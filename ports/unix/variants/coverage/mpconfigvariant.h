@@ -62,6 +62,7 @@
 #define MICROPY_PY_COLLECTIONS_NAMEDTUPLE__ASDICT (1)
 #define MICROPY_PY_UCRYPTOLIB          (1)
 #define MICROPY_PY_UCRYPTOLIB_CTR      (1)
+#define MICROPY_PY_CLASS_ORDERED_LOCALS (1)
 #define MICROPY_PY_MICROPYTHON_HEAP_LOCKED (1)
 
 // use vfs's functions for import stat and builtin open

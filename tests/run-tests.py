@@ -423,6 +423,7 @@ def run_tests(pyb, tests, args, result_dir, num_threads=1):
 
     if not has_coverage:
         skip_tests.add("cmdline/cmd_parsetree.py")
+        skip_tests.add("basics/class_dict_order.py")
 
     # Some tests shouldn't be run on a PC
     if args.target == "unix":
