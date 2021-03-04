@@ -33,6 +33,7 @@
 #if MICROPY_HW_ENABLE_STORAGE
 
 int32_t spi_bdev_ioctl(spi_bdev_t *bdev, uint32_t op, uint32_t arg) {
+    int ret = 0;
     switch (op) {
         case BDEV_IOCTL_INIT:
             bdev->spiflash.config = (const mp_spiflash_config_t *)arg;
@@ -43,28 +44,28 @@ int32_t spi_bdev_ioctl(spi_bdev_t *bdev, uint32_t op, uint32_t arg) {
         case BDEV_IOCTL_IRQ_HANDLER:
             #if MICROPY_HW_SPIFLASH_ENABLE_CACHE
             if ((bdev->spiflash.flags & 1) && HAL_GetTick() - bdev->flash_tick_counter_last_write >= 1000) {
-                mp_spiflash_cache_flush(&bdev->spiflash);
+                ret = mp_spiflash_cache_flush(&bdev->spiflash);
                 led_state(PYB_LED_RED, 0); // indicate a clean cache with LED off
             }
             #endif
-            return 0;
+            return ret;
 
         case BDEV_IOCTL_SYNC:
             #if MICROPY_HW_SPIFLASH_ENABLE_CACHE
             if (bdev->spiflash.flags & 1) {
                 uint32_t basepri = raise_irq_pri(IRQ_PRI_FLASH); // prevent cache flushing and USB access
-                mp_spiflash_cache_flush(&bdev->spiflash);
+                ret = mp_spiflash_cache_flush(&bdev->spiflash);
                 led_state(PYB_LED_RED, 0); // indicate a clean cache with LED off
                 restore_irq_pri(basepri);
             }
             #endif
-            return 0;
+            return ret;
 
         case BDEV_IOCTL_BLOCK_ERASE: {
             uint32_t basepri = raise_irq_pri(IRQ_PRI_FLASH); // prevent cache flushing and USB access
-            mp_spiflash_erase_block(&bdev->spiflash, arg * MP_SPIFLASH_ERASE_BLOCK_SIZE);
+            ret = mp_spiflash_erase_block(&bdev->spiflash, arg * MP_SPIFLASH_ERASE_BLOCK_SIZE);
             restore_irq_pri(basepri);
-            return 0;
+            return ret;
         }
     }
     return -MP_EINVAL;
@@ -73,10 +74,10 @@ int32_t spi_bdev_ioctl(spi_bdev_t *bdev, uint32_t op, uint32_t arg) {
 #if MICROPY_HW_SPIFLASH_ENABLE_CACHE
 int spi_bdev_readblocks(spi_bdev_t *bdev, uint8_t *dest, uint32_t block_num, uint32_t num_blocks) {
     uint32_t basepri = raise_irq_pri(IRQ_PRI_FLASH); // prevent cache flushing and USB access
-    mp_spiflash_cached_read(&bdev->spiflash, block_num * FLASH_BLOCK_SIZE, num_blocks * FLASH_BLOCK_SIZE, dest);
+    int ret = mp_spiflash_cached_read(&bdev->spiflash, block_num * FLASH_BLOCK_SIZE, num_blocks * FLASH_BLOCK_SIZE, dest);
     restore_irq_pri(basepri);
 
-    return 0;
+    return ret;
 }
 
 int spi_bdev_writeblocks(spi_bdev_t *bdev, const uint8_t *src, uint32_t block_num, uint32_t num_blocks) {
@@ -94,10 +95,10 @@ int spi_bdev_writeblocks(spi_bdev_t *bdev, const uint8_t *src, uint32_t block_nu
 
 int spi_bdev_readblocks_raw(spi_bdev_t *bdev, uint8_t *dest, uint32_t block_num, uint32_t block_offset, uint32_t num_bytes) {
     uint32_t basepri = raise_irq_pri(IRQ_PRI_FLASH); // prevent cache flushing and USB access
-    mp_spiflash_read(&bdev->spiflash, block_num * MP_SPIFLASH_ERASE_BLOCK_SIZE + block_offset, num_bytes, dest);
+    int ret = mp_spiflash_read(&bdev->spiflash, block_num * MP_SPIFLASH_ERASE_BLOCK_SIZE + block_offset, num_bytes, dest);
     restore_irq_pri(basepri);
 
-    return 0;
+    return ret;
 }
 
 int spi_bdev_writeblocks_raw(spi_bdev_t *bdev, const uint8_t *src, uint32_t block_num, uint32_t block_offset, uint32_t num_bytes) {

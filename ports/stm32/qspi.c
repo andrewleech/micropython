@@ -166,8 +166,9 @@ STATIC int qspi_ioctl(void *self_in, uint32_t cmd) {
     return 0; // success
 }
 
-STATIC void qspi_write_cmd_data(void *self_in, uint8_t cmd, size_t len, uint32_t data) {
+STATIC int qspi_write_cmd_data(void *self_in, uint8_t cmd, size_t len, uint32_t data) {
     (void)self_in;
+    int ret = 0;
 
     QUADSPI->FCR = QUADSPI_FCR_CTCF; // clear TC flag
 
@@ -204,13 +205,19 @@ STATIC void qspi_write_cmd_data(void *self_in, uint8_t cmd, size_t len, uint32_t
 
     // Wait for write to finish
     while (!(QUADSPI->SR & QUADSPI_SR_TCF)) {
+        if (QUADSPI->SR & QUADSPI_SR_TEF) {
+            ret = -MP_EIO;
+            break;
+        }
     }
 
     QUADSPI->FCR = QUADSPI_FCR_CTCF; // clear TC flag
+    return ret;
 }
 
-STATIC void qspi_write_cmd_addr_data(void *self_in, uint8_t cmd, uint32_t addr, size_t len, const uint8_t *src) {
+STATIC int qspi_write_cmd_addr_data(void *self_in, uint8_t cmd, uint32_t addr, size_t len, const uint8_t *src) {
     (void)self_in;
+    int ret = 0;
 
     uint8_t adsize = MP_SPI_ADDR_IS_32B(addr) ? 3 : 2;
 
@@ -252,6 +259,11 @@ STATIC void qspi_write_cmd_addr_data(void *self_in, uint8_t cmd, uint32_t addr, 
         // Write out the data 1 byte at a time
         while (len) {
             while (!(QUADSPI->SR & QUADSPI_SR_FTF)) {
+                if (QUADSPI->SR & QUADSPI_SR_TEF) {
+                    ret = -MP_EIO;
+                    len = 0;
+                    break;
+                }
             }
             *(volatile uint8_t *)&QUADSPI->DR = *src++;
             --len;
@@ -260,13 +272,19 @@ STATIC void qspi_write_cmd_addr_data(void *self_in, uint8_t cmd, uint32_t addr, 
 
     // Wait for write to finish
     while (!(QUADSPI->SR & QUADSPI_SR_TCF)) {
+        if (QUADSPI->SR & QUADSPI_SR_TEF) {
+            ret = -MP_EIO;
+            break;
+        }
     }
 
     QUADSPI->FCR = QUADSPI_FCR_CTCF; // clear TC flag
+    return ret;
 }
 
 STATIC uint32_t qspi_read_cmd(void *self_in, uint8_t cmd, size_t len) {
     (void)self_in;
+    int ret = 0;
 
     QUADSPI->FCR = QUADSPI_FCR_CTCF; // clear TC flag
 
@@ -286,16 +304,25 @@ STATIC uint32_t qspi_read_cmd(void *self_in, uint8_t cmd, size_t len) {
 
     // Wait for read to finish
     while (!(QUADSPI->SR & QUADSPI_SR_TCF)) {
+        if (QUADSPI->SR & QUADSPI_SR_TEF) {
+            ret = -MP_EIO;
+            break;
+        }
     }
 
     QUADSPI->FCR = QUADSPI_FCR_CTCF; // clear TC flag
 
+    if (ret != 0) {
+        // Not sure that calling functions will deal with this appropriately
+        return -1;
+    }
     // Read result
     return QUADSPI->DR;
 }
 
-STATIC void qspi_read_cmd_qaddr_qdata(void *self_in, uint8_t cmd, uint32_t addr, size_t len, uint8_t *dest) {
+STATIC int qspi_read_cmd_qaddr_qdata(void *self_in, uint8_t cmd, uint32_t addr, size_t len, uint8_t *dest) {
     (void)self_in;
+    int ret = 0;
 
     uint8_t adsize = MP_SPI_ADDR_IS_32B(addr) ? 3 : 2;
 
@@ -323,7 +350,14 @@ STATIC void qspi_read_cmd_qaddr_qdata(void *self_in, uint8_t cmd, uint32_t addr,
     // Read in the data 4 bytes at a time if dest is aligned
     if (((uintptr_t)dest & 3) == 0) {
         while (len >= 4) {
+
             while (!(QUADSPI->SR & QUADSPI_SR_FTF)) {
+                if (QUADSPI->SR & QUADSPI_SR_TEF) {
+                    ret = -MP_EIO;
+                    len = 4;
+                    break;
+                }
+
             }
             *(uint32_t *)dest = QUADSPI->DR;
             dest += 4;
@@ -334,12 +368,17 @@ STATIC void qspi_read_cmd_qaddr_qdata(void *self_in, uint8_t cmd, uint32_t addr,
     // Read in remaining data 1 byte at a time
     while (len) {
         while (!((QUADSPI->SR >> QUADSPI_SR_FLEVEL_Pos) & 0x3f)) {
+            if (QUADSPI->SR & QUADSPI_SR_TEF) {
+                ret = -MP_EIO;
+                break;
+            }
         }
         *dest++ = *(volatile uint8_t *)&QUADSPI->DR;
         --len;
     }
 
     QUADSPI->FCR = QUADSPI_FCR_CTCF; // clear TC flag
+    return ret;
 }
 
 const mp_qspi_proto_t qspi_proto = {
