@@ -29,7 +29,7 @@
 	url = https://github.com/hathach/tinyusb
 [submodule "lib/mynewt-nimble"]
 	path = lib/mynewt-nimble
-	url = https://github.com/micropython/mynewt-nimble.git
+	url = ../lib/mynewt-nimble.git
 [submodule "lib/btstack"]
 	path = lib/btstack
 	url = https://github.com/bluekitchen/btstack.git
