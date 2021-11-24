@@ -1137,6 +1137,23 @@ int mp_bluetooth_gap_passkey(uint16_t conn_handle, uint8_t action, mp_int_t pass
     DEBUG_printf("mp_bluetooth_gap_passkey: injecting IO: conn_handle=%d, action=%d, passkey=" UINT_FMT ", numcmp_accept=%d\n", conn_handle, io.action, (mp_uint_t)io.passkey, io.numcmp_accept);
     return ble_hs_err_to_errno(ble_sm_inject_io(conn_handle, &io));
 }
+
+int mp_bluetooth_compare_database_hashes(uint16_t conn_handle) {
+    DEBUG_printf("mp_bluetooth_compare_database_hashes: conn_handle=%d\n", conn_handle);
+    struct ble_store_value_hash hash_value;
+    struct ble_store_key_hash hash_key;
+    struct ble_hs_conn *conn;
+
+    conn = ble_hs_conn_find(conn_handle);
+    BLE_HS_DBG_ASSERT(conn != NULL);
+
+    hash_key.peer_addr = conn->bhc_peer_addr;
+    hash_key.peer_addr.type =
+        ble_hs_misc_peer_addr_type_to_id(conn->bhc_peer_addr.type);
+    hash_key.idx = 0;
+
+    return ble_store_read_hash(conn_handle, &hash_key, &hash_value);
+}
 #endif // MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
 
 #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
