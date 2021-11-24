@@ -360,6 +360,9 @@ int mp_bluetooth_gap_pair(uint16_t conn_handle);
 
 // Respond to a pairing request.
 int mp_bluetooth_gap_passkey(uint16_t conn_handle, uint8_t action, mp_int_t passkey);
+
+// Compare stored database hash to current one
+int mp_bluetooth_compare_database_hashes(uint16_t conn_handle);
 #endif // MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
 
 #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
