@@ -724,6 +724,15 @@ static mp_obj_t bluetooth_ble_gap_passkey(size_t n_args, const mp_obj_t *args) {
     return bluetooth_handle_errno(mp_bluetooth_gap_passkey(conn_handle, action, passkey));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(bluetooth_ble_gap_passkey_obj, 4, 4, bluetooth_ble_gap_passkey);
+
+static mp_obj_t bluetooth_compare_database_hashes(mp_obj_t self_in, mp_obj_t conn_handle_in) {
+    (void)self_in;
+    int result = 0;
+    uint16_t conn_handle = mp_obj_get_int(conn_handle_in);
+    result = mp_bluetooth_compare_database_hashes(conn_handle);
+    return MP_OBJ_NEW_SMALL_INT(result);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(bluetooth_compare_database_hashes_obj, bluetooth_compare_database_hashes);
 #endif // MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
 
 // ----------------------------------------------------------------------------
@@ -946,6 +955,7 @@ static const mp_rom_map_elem_t bluetooth_ble_locals_dict_table[] = {
     #if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
     { MP_ROM_QSTR(MP_QSTR_gap_pair), MP_ROM_PTR(&bluetooth_ble_gap_pair_obj) },
     { MP_ROM_QSTR(MP_QSTR_gap_passkey), MP_ROM_PTR(&bluetooth_ble_gap_passkey_obj) },
+    { MP_ROM_QSTR(MP_QSTR_gap_compare_database_hashes), MP_ROM_PTR(&bluetooth_compare_database_hashes_obj) },
     #endif
     // GATT Server
     { MP_ROM_QSTR(MP_QSTR_gatts_register_services), MP_ROM_PTR(&bluetooth_ble_gatts_register_services_obj) },
