@@ -85,11 +85,13 @@ void madcblock_bits_helper(madcblock_obj_t *self, mp_int_t bits) {
     if (self->unit_id == ADC_UNIT_1) {
         adc1_config_width(self->width);
     }
+    #if HAS_ADC_CAL
     for (adc_atten_t atten = ADC_ATTEN_DB_0; atten < ADC_ATTEN_MAX; atten++) {
         if (self->characteristics[atten] != NULL) {
             esp_adc_cal_characterize(self->unit_id, atten, self->width, DEFAULT_VREF, self->characteristics[atten]);
         }
     }
+    #endif
 }
 
 STATIC void madcblock_init_helper(madcblock_obj_t *self, size_t n_pos_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
@@ -167,16 +169,19 @@ STATIC mp_obj_t madcblock_connect(size_t n_pos_args, const mp_obj_t *pos_args, m
 STATIC MP_DEFINE_CONST_FUN_OBJ_KW(madcblock_connect_obj, 2, madcblock_connect);
 
 mp_int_t madcblock_read_helper(madcblock_obj_t *self, adc_channel_t channel_id) {
-    int raw;
+    int raw = 0;
     if (self->unit_id == ADC_UNIT_1) {
         raw = adc1_get_raw(channel_id);
     } else {
+        #if (SOC_ADC_PERIPH_NUM >= 2)
         check_esp_err(adc2_get_raw(channel_id, self->width, &raw));
+        #endif
     }
     return raw;
 }
 
 mp_int_t madcblock_read_uv_helper(madcblock_obj_t *self, adc_channel_t channel_id, adc_atten_t atten) {
+    #ifdef HAS_ADC_CAL
     int raw = madcblock_read_helper(self, channel_id);
     esp_adc_cal_characteristics_t *adc_chars = self->characteristics[atten];
     if (adc_chars == NULL) {
@@ -186,6 +191,9 @@ mp_int_t madcblock_read_uv_helper(madcblock_obj_t *self, adc_channel_t channel_i
     }
     mp_int_t uv = esp_adc_cal_raw_to_voltage(raw, adc_chars) * 1000;
     return uv;
+    #else
+    return 0;
+    #endif
 }
 
 STATIC const mp_rom_map_elem_t madcblock_locals_dict_table[] = {
