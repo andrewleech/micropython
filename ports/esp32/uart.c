@@ -28,6 +28,7 @@
 
 #include <stdio.h>
 
+#include "soc/uart_periph.h"
 #include "hal/uart_hal.h"
 
 #include "py/runtime.h"
