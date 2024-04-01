@@ -158,6 +158,7 @@ void machine_rtc_start(void) {
     SNVS_LP_Init(SNVS);
     #if FSL_FEATURE_SNVS_HAS_MULTIPLE_TAMPER
     // Disable all external Tamper
+    #if defined(FSL_FEATURE_SNVS_HAS_MULTIPLE_TAMPER) && (FSL_FEATURE_SNVS_HAS_MULTIPLE_TAMPER > 0)
     SNVS_LP_DisableAllExternalTamper(SNVS);
     #endif
 
