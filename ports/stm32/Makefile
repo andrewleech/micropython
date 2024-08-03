@@ -58,7 +58,7 @@ MBOOT_TEXT0_ADDR ?= 0x08000000
 include $(TOP)/py/py.mk
 include $(TOP)/extmod/extmod.mk
 
-GIT_SUBMODULES += lib/libhydrogen lib/stm32lib
+GIT_SUBMODULES += lib/libhydrogen lib/stm32lib lib/tinyusb
 
 LD_DIR=boards
 USBDEV_DIR=usbdev
@@ -112,6 +112,9 @@ INC += -I$(STM32LIB_CMSIS_ABS)/Include
 INC += -I$(STM32LIB_HAL_ABS)/Inc
 INC += -I$(USBDEV_DIR)/core/inc -I$(USBDEV_DIR)/class/inc
 #INC += -I$(USBHOST_DIR)
+INC += -I$(TOP)/lib/tinyusb/src
+INC += -I$(TOP)/shared/tinyusb/
+
 INC += -Ilwip_inc
 
 CFLAGS += $(INC) -Wall -Wpointer-arith -Werror -Wdouble-promotion -Wfloat-conversion -std=gnu99 -nostdlib $(CFLAGS_EXTRA)
@@ -207,6 +210,10 @@ SHARED_SRC_C += $(addprefix shared/,\
 	runtime/stdout_helpers.c \
 	runtime/sys_stdio_mphal.c \
 	timeutils/timeutils.c \
+	tinyusb/mp_usbd.c \
+	tinyusb/mp_usbd_cdc.c \
+	tinyusb/mp_usbd_descriptor.c \
+	tinyusb/mp_usbd_runtime.c \
 	)
 
 ifeq ($(MICROPY_FLOAT_IMPL),double)
@@ -231,16 +238,26 @@ DRIVERS_SRC_C += $(addprefix drivers/,\
 	memory/spiflash.c \
 	dht/dht.c \
 	)
+	
+TINYUSB_SRC_C += $(addprefix lib/tinyusb/src/,\
+	class/cdc/cdc_device.c \
+	class/msc/msc_device.c \
+	common/tusb_fifo.c \
+	device/usbd.c \
+	device/usbd_control.c \
+	portable/st/stm32_fsdev/dcd_stm32_fsdev.c \
+	portable/synopsys/dwc2/dcd_dwc2.c \
+	tusb.c \
+	)
+LDFLAGS +=  -Wl,--wrap=dcd_event_handler
 
 SRC_C += \
 	boardctrl.c \
 	main.c \
 	stm32_it.c \
 	usbd_conf.c \
-	usbd_desc.c \
-	usbd_cdc_interface.c \
-	usbd_hid_interface.c \
-	usbd_msc_interface.c \
+	usb.c \
+	usbd.c \
 	mphalport.c \
 	mpnetworkport.c \
 	mpthreadport.c \
@@ -270,7 +287,6 @@ SRC_C += \
 	can.c \
 	fdcan.c \
 	pyb_can.c \
-	usb.c \
 	eth.c \
 	eth_phy.c \
 	gccollect.c \
@@ -416,15 +432,6 @@ HAL_SRC_C += $(addprefix $(STM32LIB_HAL_BASE)/Src/stm32$(MCU_SERIES)xx_,\
 	)
 endif
 
-USBDEV_SRC_C += $(addprefix $(USBDEV_DIR)/,\
-	core/src/usbd_core.c \
-	core/src/usbd_ctlreq.c \
-	core/src/usbd_ioreq.c \
-	class/src/usbd_cdc_msc_hid.c \
-	class/src/usbd_msc_bot.c \
-	class/src/usbd_msc_scsi.c \
-	)
-
 ifeq ($(MICROPY_SSL_MBEDTLS),1)
 LIB_SRC_C += mbedtls/mbedtls_port.c
 endif
@@ -463,7 +470,7 @@ OBJ += $(addprefix $(BUILD)/, $(LIBM_SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SHARED_SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(DRIVERS_SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(HAL_SRC_C:.c=.o))
-OBJ += $(addprefix $(BUILD)/, $(USBDEV_SRC_C:.c=.o))
+OBJ += $(addprefix $(BUILD)/, $(TINYUSB_SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_CXX:.cpp=.o))
 OBJ += $(GEN_PINS_SRC:.c=.o)

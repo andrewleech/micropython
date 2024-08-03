@@ -37,11 +37,13 @@
 
 #if MICROPY_HW_USB_FS || MICROPY_HW_USB_HS
 
+#if !MICROPY_HW_TINYUSB_STACK
 #if MICROPY_HW_USB_FS
 PCD_HandleTypeDef pcd_fs_handle;
 #endif
 #if MICROPY_HW_USB_HS
 PCD_HandleTypeDef pcd_hs_handle;
+#endif
 #endif
 
 #if defined(STM32G0) || defined(STM32H5)
@@ -51,18 +53,17 @@ PCD_HandleTypeDef pcd_hs_handle;
 #define USB_OTG_FS USB
 #endif
 
-/*******************************************************************************
-                       PCD BSP Routines
-*******************************************************************************/
-
-/**
-  * @brief  Initializes the PCD MSP.
-  * @param  hpcd: PCD handle
-  * @retval None
-  */
-void HAL_PCD_MspInit(PCD_HandleTypeDef *hpcd) {
+#if MICROPY_HW_TINYUSB_STACK
+void pyb_usbd_init(void)
+#else
+void HAL_PCD_MspInit(PCD_HandleTypeDef *hpcd)
+#endif
+{
     #if MICROPY_HW_USB_FS
-    if (hpcd->Instance == USB_OTG_FS) {
+    #if !MICROPY_HW_TINYUSB_STACK
+    if (hpcd->Instance == USB_OTG_FS)
+    #endif
+    {
         // Configure USB GPIO's.
 
         #if defined(STM32G0) || defined(STM32G4)
@@ -134,7 +135,7 @@ void HAL_PCD_MspInit(PCD_HandleTypeDef *hpcd) {
         #endif
 
         // Enable VDDUSB
-        #if defined(STM32H5)
+        #if defined(STM32H5) || defined(STM32WB)
         HAL_PWREx_EnableVddUSB();
         #elif defined(STM32L4)
         if (__HAL_RCC_PWR_IS_CLK_DISABLED()) {
@@ -167,12 +168,17 @@ void HAL_PCD_MspInit(PCD_HandleTypeDef *hpcd) {
         HAL_NVIC_EnableIRQ(OTG_FS_IRQn);
         #endif
 
+        #if !MICROPY_HW_TINYUSB_STACK
         return;
+        #endif
     }
     #endif
 
     #if MICROPY_HW_USB_HS
-    if (hpcd->Instance == USB_OTG_HS) {
+    #if !MICROPY_HW_TINYUSB_STACK
+    if (hpcd->Instance == USB_OTG_HS)
+    #endif
+    {
         #if MICROPY_HW_USB_HS_IN_FS
 
         // Configure USB GPIO's.
@@ -261,6 +267,8 @@ void HAL_PCD_MspInit(PCD_HandleTypeDef *hpcd) {
     }
     #endif // MICROPY_HW_USB_HS
 }
+
+#if !MICROPY_HW_TINYUSB_STACK
 
 /**
   * @brief  DeInitializes the PCD MSP.
@@ -735,6 +743,8 @@ void HAL_PCDEx_SetConnectionState(PCD_HandleTypeDef *hpcd, uint8_t state) {
     }
 }
 #endif
+
+#endif // !MICROPY_HW_TINYUSB_STACK
 
 #endif // MICROPY_HW_USB_FS || MICROPY_HW_USB_HS
 
