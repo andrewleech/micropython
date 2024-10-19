@@ -172,7 +172,8 @@ SRC_HAL_IMX_C += \
 	$(MCU_DIR)/drivers/fsl_anatop_ai.c \
 	$(MCU_DIR)/drivers/fsl_caam.c \
 	$(MCU_DIR)/drivers/fsl_lpadc.c \
-	$(MCU_DIR)/drivers/fsl_mu.c
+	$(MCU_DIR)/drivers/fsl_mu.c \
+	$(MCU_DIR)/drivers/fsl_pxp.c
 else
 SRC_HAL_IMX_C += \
 	$(MCU_DIR)/drivers/fsl_adc.c \
