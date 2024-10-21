@@ -15,9 +15,16 @@
  * Definitions
  ******************************************************************************/
 
+#define DEMO_USE_ROTATE 1
+
 #define LCD_WIDTH             DEMO_BUFFER_WIDTH
 #define LCD_HEIGHT            DEMO_BUFFER_HEIGHT
 #define LCD_FB_BYTE_PER_PIXEL DEMO_BUFFER_BYTE_PER_PIXEL
+
+#define LV_PORT_DISP_INIT lv_port_disp_init
+#define LV_PORT_INDEV_INIT lv_port_indev_init
+// #define LV_PORT_INDEV_DEINIT lv_port_disp_deinit
+// #define LV_PORT_DISP_DEINIT lv_port_indev_deinit
 
 /*******************************************************************************
  * API

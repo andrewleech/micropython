@@ -68,7 +68,7 @@
 #endif
 
 #define DEMO_FB_SIZE \
-    (((DEMO_BUFFER_WIDTH * DEMO_BUFFER_HEIGHT * LCD_FB_BYTE_PER_PIXEL) + DEMO_FB_ALIGN - 1) & ~(DEMO_FB_ALIGN - 1))
+    (((DEMO_BUFFER_WIDTH * DEMO_BUFFER_HEIGHT * LCD_FB_BYTE_PER_PIXEL / 10) + DEMO_FB_ALIGN - 1) & ~(DEMO_FB_ALIGN - 1))
 
 #if LV_USE_GPU_NXP_VG_LITE
 #define VG_LITE_MAX_CONTIGUOUS_SIZE 0x200000
@@ -121,9 +121,9 @@ static void DEMO_WaitBufferSwitchOff(void);
 /*******************************************************************************
  * Variables
  ******************************************************************************/
-SDK_ALIGN(static uint8_t s_frameBuffer[2][DEMO_FB_SIZE], DEMO_FB_ALIGN);
+SDK_ALIGN(static uint8_t __attribute__((section(".heap"))) s_frameBuffer[2][DEMO_FB_SIZE], DEMO_FB_ALIGN);
 #if DEMO_USE_ROTATE
-SDK_ALIGN(static uint8_t s_lvglBuffer[1][DEMO_FB_SIZE], DEMO_FB_ALIGN);
+SDK_ALIGN(static uint8_t __attribute__((section(".heap"))) s_lvglBuffer[1][DEMO_FB_SIZE], DEMO_FB_ALIGN);
 #endif
 
 #if defined(SDK_OS_FREE_RTOS)
@@ -261,8 +261,8 @@ void lv_port_disp_init(void) {
 
     lv_display_t * disp = lv_display_create(DEMO_BUFFER_WIDTH, DEMO_BUFFER_HEIGHT);
     lv_display_set_flush_cb(disp, (void *)DEMO_FlushDisplay);
-    // lv_display_set_buffers(disp, s_frameBuffer[0], s_frameBuffer[1], DEMO_BUFFER_WIDTH*DEMO_BUFFER_HEIGHT*DEMO_BUFFER_BYTE_PER_PIXEL, LV_DISPLAY_RENDER_MODE_PARTIAL);
-    lv_display_set_buffers(disp, s_frameBuffer[0], s_frameBuffer[1], DEMO_BUFFER_WIDTH*DEMO_BUFFER_HEIGHT*DEMO_BUFFER_BYTE_PER_PIXEL, LV_DISPLAY_RENDER_MODE_DIRECT);
+    lv_display_set_buffers(disp, s_frameBuffer[0], s_frameBuffer[1], DEMO_BUFFER_WIDTH*DEMO_BUFFER_HEIGHT*DEMO_BUFFER_BYTE_PER_PIXEL, LV_DISPLAY_RENDER_MODE_PARTIAL);
+    // lv_display_set_buffers(disp, s_frameBuffer[0], s_frameBuffer[1], DEMO_BUFFER_WIDTH*DEMO_BUFFER_HEIGHT*DEMO_BUFFER_BYTE_PER_PIXEL, LV_DISPLAY_RENDER_MODE_DIRECT);
 
 
 
@@ -504,7 +504,7 @@ static void DEMO_InitTouch(void) {
 
     if (kStatus_Success != status) {
         PRINTF("Touch IC initialization failed\r\n");
-        assert(false);
+        // assert(false);
     }
 
     GT911_GetResolution(&s_touchHandle, &s_touchResolutionX, &s_touchResolutionY);
