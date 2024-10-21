@@ -17,7 +17,7 @@
 #endif
 #include "pin_mux.h"
 #include "board.h"
-#include "fsl_debug_console.h"
+// #include "fsl_debug_console.h"
 
 #if (DEMO_DISPLAY_CONTROLLER == DEMO_DISPLAY_CONTROLLER_LCDIFV2)
 #include "fsl_dc_fb_lcdifv2.h"

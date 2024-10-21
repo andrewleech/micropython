@@ -10,9 +10,14 @@
 
 #include "fsl_dc_fb.h"
 
+#include "py/mphal.h"
+#include "py/mpconfig.h"
+
 /*******************************************************************************
  * Definitions
  ******************************************************************************/
+
+#define PRINTF(...)   mp_printf(&mp_plat_print, "lvgl: " __VA_ARGS__)
 
 /* @TEST_ANCHOR */
 
@@ -24,12 +29,13 @@
 #define DEMO_DISPLAY_CONTROLLER_LCDIFV2 1
 
 #ifndef DEMO_PANEL
-#define DEMO_PANEL DEMO_PANEL_RK055AHD091
+#define DEMO_PANEL DEMO_PANEL_RK055MHD091
 #endif
 
 #ifndef DEMO_DISPLAY_CONTROLLER
 /* Use LCDIFV2 by default, could use ELCDIF by changing this macro. */
 #define DEMO_DISPLAY_CONTROLLER DEMO_DISPLAY_CONTROLLER_LCDIFV2
+// #define DEMO_DISPLAY_CONTROLLER DEMO_DISPLAY_CONTROLLER_ELCDIF
 #endif
 
 #define DEMO_BUFFER_FIXED_ADDRESS 0

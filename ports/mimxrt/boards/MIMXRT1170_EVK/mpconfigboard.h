@@ -265,3 +265,26 @@
 #define MICROPY_BOARD_ROOT_POINTERS \
     struct _machine_i2s_obj_t *machine_i2s_obj[MICROPY_HW_I2S_NUM];
 #endif
+
+
+// TODO convert these and the matching pin control functions in display_support.c to mpy standard
+/*! @brief The MIPI panel pins. */
+#define BOARD_MIPI_PANEL_RST_GPIO   GPIO9
+#define BOARD_MIPI_PANEL_RST_PIN    1
+#define BOARD_MIPI_PANEL_POWER_GPIO GPIO11
+#define BOARD_MIPI_PANEL_POWER_PIN  16
+/* Back light pin. */
+#define BOARD_MIPI_PANEL_BL_GPIO GPIO9
+#define BOARD_MIPI_PANEL_BL_PIN  29
+
+/* Touch panel. */
+#define BOARD_MIPI_PANEL_TOUCH_I2C_BASEADDR      LPI2C5
+#define BOARD_MIPI_PANEL_TOUCH_I2C_CLOCK_ROOT    kCLOCK_Root_Lpi2c5
+#define BOARD_MIPI_PANEL_TOUCH_I2C_CLOCK_SOURCE  (1U)  /* OSC24M. */
+#define BOARD_MIPI_PANEL_TOUCH_I2C_CLOCK_DIVIDER (1U) /* Divider = 12, LPI2C clock frequency 2M. */
+#define BOARD_MIPI_PANEL_TOUCH_I2C_CLOCK_FREQ    CLOCK_GetRootClockFreq(BOARD_MIPI_PANEL_TOUCH_I2C_CLOCK_ROOT)
+#define BOARD_MIPI_PANEL_TOUCH_RST_GPIO          GPIO9
+#define BOARD_MIPI_PANEL_TOUCH_RST_PIN           0
+#define BOARD_MIPI_PANEL_TOUCH_INT_GPIO          GPIO8
+#define BOARD_MIPI_PANEL_TOUCH_INT_PIN           31
+

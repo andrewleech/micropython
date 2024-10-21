@@ -11,11 +11,12 @@
 #include "FreeRTOS.h"
 #include "semphr.h"
 #endif
+
 #include "board.h"
 
 #include "fsl_gpio.h"
 #include "fsl_cache.h"
-#include "fsl_debug_console.h"
+// #include "fsl_debug_console.h"
 
 #include "fsl_gt911.h"
 
@@ -25,7 +26,7 @@
 #endif
 
 #if LV_USE_GPU_NXP_PXP
-#include "../lvgl/lvgl/src/draw/nxp/pxp/lv_draw_pxp_blend.h"
+// #include "../lvgl/lvgl/src/draw/nxp/pxp/lv_draw_pxp_blend.h"
 #endif
 
 /*******************************************************************************
@@ -91,15 +92,17 @@
 /*******************************************************************************
  * Prototypes
  ******************************************************************************/
-static void DEMO_FlushDisplay(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p);
+// static void DEMO_FlushDisplay(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p);
+static void DEMO_FlushDisplay(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map);
 
-#if (LV_USE_GPU_NXP_VG_LITE || LV_USE_GPU_NXP_PXP)
+#if 0 && (LV_USE_GPU_NXP_VG_LITE || LV_USE_GPU_NXP_PXP)
 static void DEMO_CleanInvalidateCache(lv_disp_drv_t *disp_drv);
 #endif
 
 static void DEMO_InitTouch(void);
 
-static void DEMO_ReadTouch(lv_indev_drv_t *drv, lv_indev_data_t *data);
+// static void DEMO_ReadTouch(lv_indev_drv_t *drv, lv_indev_data_t *data);
+static void DEMO_ReadTouch(lv_indev_t * indev_drv, lv_indev_data_t * data);
 
 static void DEMO_BufferSwitchOffCallback(void *param, void *switchOffBuffer);
 
@@ -183,14 +186,14 @@ void lv_port_pre_init(void) {
 }
 
 void lv_port_disp_init(void) {
-    static lv_disp_draw_buf_t disp_buf;
+    // static lv_disp_draw_buf_t disp_buf;
 
     memset(s_frameBuffer, 0, sizeof(s_frameBuffer));
     #if DEMO_USE_ROTATE
     memset(s_lvglBuffer, 0, sizeof(s_lvglBuffer));
-    lv_disp_draw_buf_init(&disp_buf, s_lvglBuffer[0], NULL, DEMO_BUFFER_WIDTH * DEMO_BUFFER_HEIGHT);
+    // lv_disp_draw_buf_init(&disp_buf, s_lvglBuffer[0], NULL, DEMO_BUFFER_WIDTH * DEMO_BUFFER_HEIGHT);
     #else
-    lv_disp_draw_buf_init(&disp_buf, s_frameBuffer[0], s_frameBuffer[1], DEMO_BUFFER_WIDTH * DEMO_BUFFER_HEIGHT);
+    // lv_disp_draw_buf_init(&disp_buf, s_frameBuffer[0], s_frameBuffer[1], DEMO_BUFFER_WIDTH * DEMO_BUFFER_HEIGHT);
     #endif
 
     status_t status;
@@ -251,31 +254,40 @@ void lv_port_disp_init(void) {
      * Register the display in LittlevGL
      *----------------------------------*/
 
-    static lv_disp_drv_t disp_drv; /*Descriptor of a display driver*/
-    lv_disp_drv_init(&disp_drv);   /*Basic initialization*/
+    // Changes in master (v9 development) https://github.com/lvgl/lvgl/issues/4011
+
+    // static lv_disp_drv_t disp_drv; /*Descriptor of a display driver*/
+    // lv_disp_drv_init(&disp_drv);   /*Basic initialization*/
+
+    lv_display_t * disp = lv_display_create(DEMO_BUFFER_WIDTH, DEMO_BUFFER_HEIGHT);
+    lv_display_set_flush_cb(disp, (void *)DEMO_FlushDisplay);
+    // lv_display_set_buffers(disp, s_frameBuffer[0], s_frameBuffer[1], DEMO_BUFFER_WIDTH*DEMO_BUFFER_HEIGHT*DEMO_BUFFER_BYTE_PER_PIXEL, LV_DISPLAY_RENDER_MODE_PARTIAL);
+    lv_display_set_buffers(disp, s_frameBuffer[0], s_frameBuffer[1], DEMO_BUFFER_WIDTH*DEMO_BUFFER_HEIGHT*DEMO_BUFFER_BYTE_PER_PIXEL, LV_DISPLAY_RENDER_MODE_DIRECT);
+
+
 
     /*Set up the functions to access to your display*/
 
     /*Set the resolution of the display*/
-    disp_drv.hor_res = LVGL_BUFFER_WIDTH;
-    disp_drv.ver_res = LVGL_BUFFER_HEIGHT;
+    // disp_drv.hor_res = LVGL_BUFFER_WIDTH;
+    // disp_drv.ver_res = LVGL_BUFFER_HEIGHT;
 
     /*Used to copy the buffer's content to the display*/
-    disp_drv.flush_cb = DEMO_FlushDisplay;
+    // disp_drv.flush_cb = DEMO_FlushDisplay;
 
-    #if (LV_USE_GPU_NXP_VG_LITE || LV_USE_GPU_NXP_PXP)
-    disp_drv.clean_dcache_cb = DEMO_CleanInvalidateCache;
-    #endif
+    // #if (LV_USE_GPU_NXP_VG_LITE || LV_USE_GPU_NXP_PXP)
+    // disp_drv.clean_dcache_cb = DEMO_CleanInvalidateCache;
+    // #endif
 
     /*Set a display buffer*/
-    disp_drv.draw_buf = &disp_buf;
+    // disp_drv.draw_buf = &disp_buf;
 
     /* Partial refresh */
-    disp_drv.full_refresh = 0;
-    disp_drv.direct_mode = 1;
+    // disp_drv.full_refresh = 0;
+    // disp_drv.direct_mode = 1;
 
     /*Finally register the driver*/
-    lv_disp_drv_register(&disp_drv);
+    // lv_disp_drv_register(&disp_drv);
 
     #if LV_USE_GPU_NXP_VG_LITE
     if (vg_lite_init(64, 64) != VG_LITE_SUCCESS) {
@@ -301,7 +313,7 @@ static void DEMO_BufferSwitchOffCallback(void *param, void *switchOffBuffer) {
     #endif
 }
 
-#if (LV_USE_GPU_NXP_VG_LITE || LV_USE_GPU_NXP_PXP)
+#if 0 && (LV_USE_GPU_NXP_VG_LITE || LV_USE_GPU_NXP_PXP)
 static void DEMO_CleanInvalidateCache(lv_disp_drv_t *disp_drv) {
     DEMO_FLUSH_DCACHE();
 }
@@ -320,12 +332,16 @@ static void DEMO_WaitBufferSwitchOff(void) {
     #endif
 }
 
-static void DEMO_FlushDisplay(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p) {
+
+#if 0
+
+lv_display_flush_cb_t DEMO_FlushDisplay(lv_display_t * disp_drv, const lv_area_t * area, uint8_t * color_p) {
+// static void DEMO_FlushDisplay(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p) {
     D2_On();
 
     if (!lv_disp_flush_is_last(disp_drv)) {
         lv_disp_flush_ready(disp_drv);
-        D2_Off();
+        // D2_Off();
         return;
     }
     #if DEMO_USE_ROTATE
@@ -397,11 +413,41 @@ static void DEMO_FlushDisplay(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv
      * Inform the graphics library that you are ready with the flushing*/
     lv_disp_flush_ready(disp_drv);
     #endif /* DEMO_USE_ROTATE */
-    D2_Off();
+    // D2_Off();
 }
 
+#else
+
+void DEMO_FlushDisplay(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map)
+{
+    static bool firstFlush = true;
+
+    if (firstFlush)
+    {	firstFlush = false;}
+    else
+    {   DEMO_WaitBufferSwitchOff();}
+
+    DEMO_FLUSH_DCACHE();
+
+    void *inactiveFrameBuffer = s_inactiveFrameBuffer;
+
+    for (uint32_t y = 0; y < LVGL_BUFFER_HEIGHT; y++)
+    {
+       for (uint32_t x = 0; x < LVGL_BUFFER_WIDTH; x++)
+        {
+            ((uint8_t *)inactiveFrameBuffer)[(DEMO_BUFFER_HEIGHT - x) * DEMO_BUFFER_WIDTH + y] =
+            		px_map[y * LVGL_BUFFER_WIDTH + x];
+       }
+    }
+
+    g_dc.ops->setFrameBuffer(&g_dc, 0, inactiveFrameBuffer);
+
+    lv_disp_flush_ready(disp);
+}
+#endif
+
 void lv_port_indev_init(void) {
-    static lv_indev_drv_t indev_drv;
+    // static lv_indev_drv_t indev_drv;
 
     /*------------------
      * Touchpad
@@ -411,10 +457,15 @@ void lv_port_indev_init(void) {
     DEMO_InitTouch();
 
     /*Register a touchpad input device*/
-    lv_indev_drv_init(&indev_drv);
-    indev_drv.type = LV_INDEV_TYPE_POINTER;
-    indev_drv.read_cb = DEMO_ReadTouch;
-    lv_indev_drv_register(&indev_drv);
+    // lv_indev_drv_init(&indev_drv);
+    // indev_drv.type = LV_INDEV_TYPE_POINTER;
+    // indev_drv.read_cb = DEMO_ReadTouch;
+    // lv_indev_drv_register(&indev_drv);
+
+    lv_indev_t * indev = lv_indev_create();
+    lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(indev, DEMO_ReadTouch);
+
 }
 
 static void BOARD_PullMIPIPanelTouchResetPin(bool pullUp) {
@@ -460,8 +511,9 @@ static void DEMO_InitTouch(void) {
 }
 
 /* Will be called by the library to read the touchpad */
-static void DEMO_ReadTouch(lv_indev_drv_t *drv, lv_indev_data_t *data) {
-    D4_On();
+static void DEMO_ReadTouch(lv_indev_t * drv, lv_indev_data_t * data) {
+// static void DEMO_ReadTouch(lv_indev_drv_t *drv, lv_indev_data_t *data) {
+    // D4_On();
     static int touch_x = 0;
     static int touch_y = 0;
 
@@ -479,7 +531,7 @@ static void DEMO_ReadTouch(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     data->point.x = touch_x * DEMO_PANEL_WIDTH / s_touchResolutionX;
     data->point.y = touch_y * DEMO_PANEL_HEIGHT / s_touchResolutionY;
     #endif
-    D4_Off();
+    // D4_Off();
 }
 
 #if LV_USE_GPU_NXP_VG_LITE
