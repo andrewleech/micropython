@@ -219,6 +219,7 @@ SRC_C += \
 	systick.c \
 	ticks.c \
 	tusb_port.c \
+	$(wildcard $(BOARD_DIR)/*.c)
 
 SHARED_SRC_C += \
 	shared/libc/printf.c \
