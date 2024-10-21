@@ -250,30 +250,31 @@ SECTIONS
   .heap :
   {
     . = ALIGN(8);
+    *(.heap);
     __end__ = .;
     PROVIDE(end = .);
     __HeapBase = .;
     . += HEAP_SIZE;
     __HeapLimit = .;
     __heap_limit = .; /* Add for _sbrk */
-  } > m_dtcm
+  } > m_ocrm
 
   .stack :
   {
     . = ALIGN(8);
     . += STACK_SIZE;
-  } > m_dtcm
+  } > m_ocrm
 
   _flashimagelen = __FLASH_DATA_END - flash_start;
 
   /* Initializes stack on the end of block */
-  __StackTop   = ORIGIN(m_dtcm) + LENGTH(m_dtcm);
+  __StackTop   = ORIGIN(m_ocrm) + LENGTH(m_ocrm);
   __StackLimit = __StackTop - STACK_SIZE;
   _vStackTop = __StackTop;
   PROVIDE(__stack = __StackTop);
 
   .ARM.attributes 0 : { *(.ARM.attributes) }
 
-  ASSERT(__StackLimit >= __HeapLimit, "region m_dtcm overflowed with stack and heap")
+  ASSERT(__StackLimit >= __HeapLimit, "region m_ocrm overflowed with stack and heap")
 }
 
