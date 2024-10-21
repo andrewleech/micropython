@@ -49,7 +49,7 @@ __stack_size__ = 0x8000;
 _estack = __StackTop;
 _sstack = __StackLimit;
 
-#if MICROPY_HW_SDRAM_AVAIL
+#if 0 /* MICROPY_HW_SDRAM_AVAIL */
 _gc_heap_start = ORIGIN(m_sdram);
 _gc_heap_end = ORIGIN(m_sdram) + LENGTH(m_sdram);
 #else

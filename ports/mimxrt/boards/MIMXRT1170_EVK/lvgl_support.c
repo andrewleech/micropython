@@ -121,9 +121,9 @@ static void DEMO_WaitBufferSwitchOff(void);
 /*******************************************************************************
  * Variables
  ******************************************************************************/
-SDK_ALIGN(static uint8_t __attribute__((section(".heap"))) s_frameBuffer[2][DEMO_FB_SIZE], DEMO_FB_ALIGN);
+SDK_ALIGN(static uint8_t __attribute__((section(".sdram"))) s_frameBuffer[2][DEMO_FB_SIZE], DEMO_FB_ALIGN);
 #if DEMO_USE_ROTATE
-SDK_ALIGN(static uint8_t __attribute__((section(".heap"))) s_lvglBuffer[1][DEMO_FB_SIZE], DEMO_FB_ALIGN);
+SDK_ALIGN(static uint8_t __attribute__((section(".sdram"))) s_lvglBuffer[1][DEMO_FB_SIZE], DEMO_FB_ALIGN);
 #endif
 
 #if defined(SDK_OS_FREE_RTOS)
