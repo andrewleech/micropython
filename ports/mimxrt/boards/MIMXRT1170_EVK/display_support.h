@@ -77,7 +77,7 @@
 #endif
 
 #define DEMO_BUFFER_WIDTH  DEMO_PANEL_WIDTH
-#define DEMO_BUFFER_HEIGHT DEMO_PANEL_HEIGHT
+#define DEMO_BUFFER_HEIGHT (DEMO_PANEL_HEIGHT / 10)
 
 /* Where the frame buffer is shown in the screen. */
 #define DEMO_BUFFER_START_X 0U

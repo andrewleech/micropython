@@ -68,7 +68,7 @@
 #endif
 
 #define DEMO_FB_SIZE \
-    (((DEMO_BUFFER_WIDTH * DEMO_BUFFER_HEIGHT * LCD_FB_BYTE_PER_PIXEL / 10) + DEMO_FB_ALIGN - 1) & ~(DEMO_FB_ALIGN - 1))
+    (((DEMO_BUFFER_WIDTH * DEMO_BUFFER_HEIGHT * LCD_FB_BYTE_PER_PIXEL) + DEMO_FB_ALIGN - 1) & ~(DEMO_FB_ALIGN - 1))
 
 #if LV_USE_GPU_NXP_VG_LITE
 #define VG_LITE_MAX_CONTIGUOUS_SIZE 0x200000
@@ -188,6 +188,8 @@ void lv_port_pre_init(void) {
 void lv_port_disp_init(void) {
     // static lv_disp_draw_buf_t disp_buf;
 
+    BOARD_InitMipiPanelPins();
+    
     memset(s_frameBuffer, 0, sizeof(s_frameBuffer));
     #if DEMO_USE_ROTATE
     memset(s_lvglBuffer, 0, sizeof(s_lvglBuffer));
@@ -447,6 +449,7 @@ void DEMO_FlushDisplay(lv_display_t * disp, const lv_area_t * area, uint8_t * px
 #endif
 
 void lv_port_indev_init(void) {
+	BOARD_MIPIPanelTouch_I2C_Init();
     // static lv_indev_drv_t indev_drv;
 
     /*------------------
