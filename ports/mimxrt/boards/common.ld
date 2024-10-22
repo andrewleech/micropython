@@ -264,7 +264,7 @@ SECTIONS
     . += STACK_SIZE;
   } > m_dtcm
 
-  .sdram :
+  .sdram (NOLOAD) :
   {
     . = ALIGN(8);
     *(.sdram);
