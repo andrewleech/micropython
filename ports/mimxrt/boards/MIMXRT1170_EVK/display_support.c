@@ -320,6 +320,24 @@ static void BOARD_InitMipiDsiClock(void) {
     mipiDsiDphyRefClkFreq_Hz = BOARD_XTAL0_CLK_HZ;
 }
 
+status_t BOARD_DeinitLcdPanel(void) {
+    status_t status;
+
+    #if (DEMO_PANEL == DEMO_PANEL_RK055AHD091)
+    status = RM68200_Deinit(&rm68200Handle);
+
+    #elif (DEMO_PANEL_RK055MHD091 == DEMO_PANEL)
+
+    status = HX8394_Deinit(&hx8394Handle);
+
+    #else
+
+    status = RM68191_Deinit(&rm68191Handle);
+    #endif
+
+    return status;
+}
+
 static status_t BOARD_InitLcdPanel(void) {
     status_t status;
 

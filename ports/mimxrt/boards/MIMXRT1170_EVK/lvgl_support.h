@@ -26,8 +26,8 @@
 
 #define LV_PORT_DISP_INIT lv_port_disp_init
 #define LV_PORT_INDEV_INIT lv_port_indev_init
-// #define LV_PORT_INDEV_DEINIT lv_port_disp_deinit
-// #define LV_PORT_DISP_DEINIT lv_port_indev_deinit
+#define LV_PORT_DISP_DEINIT lv_port_disp_deinit
+// #define LV_PORT_INDEX_DEINIT lv_port_indev_deinit
 
 /*******************************************************************************
  * API
@@ -40,6 +40,7 @@ extern "C" {
 
 void lv_port_pre_init(void);
 void lv_port_disp_init(void);
+void lv_port_disp_deinit(void);
 void lv_port_indev_init(void);
 
 #if defined(__cplusplus)

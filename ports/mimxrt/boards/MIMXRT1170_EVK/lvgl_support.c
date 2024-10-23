@@ -297,6 +297,10 @@ void lv_port_disp_init(void) {
     #endif
 }
 
+void lv_port_disp_deinit(void) {
+    BOARD_DeinitLcdPanel();
+}
+
 static void DEMO_BufferSwitchOffCallback(void *param, void *switchOffBuffer) {
     #if defined(SDK_OS_FREE_RTOS)
     BaseType_t taskAwake = pdFALSE;

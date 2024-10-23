@@ -101,6 +101,7 @@ extern "C" {
 #endif /* __cplusplus */
 
 status_t BOARD_PrepareDisplayController(void);
+status_t BOARD_DeinitLcdPanel(void);
 
 #if defined(__cplusplus)
 }
