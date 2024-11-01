@@ -132,6 +132,7 @@ SRC_HAL_IMX_C += \
 	$(MCU_DIR)/drivers/fsl_lpi2c.c \
 	$(MCU_DIR)/drivers/fsl_lpspi.c \
 	$(MCU_DIR)/drivers/fsl_lpspi_edma.c \
+	$(MCU_DIR)/drivers/fsl_lpuart.c \
 	$(MCU_DIR)/drivers/fsl_pit.c \
 	$(MCU_DIR)/drivers/fsl_pwm.c \
 	$(MCU_DIR)/drivers/fsl_sai.c \
@@ -163,6 +164,7 @@ endif
 
 ifeq ($(MCU_SERIES), MIMXRT1176)
 INC += -I$(TOP)/$(MCU_DIR)/drivers/cm7
+CFLAGS += -DCRYPTO_USE_DRIVER_CAAM -DCACHE_MODE_WRITE_THROUGH=1
 
 SRC_HAL_IMX_C += \
 	$(MCU_DIR)/drivers/cm7/fsl_cache.c \
@@ -190,7 +192,6 @@ SRC_C += \
 	eth.c \
 	fatfs_port.c \
 	flash.c \
-	hal/fsl_lpuart.c \
 	hal/pwm_backport.c \
 	help.c \
 	led.c \

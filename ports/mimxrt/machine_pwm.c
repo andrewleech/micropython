@@ -28,6 +28,7 @@
 // This file is never compiled standalone, it's included directly from
 // extmod/machine_pwm.c via MICROPY_PY_MACHINE_PWM_INCLUDEFILE.
 
+#include "fsl_device_registers.h"
 #include "py/mphal.h"
 #include "pin.h"
 #include "fsl_clock.h"
@@ -239,7 +240,9 @@ static void configure_flexpwm(machine_pwm_obj_t *self) {
             pwmConfig.pairOperation = kPWM_Independent;
         }
         pwmConfig.clockSource = kPWM_BusClock;
+        #if !defined(FSL_FEATURE_PWM_HAS_NO_WAITEN) || (!FSL_FEATURE_PWM_HAS_NO_WAITEN)
         pwmConfig.enableWait = false;
+        #endif
         pwmConfig.initializationControl = self->sync ? kPWM_Initialize_MasterSync : kPWM_Initialize_LocalSync;
 
         if (PWM_Init(self->instance, self->submodule, &pwmConfig) == kStatus_Fail) {
