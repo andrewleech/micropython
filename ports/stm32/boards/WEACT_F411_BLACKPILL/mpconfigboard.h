@@ -79,15 +79,10 @@
 #define MICROPY_HW_SPI3_MISO    (pin_B4)
 #define MICROPY_HW_SPI3_MOSI    (pin_B5)
 
-// External SPI Flash configuration
-
-#if !MICROPY_HW_SPIFLASH_SIZE_BYTES
-// Use internal filesystem if spiflash not enabled.
 #define MICROPY_HW_ENABLE_INTERNAL_FLASH_STORAGE (1)
 
-#else
-// Disable internal filesystem to use spiflash.
-#define MICROPY_HW_ENABLE_INTERNAL_FLASH_STORAGE (0)
+// External SPI Flash configuration
+#if MICROPY_HW_SPIFLASH_SIZE_BYTES
 
 // SPI flash pins
 #define MICROPY_HW_SPIFLASH_CS          (pyb_pin_FLASH_CS)
@@ -103,10 +98,24 @@
 
 extern const struct _mp_spiflash_config_t spiflash_config;
 extern struct _spi_bdev_t spi_bdev;
+
+// This configures the spiflash storage logically directly
+// after the internal flash as accessed via pyb.Flash
+// If start/length variables are not passed to pyb.Flash
+// both internal and external flash will be used merged into one
+// larger filesystem.
+
 #define MICROPY_HW_SPIFLASH_ENABLE_CACHE (1)
-#define MICROPY_HW_BDEV_SPIFLASH    (&spi_bdev)
-#define MICROPY_HW_BDEV_SPIFLASH_CONFIG (&spiflash_config)
-#define MICROPY_HW_BDEV_SPIFLASH_SIZE_BYTES (MICROPY_HW_SPIFLASH_SIZE_BITS / 8)
-#define MICROPY_HW_BDEV_SPIFLASH_EXTENDED (&spi_bdev) // for extended block protocol
 #define MICROPY_HW_SPIFLASH_SIZE_BITS (MICROPY_HW_SPIFLASH_SIZE_BYTES * 8)
+#define MICROPY_HW_BDEV2_SPIFLASH    (&spi_bdev)
+#define MICROPY_HW_BDEV2_SPIFLASH_CONFIG (&spiflash_config)
+#define MICROPY_HW_BDEV2_SPIFLASH_SIZE_BYTES (MICROPY_HW_SPIFLASH_SIZE_BITS / 8)
+#define MICROPY_HW_BDEV2_SPIFLASH_EXTENDED (&spi_bdev) // for extended block protocol
+#define MICROPY_HW_BDEV2_READBLOCKS(dest, bl, n) spi_bdev_readblocks(MICROPY_HW_BDEV2_SPIFLASH, (dest), (bl), (n))
+#define MICROPY_HW_BDEV2_WRITEBLOCKS(src, bl, n) spi_bdev_writeblocks(MICROPY_HW_BDEV2_SPIFLASH, (src), (bl), (n))
+#define MICROPY_HW_BDEV2_IOCTL(op, arg) ( \
+    (op) == BDEV_IOCTL_NUM_BLOCKS ? (MICROPY_HW_BDEV2_SPIFLASH_SIZE_BYTES / FLASH_BLOCK_SIZE) : \
+    (op) == BDEV_IOCTL_INIT ? spi_bdev_ioctl(MICROPY_HW_BDEV2_SPIFLASH, (op), (uint32_t)MICROPY_HW_BDEV2_SPIFLASH_CONFIG) : \
+    spi_bdev_ioctl(MICROPY_HW_BDEV2_SPIFLASH, (op), (arg)) \
+    )
 #endif

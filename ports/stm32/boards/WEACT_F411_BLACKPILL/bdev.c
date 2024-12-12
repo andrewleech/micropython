@@ -2,7 +2,7 @@
 #include "spi.h"
 #include "py/mpconfig.h"
 
-#if !MICROPY_HW_ENABLE_INTERNAL_FLASH_STORAGE
+#if MICROPY_HW_SPIFLASH_SIZE_BYTES
 
 #if WEACT_F411_V20
 // External SPI flash uses SPI interface, but not on all HW spi pins.
