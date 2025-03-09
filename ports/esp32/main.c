@@ -187,8 +187,6 @@ soft_reset_exit:
     mp_usbd_deinit();
     #endif
 
-    gc_sweep_all();
-
     // Free any native code pointers that point to iRAM.
     esp_native_code_free_all();
 

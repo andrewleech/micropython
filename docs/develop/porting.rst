@@ -59,7 +59,6 @@ The basic MicroPython firmware is implemented in the main port file, e.g ``main.
        pyexec_friendly_repl();
 
        // Deinitialise the runtime.
-       gc_sweep_all();
        mp_deinit();
        return 0;
    }

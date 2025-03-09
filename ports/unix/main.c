@@ -782,10 +782,6 @@ MP_NOINLINE int main_(int argc, char **argv) {
     mp_thread_deinit();
     #endif
 
-    #if defined(MICROPY_UNIX_COVERAGE)
-    gc_sweep_all();
-    #endif
-
     mp_deinit();
 
     #if MICROPY_ENABLE_GC && !defined(NDEBUG)

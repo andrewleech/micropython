@@ -174,7 +174,6 @@ int main(void) {
         machine_uart_deinit_all();
         machine_pwm_deinit_all();
         soft_timer_deinit();
-        gc_sweep_all();
         mp_deinit();
     }
 

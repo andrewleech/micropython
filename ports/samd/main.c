@@ -98,7 +98,6 @@ void samd_main(void) {
         #if MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
         mp_usbd_deinit();
         #endif
-        gc_sweep_all();
         #if MICROPY_PY_MACHINE_I2C || MICROPY_PY_MACHINE_SPI || MICROPY_PY_MACHINE_UART
         sercom_deinit_all();
         #endif

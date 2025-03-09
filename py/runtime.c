@@ -197,6 +197,10 @@ void mp_init(void) {
 }
 
 void mp_deinit(void) {
+    #if MICROPY_ENABLE_GC
+    gc_sweep_all();
+    #endif
+
     MP_THREAD_GIL_EXIT();
 
     // call port specific deinitialization if any
