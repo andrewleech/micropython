@@ -88,7 +88,7 @@ static void mp_reset(void) {
 }
 
 void soft_reset(void) {
-    gc_sweep_all();
+    mp_deinit();
     mp_hal_stdout_tx_str("MPY: soft reboot\r\n");
     mp_hal_delay_us(10000); // allow UART to flush output
     mp_reset();

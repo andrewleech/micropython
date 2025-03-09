@@ -172,7 +172,6 @@ soft_reset:
     gc_collect();
     #endif
 
-    gc_sweep_all();
     mp_deinit();
 
     goto soft_reset;

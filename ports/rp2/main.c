@@ -245,7 +245,6 @@ int main(int argc, char **argv) {
         // Hook for resetting anything right at the end of a soft reset command.
         MICROPY_BOARD_END_SOFT_RESET();
 
-        gc_sweep_all();
         mp_deinit();
         #if MICROPY_HW_ENABLE_UART_REPL
         setup_default_uart();
