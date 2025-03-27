@@ -46,6 +46,7 @@
 #include "host/usbh.h"
 #include "class/cdc/cdc_host.h"
 #include "class/msc/msc_host.h"
+#include "class/hid/hid_host.h"
 #endif
 
 // Max number of devices we can keep track of
@@ -56,6 +57,9 @@
 
 // Max number of MSC devices we can keep track of
 #define USBH_MAX_MSC (CFG_TUH_MSC)
+
+// Max number of HID devices we can keep track of
+#define USBH_MAX_HID (CFG_TUH_HID)
 
 // Storage for string descriptors
 #define MAX_STRING_LEN 32
@@ -68,12 +72,16 @@ static void usbh_cdc_unmount_cb(uint8_t itf_num);
 static void usbh_cdc_rx_cb(uint8_t itf_num);
 static void usbh_msc_mount_cb(uint8_t dev_addr);
 static void usbh_msc_unmount_cb(uint8_t dev_addr);
+static void usbh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *report_desc, uint16_t desc_len);
+static void usbh_hid_unmount_cb(uint8_t dev_addr, uint8_t instance);
+static void usbh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *report, uint16_t len);
 
 // Global state for USB Host
 typedef struct _machine_usb_host_obj_t {
     mp_obj_list_t *device_list;   // List of detected USB devices
     mp_obj_list_t *cdc_list;      // List of detected CDC devices
     mp_obj_list_t *msc_list;      // List of detected MSC devices
+    mp_obj_list_t *hid_list;      // List of detected HID devices
     bool initialized;             // Whether USB Host is initialized
     bool active;                  // Whether USB Host is active
 
@@ -88,6 +96,10 @@ static machine_usb_host_obj_t usbh_state;
 // CDC device IRQ (for callbacks when data is received)
 static mp_obj_t usbh_cdc_irq_callback[USBH_MAX_CDC] = {mp_const_none};
 static bool usbh_cdc_irq_scheduled[USBH_MAX_CDC] = {false};
+
+// HID device IRQ (for callbacks when reports are received)
+static mp_obj_t usbh_hid_irq_callback[USBH_MAX_HID] = {mp_const_none};
+static bool usbh_hid_irq_scheduled[USBH_MAX_HID] = {false};
 
 // Constants for USBH_CDC.irq trigger
 #define USBH_CDC_IRQ_RX (1)
@@ -125,12 +137,24 @@ static machine_usbh_msc_obj_t *find_msc_by_addr_lun(uint8_t addr, uint8_t lun) {
     return NULL;
 }
 
+// Helper function to find a HID device by address and instance
+static machine_usbh_hid_obj_t *find_hid_by_addr_instance(uint8_t addr, uint8_t instance) {
+    for (size_t i = 0; i < usbh_state.hid_list->len; i++) {
+        machine_usbh_hid_obj_t *hid = MP_OBJ_TO_PTR(usbh_state.hid_list->items[i]);
+        if (hid->device->addr == addr && hid->instance == instance) {
+            return hid;
+        }
+    }
+    return NULL;
+}
+
 // Function to initialize the USB Host module
 void machine_usbh_init0(void) {
     // Create lists to track devices
     usbh_state.device_list = mp_obj_new_list(0, NULL);
     usbh_state.cdc_list = mp_obj_new_list(0, NULL);
     usbh_state.msc_list = mp_obj_new_list(0, NULL);
+    usbh_state.hid_list = mp_obj_new_list(0, NULL);
     usbh_state.initialized = false;
     usbh_state.active = false;
 
@@ -145,6 +169,12 @@ void machine_usbh_init0(void) {
     for (int i = 0; i < USBH_MAX_CDC; i++) {
         usbh_cdc_irq_callback[i] = mp_const_none;
         usbh_cdc_irq_scheduled[i] = false;
+    }
+
+    // Register HID IRQ callbacks
+    for (int i = 0; i < USBH_MAX_HID; i++) {
+        usbh_hid_irq_callback[i] = mp_const_none;
+        usbh_hid_irq_scheduled[i] = false;
     }
 }
 
@@ -272,6 +302,14 @@ static void usbh_device_unmount_cb(uint8_t dev_addr) {
             }
         }
 
+        // Remove any HID devices associated with this address
+        for (int i = usbh_state.hid_list->len - 1; i >= 0; i--) {
+            machine_usbh_hid_obj_t *hid = MP_OBJ_TO_PTR(usbh_state.hid_list->items[i]);
+            if (hid->device->addr == dev_addr) {
+                mp_obj_list_remove(usbh_state.hid_list, MP_OBJ_FROM_PTR(hid));
+            }
+        }
+
         // Remove the device from the list
         for (int i = 0; i < usbh_state.device_list->len; i++) {
             if (usbh_state.device_list->items[i] == MP_OBJ_FROM_PTR(device)) {
@@ -286,7 +324,7 @@ static void usbh_device_unmount_cb(uint8_t dev_addr) {
 static void usbh_cdc_mount_cb(uint8_t itf_num) {
     tuh_itf_info_t itf_info = {0};
     tuh_cdc_itf_get_info(itf_num, &itf_info);
-  
+
     // Find the device
     machine_usbh_device_obj_t *device = find_device_by_addr(itf_info.daddr);
     if (!device) {
@@ -323,13 +361,11 @@ static void usbh_cdc_unmount_cb(uint8_t itf_num) {
 
 // Callback after MSC device has been scanned
 static scsi_inquiry_resp_t inquiry_resp;
-static bool usbh_msc_inquiry_complete_cb(uint8_t dev_addr, tuh_msc_complete_data_t const * cb_data)
-{
-    msc_cbw_t const* cbw = cb_data->cbw;
-    msc_csw_t const* csw = cb_data->csw;
+static bool usbh_msc_inquiry_complete_cb(uint8_t dev_addr, tuh_msc_complete_data_t const *cb_data) {
+    msc_cbw_t const *cbw = cb_data->cbw;
+    msc_csw_t const *csw = cb_data->csw;
 
-    if (csw->status != 0)
-    {
+    if (csw->status != 0) {
         // printf("Inquiry failed\r\n");
         return false;
     }
@@ -351,7 +387,7 @@ static bool usbh_msc_inquiry_complete_cb(uint8_t dev_addr, tuh_msc_complete_data
     msc->busy = false;
 
     msc->connected = true;
- 
+
     // Add to MSC list
     mp_obj_list_append(usbh_state.msc_list, MP_OBJ_FROM_PTR(msc));
 
@@ -366,7 +402,7 @@ static void usbh_msc_mount_cb(uint8_t dev_addr) {
     if (!device) {
         return;
     }
-    
+
     uint8_t const lun = 0; // todo support multiple devices
 
     // Check if device is already registered
@@ -450,6 +486,129 @@ void tuh_msc_umount_cb(uint8_t dev_addr) {
     usbh_msc_unmount_cb(dev_addr);
 }
 
+// Callback when a HID device is mounted
+static void usbh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *report_desc, uint16_t desc_len) {
+    // Find the device
+    machine_usbh_device_obj_t *device = find_device_by_addr(dev_addr);
+    if (!device) {
+        return;
+    }
+
+    // Check if HID device already exists
+    if (find_hid_by_addr_instance(dev_addr, instance) != NULL) {
+        return;
+    }
+
+    // Create a HID device object
+    machine_usbh_hid_obj_t *hid = mp_obj_malloc(machine_usbh_hid_obj_t, &machine_usbh_hid_type);
+    hid->device = device;
+    hid->instance = instance;
+    hid->connected = true;
+    hid->has_report = false;
+    hid->report_len = 0;
+    hid->report_id = 0;
+
+    // Determine protocol
+    uint8_t const protocol = tuh_hid_interface_protocol(dev_addr, instance);
+    switch (protocol) {
+        case HID_ITF_PROTOCOL_KEYBOARD:
+            hid->protocol = USBH_HID_PROTOCOL_KEYBOARD;
+            break;
+        case HID_ITF_PROTOCOL_MOUSE:
+            hid->protocol = USBH_HID_PROTOCOL_MOUSE;
+            break;
+        default:
+            hid->protocol = USBH_HID_PROTOCOL_GENERIC;
+            break;
+    }
+
+    // Try to parse usage page/usage from report descriptor (simplified)
+    hid->usage_page = 0;
+    hid->usage = 0;
+
+    if (desc_len >= 3 && report_desc[0] == 0x05) {
+        // Usage Page item
+        hid->usage_page = report_desc[1];
+
+        // Look for Usage item
+        if (desc_len >= 6 && report_desc[2] == 0x09) {
+            hid->usage = report_desc[3];
+        }
+    }
+
+    // Add to HID list
+    mp_obj_list_append(usbh_state.hid_list, MP_OBJ_FROM_PTR(hid));
+
+    // Enable received report callback
+    tuh_hid_receive_report(dev_addr, instance);
+}
+
+// Callback when a HID device is unmounted
+static void usbh_hid_unmount_cb(uint8_t dev_addr, uint8_t instance) {
+    // Find the HID device
+    machine_usbh_hid_obj_t *hid = find_hid_by_addr_instance(dev_addr, instance);
+    if (hid) {
+        hid->connected = false;
+
+        // Remove from HID list
+        for (int i = 0; i < usbh_state.hid_list->len; i++) {
+            if (usbh_state.hid_list->items[i] == MP_OBJ_FROM_PTR(hid)) {
+                mp_obj_list_remove(usbh_state.hid_list, MP_OBJ_FROM_PTR(hid));
+                break;
+            }
+        }
+    }
+}
+
+// Callback when a HID report is received
+static void usbh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *report, uint16_t len) {
+    // Find the HID device
+    machine_usbh_hid_obj_t *hid = find_hid_by_addr_instance(dev_addr, instance);
+    if (hid) {
+        // Store the report
+        if (len <= USBH_HID_MAX_REPORT_SIZE) {
+            memcpy(hid->report_data, report, len);
+            hid->report_len = len;
+            hid->has_report = true;
+
+            // Determine report ID if present
+            if (tuh_hid_report_id_enabled(dev_addr, instance)) {
+                hid->report_id = report[0];
+            } else {
+                hid->report_id = 0;
+            }
+
+            // Find the matching callback index and schedule if needed
+            for (int i = 0; i < usbh_state.hid_list->len; i++) {
+                if (usbh_state.hid_list->items[i] == MP_OBJ_FROM_PTR(hid)) {
+                    // If callback exists and not already scheduled, schedule it
+                    if (usbh_hid_irq_callback[i] != mp_const_none && !usbh_hid_irq_scheduled[i]) {
+                        mp_sched_schedule(usbh_hid_irq_callback[i], MP_OBJ_FROM_PTR(hid));
+                        usbh_hid_irq_scheduled[i] = true;
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Continue receiving reports
+        tuh_hid_receive_report(dev_addr, instance);
+    }
+}
+
+// TinyUSB HID callbacks
+void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *desc_report, uint16_t desc_len) {
+    usbh_hid_mount_cb(dev_addr, instance, desc_report, desc_len);
+}
+
+void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
+    usbh_hid_unmount_cb(dev_addr, instance);
+}
+
+void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *report, uint16_t len) {
+    usbh_hid_report_received_cb(dev_addr, instance, report, len);
+}
+
 /******************************************************************************/
 // MicroPython bindings for USBHost
 
@@ -490,6 +649,13 @@ static mp_obj_t machine_usb_host_msc_devices(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usb_host_msc_devices_obj, machine_usb_host_msc_devices);
 
+// Method to get the list of HID devices
+static mp_obj_t machine_usb_host_hid_devices(mp_obj_t self_in) {
+    (void)self_in;
+    return MP_OBJ_FROM_PTR(usbh_state.hid_list);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(machine_usb_host_hid_devices_obj, machine_usb_host_hid_devices);
+
 // Method to check if active
 static mp_obj_t machine_usb_host_active(size_t n_args, const mp_obj_t *args) {
     if (n_args == 1) {
@@ -524,6 +690,7 @@ static const mp_rom_map_elem_t machine_usb_host_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_devices), MP_ROM_PTR(&machine_usb_host_devices_obj) },
     { MP_ROM_QSTR(MP_QSTR_cdc_devices), MP_ROM_PTR(&machine_usb_host_cdc_devices_obj) },
     { MP_ROM_QSTR(MP_QSTR_msc_devices), MP_ROM_PTR(&machine_usb_host_msc_devices_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hid_devices), MP_ROM_PTR(&machine_usb_host_hid_devices_obj) },
     { MP_ROM_QSTR(MP_QSTR_active), MP_ROM_PTR(&machine_usb_host_active_obj) },
 };
 static MP_DEFINE_CONST_DICT(machine_usb_host_locals_dict, machine_usb_host_locals_dict_table);
@@ -865,8 +1032,7 @@ static mp_obj_t machine_usbh_msc_is_connected(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_msc_is_connected_obj, machine_usbh_msc_is_connected);
 
-static bool machine_usbh_msc_io_complete(uint8_t dev_addr, tuh_msc_complete_data_t const * cb_data)
-{
+static bool machine_usbh_msc_io_complete(uint8_t dev_addr, tuh_msc_complete_data_t const *cb_data) {
     machine_usbh_msc_obj_t *msc = (machine_usbh_msc_obj_t *)(cb_data->user_arg);
     if (msc) {
         msc->busy = false;
@@ -1008,6 +1174,190 @@ MP_DEFINE_CONST_OBJ_TYPE(
     // make_new, machine_usbh_msc_make_new,
     print, machine_usbh_msc_print,
     locals_dict, &machine_usbh_msc_locals_dict
+    );
+
+/******************************************************************************/
+// MicroPython bindings for USBH_HID
+
+// Print function for HID device
+static void machine_usbh_hid_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
+    machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    mp_printf(print, "USBH_HID(addr=%u, instance=%u, protocol=%u, usage_page=0x%04x, usage=0x%04x)",
+        self->device->addr, self->instance, self->protocol, self->usage_page, self->usage);
+}
+
+// Method to check if connected
+static mp_obj_t machine_usbh_hid_is_connected(mp_obj_t self_in) {
+    machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    return mp_obj_new_bool(self->connected && self->device->mounted);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_hid_is_connected_obj, machine_usbh_hid_is_connected);
+
+// Method to check protocol
+static mp_obj_t machine_usbh_hid_get_protocol(mp_obj_t self_in) {
+    machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    return MP_OBJ_NEW_SMALL_INT(self->protocol);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_hid_get_protocol_obj, machine_usbh_hid_get_protocol);
+
+// Method to check if report is available
+static mp_obj_t machine_usbh_hid_has_report(mp_obj_t self_in) {
+    machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    return mp_obj_new_bool(self->has_report);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_hid_has_report_obj, machine_usbh_hid_has_report);
+
+// Method to get report data
+static mp_obj_t machine_usbh_hid_get_report(mp_obj_t self_in) {
+    machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (!self->has_report) {
+        return mp_const_none;
+    }
+
+    // Create a bytes object with the report data
+    mp_obj_t report = mp_obj_new_bytes(self->report_data, self->report_len);
+
+    // Clear the has_report flag
+    self->has_report = false;
+
+    return report;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_hid_get_report_obj, machine_usbh_hid_get_report);
+
+// Method to get report ID
+static mp_obj_t machine_usbh_hid_get_report_id(mp_obj_t self_in) {
+    machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    return MP_OBJ_NEW_SMALL_INT(self->report_id);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_hid_get_report_id_obj, machine_usbh_hid_get_report_id);
+
+// Method to get usage page
+static mp_obj_t machine_usbh_hid_get_usage_page(mp_obj_t self_in) {
+    machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    return MP_OBJ_NEW_SMALL_INT(self->usage_page);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_hid_get_usage_page_obj, machine_usbh_hid_get_usage_page);
+
+// Method to get usage
+static mp_obj_t machine_usbh_hid_get_usage(mp_obj_t self_in) {
+    machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    return MP_OBJ_NEW_SMALL_INT(self->usage);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_hid_get_usage_obj, machine_usbh_hid_get_usage);
+
+// Method for setting up IRQ handler
+static mp_obj_t machine_usbh_hid_irq(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_handler, ARG_trigger, ARG_hard };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_handler, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_trigger, MP_ARG_INT, {.u_int = USBH_HID_IRQ_REPORT} },
+        { MP_QSTR_hard, MP_ARG_BOOL, {.u_bool = false} },
+    };
+
+    machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    if (n_args > 1 || kw_args->used != 0) {
+        // Check the handler
+        mp_obj_t handler = args[ARG_handler].u_obj;
+        if (handler != mp_const_none && !mp_obj_is_callable(handler)) {
+            mp_raise_ValueError(MP_ERROR_TEXT("handler must be None or callable"));
+        }
+
+        // Check the trigger
+        mp_uint_t trigger = args[ARG_trigger].u_int;
+        if (trigger == 0) {
+            handler = mp_const_none;
+        } else if (trigger != USBH_HID_IRQ_REPORT) {
+            mp_raise_ValueError(MP_ERROR_TEXT("unsupported trigger"));
+        }
+
+        // Check hard/soft
+        if (args[ARG_hard].u_bool) {
+            mp_raise_ValueError(MP_ERROR_TEXT("hard unsupported"));
+        }
+
+        // Find the HID device index
+        for (int i = 0; i < usbh_state.hid_list->len; i++) {
+            if (usbh_state.hid_list->items[i] == MP_OBJ_FROM_PTR(self)) {
+                // Set the callback
+                usbh_hid_irq_callback[i] = handler;
+                usbh_hid_irq_scheduled[i] = false;
+                break;
+            }
+        }
+    }
+
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(machine_usbh_hid_irq_obj, 1, machine_usbh_hid_irq);
+
+// Method to request a report from the device
+static mp_obj_t machine_usbh_hid_request_report(mp_obj_t self_in) {
+    machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (!self->connected || !self->device->mounted) {
+        mp_raise_OSError(MP_ENODEV);
+    }
+
+    // Request a report from the device
+    bool success = tuh_hid_receive_report(self->device->addr, self->instance);
+    return mp_obj_new_bool(success);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_hid_request_report_obj, machine_usbh_hid_request_report);
+
+// Method to send a report to the device (for output reports)
+static mp_obj_t machine_usbh_hid_send_report(mp_obj_t self_in, mp_obj_t report_in) {
+    machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (!self->connected || !self->device->mounted) {
+        mp_raise_OSError(MP_ENODEV);
+    }
+
+    // Get the report data
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer_raise(report_in, &bufinfo, MP_BUFFER_READ);
+
+    if (bufinfo.len > USBH_HID_MAX_REPORT_SIZE) {
+        mp_raise_ValueError(MP_ERROR_TEXT("report too large"));
+    }
+
+    // Send the report
+    bool success = tuh_hid_send_report(self->device->addr, self->instance, 0, bufinfo.buf, bufinfo.len);
+    return mp_obj_new_bool(success);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(machine_usbh_hid_send_report_obj, machine_usbh_hid_send_report);
+
+// Local dict for USBH_HID type
+static const mp_rom_map_elem_t machine_usbh_hid_locals_dict_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_is_connected), MP_ROM_PTR(&machine_usbh_hid_is_connected_obj) },
+    { MP_ROM_QSTR(MP_QSTR_protocol), MP_ROM_PTR(&machine_usbh_hid_get_protocol_obj) },
+    { MP_ROM_QSTR(MP_QSTR_has_report), MP_ROM_PTR(&machine_usbh_hid_has_report_obj) },
+    { MP_ROM_QSTR(MP_QSTR_get_report), MP_ROM_PTR(&machine_usbh_hid_get_report_obj) },
+    { MP_ROM_QSTR(MP_QSTR_report_id), MP_ROM_PTR(&machine_usbh_hid_get_report_id_obj) },
+    { MP_ROM_QSTR(MP_QSTR_usage_page), MP_ROM_PTR(&machine_usbh_hid_get_usage_page_obj) },
+    { MP_ROM_QSTR(MP_QSTR_usage), MP_ROM_PTR(&machine_usbh_hid_get_usage_obj) },
+    { MP_ROM_QSTR(MP_QSTR_irq), MP_ROM_PTR(&machine_usbh_hid_irq_obj) },
+    { MP_ROM_QSTR(MP_QSTR_request_report), MP_ROM_PTR(&machine_usbh_hid_request_report_obj) },
+    { MP_ROM_QSTR(MP_QSTR_send_report), MP_ROM_PTR(&machine_usbh_hid_send_report_obj) },
+
+    // Protocol constants
+    { MP_ROM_QSTR(MP_QSTR_PROTOCOL_NONE), MP_ROM_INT(USBH_HID_PROTOCOL_NONE) },
+    { MP_ROM_QSTR(MP_QSTR_PROTOCOL_KEYBOARD), MP_ROM_INT(USBH_HID_PROTOCOL_KEYBOARD) },
+    { MP_ROM_QSTR(MP_QSTR_PROTOCOL_MOUSE), MP_ROM_INT(USBH_HID_PROTOCOL_MOUSE) },
+    { MP_ROM_QSTR(MP_QSTR_PROTOCOL_GENERIC), MP_ROM_INT(USBH_HID_PROTOCOL_GENERIC) },
+
+    // IRQ constants
+    { MP_ROM_QSTR(MP_QSTR_IRQ_REPORT), MP_ROM_INT(USBH_HID_IRQ_REPORT) },
+};
+static MP_DEFINE_CONST_DICT(machine_usbh_hid_locals_dict, machine_usbh_hid_locals_dict_table);
+
+// Type definition for USBH_HID
+MP_DEFINE_CONST_OBJ_TYPE(
+    machine_usbh_hid_type,
+    MP_QSTR_USBH_HID,
+    MP_TYPE_FLAG_NONE,
+    print, machine_usbh_hid_print,
+    locals_dict, &machine_usbh_hid_locals_dict
     );
 
 #endif // MICROPY_HW_USB_HOST

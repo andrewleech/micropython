@@ -40,6 +40,18 @@
 // Maximum number of pending exceptions per single TinyUSB task execution
 #define MP_USBH_MAX_PEND_EXCS 2
 
+// HID Constants
+#define USBH_HID_MAX_REPORT_SIZE  64
+
+// HID boot protocol codes
+#define USBH_HID_PROTOCOL_NONE      0
+#define USBH_HID_PROTOCOL_KEYBOARD  1
+#define USBH_HID_PROTOCOL_MOUSE     2
+#define USBH_HID_PROTOCOL_GENERIC   3
+
+// HID report event types
+#define USBH_HID_IRQ_REPORT      1
+
 // Initialize TinyUSB for host mode
 static inline void mp_usbh_init_tuh(void) {
     tuh_init(BOARD_TUH_RHPORT);
@@ -59,6 +71,9 @@ extern const mp_obj_type_t machine_usbh_cdc_type;
 
 // The USBH_MSC type
 extern const mp_obj_type_t machine_usbh_msc_type;
+
+// The USBH_HID type
+extern const mp_obj_type_t machine_usbh_hid_type;
 
 // Initialize USB Host module at boot
 void machine_usbh_init0(void);
@@ -98,6 +113,21 @@ typedef struct _machine_usbh_msc_obj_t {
     bool readonly;                   // Whether the device is read-only
     bool busy;
 } machine_usbh_msc_obj_t;
+
+// Structure for USB HID device
+typedef struct _machine_usbh_hid_obj_t {
+    mp_obj_base_t base;
+    machine_usbh_device_obj_t *device; // Parent device
+    uint8_t instance;                // HID instance (different from interface number)
+    uint8_t protocol;                // HID protocol (KEYBOARD, MOUSE, GENERIC)
+    uint16_t usage_page;             // HID usage page
+    uint16_t usage;                  // HID usage
+    bool connected;                  // Whether device is connected
+    bool has_report;                 // Whether there's a new report available
+    uint8_t report_data[USBH_HID_MAX_REPORT_SIZE]; // Last received report data
+    uint16_t report_len;             // Length of the last report
+    uint8_t report_id;               // Last report ID
+} machine_usbh_hid_obj_t;
 
 #endif // MICROPY_HW_USB_HOST
 
