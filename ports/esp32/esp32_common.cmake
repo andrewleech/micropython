@@ -100,6 +100,7 @@ if(MICROPY_PY_TINYUSB AND NOT ECHO_SUBMODULES)
 
     list(APPEND MICROPY_LINK_TINYUSB
         -Wl,--wrap=dcd_event_handler
+        -Wl,--wrap=hcd_event_handler
     )
 endif()
 
