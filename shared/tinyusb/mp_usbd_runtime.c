@@ -428,7 +428,7 @@ void mp_usbd_init(void) {
     }
 
     if (need_usb) {
-        // The following will call tusb_init(), which is safe to call redundantly.
+        // The following will call tud_init(), which is safe to call redundantly.
         mp_usbd_init_tud();
         // Reconnect if mp_usbd_deinit() has disconnected.
         tud_connect();

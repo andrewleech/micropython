@@ -42,7 +42,7 @@
 
 // Initialise TinyUSB device.
 static inline void mp_usbd_init_tud(void) {
-    tusb_init();
+    tud_init(TUD_OPT_RHPORT);
     tud_cdc_configure_fifo_t cfg = { .rx_persistent = 0, .tx_persistent = 1 };
     tud_cdc_configure_fifo(&cfg);
 }
@@ -131,7 +131,7 @@ inline static bool mp_usb_device_builtin_enabled(const mp_obj_usb_device_t *usbd
 #else // Static USBD drivers only
 
 static inline void mp_usbd_init(void) {
-    // Without runtime USB support, this can be a thin wrapper wrapper around tusb_init()
+    // Without runtime USB support, this can be a thin wrapper wrapper around tud_init()
     // which is called in the below helper function.
     mp_usbd_init_tud();
 }

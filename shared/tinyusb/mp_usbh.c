@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2025 Andrew Leech
+ * Copyright (c) 2025 Claude AI Assistant
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,9 +36,10 @@
 #include "extmod/vfs.h"
 #include "shared/runtime/mpirq.h"
 
+#include "mp_usbd.h"
 #include "mp_usbh.h"
 
-#if MICROPY_HW_USB_HOST
+#if MICROPY_HW_USB_HOST || 1
 
 #ifndef NO_QSTR
 #include "tusb.h"
@@ -62,14 +63,14 @@
 // Forward declarations
 static void usbh_device_mount_cb(uint8_t dev_addr);
 static void usbh_device_unmount_cb(uint8_t dev_addr);
-static void usbh_cdc_mount_cb(uint8_t dev_addr, uint8_t itf_num);
-static void usbh_cdc_unmount_cb(uint8_t dev_addr);
-static void usbh_cdc_rx_cb(uint8_t dev_addr, uint8_t itf_num);
-static void usbh_msc_mount_cb(uint8_t dev_addr, uint8_t lun);
+static void usbh_cdc_mount_cb(uint8_t itf_num);
+static void usbh_cdc_unmount_cb(uint8_t itf_num);
+static void usbh_cdc_rx_cb(uint8_t itf_num);
+static void usbh_msc_mount_cb(uint8_t dev_addr);
 static void usbh_msc_unmount_cb(uint8_t dev_addr);
 
 // Global state for USB Host
-static struct {
+typedef struct _machine_usb_host_obj_t {
     mp_obj_list_t *device_list;   // List of detected USB devices
     mp_obj_list_t *cdc_list;      // List of detected CDC devices
     mp_obj_list_t *msc_list;      // List of detected MSC devices
@@ -80,7 +81,9 @@ static struct {
     char manufacturer_str[USBH_MAX_DEVICES][MAX_STRING_LEN];
     char product_str[USBH_MAX_DEVICES][MAX_STRING_LEN];
     char serial_str[USBH_MAX_DEVICES][MAX_STRING_LEN];
-} usbh_state;
+} machine_usb_host_obj_t;
+
+static machine_usb_host_obj_t usbh_state;
 
 // CDC device IRQ (for callbacks when data is received)
 static mp_obj_t usbh_cdc_irq_callback[USBH_MAX_CDC] = {mp_const_none};
@@ -101,10 +104,10 @@ static machine_usbh_device_obj_t *find_device_by_addr(uint8_t addr) {
 }
 
 // Helper function to find a CDC device by address and interface
-static machine_usbh_cdc_obj_t *find_cdc_by_addr_itf(uint8_t addr, uint8_t itf_num) {
+static machine_usbh_cdc_obj_t *find_cdc_by_itf(uint8_t itf_num) {
     for (size_t i = 0; i < usbh_state.cdc_list->len; i++) {
         machine_usbh_cdc_obj_t *cdc = MP_OBJ_TO_PTR(usbh_state.cdc_list->items[i]);
-        if (cdc->device->addr == addr && cdc->itf_num == itf_num) {
+        if (cdc->itf_num == itf_num) {
             return cdc;
         }
     }
@@ -156,7 +159,9 @@ void mp_usbh_task(void) {
 static void usbh_device_mount_cb(uint8_t dev_addr) {
     // Get device information
     tusb_desc_device_t desc_device;
-    if (!tuh_device_get_descriptor(dev_addr, &desc_device, sizeof(desc_device))) {
+    uint8_t xfer_result = tuh_descriptor_get_device_sync(dev_addr, &desc_device, sizeof(desc_device));
+    if (XFER_RESULT_SUCCESS != xfer_result) {
+        // printf("Failed to get device descriptor\r\n");
         return;
     }
 
@@ -170,11 +175,14 @@ static void usbh_device_mount_cb(uint8_t dev_addr) {
     device->dev_protocol = desc_device.bDeviceProtocol;
     device->mounted = true;
 
-    // Get string descriptors (these are optional)
+    // Get string descriptors using direct synchronous functions (these are optional)
     uint16_t temp_buf[MAX_STRING_LEN];
+    const uint16_t language_id = 0x0409; // English US
 
+    // Get manufacturer string
     if (desc_device.iManufacturer) {
-        if (tuh_descriptor_get_string(dev_addr, desc_device.iManufacturer, 0x0409, temp_buf, sizeof(temp_buf))) {
+        xfer_result = tuh_descriptor_get_manufacturer_string_sync(dev_addr, language_id, temp_buf, sizeof(temp_buf));
+        if (xfer_result == XFER_RESULT_SUCCESS) {
             // Convert UTF-16LE to UTF-8 (simplified)
             for (size_t i = 1; i < temp_buf[0] / 2 && i < MAX_STRING_LEN - 1; i++) {
                 usbh_state.manufacturer_str[dev_addr - 1][i - 1] = (char)(temp_buf[i] & 0xFF);
@@ -188,8 +196,10 @@ static void usbh_device_mount_cb(uint8_t dev_addr) {
         device->manufacturer = NULL;
     }
 
+    // Get product string
     if (desc_device.iProduct) {
-        if (tuh_descriptor_get_string(dev_addr, desc_device.iProduct, 0x0409, temp_buf, sizeof(temp_buf))) {
+        xfer_result = tuh_descriptor_get_product_string_sync(dev_addr, language_id, temp_buf, sizeof(temp_buf));
+        if (xfer_result == XFER_RESULT_SUCCESS) {
             // Convert UTF-16LE to UTF-8 (simplified)
             for (size_t i = 1; i < temp_buf[0] / 2 && i < MAX_STRING_LEN - 1; i++) {
                 usbh_state.product_str[dev_addr - 1][i - 1] = (char)(temp_buf[i] & 0xFF);
@@ -203,8 +213,10 @@ static void usbh_device_mount_cb(uint8_t dev_addr) {
         device->product = NULL;
     }
 
+    // Get serial number string
     if (desc_device.iSerialNumber) {
-        if (tuh_descriptor_get_string(dev_addr, desc_device.iSerialNumber, 0x0409, temp_buf, sizeof(temp_buf))) {
+        xfer_result = tuh_descriptor_get_serial_string_sync(dev_addr, language_id, temp_buf, sizeof(temp_buf));
+        if (xfer_result == XFER_RESULT_SUCCESS) {
             // Convert UTF-16LE to UTF-8 (simplified)
             for (size_t i = 1; i < temp_buf[0] / 2 && i < MAX_STRING_LEN - 1; i++) {
                 usbh_state.serial_str[dev_addr - 1][i - 1] = (char)(temp_buf[i] & 0xFF);
@@ -221,20 +233,20 @@ static void usbh_device_mount_cb(uint8_t dev_addr) {
     // Add to the device list
     mp_obj_list_append(usbh_state.device_list, MP_OBJ_FROM_PTR(device));
 
-    // Open interfaces based on device class
-    if (device->dev_class == TUSB_CLASS_MISC &&
-        device->dev_subclass == MISC_SUBCLASS_COMMON &&
-        device->dev_protocol == MISC_PROTOCOL_IAD) {
-        // Device uses Interface Association Descriptor (IAD) - check interfaces
-        tuh_cdc_itf_mount(dev_addr, 0);
-        tuh_msc_mount(dev_addr, 0);
-    } else if (device->dev_class == TUSB_CLASS_CDC) {
-        // CDC device
-        tuh_cdc_itf_mount(dev_addr, 0);
-    } else if (device->dev_class == TUSB_CLASS_MSC) {
-        // MSC device
-        tuh_msc_mount(dev_addr, 0);
-    }
+    // // Open interfaces based on device class
+    // if (device->dev_class == TUSB_CLASS_MISC &&
+    //     device->dev_subclass == MISC_SUBCLASS_COMMON &&
+    //     device->dev_protocol == MISC_PROTOCOL_IAD) {
+    //     // Device uses Interface Association Descriptor (IAD) - check interfaces
+    //     // tuh_cdc_itf_mount(dev_addr, 0);
+    //     // tuh_msc_mount(dev_addr, 0);
+    // } else if (device->dev_class == TUSB_CLASS_CDC) {
+    //     // CDC device
+    //     tuh_cdc_mount(dev_addr, 0);
+    // } else if (device->dev_class == TUSB_CLASS_MSC) {
+    //     // MSC device
+    //     tuh_msc_mount(dev_addr, 0);
+    // }
 }
 
 // Callback when a USB device is unmounted
@@ -248,7 +260,7 @@ static void usbh_device_unmount_cb(uint8_t dev_addr) {
         for (int i = usbh_state.cdc_list->len - 1; i >= 0; i--) {
             machine_usbh_cdc_obj_t *cdc = MP_OBJ_TO_PTR(usbh_state.cdc_list->items[i]);
             if (cdc->device->addr == dev_addr) {
-                mp_obj_list_remove(usbh_state.cdc_list, i);
+                mp_obj_list_remove(usbh_state.cdc_list, MP_OBJ_FROM_PTR(cdc));
             }
         }
 
@@ -256,14 +268,14 @@ static void usbh_device_unmount_cb(uint8_t dev_addr) {
         for (int i = usbh_state.msc_list->len - 1; i >= 0; i--) {
             machine_usbh_msc_obj_t *msc = MP_OBJ_TO_PTR(usbh_state.msc_list->items[i]);
             if (msc->device->addr == dev_addr) {
-                mp_obj_list_remove(usbh_state.msc_list, i);
+                mp_obj_list_remove(usbh_state.msc_list, MP_OBJ_FROM_PTR(msc));
             }
         }
 
         // Remove the device from the list
         for (int i = 0; i < usbh_state.device_list->len; i++) {
             if (usbh_state.device_list->items[i] == MP_OBJ_FROM_PTR(device)) {
-                mp_obj_list_remove(usbh_state.device_list, i);
+                mp_obj_list_remove(usbh_state.device_list, MP_OBJ_FROM_PTR(device));
                 break;
             }
         }
@@ -271,9 +283,12 @@ static void usbh_device_unmount_cb(uint8_t dev_addr) {
 }
 
 // Callback when a CDC interface is mounted
-static void usbh_cdc_mount_cb(uint8_t dev_addr, uint8_t itf_num) {
+static void usbh_cdc_mount_cb(uint8_t itf_num) {
+    tuh_itf_info_t itf_info = {0};
+    tuh_cdc_itf_get_info(itf_num, &itf_info);
+  
     // Find the device
-    machine_usbh_device_obj_t *device = find_device_by_addr(dev_addr);
+    machine_usbh_device_obj_t *device = find_device_by_addr(itf_info.daddr);
     if (!device) {
         return;
     }
@@ -288,30 +303,71 @@ static void usbh_cdc_mount_cb(uint8_t dev_addr, uint8_t itf_num) {
     // Add to CDC list
     mp_obj_list_append(usbh_state.cdc_list, MP_OBJ_FROM_PTR(cdc));
 
-    // Start line coding
-    uint32_t line_coding[2] = {115200, 0x0800};
-    tuh_cdc_set_line_coding(dev_addr, itf_num, line_coding, NULL, 0);
+    // Set line coding
+    cdc_line_coding_t line_coding = { 115200, CDC_LINE_CODING_STOP_BITS_1, CDC_LINE_CODING_PARITY_NONE, 8 };
+    tuh_cdc_set_line_coding(itf_num, &line_coding, NULL, 0);
 }
 
 // Callback when a CDC interface is unmounted
-static void usbh_cdc_unmount_cb(uint8_t dev_addr) {
+static void usbh_cdc_unmount_cb(uint8_t itf_num) {
     // Find and remove any CDC devices with this address
     for (int i = usbh_state.cdc_list->len - 1; i >= 0; i--) {
         machine_usbh_cdc_obj_t *cdc = MP_OBJ_TO_PTR(usbh_state.cdc_list->items[i]);
-        if (cdc->device->addr == dev_addr) {
+        if (cdc->itf_num == itf_num) {
             cdc->connected = false;
-            mp_obj_list_remove(usbh_state.cdc_list, i);
+            mp_obj_list_remove(usbh_state.cdc_list, MP_OBJ_FROM_PTR(cdc));
         }
     }
 }
 
+
+// Callback after MSC device has been scanned
+static scsi_inquiry_resp_t inquiry_resp;
+static bool usbh_msc_inquiry_complete_cb(uint8_t dev_addr, tuh_msc_complete_data_t const * cb_data)
+{
+    msc_cbw_t const* cbw = cb_data->cbw;
+    msc_csw_t const* csw = cb_data->csw;
+
+    if (csw->status != 0)
+    {
+        // printf("Inquiry failed\r\n");
+        return false;
+    }
+
+    machine_usbh_msc_obj_t *msc = (machine_usbh_msc_obj_t *)(cb_data->user_arg);
+
+    // Print out Vendor ID, Product ID and Rev
+    // printf("%.8s %.16s rev %.4s\r\n", inquiry_resp.vendor_id, inquiry_resp.product_id, inquiry_resp.product_rev);
+
+    // Get capacity of device
+    msc->block_count = tuh_msc_get_block_count(dev_addr, cbw->lun);
+    msc->block_size = tuh_msc_get_block_size(dev_addr, cbw->lun);
+
+    // printf("Disk Size: %" PRIu32 " MB\r\n", block_count / ((1024*1024)/block_size));
+    // printf("Block Count = %" PRIu32 ", Block Size: %" PRIu32 "\r\n", block_count, block_size);
+
+    // Check write-protection bit (7) in byte 3
+    msc->readonly = (inquiry_resp.protect) ? true : false;
+    msc->busy = false;
+
+    msc->connected = true;
+ 
+    // Add to MSC list
+    mp_obj_list_append(usbh_state.msc_list, MP_OBJ_FROM_PTR(msc));
+
+    return true;
+}
+
+
 // Callback when a MSC interface is mounted
-static void usbh_msc_mount_cb(uint8_t dev_addr, uint8_t lun) {
+static void usbh_msc_mount_cb(uint8_t dev_addr) {
     // Find the device
     machine_usbh_device_obj_t *device = find_device_by_addr(dev_addr);
     if (!device) {
         return;
     }
+    
+    uint8_t const lun = 0; // todo support multiple devices
 
     // Check if device is already registered
     if (find_msc_by_addr_lun(dev_addr, lun) != NULL) {
@@ -325,29 +381,11 @@ static void usbh_msc_mount_cb(uint8_t dev_addr, uint8_t lun) {
     msc->connected = true;
 
     // Get device capacity info
-    uint32_t block_count = 0;
-    uint32_t block_size = 0;
-    bool result = tuh_msc_get_capacity(dev_addr, lun, &block_count, &block_size);
-    if (result) {
-        msc->block_size = block_size;
-        msc->block_count = block_count;
-    } else {
-        msc->block_size = 512;  // Default common block size
-        msc->block_count = 0;   // Unknown
-    }
+    // uint32_t block_count = tuh_msc_get_block_count(dev_addr, lun);
+    // uint32_t block_size = tuh_msc_get_block_size(dev_addr, lun);
 
-    // Check if device is read-only (write protected)
-    uint8_t inquiry_resp[36] = {0};
-    result = tuh_msc_inquiry(dev_addr, lun, inquiry_resp);
-    if (result) {
-        // Check write-protection bit (7) in byte 3
-        msc->readonly = (inquiry_resp[3] & 0x80) ? true : false;
-    } else {
-        msc->readonly = false;  // Assume not read-only
-    }
-
-    // Add to MSC list
-    mp_obj_list_append(usbh_state.msc_list, MP_OBJ_FROM_PTR(msc));
+    // Check for device details
+    tuh_msc_inquiry(dev_addr, lun, &inquiry_resp, usbh_msc_inquiry_complete_cb, (uintptr_t)msc);
 }
 
 // Callback when a MSC interface is unmounted
@@ -357,15 +395,15 @@ static void usbh_msc_unmount_cb(uint8_t dev_addr) {
         machine_usbh_msc_obj_t *msc = MP_OBJ_TO_PTR(usbh_state.msc_list->items[i]);
         if (msc->device->addr == dev_addr) {
             msc->connected = false;
-            mp_obj_list_remove(usbh_state.msc_list, i);
+            mp_obj_list_remove(usbh_state.msc_list, MP_OBJ_FROM_PTR(msc));
         }
     }
 }
 
 // Callback for CDC RX event
-static void usbh_cdc_rx_cb(uint8_t dev_addr, uint8_t itf_num) {
+static void usbh_cdc_rx_cb(uint8_t itf_num) {
     // Find the CDC device
-    machine_usbh_cdc_obj_t *cdc = find_cdc_by_addr_itf(dev_addr, itf_num);
+    machine_usbh_cdc_obj_t *cdc = find_cdc_by_itf(itf_num);
     if (cdc) {
         cdc->rx_pending = true;
 
@@ -392,22 +430,20 @@ void tuh_umount_cb(uint8_t dev_addr) {
     usbh_device_unmount_cb(dev_addr);
 }
 
-void tuh_cdc_mount_cb(uint8_t dev_addr, uint8_t itf_num, uint8_t max_packet_size) {
-    (void)max_packet_size;
-    usbh_cdc_mount_cb(dev_addr, itf_num);
+void tuh_cdc_mount_cb(uint8_t itf_num) {
+    usbh_cdc_mount_cb(itf_num);
 }
 
-void tuh_cdc_umount_cb(uint8_t dev_addr) {
-    usbh_cdc_unmount_cb(dev_addr);
+void tuh_cdc_umount_cb(uint8_t itf_num) {
+    usbh_cdc_unmount_cb(itf_num);
 }
 
-void tuh_cdc_rx_cb(uint8_t dev_addr, uint8_t itf_num) {
-    usbh_cdc_rx_cb(dev_addr, itf_num);
+void tuh_cdc_rx_cb(uint8_t itf_num) {
+    usbh_cdc_rx_cb(itf_num);
 }
 
-void tuh_msc_mount_cb(uint8_t dev_addr, uint8_t lun, uint8_t *p_inquiry) {
-    (void)p_inquiry;
-    usbh_msc_mount_cb(dev_addr, lun);
+void tuh_msc_mount_cb(uint8_t dev_addr) {
+    usbh_msc_mount_cb(dev_addr);
 }
 
 void tuh_msc_umount_cb(uint8_t dev_addr) {
@@ -428,9 +464,9 @@ static mp_obj_t machine_usb_host_make_new(const mp_obj_type_t *type, size_t n_ar
     // Parse arguments (none for now)
     mp_arg_check_num(n_args, n_kw, 0, 0, false);
 
-    // Create the object
-    mp_obj_t obj = mp_obj_new_type_obj(type);
-    return obj;
+    // Create the self object
+    // machine_usb_host_obj_t *self = mp_obj_malloc(machine_usb_host_obj_t, type);
+    return MP_OBJ_FROM_PTR(&usbh_state);
 }
 
 // Method to get the list of devices
@@ -464,12 +500,19 @@ static mp_obj_t machine_usb_host_active(size_t n_args, const mp_obj_t *args) {
         if (mp_obj_is_true(args[1])) {
             if (!usbh_state.initialized) {
                 // Initialize TinyUSB for host mode
+                if (TUD_OPT_RHPORT == BOARD_TUH_RHPORT) { // TUH_OPT_RHPORT
+                    tud_deinit(TUD_OPT_RHPORT);
+                }
                 mp_usbh_init_tuh();
                 usbh_state.initialized = true;
             }
             usbh_state.active = true;
         } else {
             usbh_state.active = false;
+            tuh_deinit(BOARD_TUH_RHPORT);
+            if (TUD_OPT_RHPORT == BOARD_TUH_RHPORT) {
+                mp_usbd_init_tud();
+            }
         }
         return mp_const_none;
     }
@@ -565,7 +608,7 @@ static MP_DEFINE_CONST_DICT(machine_usbh_device_locals_dict, machine_usbh_device
 // Type definition for USB device
 MP_DEFINE_CONST_OBJ_TYPE(
     machine_usbh_device_type,
-    MP_QSTR_USBDevice,
+    MP_QSTR_USBH_Device,
     MP_TYPE_FLAG_NONE,
     print, machine_usbh_device_print,
     locals_dict, &machine_usbh_device_locals_dict
@@ -581,12 +624,12 @@ static void machine_usbh_cdc_print(const mp_print_t *print, mp_obj_t self_in, mp
         self->device->addr, self->itf_num);
 }
 
-// Constructor for USBH_CDC
-static mp_obj_t machine_usbh_cdc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
-    // CDC devices are created internally, not by the user
-    mp_raise_TypeError(MP_ERROR_TEXT("Cannot create USBH_CDC objects directly"));
-    return mp_const_none;
-}
+// // Constructor for USBH_CDC
+// static mp_obj_t machine_usbh_cdc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+//     // CDC devices are created internally, not by the user
+//     mp_raise_TypeError(MP_ERROR_TEXT("Cannot create USBH_CDC objects directly"));
+//     return mp_const_none;
+// }
 
 // Method to check if connected
 static mp_obj_t machine_usbh_cdc_is_connected(mp_obj_t self_in) {
@@ -602,7 +645,7 @@ static mp_obj_t machine_usbh_cdc_any(mp_obj_t self_in) {
         return MP_OBJ_NEW_SMALL_INT(0);
     }
 
-    uint32_t available = tuh_cdc_read_available(self->device->addr, self->itf_num);
+    uint32_t available = tuh_cdc_read_available(self->itf_num);
     return MP_OBJ_NEW_SMALL_INT(available);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_cdc_any_obj, machine_usbh_cdc_any);
@@ -626,7 +669,7 @@ static mp_obj_t machine_usbh_cdc_read(size_t n_args, const mp_obj_t *args) {
     }
 
     // Read from the CDC device
-    uint32_t count = tuh_cdc_read(self->device->addr, self->itf_num, buf, size);
+    uint32_t count = tuh_cdc_read(self->itf_num, buf, size);
 
     // Create a bytes object with the result
     mp_obj_t bytes = mp_obj_new_bytes(buf, count);
@@ -648,7 +691,7 @@ static mp_obj_t machine_usbh_cdc_write(mp_obj_t self_in, mp_obj_t data_in) {
     mp_get_buffer_raise(data_in, &bufinfo, MP_BUFFER_READ);
 
     // Write to the CDC device
-    uint32_t count = tuh_cdc_write(self->device->addr, self->itf_num, bufinfo.buf, bufinfo.len);
+    uint32_t count = tuh_cdc_write(self->itf_num, bufinfo.buf, bufinfo.len);
 
     return MP_OBJ_NEW_SMALL_INT(count);
 }
@@ -710,7 +753,7 @@ static mp_uint_t machine_usbh_cdc_stream_read(mp_obj_t self_in, void *buf, mp_ui
         return MP_STREAM_ERROR;
     }
 
-    uint32_t count = tuh_cdc_read(self->device->addr, self->itf_num, buf, size);
+    uint32_t count = tuh_cdc_read(self->itf_num, buf, size);
     if (count == 0) {
         // No data available
         *errcode = MP_EAGAIN;
@@ -728,7 +771,7 @@ static mp_uint_t machine_usbh_cdc_stream_write(mp_obj_t self_in, const void *buf
         return MP_STREAM_ERROR;
     }
 
-    uint32_t count = tuh_cdc_write(self->device->addr, self->itf_num, buf, size);
+    uint32_t count = tuh_cdc_write(self->itf_num, buf, size);
     if (count == 0) {
         // Could not write any data
         *errcode = MP_EAGAIN;
@@ -747,7 +790,7 @@ static mp_uint_t machine_usbh_cdc_stream_ioctl(mp_obj_t self_in, mp_uint_t reque
         mp_uint_t flags = arg;
         ret = 0;
 
-        if ((flags & MP_STREAM_POLL_RD) && tuh_cdc_read_available(self->device->addr, self->itf_num) > 0) {
+        if ((flags & MP_STREAM_POLL_RD) && tuh_cdc_read_available(self->itf_num) > 0) {
             ret |= MP_STREAM_POLL_RD;
         }
 
@@ -792,7 +835,7 @@ MP_DEFINE_CONST_OBJ_TYPE(
     machine_usbh_cdc_type,
     MP_QSTR_USBH_CDC,
     MP_TYPE_FLAG_ITER_IS_STREAM,
-    make_new, machine_usbh_cdc_make_new,
+    // make_new, machine_usbh_cdc_make_new,
     print, machine_usbh_cdc_print,
     protocol, &machine_usbh_cdc_stream_p,
     locals_dict, &machine_usbh_cdc_locals_dict
@@ -808,12 +851,12 @@ static void machine_usbh_msc_print(const mp_print_t *print, mp_obj_t self_in, mp
         self->device->addr, self->lun, self->block_size, self->block_count, self->readonly);
 }
 
-// Constructor for USBH_MSC
-static mp_obj_t machine_usbh_msc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
-    // MSC devices are created internally, not by the user
-    mp_raise_TypeError(MP_ERROR_TEXT("Cannot create USBH_MSC objects directly"));
-    return mp_const_none;
-}
+// // Constructor for USBH_MSC
+// static mp_obj_t machine_usbh_msc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+//     // MSC devices are created internally, not by the user
+//     mp_raise_TypeError(MP_ERROR_TEXT("Cannot create USBH_MSC objects directly"));
+//     return mp_const_none;
+// }
 
 // Method to check if connected
 static mp_obj_t machine_usbh_msc_is_connected(mp_obj_t self_in) {
@@ -821,6 +864,16 @@ static mp_obj_t machine_usbh_msc_is_connected(mp_obj_t self_in) {
     return mp_obj_new_bool(self->connected && self->device->mounted);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_msc_is_connected_obj, machine_usbh_msc_is_connected);
+
+static bool machine_usbh_msc_io_complete(uint8_t dev_addr, tuh_msc_complete_data_t const * cb_data)
+{
+    machine_usbh_msc_obj_t *msc = (machine_usbh_msc_obj_t *)(cb_data->user_arg);
+    if (msc) {
+        msc->busy = false;
+        return true;
+    }
+    return false;
+}
 
 // Method to readblocks for block protocol
 static mp_obj_t machine_usbh_msc_readblocks(size_t n_args, const mp_obj_t *args) {
@@ -836,15 +889,24 @@ static mp_obj_t machine_usbh_msc_readblocks(size_t n_args, const mp_obj_t *args)
     uint32_t offset = 0;
     if (n_args == 4) {
         offset = mp_obj_get_int(args[3]);
+        if (offset != 0) {
+            // todo I think we'd need to do a read/modify/write here
+            mp_raise_ValueError(MP_ERROR_TEXT("partial block writes not supported"));
+        }
     }
 
-    uint32_t count = bufinfo.len;
-    bool result = tuh_msc_read10(self->device->addr, self->lun,
-        bufinfo.buf, block_num, count / self->block_size);
+    uint32_t count = bufinfo.len / self->block_size;
+    self->busy = true;
+    tuh_msc_read10(self->device->addr, self->lun,
+        bufinfo.buf, block_num, count, machine_usbh_msc_io_complete, (uintptr_t)self);
 
     // Wait for the operation to complete
     while (!tuh_msc_ready(self->device->addr)) {
         tuh_task();  // Process USB events until ready
+    }
+    if (self->busy) {
+        // Shouldn't get here unless tuh_msc_ready() doesn't work
+        mp_raise_OSError(MP_EINPROGRESS);
     }
 
     return mp_const_none;
@@ -862,6 +924,10 @@ static mp_obj_t machine_usbh_msc_writeblocks(size_t n_args, const mp_obj_t *args
         mp_raise_OSError(MP_EROFS);  // Read-only file system
     }
 
+    if (self->busy) {
+        mp_raise_OSError(MP_EBUSY);  // Read-only file system
+    }
+
     uint32_t block_num = mp_obj_get_int(args[1]);
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(args[2], &bufinfo, MP_BUFFER_READ);
@@ -869,15 +935,24 @@ static mp_obj_t machine_usbh_msc_writeblocks(size_t n_args, const mp_obj_t *args
     uint32_t offset = 0;
     if (n_args == 4) {
         offset = mp_obj_get_int(args[3]);
+        if (offset != 0) {
+            // todo I think we'd need to do a read/modify/write here
+            mp_raise_ValueError(MP_ERROR_TEXT("partial block writes not supported"));
+        }
     }
 
-    uint32_t count = bufinfo.len;
-    bool result = tuh_msc_write10(self->device->addr, self->lun,
-        bufinfo.buf, block_num, count / self->block_size);
+    uint32_t count = bufinfo.len / self->block_size;
+    self->busy = true;
+    tuh_msc_write10(self->device->addr, self->lun,
+        bufinfo.buf, block_num, count, machine_usbh_msc_io_complete, (uintptr_t)self);
 
     // Wait for the operation to complete
     while (!tuh_msc_ready(self->device->addr)) {
         tuh_task();  // Process USB events until ready
+    }
+    if (self->busy) {
+        // Shouldn't get here unless tuh_msc_ready() doesn't work
+        mp_raise_OSError(MP_EINPROGRESS);
     }
 
     return mp_const_none;
@@ -930,7 +1005,7 @@ MP_DEFINE_CONST_OBJ_TYPE(
     machine_usbh_msc_type,
     MP_QSTR_USBH_MSC,
     MP_TYPE_FLAG_NONE,
-    make_new, machine_usbh_msc_make_new,
+    // make_new, machine_usbh_msc_make_new,
     print, machine_usbh_msc_print,
     locals_dict, &machine_usbh_msc_locals_dict
     );

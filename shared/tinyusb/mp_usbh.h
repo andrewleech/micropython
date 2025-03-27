@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2025 Andrew Leech
+ * Copyright (c) 2025 Claude AI Assistant
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,11 +30,19 @@
 #include "py/obj.h"
 #include "py/runtime.h"
 
+#ifndef NO_QSTR
+#include "tusb.h"
+#include "device/dcd.h"
+#endif
+
 #if MICROPY_HW_USB_HOST
+
+// Maximum number of pending exceptions per single TinyUSB task execution
+#define MP_USBH_MAX_PEND_EXCS 2
 
 // Initialize TinyUSB for host mode
 static inline void mp_usbh_init_tuh(void) {
-    tusb_init();
+    tuh_init(BOARD_TUH_RHPORT);
 }
 
 // Function to be called in the port's main loop to process USB host events
@@ -42,6 +50,9 @@ void mp_usbh_task(void);
 
 // The USBHost type
 extern const mp_obj_type_t machine_usb_host_type;
+
+// The USBH_Device type
+extern const mp_obj_type_t machine_usbh_device_type;
 
 // The USBH_CDC type
 extern const mp_obj_type_t machine_usbh_cdc_type;
@@ -85,6 +96,7 @@ typedef struct _machine_usbh_msc_obj_t {
     uint32_t block_size;             // Block size in bytes
     uint32_t block_count;            // Number of blocks
     bool readonly;                   // Whether the device is read-only
+    bool busy;
 } machine_usbh_msc_obj_t;
 
 #endif // MICROPY_HW_USB_HOST

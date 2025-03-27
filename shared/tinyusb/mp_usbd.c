@@ -43,6 +43,7 @@ void mp_usbd_task(void) {
 void mp_usbd_task_callback(mp_sched_node_t *node) {
     (void)node;
     mp_usbd_task();
+    mp_usbh_task();
 }
 
 #endif // !MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
