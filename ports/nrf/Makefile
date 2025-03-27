@@ -268,7 +268,7 @@ SRC_C += $(addprefix lib/tinyusb/src/,\
 	portable/nordic/nrf5x/dcd_nrf5x.c \
 	)
 
-LDFLAGS += -Wl,--wrap=dcd_event_handler
+LDFLAGS += -Wl,--wrap=dcd_event_handler -Wl,--wrap=hcd_event_handler
 endif
 
 DRIVERS_SRC_C += $(addprefix modules/,\
