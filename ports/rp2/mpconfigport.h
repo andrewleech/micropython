@@ -67,6 +67,10 @@
 #endif
 #endif
 
+#ifndef MICROPY_HW_USB_HOST
+#define MICROPY_HW_USB_HOST (1) // Support machine.USBHost
+#endif
+
 // Number of bytes of flash to allocate to the ROMFS partition.
 #ifndef MICROPY_HW_ROMFS_BYTES
 #define MICROPY_HW_ROMFS_BYTES (0)
@@ -193,12 +197,13 @@
 #define MICROPY_FATFS_ENABLE_LFN                (2)
 #define MICROPY_FATFS_LFN_CODE_PAGE             437 /* 1=SFN/ANSI 437=LFN/U.S.(OEM) */
 #define MICROPY_FATFS_RPATH                     (2)
-#if MICROPY_HW_USB_MSC
+#if MICROPY_HW_USB_MSC || MICROPY_HW_USB_HOST
 #define MICROPY_FATFS_USE_LABEL                 (1)
 #define MICROPY_FATFS_MULTI_PARTITION           (1)
 // Set FatFS block size to flash sector size to avoid caching
 // the flash sector in memory to support smaller block sizes.
 #define MICROPY_FATFS_MAX_SS                    (FLASH_SECTOR_SIZE)
+#define MICROPY_FATFS_EXFAT                     (1)
 #endif
 
 #ifndef MICROPY_BOARD_ENTER_BOOTLOADER

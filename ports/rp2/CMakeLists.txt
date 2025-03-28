@@ -128,6 +128,7 @@ set(MICROPY_SOURCE_LIB
     ${MICROPY_DIR}/shared/tinyusb/mp_usbd_cdc.c
     ${MICROPY_DIR}/shared/tinyusb/mp_usbd_descriptor.c
     ${MICROPY_DIR}/shared/tinyusb/mp_usbd_runtime.c
+    ${MICROPY_DIR}/shared/tinyusb/mp_usbh.c
 )
 
 if(PICO_ARM)
@@ -179,6 +180,7 @@ set(MICROPY_SOURCE_QSTR
     ${MICROPY_DIR}/shared/runtime/mpirq.c
     ${MICROPY_DIR}/shared/runtime/sys_stdio_mphal.c
     ${MICROPY_DIR}/shared/tinyusb/mp_usbd_runtime.c
+    ${MICROPY_DIR}/shared/tinyusb/mp_usbh.c
     ${MICROPY_PORT_DIR}/machine_adc.c
     ${MICROPY_PORT_DIR}/machine_i2c.c
     ${MICROPY_PORT_DIR}/machine_pin.c
@@ -239,6 +241,7 @@ set(PICO_SDK_COMPONENTS
     pico_util
     tinyusb_common
     tinyusb_device
+    tinyusb_host
 )
 
 if(PICO_ARM)
@@ -517,6 +520,7 @@ target_compile_options(${MICROPY_TARGET} PRIVATE
 target_link_options(${MICROPY_TARGET} PRIVATE
     -Wl,--defsym=__micropy_c_heap_size__=${MICROPY_C_HEAP_SIZE}
     -Wl,--wrap=dcd_event_handler
+    -Wl,--wrap=hcd_event_handler
     -Wl,--wrap=runtime_init_clocks
 )
 
