@@ -57,7 +57,8 @@ static inline void mp_usbh_init_tuh(void) {
     tuh_init(BOARD_TUH_RHPORT);
 }
 
-// Function to be called in the port's main loop to process USB host events
+// Schedule a call to mp_usbd_task(), even if no USB interrupt has occurred
+void mp_usbh_schedule_task(void);
 void mp_usbh_task(void);
 
 // The USBHost type
@@ -74,9 +75,6 @@ extern const mp_obj_type_t machine_usbh_msc_type;
 
 // The USBH_HID type
 extern const mp_obj_type_t machine_usbh_hid_type;
-
-// Initialize USB Host module at boot
-void machine_usbh_init0(void);
 
 // Structure to track USB device information
 typedef struct _machine_usbh_device_obj_t {
@@ -96,7 +94,7 @@ typedef struct _machine_usbh_device_obj_t {
 // Structure for USB CDC device
 typedef struct _machine_usbh_cdc_obj_t {
     mp_obj_base_t base;
-    machine_usbh_device_obj_t *device; // Parent device
+    uint8_t dev_addr; // Parent device
     uint8_t itf_num;                 // Interface number
     bool connected;                  // Whether device is connected
     bool rx_pending;                 // Whether there's data available to read
@@ -105,7 +103,7 @@ typedef struct _machine_usbh_cdc_obj_t {
 // Structure for USB MSC device (block device)
 typedef struct _machine_usbh_msc_obj_t {
     mp_obj_base_t base;
-    machine_usbh_device_obj_t *device; // Parent device
+    uint8_t dev_addr; // Parent device
     uint8_t lun;                     // Logical Unit Number
     bool connected;                  // Whether device is connected
     uint32_t block_size;             // Block size in bytes
@@ -117,16 +115,13 @@ typedef struct _machine_usbh_msc_obj_t {
 // Structure for USB HID device
 typedef struct _machine_usbh_hid_obj_t {
     mp_obj_base_t base;
-    machine_usbh_device_obj_t *device; // Parent device
+    uint8_t dev_addr; // Parent device
     uint8_t instance;                // HID instance (different from interface number)
     uint8_t protocol;                // HID protocol (KEYBOARD, MOUSE, GENERIC)
     uint16_t usage_page;             // HID usage page
     uint16_t usage;                  // HID usage
     bool connected;                  // Whether device is connected
-    bool has_report;                 // Whether there's a new report available
-    uint8_t report_data[USBH_HID_MAX_REPORT_SIZE]; // Last received report data
-    uint16_t report_len;             // Length of the last report
-    uint8_t report_id;               // Last report ID
+    mp_obj_t latest_report;          // Last received report data
 } machine_usbh_hid_obj_t;
 
 #endif // MICROPY_HW_USB_HOST
