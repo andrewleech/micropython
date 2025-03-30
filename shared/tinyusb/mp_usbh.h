@@ -40,6 +40,9 @@
 // Maximum number of pending exceptions per single TinyUSB task execution
 #define MP_USBH_MAX_PEND_EXCS 2
 
+// CDC IRQ trigger
+#define USBH_CDC_IRQ_RX     1
+
 // HID Constants
 #define USBH_HID_MAX_REPORT_SIZE  64
 
@@ -51,6 +54,16 @@
 
 // HID report event types
 #define USBH_HID_IRQ_REPORT      1
+
+// Maximum number of device strings
+#define USBH_MAX_DEVICES    4  // Maximum number of devices
+#define USBH_MAX_STR_LEN    32
+
+// Maximum number of CDC devices
+#define USBH_MAX_CDC        4
+
+// Maximum number of HID devices
+#define USBH_MAX_HID        4
 
 // Initialize TinyUSB for host mode
 static inline void mp_usbh_init_tuh(void) {
@@ -75,6 +88,25 @@ extern const mp_obj_type_t machine_usbh_msc_type;
 
 // The USBH_HID type
 extern const mp_obj_type_t machine_usbh_hid_type;
+
+// Structure to hold shared USB host state
+typedef struct _mp_obj_usb_host_t {
+    mp_obj_base_t base;
+    mp_obj_t device_list;              // List of connected general devices
+    mp_obj_t cdc_list;                 // List of CDC devices
+    mp_obj_t msc_list;                 // List of MSC devices
+    mp_obj_t hid_list;                 // List of HID devices
+    bool initialized;                  // Whether TinyUSB is initialized
+    bool active;                       // Whether USB host is active
+    char manufacturer_str[USBH_MAX_DEVICES][USBH_MAX_STR_LEN]; // Manufacturer strings
+    char product_str[USBH_MAX_DEVICES][USBH_MAX_STR_LEN];      // Product strings
+    char serial_str[USBH_MAX_DEVICES][USBH_MAX_STR_LEN];       // Serial strings
+    mp_obj_t usbh_cdc_irq_callback[USBH_MAX_CDC]; // CDC IRQ callbacks
+    bool usbh_cdc_irq_scheduled[USBH_MAX_CDC];    // Whether the CDC IRQ is scheduled
+    mp_obj_t usbh_hid_irq_callback[USBH_MAX_HID]; // HID IRQ callbacks
+    uint8_t pend_excs[MP_USBH_MAX_PEND_EXCS][2]; // Pending exceptions to be processed (dev_addr, itf_idx)
+    uint8_t num_pend_excs;                    // Number of pending exceptions
+} mp_obj_usb_host_t;
 
 // Structure to track USB device information
 typedef struct _machine_usbh_device_obj_t {
@@ -123,6 +155,9 @@ typedef struct _machine_usbh_hid_obj_t {
     bool connected;                  // Whether device is connected
     mp_obj_t latest_report;          // Last received report data
 } machine_usbh_hid_obj_t;
+
+// Helper function to check if a device is mounted
+bool device_mounted(uint8_t dev_addr);
 
 #endif // MICROPY_HW_USB_HOST
 

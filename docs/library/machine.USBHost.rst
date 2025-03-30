@@ -99,6 +99,29 @@ Methods
               import os
               print(os.listdir('/usb'))
 
+.. method:: USBHost.hid_devices()
+
+   Returns a list of connected HID devices (Human Interface Devices, like keyboards and mice).
+   
+   Each device in the returned list is a USBH_HID object.
+   
+   Example::
+
+      # Get list of HID devices
+      hid_devices = host.hid_devices()
+      for hid in hid_devices:
+          protocol = "Unknown"
+          if hid.protocol == hid.PROTOCOL_KEYBOARD:
+              protocol = "Keyboard"
+          elif hid.protocol == hid.PROTOCOL_MOUSE:
+              protocol = "Mouse"
+          print(f"HID device: {protocol}, usage page={hid.usage_page}, usage={hid.usage}")
+          
+          # Get the latest report from the device
+          report = hid.get_report()
+          if report:
+              print(f"Latest report: {report}")
+
 USBDevice class
 --------------
 
@@ -243,28 +266,89 @@ USBH_MSC class
          with open('/usb/test.txt', 'r') as f:
              print(f.read())
 
+USBH_HID class
+-------------
+
+.. class:: USBH_HID
+
+   This class is not meant to be instantiated directly, but is returned by
+   ``USBHost.hid_devices()``. It provides access to USB HID devices like keyboards,
+   mice, and other input devices.
+   
+   .. method:: USBH_HID.is_connected()
+
+      Returns ``True`` if the HID device is still connected, ``False`` otherwise.
+
+   .. method:: USBH_HID.protocol
+
+      Returns the device's HID protocol type. This can be one of the following constants:
+      
+      - ``USBH_HID.PROTOCOL_NONE`` - No specific protocol
+      - ``USBH_HID.PROTOCOL_KEYBOARD`` - Keyboard protocol
+      - ``USBH_HID.PROTOCOL_MOUSE`` - Mouse protocol
+      - ``USBH_HID.PROTOCOL_GENERIC`` - Generic HID protocol
+
+   .. method:: USBH_HID.usage_page
+
+      Returns the device's HID usage page, which is a number that identifies the general
+      category of the device according to the USB HID specification.
+
+   .. method:: USBH_HID.usage
+
+      Returns the device's HID usage, which is a number that identifies the specific
+      function of the device according to the USB HID specification.
+
+   .. method:: USBH_HID.get_report()
+
+      Returns the most recently received report from the device as a bytes object,
+      or ``None`` if no report has been received yet.
+
+   .. method:: USBH_HID.request_report()
+
+      Requests a new report from the device. Returns ``True`` if the request was
+      successfully sent, ``False`` otherwise.
+
+   .. method:: USBH_HID.send_report(data)
+
+      Sends an output report to the device. This is typically used for devices that
+      have output capabilities, such as keyboard LEDs or rumble motors.
+      
+      - ``data`` is a bytes object containing the report data to send.
+      
+      Returns ``True`` if the report was successfully sent, ``False`` otherwise.
+
+   .. method:: USBH_HID.irq(handler=None, trigger=IRQ_REPORT, hard=False)
+
+      Set a callback to be triggered when a report is received.
+      
+      - ``handler`` is the function to call when a report is received.
+      - ``trigger`` is the event that triggers the callback.
+      
+      The handler will be passed the HID device object.
+      
+      Example::
+
+         def on_report(hid):
+             report = hid.get_report()
+             if report:
+                 print(f"Received HID report: {report}")
+         
+         hid.irq(handler=on_report, trigger=hid.IRQ_REPORT)
+
 Constants
 ---------
 
 .. data:: USBH_CDC.IRQ_RX
 
-   Constant used with ``irq()`` method to trigger on data reception.
-   
-Hardware Integration
--------------------
+   Constant used with CDC ``irq()`` method to trigger on data reception.
 
-USB Host mode requires periodic processing of USB events. This is typically done
-in the port's main task loop. For example:
+.. data:: USBH_HID.PROTOCOL_NONE
+.. data:: USBH_HID.PROTOCOL_KEYBOARD
+.. data:: USBH_HID.PROTOCOL_MOUSE
+.. data:: USBH_HID.PROTOCOL_GENERIC
 
-.. code-block:: c
+   Constants representing different HID protocol types.
 
-   // In the port's main task loop
-   for (;;) {
-       #if MICROPY_HW_USB_HOST
-       // Process USB host events
-       mp_usbh_task();
-       #endif
-       
-       // Other processing
-       ...
-   }
+.. data:: USBH_HID.IRQ_REPORT
+
+   Constant used with HID ``irq()`` method to trigger on report reception.
