@@ -55,8 +55,9 @@ static const mp_stream_p_t machine_usbh_cdc_stream_p = {
 
 // Print function for USBHost
 static void machine_usb_host_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
-    (void)self_in;
-    mp_printf(print, "USBHost()");
+    mp_obj_usb_host_t *self = MP_OBJ_TO_PTR(self_in);
+    mp_obj_list_t *devices = MP_OBJ_TO_PTR(self->device_list);
+    mp_printf(print, "<USBHost devices: %d>", devices->len);
 }
 
 // Create a new USBHost object
@@ -83,17 +84,6 @@ static mp_obj_t machine_usb_host_make_new(const mp_obj_type_t *type, size_t n_ar
             self->serial_str[i][0] = '\0';
         }
 
-        // Register CDC IRQ callbacks
-        for (int i = 0; i < USBH_MAX_CDC; i++) {
-            self->usbh_cdc_irq_callback[i] = mp_const_none;
-            self->usbh_cdc_irq_scheduled[i] = false;
-        }
-
-        // Register HID IRQ callbacks
-        for (int i = 0; i < USBH_MAX_HID; i++) {
-            self->usbh_hid_irq_callback[i] = mp_const_none;
-        }
-
         self->num_pend_excs = 0;
         MP_STATE_VM(usbh) = MP_OBJ_FROM_PTR(self);
     }
@@ -104,28 +94,28 @@ static mp_obj_t machine_usb_host_make_new(const mp_obj_type_t *type, size_t n_ar
 // Method to get the list of devices
 static mp_obj_t machine_usb_host_devices(mp_obj_t self_in) {
     mp_obj_usb_host_t *self = MP_OBJ_TO_PTR(self_in);
-    return MP_OBJ_FROM_PTR(self->device_list);
+    return self->device_list;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usb_host_devices_obj, machine_usb_host_devices);
 
 // Method to get the list of CDC devices
 static mp_obj_t machine_usb_host_cdc_devices(mp_obj_t self_in) {
     mp_obj_usb_host_t *self = MP_OBJ_TO_PTR(self_in);
-    return MP_OBJ_FROM_PTR(self->cdc_list);
+    return self->cdc_list;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usb_host_cdc_devices_obj, machine_usb_host_cdc_devices);
 
 // Method to get the list of MSC devices
 static mp_obj_t machine_usb_host_msc_devices(mp_obj_t self_in) {
     mp_obj_usb_host_t *self = MP_OBJ_TO_PTR(self_in);
-    return MP_OBJ_FROM_PTR(self->msc_list);
+    return self->msc_list;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usb_host_msc_devices_obj, machine_usb_host_msc_devices);
 
 // Method to get the list of HID devices
 static mp_obj_t machine_usb_host_hid_devices(mp_obj_t self_in) {
     mp_obj_usb_host_t *self = MP_OBJ_TO_PTR(self_in);
-    return MP_OBJ_FROM_PTR(self->hid_list);
+    return self->hid_list;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usb_host_hid_devices_obj, machine_usb_host_hid_devices);
 
@@ -354,17 +344,8 @@ static mp_obj_t machine_usbh_cdc_irq(size_t n_args, const mp_obj_t *pos_args, mp
             mp_raise_ValueError(MP_ERROR_TEXT("hard unsupported"));
         }
 
-        // Find the CDC device index
-        mp_obj_usb_host_t *usbh = MP_OBJ_TO_PTR(MP_STATE_VM(usbh));
-        mp_obj_list_t *cdc_list = MP_OBJ_TO_PTR(usbh->cdc_list);
-        for (int i = 0; i < cdc_list->len; i++) {
-            if (cdc_list->items[i] == MP_OBJ_FROM_PTR(self)) {
-                // Set the callback
-                usbh->usbh_cdc_irq_callback[i] = handler;
-                usbh->usbh_cdc_irq_scheduled[i] = false;
-                break;
-            }
-        }
+        // Set the callback
+        self->irq_callback = handler;
     }
 
     return mp_const_none;
@@ -463,27 +444,27 @@ static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_msc_is_connected_obj, machine_usbh
 // Method to read blocks for block protocol
 static mp_obj_t machine_usbh_msc_readblocks(size_t n_args, const mp_obj_t *args) {
     machine_usbh_msc_obj_t *self = MP_OBJ_TO_PTR(args[0]);
-    
+
     if (!self->connected || !device_mounted(self->dev_addr)) {
         mp_raise_OSError(MP_ENODEV);
     }
 
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(args[2], &bufinfo, MP_BUFFER_WRITE);
-    
+
     mp_int_t block_num = mp_obj_get_int(args[1]);
-    
+
     // Handle offset parameter if provided
     mp_int_t offset = 0;
     if (n_args >= 4) {
         offset = mp_obj_get_int(args[3]);
     }
-    
+
     // Check offset is within block size
     if (offset < 0 || offset >= self->block_size) {
         mp_raise_ValueError(MP_ERROR_TEXT("offset is invalid"));
     }
-    
+
     // Check size is valid for reading from the block
     if (bufinfo.len > (self->block_size - offset)) {
         mp_raise_ValueError(MP_ERROR_TEXT("buffer length exceeds block size - offset"));
@@ -493,16 +474,16 @@ static mp_obj_t machine_usbh_msc_readblocks(size_t n_args, const mp_obj_t *args)
         mp_raise_OSError(MP_EBUSY);
     }
     self->busy = true;
-    
+
     // Read from MSC device
     bool success = tuh_msc_read10(self->dev_addr, self->lun, bufinfo.buf, block_num, bufinfo.len / self->block_size, NULL, 0);
-    
+
     self->busy = false;
-    
+
     if (!success) {
         mp_raise_OSError(MP_EIO);
     }
-    
+
     return mp_const_none;
 }
 // For extended protocol with offset support
@@ -511,38 +492,38 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_usbh_msc_readblocks_obj, 3, 4
 // Method to write blocks for block protocol
 static mp_obj_t machine_usbh_msc_writeblocks(size_t n_args, const mp_obj_t *args) {
     machine_usbh_msc_obj_t *self = MP_OBJ_TO_PTR(args[0]);
-    
+
     if (!self->connected || !device_mounted(self->dev_addr)) {
         mp_raise_OSError(MP_ENODEV);
     }
-    
+
     if (self->readonly) {
         mp_raise_OSError(MP_EROFS);
     }
-    
+
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(args[2], &bufinfo, MP_BUFFER_READ);
-    
+
     mp_int_t block_num = mp_obj_get_int(args[1]);
-    
+
     // NOTE: Currently we don't use the offset parameter for simplicity
     // This means only the basic protocol is supported, not littlefs
-    
+
     if (self->busy) {
         mp_raise_OSError(MP_EINPROGRESS);
     }
-    
+
     self->busy = true;
-    
+
     // Write to MSC device
     bool success = tuh_msc_write10(self->dev_addr, self->lun, bufinfo.buf, block_num, bufinfo.len / self->block_size, NULL, 0);
-    
+
     self->busy = false;
-    
+
     if (!success) {
         mp_raise_OSError(MP_EIO);
     }
-    
+
     return mp_const_none;
 }
 // Basic protocol for compatibility
@@ -684,16 +665,8 @@ static mp_obj_t machine_usbh_hid_irq(size_t n_args, const mp_obj_t *pos_args, mp
             mp_raise_ValueError(MP_ERROR_TEXT("hard unsupported"));
         }
 
-        // Find the HID device index
-        mp_obj_usb_host_t *usbh = MP_OBJ_TO_PTR(MP_STATE_VM(usbh));
-        mp_obj_list_t *hid_list = MP_OBJ_TO_PTR(usbh->hid_list);
-        for (int i = 0; i < hid_list->len; i++) {
-            if (hid_list->items[i] == MP_OBJ_FROM_PTR(self)) {
-                // Set the callback
-                usbh->usbh_hid_irq_callback[i] = handler;
-                break;
-            }
-        }
+        // Set the callback
+        self->irq_callback = handler;
     }
 
     return mp_const_none;
