@@ -249,6 +249,9 @@ soft_reset_exit:
     // wait for pending transactions to complete
     mp_hal_delay_ms(20);
 
+    // Deinitialize MicroPython.
+    mp_shutdown();
+
     goto soft_reset;
 }
 

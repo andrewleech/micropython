@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
 
         mp_printf(&mp_plat_print, "MPY: soft reboot\n");
 
-        mp_deinit();
+        mp_shutdown();
     }
 }
 

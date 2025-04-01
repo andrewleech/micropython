@@ -172,7 +172,8 @@ soft_reset:
     gc_collect();
     #endif
 
-    mp_deinit();
+    // Deinitialize MicroPython runtime.
+    mp_shutdown();
 
     goto soft_reset;
 

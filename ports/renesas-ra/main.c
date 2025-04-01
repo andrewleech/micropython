@@ -437,7 +437,7 @@ soft_reset_exit:
 
     MICROPY_BOARD_END_SOFT_RESET(&state);
 
-    mp_deinit();
+    mp_shutdown();
 
     goto soft_reset;
 }

@@ -168,40 +168,17 @@ soft_reset:
 
 soft_reset_exit:
 
-    #if MICROPY_BLUETOOTH_NIMBLE
-    mp_bluetooth_deinit();
-    #endif
-
-    #if MICROPY_PY_ESPNOW
-    espnow_deinit(mp_const_none);
-    MP_STATE_PORT(espnow_singleton) = NULL;
-    #endif
-
-    machine_timer_deinit_all();
-
-    #if MICROPY_PY_THREAD
-    mp_thread_deinit();
-    #endif
-
-    #if MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
-    mp_usbd_deinit();
-    #endif
-
-    // Free any native code pointers that point to iRAM.
-    esp_native_code_free_all();
+    // Deinitialize MicroPython runtime.
+    mp_shutdown();
 
     mp_hal_stdout_tx_str("MPY: soft reboot\r\n");
 
     // deinitialise peripherals
-    machine_pwm_deinit_all();
-    // TODO: machine_rmt_deinit_all();
-    machine_pins_deinit();
     machine_deinit();
     #if MICROPY_PY_SOCKET_EVENTS
     socket_events_deinit();
     #endif
 
-    mp_deinit();
     fflush(stdout);
     goto soft_reset;
 }
@@ -235,6 +212,9 @@ static void esp_native_code_free_all(void) {
         native_code_head = next;
     }
 }
+
+// Register the cleanup function
+MP_REGISTER_DEINIT_FUNCTION(esp_native_code_free_all);
 
 void *esp_native_code_commit(void *buf, size_t len, void *reloc) {
     len = (len + 3) & ~3;

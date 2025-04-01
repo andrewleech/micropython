@@ -97,7 +97,7 @@ int main(int argc, char **argv) {
     #else
     pyexec_frozen_module("frozentest.py", false);
     #endif
-    mp_deinit();
+    mp_shutdown();
     return 0;
 }
 

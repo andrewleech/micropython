@@ -87,21 +87,9 @@ void samd_main(void) {
 
     soft_reset_exit:
         mp_printf(MP_PYTHON_PRINTER, "MPY: soft reboot\n");
-        #if MICROPY_PY_MACHINE_ADC
-        adc_deinit_all();
-        #endif
-        pin_irq_deinit_all();
-        #if MICROPY_PY_MACHINE_PWM
-        pwm_deinit_all();
-        #endif
-        soft_timer_deinit();
-        #if MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
-        mp_usbd_deinit();
-        #endif
-        #if MICROPY_PY_MACHINE_I2C || MICROPY_PY_MACHINE_SPI || MICROPY_PY_MACHINE_UART
-        sercom_deinit_all();
-        #endif
-        mp_deinit();
+
+        // Deinitialize MicroPython runtime.
+        mp_shutdown();
     }
 }
 

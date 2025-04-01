@@ -222,30 +222,11 @@ int main(int argc, char **argv) {
         // Hook for resetting anything immediately following a soft reset command.
         MICROPY_BOARD_START_SOFT_RESET();
 
-        #if MICROPY_PY_NETWORK
-        mod_network_deinit();
-        #endif
-        machine_i2s_deinit_all();
-        rp2_dma_deinit();
-        rp2_pio_deinit();
-        #if MICROPY_PY_BLUETOOTH
-        mp_bluetooth_deinit();
-        #endif
-        machine_pwm_deinit_all();
-        machine_pin_deinit();
-        machine_uart_deinit_all();
-        #if MICROPY_PY_THREAD
-        mp_thread_deinit();
-        #endif
-        soft_timer_deinit();
-        #if MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
-        mp_usbd_deinit();
-        #endif
+        // Deinitialize MicroPython runtime.
+        mp_shutdown();
 
         // Hook for resetting anything right at the end of a soft reset command.
         MICROPY_BOARD_END_SOFT_RESET();
-
-        mp_deinit();
         #if MICROPY_HW_ENABLE_UART_REPL
         setup_default_uart();
         mp_uart_init();

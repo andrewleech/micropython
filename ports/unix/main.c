@@ -778,11 +778,22 @@ MP_NOINLINE int main_(int argc, char **argv) {
     mp_bluetooth_deinit();
     #endif
 
+    // Register the cleanup function
+    #if MICROPY_PY_BLUETOOTH
+    MP_REGISTER_DEINIT_FUNCTION(mp_bluetooth_deinit);
+    #endif
+
     #if MICROPY_PY_THREAD
     mp_thread_deinit();
     #endif
 
-    mp_deinit();
+    // Register the cleanup function
+    #if MICROPY_PY_THREAD
+    MP_REGISTER_DEINIT_FUNCTION(mp_thread_deinit);
+    #endif
+
+    // Deinitialize MicroPython runtime.
+    mp_shutdown();
 
     #if MICROPY_ENABLE_GC && !defined(NDEBUG)
     // We don't really need to free memory since we are about to exit the

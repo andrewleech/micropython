@@ -60,7 +60,7 @@ void bare_main(void) {
     mp_init();
     do_str(demo_single_input, MP_PARSE_SINGLE_INPUT);
     do_str(demo_file_input, MP_PARSE_FILE_INPUT);
-    mp_deinit();
+    mp_shutdown();
 }
 
 // Called if an exception is raised outside all C exception-catching handlers.
