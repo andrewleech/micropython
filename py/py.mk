@@ -261,6 +261,11 @@ $(HEADER_BUILD)/root_pointers.h: $(HEADER_BUILD)/root_pointers.collected $(PY_SR
 	@$(ECHO) "GEN $@"
 	$(Q)$(PYTHON) $(PY_SRC)/make_root_pointers.py $< > $@
 
+# build a list of registered deinit functions for py/runtime.c.
+$(HEADER_BUILD)/mp_deinit_funcs.h: $(HEADER_BUILD)/deinit_fun.collected $(PY_SRC)/makeqstrdefs.py
+	@$(ECHO) "GEN $@"
+	$(Q)$(PYTHON) $(PY_SRC)/makeqstrdefs.py cat deinit_fun $(HEADER_BUILD)/deinit_fun.collected $(HEADER_BUILD) $@
+
 # Standard C functions like memset need to be compiled with special flags so
 # the compiler does not optimise these functions in terms of themselves.
 CFLAGS_BUILTIN ?= -ffreestanding -fno-builtin -fno-lto

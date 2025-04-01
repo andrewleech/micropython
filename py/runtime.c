@@ -46,6 +46,9 @@
 #include "py/cstack.h"
 #include "py/gc.h"
 
+// Forward declaration for the auto-generated deinit function
+void mp_run_deinit_funcs(void);
+
 #if MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL
 #include "extmod/vfs.h"
 #endif
@@ -207,6 +210,15 @@ void mp_deinit(void) {
     #ifdef MICROPY_PORT_DEINIT_FUNC
     MICROPY_PORT_DEINIT_FUNC;
     #endif
+}
+
+// Consolidated shutdown function
+void mp_shutdown(void) {
+    // Run registered deinitialisation functions
+    mp_run_deinit_funcs();
+
+    // Perform final MicroPython cleanup
+    mp_deinit();
 }
 
 void mp_globals_locals_set_from_nlr_jump_callback(void *ctx_in) {

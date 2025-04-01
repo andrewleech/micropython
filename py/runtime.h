@@ -95,6 +95,14 @@ extern const byte mp_binary_op_method_name[];
 void mp_init(void);
 void mp_deinit(void);
 
+// Macro to register a function to be called during shutdown.
+// Can take one or two arguments. The first is the function pointer.
+// The optional second is a function pointer that must be called first.
+#define MP_REGISTER_DEINIT_FUNCTION(...)
+
+void mp_run_deinit_funcs(void);
+void mp_shutdown(void);
+
 void mp_sched_exception(mp_obj_t exc);
 void mp_sched_keyboard_interrupt(void);
 #if MICROPY_ENABLE_VM_ABORT
