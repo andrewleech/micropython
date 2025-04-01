@@ -81,7 +81,7 @@ void soft_timer_deinit(void) {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(soft_timer_deinit);
+MP_REGISTER_DEINIT_FUNCTION(soft_timer_deinit, soft_timer_deinit);
 
 // Must be executed at IRQ_PRI_PENDSV
 void soft_timer_handler(void) {

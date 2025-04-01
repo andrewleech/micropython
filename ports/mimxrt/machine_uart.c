@@ -455,7 +455,7 @@ void machine_uart_deinit_all(void) {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(machine_uart_deinit_all);
+MP_REGISTER_DEINIT_FUNCTION(uart_deinit_all, machine_uart_deinit_all);
 
 #if MICROPY_PY_MACHINE_UART_IRQ
 static mp_uint_t uart_irq_trigger(mp_obj_t self_in, mp_uint_t new_trigger) {

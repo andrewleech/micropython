@@ -62,7 +62,7 @@ void machine_pin_deinit(void) {
 
 // Register the cleanup function
 #if MICROPY_PY_MACHINE
-MP_REGISTER_DEINIT_FUNCTION(machine_pin_deinit);
+MP_REGISTER_DEINIT_FUNCTION(pin_deinit, machine_pin_deinit);
 #endif
 
 static void gpio_callback_handler(const struct device *port, struct gpio_callback *cb, gpio_port_pins_t pins) {

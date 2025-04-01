@@ -144,7 +144,7 @@ void machine_rtc_irq_deinit(void) {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(machine_rtc_irq_deinit);
+MP_REGISTER_DEINIT_FUNCTION(rtc_irq_deinit, machine_rtc_irq_deinit);
 
 typedef struct _machine_rtc_obj_t {
     mp_obj_base_t base;

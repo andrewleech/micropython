@@ -139,7 +139,7 @@ void machine_pin_deinit(void) {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(machine_pin_deinit);
+MP_REGISTER_DEINIT_FUNCTION(pin_deinit, machine_pin_deinit);
 
 const machine_pin_obj_t *machine_pin_find_named(const mp_obj_dict_t *named_pins, mp_obj_t name) {
     const mp_map_t *named_map = &named_pins->map;

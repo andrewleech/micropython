@@ -46,7 +46,7 @@ void machine_pin_deinit(void) {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(machine_pin_deinit);
+MP_REGISTER_DEINIT_FUNCTION(pin_deinit, machine_pin_deinit);
 
 // C API used to convert a user-supplied pin name into an ordinal pin number.
 const machine_pin_obj_t *machine_pin_find(mp_obj_t user_obj) {

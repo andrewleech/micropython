@@ -695,7 +695,7 @@ void mp_bluetooth_deinit(void) {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(mp_bluetooth_deinit);
+MP_REGISTER_DEINIT_FUNCTION(bluetooth_deinit, mp_bluetooth_deinit);
 
 bool mp_bluetooth_is_active(void) {
     return mp_bluetooth_nimble_ble_state == MP_BLUETOOTH_NIMBLE_BLE_STATE_ACTIVE;

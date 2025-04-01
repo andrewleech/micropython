@@ -166,7 +166,7 @@ static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
 
 // Register the cleanup function
 #if MICROPY_PY_MACHINE_PWM
-MP_REGISTER_DEINIT_FUNCTION(pwm_deinit_all);
+MP_REGISTER_DEINIT_FUNCTION(pwm_deinit_all, pwm_deinit_all);
 #endif
 
 NORETURN static void mp_machine_deepsleep(size_t n_args, const mp_obj_t *args) {

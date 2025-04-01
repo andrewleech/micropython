@@ -394,7 +394,7 @@ void pin_irq_deinit_all(void) {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(pin_irq_deinit_all);
+MP_REGISTER_DEINIT_FUNCTION(pin_irq_deinit, pin_irq_deinit_all);
 
 // Common EIC handler for all events.
 void EIC_Handler() {

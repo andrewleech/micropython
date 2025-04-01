@@ -83,7 +83,7 @@ void timer_deinit(void) {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(timer_deinit);
+MP_REGISTER_DEINIT_FUNCTION(timer_deinit, timer_deinit);
 
 /*
  * Timer Class

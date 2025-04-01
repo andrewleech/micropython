@@ -485,7 +485,7 @@ void machine_uart_deinit_all() {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(machine_uart_deinit_all);
+MP_REGISTER_DEINIT_FUNCTION(uart_deinit_all, machine_uart_deinit_all);
 
 static mp_int_t mp_machine_uart_any(machine_uart_obj_t *self) {
     // get all bytes from the fifo first

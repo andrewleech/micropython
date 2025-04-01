@@ -96,10 +96,12 @@ void mp_init(void);
 void mp_deinit(void);
 
 // Macro to register a function to be called during shutdown.
-// Can take one or two arguments. The first is the function pointer.
-// The optional second is a function pointer that must be called first.
+// Can take two or three arguments. The first is the unique name (identifier),
+// the second is the function pointer.
+// The optional third is the name of a function that must be called first.
 #define MP_REGISTER_DEINIT_FUNCTION(...)
 
+// Forward declaration for the auto-generated deinit function
 void mp_run_deinit_funcs(void);
 void mp_shutdown(void);
 

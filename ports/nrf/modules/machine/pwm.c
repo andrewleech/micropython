@@ -256,7 +256,7 @@ void pwm_deinit_all(void) {
 
 // Register the cleanup function
 #if MICROPY_PY_MACHINE_HW_PWM
-MP_REGISTER_DEINIT_FUNCTION(pwm_deinit_all);
+MP_REGISTER_DEINIT_FUNCTION(pwm_deinit_all, pwm_deinit_all);
 #endif
 
 // Stop the PWM module, but do not release it.

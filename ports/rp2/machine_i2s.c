@@ -181,7 +181,7 @@ void machine_i2s_deinit_all(void) {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(machine_i2s_deinit_all);
+MP_REGISTER_DEINIT_FUNCTION(i2s_deinit_all, machine_i2s_deinit_all);
 
 static int8_t get_frame_mapping_index(int8_t bits, format_t format) {
     if (format == MONO) {

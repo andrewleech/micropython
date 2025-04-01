@@ -185,7 +185,7 @@ void machine_pin_irq_deinit(void) {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(machine_pin_irq_deinit);
+MP_REGISTER_DEINIT_FUNCTION(pin_irq_deinit, machine_pin_irq_deinit);
 
 // Simplified mode setting used by the extmod modules
 void machine_pin_set_mode(const machine_pin_obj_t *self, uint8_t mode) {

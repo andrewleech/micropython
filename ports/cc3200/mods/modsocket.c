@@ -429,7 +429,7 @@ void modusocket_close_all_user_sockets (void) {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(modusocket_close_all_user_sockets);
+MP_REGISTER_DEINIT_FUNCTION(socket_close_all, modusocket_close_all_user_sockets);
 
 /******************************************************************************/
 // socket class

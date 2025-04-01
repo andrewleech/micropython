@@ -172,7 +172,7 @@ void machine_pwm_deinit_all(void) {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(machine_pwm_deinit_all);
+MP_REGISTER_DEINIT_FUNCTION(pwm_deinit_all, machine_pwm_deinit_all);
 
 static void mp_machine_pwm_deinit(machine_pwm_obj_t *self) {
     pwm_set_enabled(self->slice, false);

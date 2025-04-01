@@ -214,7 +214,7 @@ static void esp_native_code_free_all(void) {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(esp_native_code_free_all);
+MP_REGISTER_DEINIT_FUNCTION(native_code_free_all, esp_native_code_free_all);
 
 void *esp_native_code_commit(void *buf, size_t len, void *reloc) {
     len = (len + 3) & ~3;

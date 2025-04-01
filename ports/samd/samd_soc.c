@@ -147,7 +147,7 @@ void sercom_deinit_all(void) {
 
 // Register the cleanup function
 #if MICROPY_PY_MACHINE_I2C || MICROPY_PY_MACHINE_SPI || MICROPY_PY_MACHINE_UART
-MP_REGISTER_DEINIT_FUNCTION(sercom_deinit_all);
+MP_REGISTER_DEINIT_FUNCTION(sercom_deinit_all, sercom_deinit_all);
 #endif
 
 #endif
