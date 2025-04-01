@@ -219,6 +219,9 @@ mp_obj_t espnow_deinit(mp_obj_t _) {
     return mp_const_none;
 }
 
+// Register the cleanup function
+MP_REGISTER_DEINIT_FUNCTION(espnow_deinit);
+
 static mp_obj_t espnow_active(size_t n_args, const mp_obj_t *args) {
     esp_espnow_obj_t *self = _get_singleton();
     if (n_args > 1) {

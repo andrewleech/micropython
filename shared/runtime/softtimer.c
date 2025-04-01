@@ -80,6 +80,9 @@ void soft_timer_deinit(void) {
     MICROPY_PY_PENDSV_EXIT;
 }
 
+// Register the cleanup function
+MP_REGISTER_DEINIT_FUNCTION(soft_timer_deinit);
+
 // Must be executed at IRQ_PRI_PENDSV
 void soft_timer_handler(void) {
     uint32_t ticks_ms = soft_timer_get_ms();

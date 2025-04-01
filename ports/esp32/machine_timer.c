@@ -62,6 +62,9 @@ void machine_timer_deinit_all(void) {
     }
 }
 
+// Register the cleanup function
+MP_REGISTER_DEINIT_FUNCTION(machine_timer_deinit_all);
+
 static void machine_timer_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     machine_timer_obj_t *self = self_in;
     qstr mode = self->repeat ? MP_QSTR_PERIODIC : MP_QSTR_ONE_SHOT;

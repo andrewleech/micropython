@@ -100,6 +100,11 @@ void socket_events_deinit(void) {
     socket_events_head = NULL;
 }
 
+// Register the cleanup function
+#if MICROPY_PY_SOCKET_EVENTS
+MP_REGISTER_DEINIT_FUNCTION(socket_events_deinit);
+#endif
+
 // Assumes the socket is not already in the linked list, and adds it
 static void socket_events_add(socket_obj_t *sock) {
     sock->events_next = socket_events_head;

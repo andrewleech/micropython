@@ -98,6 +98,9 @@ void machine_deinit(void) {
     reset_cause = PYB_RESET_SOFT;
 }
 
+// Register the cleanup function
+MP_REGISTER_DEINIT_FUNCTION(machine_deinit);
+
 // machine.info([dump_alloc_table])
 // Print out lots of information about the board.
 static mp_obj_t machine_info(size_t n_args, const mp_obj_t *args) {

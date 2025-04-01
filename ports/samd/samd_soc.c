@@ -145,6 +145,11 @@ void sercom_deinit_all(void) {
     }
 }
 
+// Register the cleanup function
+#if MICROPY_PY_MACHINE_I2C || MICROPY_PY_MACHINE_SPI || MICROPY_PY_MACHINE_UART
+MP_REGISTER_DEINIT_FUNCTION(sercom_deinit_all);
+#endif
+
 #endif
 
 void samd_get_unique_id(samd_unique_id_t *id) {

@@ -428,6 +428,9 @@ void modusocket_close_all_user_sockets (void) {
     sl_LockObjUnlock (&modusocket_LockObj);
 }
 
+// Register the cleanup function
+MP_REGISTER_DEINIT_FUNCTION(modusocket_close_all_user_sockets);
+
 /******************************************************************************/
 // socket class
 

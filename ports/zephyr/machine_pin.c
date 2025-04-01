@@ -60,6 +60,11 @@ void machine_pin_deinit(void) {
     MP_STATE_PORT(machine_pin_irq_list) = NULL;
 }
 
+// Register the cleanup function
+#if MICROPY_PY_MACHINE
+MP_REGISTER_DEINIT_FUNCTION(machine_pin_deinit);
+#endif
+
 static void gpio_callback_handler(const struct device *port, struct gpio_callback *cb, gpio_port_pins_t pins) {
     machine_pin_irq_obj_t *irq = CONTAINER_OF(cb, machine_pin_irq_obj_t, callback);
 

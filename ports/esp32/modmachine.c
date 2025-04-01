@@ -249,6 +249,9 @@ void machine_deinit(void) {
     is_soft_reset = 1;
 }
 
+// Register the cleanup function
+MP_REGISTER_DEINIT_FUNCTION(machine_deinit);
+
 static mp_obj_t machine_wake_reason(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     return MP_OBJ_NEW_SMALL_INT(esp_sleep_get_wakeup_cause());
 }

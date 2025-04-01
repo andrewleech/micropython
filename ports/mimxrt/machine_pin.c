@@ -184,6 +184,9 @@ void machine_pin_irq_deinit(void) {
     }
 }
 
+// Register the cleanup function
+MP_REGISTER_DEINIT_FUNCTION(machine_pin_irq_deinit);
+
 // Simplified mode setting used by the extmod modules
 void machine_pin_set_mode(const machine_pin_obj_t *self, uint8_t mode) {
     gpio_pin_config_t pin_config = {kGPIO_DigitalInput, 1, kGPIO_NoIntmode};

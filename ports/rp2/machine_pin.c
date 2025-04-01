@@ -138,6 +138,9 @@ void machine_pin_deinit(void) {
     irq_remove_handler(IO_IRQ_BANK0, gpio_irq);
 }
 
+// Register the cleanup function
+MP_REGISTER_DEINIT_FUNCTION(machine_pin_deinit);
+
 const machine_pin_obj_t *machine_pin_find_named(const mp_obj_dict_t *named_pins, mp_obj_t name) {
     const mp_map_t *named_map = &named_pins->map;
     mp_map_elem_t *named_elem = mp_map_lookup((mp_map_t *)named_map, name, MP_MAP_LOOKUP);

@@ -484,6 +484,9 @@ void machine_uart_deinit_all() {
     mp_machine_uart_deinit((machine_uart_obj_t *)&machine_uart_obj[1]);
 }
 
+// Register the cleanup function
+MP_REGISTER_DEINIT_FUNCTION(machine_uart_deinit_all);
+
 static mp_int_t mp_machine_uart_any(machine_uart_obj_t *self) {
     // get all bytes from the fifo first
     uart_drain_rx_fifo(self, UART_FIFO_SIZE_RX + 1);

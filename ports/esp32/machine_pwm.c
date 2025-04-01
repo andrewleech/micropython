@@ -203,6 +203,9 @@ void machine_pwm_deinit_all(void) {
     }
 }
 
+// Register the cleanup function
+MP_REGISTER_DEINIT_FUNCTION(machine_pwm_deinit_all);
+
 static void configure_channel(machine_pwm_obj_t *self) {
     ledc_channel_config_t cfg = {
         .channel = self->channel,

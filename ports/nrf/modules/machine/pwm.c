@@ -254,6 +254,11 @@ void pwm_deinit_all(void) {
     pwm_init0();
 }
 
+// Register the cleanup function
+#if MICROPY_PY_MACHINE_HW_PWM
+MP_REGISTER_DEINIT_FUNCTION(pwm_deinit_all);
+#endif
+
 // Stop the PWM module, but do not release it.
 static void mp_machine_pwm_deinit(machine_pwm_obj_t *self) {
     self->p_config->active = STOPPED;

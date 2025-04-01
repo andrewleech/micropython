@@ -170,6 +170,9 @@ mp_obj_t espnow_deinit(mp_obj_t _) {
     return mp_const_none;
 }
 
+// Register the cleanup function
+MP_REGISTER_DEINIT_FUNCTION(espnow_deinit);
+
 // ESPNow.active(): Initialise the data buffers and ESP-NOW functions.
 // Initialise the Espressif ESPNOW software stack, register callbacks and
 // allocate the recv data buffers.

@@ -164,6 +164,11 @@ static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
     set_cpu_freq(freq);
 }
 
+// Register the cleanup function
+#if MICROPY_PY_MACHINE_PWM
+MP_REGISTER_DEINIT_FUNCTION(pwm_deinit_all);
+#endif
+
 NORETURN static void mp_machine_deepsleep(size_t n_args, const mp_obj_t *args) {
     mp_machine_lightsleep(n_args, args);
     mp_machine_reset();
