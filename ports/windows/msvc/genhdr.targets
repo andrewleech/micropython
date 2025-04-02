@@ -4,7 +4,7 @@
   <Import Project="paths.props" Condition="'$(PyPathsIncluded)' != 'True'"/>
 
   <!--Generate qstrdefs.generated.h and mpversion.h similar to what is done in py/mkrules.mk and py/py.mk-->
-  <Target Name="GenerateHeaders" DependsOnTargets="MakeVersionHdr;MakeModuleDefs;MakeRootPointers;MakeCompressedData;MakeQstrData">
+  <Target Name="GenerateHeaders" DependsOnTargets="MakeVersionHdr;MakeModuleDefs;MakeRootPointers;MakeDeinitFuncs;MakeCompressedData;MakeQstrData">
   </Target>
 
   <PropertyGroup>
@@ -14,9 +14,10 @@
     <PyQstrDefs>$(PySrcDir)qstrdefs.h</PyQstrDefs>
     <QstrDefsCollected>$(DestDir)qstrdefscollected.h</QstrDefsCollected>
     <QstrGen>$(DestDir)qstrdefs.generated.h</QstrGen>
-    <ModuleDefsCollected>$(DestDir)/moduledefs.collected</ModuleDefsCollected>
-    <RootPointersCollected>$(DestDir)/root_pointers.collected</RootPointersCollected>
-    <CompressedCollected>$(DestDir)/compressed.collected</CompressedCollected>
+    <ModuleDefsCollected>$(DestDir)moduledefs.collected</ModuleDefsCollected>
+    <RootPointersCollected>$(DestDir)root_pointers.collected</RootPointersCollected>
+    <DeinitFuncsCollected>$(DestDir)mp_deinit_funcs.collected</DeinitFuncsCollected> <!-- New property -->
+    <CompressedCollected>$(DestDir)compressed.collected</CompressedCollected>
     <PyPython Condition="'$(PyPython)' == ''">$(MICROPY_CPYTHON3)</PyPython>
     <PyPython Condition="'$(PyPython)' == ''">python</PyPython>
     <CLToolExe Condition="'$(CLToolExe)' == ''">cl.exe</CLToolExe>
@@ -48,7 +49,7 @@ using(var outFile = System.IO.File.CreateText(OutputFile)) {
   foreach(var inFile in InputFiles)
     foreach(var line in System.IO.File.ReadAllLines(inFile))
       if((line.Contains(".c") && line.StartsWith("#line")) || line.Contains("MP_QSTR") ||
-          line.Contains("MP_REGISTER") || line.Contains("MP_COMPRESSED_ROM_TEXT"))
+          line.Contains("MP_REGISTER_") || line.Contains("MP_COMPRESSED_ROM_TEXT")) // Updated to MP_REGISTER_
         outFile.WriteLine( line );
 }
         ]]>
@@ -133,6 +134,23 @@ using(var outFile = System.IO.File.CreateText(OutputFile)) {
       <TmpFile>$(DestFile).tmp</TmpFile>
     </PropertyGroup>
     <Exec Command="$(PyPython) $(PySrcDir)make_root_pointers.py $(RootPointersCollected) > $(TmpFile)"/>
+    <MSBuild Projects="$(MSBuildThisFileFullPath)" Targets="CopyFileIfDifferent" Properties="SourceFile=$(TmpFile);DestFile=$(DestFile)"/>
+  </Target>
+
+  <!-- New target to collect deinit functions -->
+  <Target Name="CollectDeinitFuncs" DependsOnTargets="MakeQstrDefs" Inputs="$(DestDir)qstr.i.last" Outputs="$(DeinitFuncsCollected)">
+    <Exec Command="$(PyPython) $(PySrcDir)makeqstrdefs.py split mp_deinit_funcs $(DestDir)qstr.i.last $(DestDir)mp_deinit_funcs _"/>
+    <Exec Command="$(PyPython) $(PySrcDir)makeqstrdefs.py cat mp_deinit_funcs _ $(DestDir)mp_deinit_funcs $(DeinitFuncsCollected)"/>
+  </Target>
+
+  <!-- New target to generate mp_deinit_funcs.h -->
+  <Target Name="MakeDeinitFuncs" DependsOnTargets="CollectDeinitFuncs" Inputs="$(PySrcDir)makeqstrdefs.py;$(DeinitFuncsCollected)" Outputs="$(DestDir)mp_deinit_funcs.h">
+    <PropertyGroup>
+      <DestFile>$(DestDir)mp_deinit_funcs.h</DestFile>
+      <TmpFile>$(DestFile).tmp</TmpFile>
+    </PropertyGroup>
+    <!-- We directly call cat here again, as makeqstrdefs.py handles the generation in 'cat' mode -->
+    <Exec Command="$(PyPython) $(PySrcDir)makeqstrdefs.py cat mp_deinit_funcs _ $(DestDir)mp_deinit_funcs $(TmpFile)"/>
     <MSBuild Projects="$(MSBuildThisFileFullPath)" Targets="CopyFileIfDifferent" Properties="SourceFile=$(TmpFile);DestFile=$(DestFile)"/>
   </Target>
 
