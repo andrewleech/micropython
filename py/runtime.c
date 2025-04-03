@@ -46,8 +46,14 @@
 #include "py/cstack.h"
 #include "py/gc.h"
 
+#ifndef NO_QSTR
+// Only include deinit function definitions when not doing qstr extraction, because
+// the qstr extraction stage also generates the deinit function header file.
+#include "genhdr/mp_deinit_funcs.h"
+#endif
+
 // Forward declaration for the auto-generated deinit function
-void mp_run_deinit_funcs(void);
+//void mp_run_deinit_funcs(void);
 
 #if MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL
 #include "extmod/vfs.h"

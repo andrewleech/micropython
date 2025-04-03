@@ -446,6 +446,12 @@ typedef struct _mp_rom_obj_t { mp_const_obj_t o; } mp_rom_obj_t;
 // param variable_declaration: a valid C variable declaration
 #define MP_REGISTER_ROOT_POINTER(variable_declaration)
 
+// Register a function to be called during shutdown.
+// Can take two or three arguments. The first is the unique name (identifier),
+// the second is the function pointer.
+// The optional third is the name of a function that must be called first.
+#define MP_REGISTER_DEINIT_FUNCTION(name, function, ...)
+
 #endif // NO_QSTR
 
 // Underlying map/hash table implementation (not dict object or map function)

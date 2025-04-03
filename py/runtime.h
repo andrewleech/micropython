@@ -95,12 +95,6 @@ extern const byte mp_binary_op_method_name[];
 void mp_init(void);
 void mp_deinit(void);
 
-// Macro to register a function to be called during shutdown.
-// Can take two or three arguments. The first is the unique name (identifier),
-// the second is the function pointer.
-// The optional third is the name of a function that must be called first.
-#define MP_REGISTER_DEINIT_FUNCTION(...)
-
 // Forward declaration for the auto-generated deinit function
 void mp_run_deinit_funcs(void);
 void mp_shutdown(void);
