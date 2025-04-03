@@ -1,4 +1,3 @@
-
 ifneq ($(MKENV_INCLUDED),1)
 # We assume that mkenv is in the same directory as this file.
 THIS_MAKEFILE = $(lastword $(MAKEFILE_LIST))
@@ -19,7 +18,7 @@ HELP_MPY_LIB_SUBMODULE ?= "\033[1;31mError: micropython-lib submodule is not ini
 OBJ_EXTRA_ORDER_DEPS =
 
 # Generate header files.
-OBJ_EXTRA_ORDER_DEPS += $(HEADER_BUILD)/moduledefs.h $(HEADER_BUILD)/root_pointers.h $(HEADER_BUILD)/mp_deinit_funcs.h # Added mp_deinit_funcs.h
+OBJ_EXTRA_ORDER_DEPS += $(HEADER_BUILD)/moduledefs.h $(HEADER_BUILD)/root_pointers.h $(HEADER_BUILD)/mp_deinit_funcs.h
 
 ifeq ($(MICROPY_ROM_TEXT_COMPRESSION),1)
 # If compression is enabled, trigger the build of compressed.data.h...
@@ -129,10 +128,9 @@ $(OBJ): | $(HEADER_BUILD)/qstrdefs.generated.h $(HEADER_BUILD)/mpversion.h $(OBJ
 # - else, if list of newer prerequisites ($?) is not empty, then process just these ($?)
 # - else, process all source files ($^) [this covers "make -B" which can set $? to empty]
 # See more information about this process in docs/develop/qstr.rst.
-QSTR_GEN_HEADERS = $(HEADER_BUILD)/qstrdefs.generated.h $(HEADER_BUILD)/moduledefs.h $(HEADER_BUILD)/root_pointers.h $(HEADER_BUILD)/compressed.data.h $(HEADER_BUILD)/mp_deinit_funcs.h
-$(HEADER_BUILD)/qstr.i.last: $(SRC_QSTR) $(QSTR_GLOBAL_DEPENDENCIES) $(QSTR_GEN_HEADERS) | $(QSTR_GLOBAL_REQUIREMENTS)
+$(HEADER_BUILD)/qstr.i.last: $(SRC_QSTR) $(QSTR_GLOBAL_DEPENDENCIES) | $(QSTR_GLOBAL_REQUIREMENTS)
 	$(ECHO) "GEN $@"
-	$(Q)$(PYTHON) $(PY_SRC)/makeqstrdefs.py pp $(CPP) output $@ cflags $(QSTR_GEN_CFLAGS) cxxflags $(QSTR_GEN_CXXFLAGS) sources $^ dependencies $(QSTR_GLOBAL_DEPENDENCIES) changed_sources $?
+	$(Q)$(PYTHON) $(PY_SRC)/makeqstrdefs.py pp $(CPP) output $(HEADER_BUILD)/qstr.i.last cflags $(QSTR_GEN_CFLAGS) cxxflags $(QSTR_GEN_CXXFLAGS) sources $^ dependencies $(QSTR_GLOBAL_DEPENDENCIES) changed_sources $?
 
 $(HEADER_BUILD)/qstr.split: $(HEADER_BUILD)/qstr.i.last
 	$(ECHO) "GEN $@"
@@ -163,16 +161,6 @@ $(HEADER_BUILD)/root_pointers.collected: $(HEADER_BUILD)/root_pointers.split
 	$(ECHO) "GEN $@"
 	$(Q)$(PYTHON) $(PY_SRC)/makeqstrdefs.py cat root_pointer _ $(HEADER_BUILD)/root_pointer $@
 
-# Compressed error strings.
-$(HEADER_BUILD)/compressed.split: $(HEADER_BUILD)/qstr.i.last
-	$(ECHO) "GEN $@"
-	$(Q)$(PYTHON) $(PY_SRC)/makeqstrdefs.py split compress $< $(HEADER_BUILD)/compress _
-	$(Q)$(TOUCH) $@
-
-$(HEADER_BUILD)/compressed.collected: $(HEADER_BUILD)/compressed.split
-	$(ECHO) "GEN $@"
-	$(Q)$(PYTHON) $(PY_SRC)/makeqstrdefs.py cat compress _ $(HEADER_BUILD)/compress $@
-
 # Shutdown deinit functions via MP_REGISTER_DEINIT_FUNCTION.
 $(HEADER_BUILD)/mp_deinit_funcs.split: $(HEADER_BUILD)/qstr.i.last
 	$(ECHO) "GEN $@"
@@ -182,6 +170,16 @@ $(HEADER_BUILD)/mp_deinit_funcs.split: $(HEADER_BUILD)/qstr.i.last
 $(HEADER_BUILD)/mp_deinit_funcs.collected: $(HEADER_BUILD)/mp_deinit_funcs.split
 	$(ECHO) "GEN $@"
 	$(Q)$(PYTHON) $(PY_SRC)/makeqstrdefs.py cat mp_deinit_funcs _ $(HEADER_BUILD)/mp_deinit_funcs $@
+
+# Compressed error strings.
+$(HEADER_BUILD)/compressed.split: $(HEADER_BUILD)/qstr.i.last
+	$(ECHO) "GEN $@"
+	$(Q)$(PYTHON) $(PY_SRC)/makeqstrdefs.py split compress $< $(HEADER_BUILD)/compress _
+	$(Q)$(TOUCH) $@
+
+$(HEADER_BUILD)/compressed.collected: $(HEADER_BUILD)/compressed.split
+	$(ECHO) "GEN $@"
+	$(Q)$(PYTHON) $(PY_SRC)/makeqstrdefs.py cat compress _ $(HEADER_BUILD)/compress $@
 
 # $(sort $(var)) removes duplicates
 #
@@ -202,19 +200,15 @@ $(MICROPY_MPYCROSS_DEPENDENCY):
 	$(MAKE) -C "$(abspath $(dir $@)..)" USER_C_MODULES=
 endif
 
-ifeq ($(FROZEN_DIR),)
-ifeq ($(FROZEN_MPY_DIR),)
-# Do not define a rule for $(BUILD)/frozen.c, it's not needed.
-else
-$(error Support for FROZEN_MPY_DIR was removed. Please use manifest.py instead, see https://docs.micropython.org/en/latest/reference/manifest.html)
-endif
-else
+ifneq ($(FROZEN_DIR),)
 $(error Support for FROZEN_DIR was removed. Please use manifest.py instead, see https://docs.micropython.org/en/latest/reference/manifest.html)
 endif
 
-ifeq ($(FROZEN_MANIFEST),)
-# Do not define a rule for $(BUILD)/frozen_content.c, it's not needed.
-else
+ifneq ($(FROZEN_MPY_DIR),)
+$(error Support for FROZEN_MPY_DIR was removed. Please use manifest.py instead, see https://docs.micropython.org/en/latest/reference/manifest.html)
+endif
+
+ifneq ($(FROZEN_MANIFEST),)
 # If we're using the default submodule path for micropython-lib, then make
 # sure it's included in "make submodules".
 ifeq ($(MPY_LIB_DIR),$(MPY_LIB_SUBMODULE_DIR))
