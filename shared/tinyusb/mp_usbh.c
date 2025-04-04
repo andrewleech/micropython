@@ -372,7 +372,6 @@ void tuh_msc_mount_cb(uint8_t dev_addr) {
             msc->connected = true;
             msc->block_size = block_size;
             msc->block_count = block_count;
-            msc->busy = false;
 
             // Check write protection
             msc->readonly = false;  // Assume writable by default

@@ -146,7 +146,6 @@ typedef struct _machine_usbh_msc_obj_t {
     uint32_t block_size;        // Block size in bytes
     uint32_t block_count;       // Number of blocks
     bool readonly;              // Whether the device is read-only
-    bool busy;
 } machine_usbh_msc_obj_t;
 
 // Structure for USB HID device

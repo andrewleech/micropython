@@ -422,7 +422,7 @@ static mp_obj_t machine_usbh_msc_is_connected(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_msc_is_connected_obj, machine_usbh_msc_is_connected);
 
-// Method to read blocks for block protocol
+// Method to readblocks for block protocol
 static mp_obj_t machine_usbh_msc_readblocks(size_t n_args, const mp_obj_t *args) {
     machine_usbh_msc_obj_t *self = MP_OBJ_TO_PTR(args[0]);
 
@@ -451,26 +451,22 @@ static mp_obj_t machine_usbh_msc_readblocks(size_t n_args, const mp_obj_t *args)
         mp_raise_ValueError(MP_ERROR_TEXT("buffer length exceeds block size - offset"));
     }
 
-    if (self->busy) {
-        mp_raise_OSError(MP_EBUSY);
-    }
-    self->busy = true;
+    uint32_t count = bufinfo.len / self->block_size;
+    tuh_msc_read10(self->dev_addr, self->lun, bufinfo.buf, block_num, count, NULL, 0);
 
-    // Read from MSC device
-    bool success = tuh_msc_read10(self->dev_addr, self->lun, bufinfo.buf, block_num, bufinfo.len / self->block_size, NULL, 0);
-
-    self->busy = false;
-
-    if (!success) {
-        mp_raise_OSError(MP_EIO);
+    // Wait for the operation to complete
+    while (!tuh_msc_ready(self->dev_addr)) {
+        tuh_task();  // Process USB events until ready
     }
 
     return mp_const_none;
 }
-// For extended protocol with offset support
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_usbh_msc_readblocks_obj, 3, 4, machine_usbh_msc_readblocks);
+// extended protocol, would require buffering for `offset` handling
+// static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_usbh_msc_readblocks_obj, 3, 4, machine_usbh_msc_readblocks);
+// basic protocol, no littlefs support
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_usbh_msc_readblocks_obj, 3, 3, machine_usbh_msc_readblocks);
 
-// Method to write blocks for block protocol
+// Method to writeblocks for block protocol
 static mp_obj_t machine_usbh_msc_writeblocks(size_t n_args, const mp_obj_t *args) {
     machine_usbh_msc_obj_t *self = MP_OBJ_TO_PTR(args[0]);
 
@@ -487,27 +483,28 @@ static mp_obj_t machine_usbh_msc_writeblocks(size_t n_args, const mp_obj_t *args
 
     mp_int_t block_num = mp_obj_get_int(args[1]);
 
-    // NOTE: Currently we don't use the offset parameter for simplicity
-    // This means only the basic protocol is supported, not littlefs
-
-    if (self->busy) {
-        mp_raise_OSError(MP_EINPROGRESS);
+    uint32_t offset = 0;
+    if (n_args == 4) {
+        offset = mp_obj_get_int(args[3]);
+        if (offset != 0) {
+            // todo I think we'd need to do a read/modify/write here
+            mp_raise_ValueError(MP_ERROR_TEXT("partial block writes not supported"));
+        }
     }
 
-    self->busy = true;
+    uint32_t count = bufinfo.len / self->block_size;
+    tuh_msc_write10(self->dev_addr, self->lun, bufinfo.buf, block_num, count, NULL, 0);
 
-    // Write to MSC device
-    bool success = tuh_msc_write10(self->dev_addr, self->lun, bufinfo.buf, block_num, bufinfo.len / self->block_size, NULL, 0);
-
-    self->busy = false;
-
-    if (!success) {
-        mp_raise_OSError(MP_EIO);
+    // Wait for the operation to complete
+    while (!tuh_msc_ready(self->dev_addr)) {
+        tuh_task();  // Process USB events until ready
     }
 
     return mp_const_none;
 }
-// Basic protocol for compatibility
+// extended protocol, would require buffering for `offset` handling
+// static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_usbh_msc_writeblocks_obj, 3, 4, machine_usbh_msc_writeblocks);
+// basic protocol, no littlefs support
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_usbh_msc_writeblocks_obj, 3, 3, machine_usbh_msc_writeblocks);
 
 // Method to ioctl for block protocol
