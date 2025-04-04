@@ -170,69 +170,50 @@ static void machine_usbh_device_print(const mp_print_t *print, mp_obj_t self_in,
         self->addr, self->vid, self->pid, self->dev_class);
 }
 
-// Method to get VID
-static mp_obj_t machine_usbh_device_get_vid(mp_obj_t self_in) {
+// Attribute handler for USBH_Device
+static void machine_usbh_device_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     machine_usbh_device_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    return MP_OBJ_NEW_SMALL_INT(self->vid);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_device_get_vid_obj, machine_usbh_device_get_vid);
-
-// Method to get PID
-static mp_obj_t machine_usbh_device_get_pid(mp_obj_t self_in) {
-    machine_usbh_device_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    return MP_OBJ_NEW_SMALL_INT(self->pid);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_device_get_pid_obj, machine_usbh_device_get_pid);
-
-// Method to get manufacturer string
-static mp_obj_t machine_usbh_device_get_manufacturer(mp_obj_t self_in) {
-    machine_usbh_device_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (self->manufacturer) {
-        return mp_obj_new_str(self->manufacturer, strlen(self->manufacturer));
+    if (dest[0] == MP_OBJ_NULL) {
+        // Load attribute
+        if (attr == MP_QSTR_vid) {
+            dest[0] = MP_OBJ_NEW_SMALL_INT(self->vid);
+        } else if (attr == MP_QSTR_pid) {
+            dest[0] = MP_OBJ_NEW_SMALL_INT(self->pid);
+        } else if (attr == MP_QSTR_manufacturer) {
+            if (self->manufacturer) {
+                dest[0] = mp_obj_new_str(self->manufacturer, strlen(self->manufacturer));
+            } else {
+                dest[0] = mp_const_none;
+            }
+        } else if (attr == MP_QSTR_product) {
+            if (self->product) {
+                dest[0] = mp_obj_new_str(self->product, strlen(self->product));
+            } else {
+                dest[0] = mp_const_none;
+            }
+        } else if (attr == MP_QSTR_serial) {
+            if (self->serial) {
+                dest[0] = mp_obj_new_str(self->serial, strlen(self->serial));
+            } else {
+                dest[0] = mp_const_none;
+            }
+        }
     } else {
-        return mp_const_none;
+        // Read-only attributes
+        if (attr == MP_QSTR_vid || attr == MP_QSTR_pid || attr == MP_QSTR_manufacturer ||
+            attr == MP_QSTR_product || attr == MP_QSTR_serial) {
+            mp_raise_msg(&mp_type_AttributeError, MP_ERROR_TEXT("can't set attribute"));
+        }
     }
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_device_get_manufacturer_obj, machine_usbh_device_get_manufacturer);
-
-// Method to get product string
-static mp_obj_t machine_usbh_device_get_product(mp_obj_t self_in) {
-    machine_usbh_device_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (self->product) {
-        return mp_obj_new_str(self->product, strlen(self->product));
-    } else {
-        return mp_const_none;
-    }
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_device_get_product_obj, machine_usbh_device_get_product);
-
-// Method to get serial string
-static mp_obj_t machine_usbh_device_get_serial(mp_obj_t self_in) {
-    machine_usbh_device_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (self->serial) {
-        return mp_obj_new_str(self->serial, strlen(self->serial));
-    } else {
-        return mp_const_none;
-    }
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_device_get_serial_obj, machine_usbh_device_get_serial);
-
-// Local dict for USBH_Device
-static const mp_rom_map_elem_t machine_usbh_device_locals_dict_table[] = {
-    { MP_ROM_QSTR(MP_QSTR_vid), MP_ROM_PTR(&machine_usbh_device_get_vid_obj) },
-    { MP_ROM_QSTR(MP_QSTR_pid), MP_ROM_PTR(&machine_usbh_device_get_pid_obj) },
-    { MP_ROM_QSTR(MP_QSTR_manufacturer), MP_ROM_PTR(&machine_usbh_device_get_manufacturer_obj) },
-    { MP_ROM_QSTR(MP_QSTR_product), MP_ROM_PTR(&machine_usbh_device_get_product_obj) },
-    { MP_ROM_QSTR(MP_QSTR_serial), MP_ROM_PTR(&machine_usbh_device_get_serial_obj) },
-};
-static MP_DEFINE_CONST_DICT(machine_usbh_device_locals_dict, machine_usbh_device_locals_dict_table);
 
 MP_DEFINE_CONST_OBJ_TYPE(
     machine_usbh_device_type,
     MP_QSTR_USBH_Device,
     MP_TYPE_FLAG_NONE,
     print, machine_usbh_device_print,
-    locals_dict, &machine_usbh_device_locals_dict
+    attr, machine_usbh_device_attr,
+    locals_dict, &mp_const_empty_map
     );
 
 /******************************************************************************/
@@ -611,27 +592,6 @@ static mp_obj_t machine_usbh_hid_get_report(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_hid_get_report_obj, machine_usbh_hid_get_report);
 
-// Method to get protocol
-static mp_obj_t machine_usbh_hid_get_protocol(mp_obj_t self_in) {
-    machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    return MP_OBJ_NEW_SMALL_INT(self->protocol);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_hid_get_protocol_obj, machine_usbh_hid_get_protocol);
-
-// Method to get usage page
-static mp_obj_t machine_usbh_hid_get_usage_page(mp_obj_t self_in) {
-    machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    return MP_OBJ_NEW_SMALL_INT(self->usage_page);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_hid_get_usage_page_obj, machine_usbh_hid_get_usage_page);
-
-// Method to get usage
-static mp_obj_t machine_usbh_hid_get_usage(mp_obj_t self_in) {
-    machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    return MP_OBJ_NEW_SMALL_INT(self->usage);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_hid_get_usage_obj, machine_usbh_hid_get_usage);
-
 // Method for setting up IRQ handler
 static mp_obj_t machine_usbh_hid_irq(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     enum { ARG_handler, ARG_trigger, ARG_hard };
@@ -707,13 +667,30 @@ static mp_obj_t machine_usbh_hid_send_report(mp_obj_t self_in, mp_obj_t report_i
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(machine_usbh_hid_send_report_obj, machine_usbh_hid_send_report);
 
+// Attribute handler for USBH_HID
+static void machine_usbh_hid_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (dest[0] == MP_OBJ_NULL) {
+        // Load attribute
+        if (attr == MP_QSTR_protocol) {
+            dest[0] = MP_OBJ_NEW_SMALL_INT(self->protocol);
+        } else if (attr == MP_QSTR_usage_page) {
+            dest[0] = MP_OBJ_NEW_SMALL_INT(self->usage_page);
+        } else if (attr == MP_QSTR_usage) {
+            dest[0] = MP_OBJ_NEW_SMALL_INT(self->usage);
+        }
+    } else {
+        // Read-only attributes
+        if (attr == MP_QSTR_protocol || attr == MP_QSTR_usage_page || attr == MP_QSTR_usage) {
+            mp_raise_msg(&mp_type_AttributeError, MP_ERROR_TEXT("can't set attribute"));
+        }
+    }
+}
+
 // Local dict for USBH_HID type
 static const mp_rom_map_elem_t machine_usbh_hid_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_is_connected), MP_ROM_PTR(&machine_usbh_hid_is_connected_obj) },
-    { MP_ROM_QSTR(MP_QSTR_protocol), MP_ROM_PTR(&machine_usbh_hid_get_protocol_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_report), MP_ROM_PTR(&machine_usbh_hid_get_report_obj) },
-    { MP_ROM_QSTR(MP_QSTR_usage_page), MP_ROM_PTR(&machine_usbh_hid_get_usage_page_obj) },
-    { MP_ROM_QSTR(MP_QSTR_usage), MP_ROM_PTR(&machine_usbh_hid_get_usage_obj) },
     { MP_ROM_QSTR(MP_QSTR_irq), MP_ROM_PTR(&machine_usbh_hid_irq_obj) },
     { MP_ROM_QSTR(MP_QSTR_request_report), MP_ROM_PTR(&machine_usbh_hid_request_report_obj) },
     { MP_ROM_QSTR(MP_QSTR_send_report), MP_ROM_PTR(&machine_usbh_hid_send_report_obj) },
@@ -734,6 +711,7 @@ MP_DEFINE_CONST_OBJ_TYPE(
     MP_QSTR_USBH_HID,
     MP_TYPE_FLAG_NONE,
     print, machine_usbh_hid_print,
+    attr, machine_usbh_hid_attr,
     locals_dict, &machine_usbh_hid_locals_dict
     );
 
