@@ -107,7 +107,7 @@ machine_usbh_hid_obj_t *find_hid_by_addr_instance(uint8_t addr, uint8_t instance
     return NULL;
 }
 
-// Helper function to check if a device is mounted
+// Helper functions to check if a device is connected / mounted
 bool device_mounted(uint8_t dev_addr) {
     machine_usbh_device_obj_t *device = find_device_by_addr(dev_addr);
     if (device) {
@@ -115,6 +115,7 @@ bool device_mounted(uint8_t dev_addr) {
     }
     return false;
 }
+
 
 // Pend an exception raise in a USBH callback to print when safe.
 //
@@ -372,6 +373,8 @@ void tuh_msc_mount_cb(uint8_t dev_addr) {
             msc->connected = true;
             msc->block_size = block_size;
             msc->block_count = block_count;
+            msc->block_cache = m_new(uint8_t, block_size);
+            msc->block_cache_addr = -1;
 
             // Check write protection
             msc->readonly = false;  // Assume writable by default

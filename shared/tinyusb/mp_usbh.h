@@ -132,8 +132,8 @@ typedef struct _machine_usbh_device_obj_t {
 typedef struct _machine_usbh_cdc_obj_t {
     mp_obj_base_t base;
     uint8_t dev_addr;           // Parent device
-    uint8_t itf_num;            // Interface number
     bool connected;             // Whether device is connected
+    uint8_t itf_num;            // Interface number
     mp_obj_t irq_callback;      // CDC IRQ callbacks
 } machine_usbh_cdc_obj_t;
 
@@ -141,28 +141,33 @@ typedef struct _machine_usbh_cdc_obj_t {
 typedef struct _machine_usbh_msc_obj_t {
     mp_obj_base_t base;
     uint8_t dev_addr;           // Parent device
-    uint8_t lun;                // Logical Unit Number
     bool connected;             // Whether device is connected
+    uint8_t lun;                // Logical Unit Number
     uint32_t block_size;        // Block size in bytes
     uint32_t block_count;       // Number of blocks
     bool readonly;              // Whether the device is read-only
+    uint8_t *block_cache;
+    ssize_t block_cache_addr;
 } machine_usbh_msc_obj_t;
 
 // Structure for USB HID device
 typedef struct _machine_usbh_hid_obj_t {
     mp_obj_base_t base;
     uint8_t dev_addr;           // Parent device
+    bool connected;             // Whether device is connected
     uint8_t instance;           // HID instance (different from interface number)
     uint8_t protocol;           // HID protocol (KEYBOARD, MOUSE, GENERIC)
     uint16_t usage_page;        // HID usage page
     uint16_t usage;             // HID usage
-    bool connected;             // Whether device is connected
     mp_obj_t latest_report;     // Last received report data
     mp_obj_t irq_callback;      // HID IRQ callbacks
 } machine_usbh_hid_obj_t;
 
 // Helper function to check if a device is mounted
 bool device_mounted(uint8_t dev_addr);
+
+// This macro can accept and of the device types (cdc, msc, hid) above.
+#define DEVICE_ACTIVE(self) (self->connected && device_mounted(self->dev_addr))
 
 #endif // MICROPY_HW_USB_HOST
 

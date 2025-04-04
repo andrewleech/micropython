@@ -229,14 +229,14 @@ static void machine_usbh_cdc_print(const mp_print_t *print, mp_obj_t self_in, mp
 // Method to check if connected
 static mp_obj_t machine_usbh_cdc_is_connected(mp_obj_t self_in) {
     machine_usbh_cdc_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    return mp_obj_new_bool(self->connected && device_mounted(self->dev_addr));
+    return mp_obj_new_bool(DEVICE_ACTIVE(self));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_cdc_is_connected_obj, machine_usbh_cdc_is_connected);
 
 // Method to check if data is available
 static mp_obj_t machine_usbh_cdc_any(mp_obj_t self_in) {
     machine_usbh_cdc_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (!self->connected || !device_mounted(self->dev_addr)) {
+    if (!DEVICE_ACTIVE(self)) {
         return MP_OBJ_NEW_SMALL_INT(0);
     }
 
@@ -248,7 +248,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_cdc_any_obj, machine_usbh_cdc_any)
 // Method to read data (non-blocking)
 static mp_obj_t machine_usbh_cdc_read(size_t n_args, const mp_obj_t *args) {
     machine_usbh_cdc_obj_t *self = MP_OBJ_TO_PTR(args[0]);
-    if (!self->connected || !device_mounted(self->dev_addr)) {
+    if (!DEVICE_ACTIVE(self)) {
         mp_raise_OSError(MP_ENODEV);
     }
 
@@ -277,7 +277,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_usbh_cdc_read_obj, 2, 2, mach
 // Method to write data
 static mp_obj_t machine_usbh_cdc_write(mp_obj_t self_in, mp_obj_t data_in) {
     machine_usbh_cdc_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (!self->connected || !device_mounted(self->dev_addr)) {
+    if (!DEVICE_ACTIVE(self)) {
         mp_raise_OSError(MP_ENODEV);
     }
 
@@ -336,7 +336,7 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(machine_usbh_cdc_irq_obj, 1, machine_usbh_cdc_
 // Stream protocol implementation
 static mp_uint_t machine_usbh_cdc_read_method(mp_obj_t self_in, void *buf_in, mp_uint_t size, int *errcode) {
     machine_usbh_cdc_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (!self->connected || !device_mounted(self->dev_addr)) {
+    if (!DEVICE_ACTIVE(self)) {
         *errcode = MP_ENODEV;
         return MP_STREAM_ERROR;
     }
@@ -348,7 +348,7 @@ static mp_uint_t machine_usbh_cdc_read_method(mp_obj_t self_in, void *buf_in, mp
 
 static mp_uint_t machine_usbh_cdc_write_method(mp_obj_t self_in, const void *buf_in, mp_uint_t size, int *errcode) {
     machine_usbh_cdc_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (!self->connected || !device_mounted(self->dev_addr)) {
+    if (!DEVICE_ACTIVE(self)) {
         *errcode = MP_ENODEV;
         return MP_STREAM_ERROR;
     }
@@ -364,7 +364,7 @@ static mp_uint_t machine_usbh_cdc_ioctl_method(mp_obj_t self_in, mp_uint_t reque
 
     if (request == MP_STREAM_POLL) {
         ret = 0;
-        if (!self->connected || !device_mounted(self->dev_addr)) {
+        if (!DEVICE_ACTIVE(self)) {
             ret |= MP_STREAM_POLL_NVAL;
         } else {
             uint32_t available = tuh_cdc_read_available(self->itf_num);
@@ -426,7 +426,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_msc_is_connected_obj, machine_usbh
 static mp_obj_t machine_usbh_msc_readblocks(size_t n_args, const mp_obj_t *args) {
     machine_usbh_msc_obj_t *self = MP_OBJ_TO_PTR(args[0]);
 
-    if (!self->connected || !device_mounted(self->dev_addr)) {
+    if (!DEVICE_ACTIVE(self)) {
         mp_raise_OSError(MP_ENODEV);
     }
 
@@ -451,26 +451,40 @@ static mp_obj_t machine_usbh_msc_readblocks(size_t n_args, const mp_obj_t *args)
         mp_raise_ValueError(MP_ERROR_TEXT("buffer length exceeds block size - offset"));
     }
 
-    uint32_t count = bufinfo.len / self->block_size;
-    tuh_msc_read10(self->dev_addr, self->lun, bufinfo.buf, block_num, count, NULL, 0);
+    // Read from MSC cache or device
+    if (self->block_cache_addr != block_num) {
+        self->block_cache_addr = -1;
+        bool success = tuh_msc_read10(self->dev_addr, self->lun, self->block_cache, block_num, 1, NULL, 0);
 
-    // Wait for the operation to complete
-    while (!tuh_msc_ready(self->dev_addr)) {
-        tuh_task();  // Process USB events until ready
+        // Wait for the operation to complete
+        while (!tuh_msc_ready(self->dev_addr)) {
+            tuh_task();  // Process USB events until ready
+            mp_event_handle_nowait();
+            if (!DEVICE_ACTIVE(self)) {
+                mp_raise_OSError(MP_EIO);
+            }
+        }
+
+        if (!success) {
+            mp_raise_OSError(MP_EIO);
+        }
+        self->block_cache_addr = block_num;
     }
+    memcpy(bufinfo.buf, self->block_cache + offset, bufinfo.len);
 
     return mp_const_none;
 }
 // extended protocol, would require buffering for `offset` handling
 // static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_usbh_msc_readblocks_obj, 3, 4, machine_usbh_msc_readblocks);
 // basic protocol, no littlefs support
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_usbh_msc_readblocks_obj, 3, 3, machine_usbh_msc_readblocks);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_usbh_msc_readblocks_obj, 3, 4, machine_usbh_msc_readblocks);
 
 // Method to writeblocks for block protocol
 static mp_obj_t machine_usbh_msc_writeblocks(size_t n_args, const mp_obj_t *args) {
+    bool success = false;
     machine_usbh_msc_obj_t *self = MP_OBJ_TO_PTR(args[0]);
 
-    if (!self->connected || !device_mounted(self->dev_addr)) {
+    if (!DEVICE_ACTIVE(self)) {
         mp_raise_OSError(MP_ENODEV);
     }
 
@@ -486,18 +500,55 @@ static mp_obj_t machine_usbh_msc_writeblocks(size_t n_args, const mp_obj_t *args
     uint32_t offset = 0;
     if (n_args == 4) {
         offset = mp_obj_get_int(args[3]);
-        if (offset != 0) {
-            // todo I think we'd need to do a read/modify/write here
-            mp_raise_ValueError(MP_ERROR_TEXT("partial block writes not supported"));
-        }
     }
 
-    uint32_t count = bufinfo.len / self->block_size;
-    tuh_msc_write10(self->dev_addr, self->lun, bufinfo.buf, block_num, count, NULL, 0);
+    if (offset != 0 || (bufinfo.len % self->block_size)) {
+        // Writing partial block
 
+        // Check buffer lies within one block
+        if (bufinfo.len > (self->block_size - offset)) {
+            mp_raise_ValueError(MP_ERROR_TEXT("buffer length exceeds block size - offset"));
+        }
+
+        // Read page from MSC cache or device
+        if (self->block_cache_addr != block_num) {
+            self->block_cache_addr = -1;
+            success = tuh_msc_read10(self->dev_addr, self->lun, self->block_cache, block_num, 1, NULL, 0);
+
+            // Wait for the operation to complete
+            while (!tuh_msc_ready(self->dev_addr)) {
+                tuh_task();  // Process USB events until ready
+                mp_event_handle_nowait();
+                if (!DEVICE_ACTIVE(self)) {
+                    mp_raise_OSError(MP_EIO);
+                }
+            }
+
+            if (!success) {
+                mp_raise_OSError(MP_EIO);
+            }
+            self->block_cache_addr = block_num;
+        }
+        // Modify the cached page with new data
+        memcpy(self->block_cache + offset, bufinfo.buf, bufinfo.len);
+
+        // Write cache to flash
+        success = tuh_msc_write10(self->dev_addr, self->lun, self->block_cache, block_num, 1, NULL, 0);
+    } else {
+        // No offset provided, writing whole blocks.
+        uint32_t count = bufinfo.len / self->block_size;
+        success = tuh_msc_write10(self->dev_addr, self->lun, bufinfo.buf, block_num, count, NULL, 0);
+    }
     // Wait for the operation to complete
     while (!tuh_msc_ready(self->dev_addr)) {
         tuh_task();  // Process USB events until ready
+        mp_event_handle_nowait();
+        if (!DEVICE_ACTIVE(self)) {
+            mp_raise_OSError(MP_EIO);
+        }
+    }
+    if (!success) {
+        mp_raise_OSError(MP_EIO);
     }
 
     return mp_const_none;
@@ -505,7 +556,7 @@ static mp_obj_t machine_usbh_msc_writeblocks(size_t n_args, const mp_obj_t *args
 // extended protocol, would require buffering for `offset` handling
 // static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_usbh_msc_writeblocks_obj, 3, 4, machine_usbh_msc_writeblocks);
 // basic protocol, no littlefs support
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_usbh_msc_writeblocks_obj, 3, 3, machine_usbh_msc_writeblocks);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_usbh_msc_writeblocks_obj, 3, 4, machine_usbh_msc_writeblocks);
 
 // Method to ioctl for block protocol
 static mp_obj_t machine_usbh_msc_ioctl(mp_obj_t self_in, mp_obj_t cmd_in, mp_obj_t arg_in) {
@@ -577,7 +628,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_hid_is_connected_obj, machine_usbh
 // Method to get latest report
 static mp_obj_t machine_usbh_hid_get_report(mp_obj_t self_in) {
     machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (!self->connected || !device_mounted(self->dev_addr)) {
+    if (!DEVICE_ACTIVE(self)) {
         mp_raise_OSError(MP_ENODEV);
     }
 
@@ -633,7 +684,7 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(machine_usbh_hid_irq_obj, 1, machine_usbh_hid_
 // Method to request a report from the device
 static mp_obj_t machine_usbh_hid_request_report(mp_obj_t self_in) {
     machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (!self->connected || !device_mounted(self->dev_addr)) {
+    if (!DEVICE_ACTIVE(self)) {
         mp_raise_OSError(MP_ENODEV);
     }
 
@@ -646,7 +697,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_hid_request_report_obj, machine_us
 // Method to send a report to the device (for output reports)
 static mp_obj_t machine_usbh_hid_send_report(mp_obj_t self_in, mp_obj_t report_in) {
     machine_usbh_hid_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (!self->connected || !device_mounted(self->dev_addr)) {
+    if (!DEVICE_ACTIVE(self)) {
         mp_raise_OSError(MP_ENODEV);
     }
 
