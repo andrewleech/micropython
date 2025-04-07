@@ -130,7 +130,7 @@ void uart_deinit_all(void) {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(uart_deinit_all, uart_deinit_all);
+MP_REGISTER_DEINIT_FUNCTION(ra_uart, uart_deinit_all);
 
 bool uart_exists(int uart_id) {
     if (uart_id > MP_ARRAY_SIZE(MP_STATE_PORT(machine_uart_obj_all))) {

@@ -666,35 +666,7 @@ soft_reset_exit:
         mp_printf(&mp_plat_print, "MPY: soft reboot\n");
     }
 
-    #if MICROPY_PY_BLUETOOTH
-    mp_bluetooth_deinit();
-    #endif
-    #if defined(STM32WL)
-    subghz_deinit();
-    #endif
-    #if MICROPY_PY_NETWORK
-    mod_network_deinit();
-    #endif
-    soft_timer_deinit();
-    timer_deinit();
-    uart_deinit_all();
-    spi_deinit_all();
-    #if MICROPY_PY_PYB_LEGACY && MICROPY_HW_ENABLE_HW_I2C
-    pyb_i2c_deinit_all();
-    #endif
-    #if MICROPY_HW_ENABLE_CAN
-    pyb_can_deinit_all();
-    #endif
-    #if MICROPY_HW_ENABLE_DAC
-    dac_deinit_all();
-    #endif
-    #if MICROPY_PY_MACHINE
-    machine_deinit();
-    #endif
-
-    #if MICROPY_PY_THREAD
-    pyb_thread_deinit();
-    #endif
+    // Deinitialisation functions are automatically run by mp_shutdown().
 
     #if defined(MICROPY_HW_UART_REPL)
     MP_STATE_PORT(pyb_stdio_uart) = &pyb_uart_repl_obj;

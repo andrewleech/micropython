@@ -90,6 +90,8 @@ void subghz_deinit(void) {
     __HAL_RCC_SUBGHZ_RADIO_RELEASE_RESET();
 }
 
+MP_REGISTER_DEINIT_FUNCTION(stm32wl_subghz, subghz_deinit);
+
 static mp_obj_t subghz_cs(mp_obj_t value) {
     // Treat the same as normal SPI - truthy is "unselected",
     //   falsey is active low "selected",

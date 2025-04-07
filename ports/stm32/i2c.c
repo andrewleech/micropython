@@ -591,3 +591,7 @@ int i2c_find_peripheral(mp_obj_t id) {
 }
 
 #endif // MICROPY_HW_ENABLE_HW_I2C
+
+#if MICROPY_ENABLE_DEINIT_HELPER
+MP_REGISTER_DEINIT_FUNCTION(stm32_i2c, pyb_i2c_deinit_all);
+#endif

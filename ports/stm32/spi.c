@@ -554,6 +554,8 @@ void spi_deinit_all(void) {
     }
 }
 
+MP_REGISTER_DEINIT_FUNCTION(stm32_spi, spi_deinit_all);
+
 static HAL_StatusTypeDef spi_wait_dma_finished(const spi_t *spi, uint32_t t_start, uint32_t timeout) {
     volatile HAL_SPI_StateTypeDef *state = &spi->spi->State;
     for (;;) {

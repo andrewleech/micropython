@@ -416,25 +416,6 @@ soft_reset_exit:
         mp_printf(&mp_plat_print, "MPY: soft reboot\n");
     }
 
-    #if MICROPY_PY_BLUETOOTH
-    mp_bluetooth_deinit();
-    #endif
-    #if MICROPY_PY_NETWORK
-    mod_network_deinit();
-    #endif
-    soft_timer_deinit();
-    timer_deinit();
-    uart_deinit_all();
-    #if MICROPY_HW_ENABLE_DAC
-    dac_deinit_all();
-    #endif
-    machine_pin_deinit();
-    machine_deinit();
-
-    #if MICROPY_PY_THREAD
-    pyb_thread_deinit();
-    #endif
-
     MICROPY_BOARD_END_SOFT_RESET(&state);
 
     mp_shutdown();

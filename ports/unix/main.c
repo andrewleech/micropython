@@ -773,19 +773,12 @@ MP_NOINLINE int main_(int argc, char **argv) {
     }
     #endif
 
-    #if MICROPY_PY_BLUETOOTH
-    void mp_bluetooth_deinit(void);
-    mp_bluetooth_deinit();
-    #endif
 
     // Register the cleanup function
     #if MICROPY_PY_BLUETOOTH
     MP_REGISTER_DEINIT_FUNCTION(mp_bluetooth_deinit);
     #endif
 
-    #if MICROPY_PY_THREAD
-    mp_thread_deinit();
-    #endif
 
     // Register the cleanup function
     #if MICROPY_PY_THREAD

@@ -99,7 +99,7 @@ void machine_deinit(void) {
 }
 
 // Register the cleanup function
-MP_REGISTER_DEINIT_FUNCTION(machine_deinit, machine_deinit);
+MP_REGISTER_DEINIT_FUNCTION(ra_machine, machine_deinit);
 
 // machine.info([dump_alloc_table])
 // Print out lots of information about the board.

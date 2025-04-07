@@ -168,16 +168,10 @@ soft_reset:
 
 soft_reset_exit:
 
-    // Deinitialize MicroPython runtime.
+    // Deinitialize MicroPython runtime and peripherals.
     mp_shutdown();
 
     mp_hal_stdout_tx_str("MPY: soft reboot\r\n");
-
-    // deinitialise peripherals
-    machine_deinit();
-    #if MICROPY_PY_SOCKET_EVENTS
-    socket_events_deinit();
-    #endif
 
     fflush(stdout);
     goto soft_reset;

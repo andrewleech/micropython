@@ -119,6 +119,8 @@ void pyb_can_deinit_all(void) {
     }
 }
 
+MP_REGISTER_DEINIT_FUNCTION(stm32_can, pyb_can_deinit_all);
+
 static void pyb_can_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     pyb_can_obj_t *self = MP_OBJ_TO_PTR(self_in);
     if (!self->is_enabled) {

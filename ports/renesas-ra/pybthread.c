@@ -3,7 +3,8 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2017 Damien P. George
+ * Copyright (c) 2021-2022 Renesas Electronics Corporation
+ * Copyright (c) 2023 Vekatech Ltd.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -87,6 +88,8 @@ void pyb_thread_deinit() {
     pyb_thread_cur->run_next = pyb_thread_cur;
     enable_irq(irq_state);
 }
+
+MP_REGISTER_DEINIT_FUNCTION(ra_thread, pyb_thread_deinit);
 
 static void pyb_thread_terminate(void) {
     uint32_t irq_state = disable_irq();

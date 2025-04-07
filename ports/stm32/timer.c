@@ -167,6 +167,8 @@ void timer_deinit(void) {
     }
 }
 
+MP_REGISTER_DEINIT_FUNCTION(stm32_timer, timer_deinit);
+
 #if defined(TIM5)
 // TIM5 is set-up for the servo controller
 // This function inits but does not start the timer

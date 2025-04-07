@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2013, 2014 Damien P. George
+ * Copyright (c) 2013-2019 Damien P. George
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -437,6 +437,8 @@ void pyb_i2c_deinit_all(void) {
     }
 }
 
+MP_REGISTER_DEINIT_FUNCTION(stm32_pyb_i2c, pyb_i2c_deinit_all);
+
 static void i2c_reset_after_error(I2C_HandleTypeDef *i2c) {
     // wait for bus-busy flag to be cleared, with a timeout
     for (int timeout = 50; timeout > 0; --timeout) {
@@ -604,7 +606,7 @@ static HAL_StatusTypeDef i2c_wait_dma_finished(I2C_HandleTypeDef *i2c, uint32_t 
 }
 
 /******************************************************************************/
-/* MicroPython bindings                                                       */
+// MicroPython bindings
 
 static inline bool in_master_mode(pyb_i2c_obj_t *self) {
     return self->i2c->Init.OwnAddress1 == PYB_I2C_MASTER_ADDRESS;

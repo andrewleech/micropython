@@ -84,6 +84,8 @@ void pyb_thread_deinit() {
     enable_irq(irq_state);
 }
 
+MP_REGISTER_DEINIT_FUNCTION(stm32_thread, pyb_thread_deinit);
+
 static void pyb_thread_terminate(void) {
     uint32_t irq_state = disable_irq();
     pyb_thread_t *thread = pyb_thread_cur;
