@@ -197,6 +197,9 @@ static void machine_usbh_device_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest
             } else {
                 dest[0] = mp_const_none;
             }
+        } else {
+            // Continue lookup in locals_dict.
+            dest[1] = MP_OBJ_SENTINEL;
         }
     } else {
         // Read-only attributes
@@ -245,52 +248,52 @@ static mp_obj_t machine_usbh_cdc_any(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usbh_cdc_any_obj, machine_usbh_cdc_any);
 
-// Method to read data (non-blocking)
-static mp_obj_t machine_usbh_cdc_read(size_t n_args, const mp_obj_t *args) {
-    machine_usbh_cdc_obj_t *self = MP_OBJ_TO_PTR(args[0]);
-    if (!DEVICE_ACTIVE(self)) {
-        mp_raise_OSError(MP_ENODEV);
-    }
+// // Method to read data (non-blocking)
+// static mp_obj_t machine_usbh_cdc_read(size_t n_args, const mp_obj_t *args) {
+//     machine_usbh_cdc_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+//     if (!DEVICE_ACTIVE(self)) {
+//         mp_raise_OSError(MP_ENODEV);
+//     }
 
-    mp_int_t size = mp_obj_get_int(args[1]);
-    if (size < 0) {
-        mp_raise_ValueError(MP_ERROR_TEXT("size must be non-negative"));
-    }
+//     mp_int_t size = mp_obj_get_int(args[1]);
+//     if (size < 0) {
+//         mp_raise_ValueError(MP_ERROR_TEXT("size must be non-negative"));
+//     }
 
-    // Create a buffer to read into
-    uint8_t *buf = m_new(uint8_t, size);
-    if (buf == NULL) {
-        mp_raise_OSError(MP_ENOMEM);
-    }
+//     // Create a buffer to read into
+//     uint8_t *buf = m_new(uint8_t, size);
+//     if (buf == NULL) {
+//         mp_raise_OSError(MP_ENOMEM);
+//     }
 
-    // Read from the CDC device
-    uint32_t count = tuh_cdc_read(self->itf_num, buf, size);
+//     // Read from the CDC device
+//     uint32_t count = tuh_cdc_read(self->itf_num, buf, size);
 
-    // Create a bytes object with the result
-    mp_obj_t bytes = mp_obj_new_bytes(buf, count);
-    m_del(uint8_t, buf, size);
+//     // Create a bytes object with the result
+//     mp_obj_t bytes = mp_obj_new_bytes(buf, count);
+//     m_del(uint8_t, buf, size);
 
-    return bytes;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_usbh_cdc_read_obj, 2, 2, machine_usbh_cdc_read);
+//     return bytes;
+// }
+// static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_usbh_cdc_read_obj, 2, 2, machine_usbh_cdc_read);
 
-// Method to write data
-static mp_obj_t machine_usbh_cdc_write(mp_obj_t self_in, mp_obj_t data_in) {
-    machine_usbh_cdc_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (!DEVICE_ACTIVE(self)) {
-        mp_raise_OSError(MP_ENODEV);
-    }
+// // Method to write data
+// static mp_obj_t machine_usbh_cdc_write(mp_obj_t self_in, mp_obj_t data_in) {
+//     machine_usbh_cdc_obj_t *self = MP_OBJ_TO_PTR(self_in);
+//     if (!DEVICE_ACTIVE(self)) {
+//         mp_raise_OSError(MP_ENODEV);
+//     }
 
-    // Get the data to write
-    mp_buffer_info_t bufinfo;
-    mp_get_buffer_raise(data_in, &bufinfo, MP_BUFFER_READ);
+//     // Get the data to write
+//     mp_buffer_info_t bufinfo;
+//     mp_get_buffer_raise(data_in, &bufinfo, MP_BUFFER_READ);
 
-    // Write to the CDC device
-    uint32_t count = tuh_cdc_write(self->itf_num, bufinfo.buf, bufinfo.len);
+//     // Write to the CDC device
+//     uint32_t count = tuh_cdc_write(self->itf_num, bufinfo.buf, bufinfo.len);
 
-    return MP_OBJ_NEW_SMALL_INT(count);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(machine_usbh_cdc_write_obj, machine_usbh_cdc_write);
+//     return MP_OBJ_NEW_SMALL_INT(count);
+// }
+// static MP_DEFINE_CONST_FUN_OBJ_2(machine_usbh_cdc_write_obj, machine_usbh_cdc_write);
 
 // Method for setting up IRQ handler
 static mp_obj_t machine_usbh_cdc_irq(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
@@ -386,8 +389,13 @@ static mp_uint_t machine_usbh_cdc_ioctl_method(mp_obj_t self_in, mp_uint_t reque
 static const mp_rom_map_elem_t machine_usbh_cdc_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_is_connected), MP_ROM_PTR(&machine_usbh_cdc_is_connected_obj) },
     { MP_ROM_QSTR(MP_QSTR_any), MP_ROM_PTR(&machine_usbh_cdc_any_obj) },
-    { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&machine_usbh_cdc_read_obj) },
-    { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&machine_usbh_cdc_write_obj) },
+
+    { MP_ROM_QSTR(MP_QSTR_flush), MP_ROM_PTR(&mp_stream_flush_obj) },
+    { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&mp_stream_read_obj) },
+    { MP_ROM_QSTR(MP_QSTR_readline), MP_ROM_PTR(&mp_stream_unbuffered_readline_obj) },
+    { MP_ROM_QSTR(MP_QSTR_readinto), MP_ROM_PTR(&mp_stream_readinto_obj) },
+    { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&mp_stream_write_obj) },
+
     { MP_ROM_QSTR(MP_QSTR_irq), MP_ROM_PTR(&machine_usbh_cdc_irq_obj) },
 
     // Constants
@@ -399,7 +407,6 @@ MP_DEFINE_CONST_OBJ_TYPE(
     machine_usbh_cdc_type,
     MP_QSTR_USBH_CDC,
     MP_TYPE_FLAG_ITER_IS_STREAM,
-    // make_new, machine_usbh_cdc_make_new,
     print, machine_usbh_cdc_print,
     protocol, &machine_usbh_cdc_stream_p,
     locals_dict, &machine_usbh_cdc_locals_dict
@@ -633,7 +640,9 @@ static mp_obj_t machine_usbh_hid_get_report(mp_obj_t self_in) {
     }
 
     if (self->latest_report != MP_OBJ_NULL) {
-        return self->latest_report;
+        mp_obj_t report = self->latest_report;
+        self->latest_report = MP_OBJ_NULL;
+        return report;
     } else {
         return mp_const_none;
     }
@@ -726,6 +735,9 @@ static void machine_usbh_hid_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             dest[0] = MP_OBJ_NEW_SMALL_INT(self->usage_page);
         } else if (attr == MP_QSTR_usage) {
             dest[0] = MP_OBJ_NEW_SMALL_INT(self->usage);
+        } else {
+            // Continue lookup in locals_dict.
+            dest[1] = MP_OBJ_SENTINEL;
         }
     } else {
         // Read-only attributes

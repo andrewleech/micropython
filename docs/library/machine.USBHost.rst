@@ -328,10 +328,8 @@ USBH_HID class
       
       Example::
 
-         def on_report(hid):
-             report = hid.get_report()
-             if report:
-                 print(f"Received HID report: {report}")
+         def on_report(hid, report):
+            print(f"Received HID report: {report}")
          
          hid.irq(handler=on_report, trigger=hid.IRQ_REPORT)
 
