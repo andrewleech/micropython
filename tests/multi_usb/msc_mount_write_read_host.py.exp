@@ -1,0 +1,22 @@
+--- instance0 ---
+Host active
+Waiting for device
+Searching for MSC device...
+MSC device found: USBH_MSC(addr=1, lun=0, block_size=512, block_count=..., readonly=0)
+Mounting MSC device at /usb...
+Mount successful
+Reading file: /usb/test_read.txt
+Read content: 'MSC Read Test'
+Content matches expected.
+Unmounting /usb...
+Unmount successful
+Host finished
+--- instance1 ---
+Device waiting for HOST_READY
+HOST_READY received
+Device configured (assuming default includes MSC and suitable block device)
+Waiting 5s for host enumeration (MSC can be slow)...
+Broadcasting DEVICE_READY
+Device waiting for HOST_FINISHED_MSC or HOST_ABORT
+HOST_FINISHED_MSC received.
+Device finished

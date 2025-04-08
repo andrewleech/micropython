@@ -1,0 +1,25 @@
+--- instance0 ---
+Host active
+Waiting for device
+Searching for CDC device...
+CDC device found: USBH_CDC(addr=1, itf=...)
+Initial is_connected: True
+Signaled device to send and disconnect.
+Entering read/connection check loop...
+Received chunk before disconnect: b'before_disconnect'
+SUCCESS: cdc.is_connected() returned False.
+Final data received: b'before_disconnect'
+Final is_connected check: False
+Host finished
+--- instance1 ---
+Device waiting for HOST_READY
+HOST_READY received
+Device configured (assuming default CDC)
+Waiting 3s for host enumeration...
+Broadcasting DEVICE_READY
+Device waiting for SEND_AND_DISCONNECT or HOST_ABORT
+SEND_AND_DISCONNECT received.
+Device sending: b'before_disconnect'
+Data sent.
+Simulating disconnect via machine.reset() in 1 second...
+Resetting now.

@@ -1,0 +1,32 @@
+--- instance0 ---
+Host active
+Waiting for device
+Searching for MSC device...
+MSC device found: USBH_MSC(addr=1, lun=0, block_size=512, block_count=..., readonly=0)
+Mounting MSC device at /usb...
+Mount successful
+Previous file not found: /usb/msc_write_test.txt
+Writing file: /usb/msc_write_test.txt with data: 'HostWriteDeviceRead'
+Wrote 19 bytes.
+Test data sent to device via globals
+Unmounting /usb...
+Unmount successful
+Signaling device to RESET_AND_READ
+Waiting for DEVICE_READ_COMPLETE
+DEVICE_READ_COMPLETE received
+Host finished
+--- instance1 ---
+Device waiting for HOST_READY
+HOST_READY received
+Device configured (assuming default includes MSC)
+Waiting 5s for host enumeration...
+Broadcasting DEVICE_READY
+Device waiting for RESET_AND_READ or HOST_ABORT
+RESET_AND_READ received.
+Device resumed after reboot.
+Resumed: Expecting 'HostWriteDeviceRead' in '/msc_write_test.txt'
+Reading file from device FS: /msc_write_test.txt
+Device read content: 'HostWriteDeviceRead'
+Device content verification PASSED.
+Broadcasting DEVICE_READ_COMPLETE
+Device finished post-reboot sequence.

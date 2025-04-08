@@ -1,0 +1,29 @@
+--- instance0 ---
+Host active
+Waiting for device
+Searching for HID mouse device...
+HID mouse found: Proto=2, UsagePage=1, Usage=2
+Registering HID IRQ handler
+HID IRQ handler registered
+Waiting for device report...
+Device report supposedly sent.
+Waiting for HID IRQ...
+IRQ: HID report received (3 bytes): b'\x00\x05\x03'
+HID IRQ triggered successfully.
+Received report looks like mouse movement: b'\x00\x05\x03'
+Unregistering HID IRQ handler
+Host finished
+--- instance1 ---
+usb.device.mouse imported successfully
+Device waiting for HOST_READY
+HOST_READY received
+Configuring as HID Mouse...
+Mouse device configured
+Waiting 2s for host enumeration...
+Broadcasting DEVICE_READY
+Device waiting for SEND_REPORT or HOST_ABORT
+SEND_REPORT received
+Sending mouse movement report (x=5, y=3)
+Mouse move report sent
+Broadcasting REPORT_SENT
+Device finished

@@ -1,0 +1,23 @@
+--- instance0 ---
+Host active
+Waiting for device
+Searching for HID keyboard device...
+HID keyboard found: USBH_HID(addr=1, instance=..., protocol=1)
+Initial is_connected: True
+Signaled device to disconnect.
+Entering connection check loop...
+SUCCESS: hid.is_connected() returned False.
+Final is_connected check: False
+Host finished
+--- instance1 ---
+usb.device.keyboard imported successfully
+Device waiting for HOST_READY
+HOST_READY received
+Configuring as HID Keyboard...
+Keyboard device configured
+Waiting 3s for host enumeration...
+Broadcasting DEVICE_READY
+Device waiting for DISCONNECT_NOW or HOST_ABORT
+DISCONNECT_NOW received.
+Simulating disconnect via machine.reset() in 1 second...
+Resetting now.

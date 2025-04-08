@@ -1,0 +1,22 @@
+--- instance0 ---
+Host active
+Waiting for device
+Waiting up to 10s for device enumeration...
+CDC device found: USBH_CDC(addr=1, itf=...)
+CDC is_connected: True
+HID device found: USBH_HID(addr=1, instance=..., protocol=...)
+HID is_connected: True
+HID protocol: ...
+HID usage_page: ...
+HID usage: ...
+Found both CDC and HID interfaces as expected.
+Host finished
+--- instance1 ---
+Device waiting for HOST_READY
+HOST_READY received
+Device configured (assuming default or boot.py sets up CDC+HID)
+Waiting 10s for host enumeration...
+Broadcasting DEVICE_READY
+Device waiting for HOST_FINISHED or HOST_ABORT
+HOST_FINISHED received.
+Device finished
