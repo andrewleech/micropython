@@ -146,6 +146,25 @@ set(MICROPY_SOURCE_DRIVERS
     ${MICROPY_DIR}/drivers/dht/dht.c
 )
 
+if(MICROPY_PY_USBIP)
+    list(APPEND MICROPY_SOURCE_PORT
+        ${MICROPY_DIR}/extmod/modusbip.c
+        ${MICROPY_DIR}/extmod/usbip_server.c
+        ${MICROPY_DIR}/extmod/usbip_tusb.c
+        ${MICROPY_DIR}/extmod/usbip_glue.c
+    )
+    list(APPEND MICROPY_SOURCE_QSTR
+        ${MICROPY_DIR}/extmod/modusbip.c # For module registration and function names
+    )
+    target_compile_definitions(${MICROPY_TARGET} PRIVATE
+        MICROPY_PY_USBIP=1
+    )
+    # Ensure LWIP is linked if USBIP is enabled
+    if (NOT MICROPY_PY_LWIP)
+        message(FATAL_ERROR "USBIP requires LWIP (MICROPY_PY_LWIP must be enabled)")
+    endif()
+endif()
+
 set(MICROPY_SOURCE_PORT
     clocks_extra.c
     datetime_patch.c

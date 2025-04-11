@@ -337,3 +337,8 @@ extern void lwip_lock_release(void);
 #ifndef MICROPY_BOARD_END_SOFT_RESET
 #define MICROPY_BOARD_END_SOFT_RESET()
 #endif
+
+// Enable USBIP module (depends on USB Host and LWIP)
+#ifndef MICROPY_PY_USBIP
+#define MICROPY_PY_USBIP (MICROPY_HW_USB_HOST && MICROPY_PY_LWIP)
+#endif
