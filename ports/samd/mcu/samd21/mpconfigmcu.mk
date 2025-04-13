@@ -10,7 +10,7 @@ ifeq ($(MICROPY_HW_CODESIZE), 248K)
 FROZEN_MANIFEST ?= mcu/$(MCU_SERIES_LOWER)/manifest.py
 endif
 
-MICROPY_VFS_LFS1 ?= 1
+# MICROPY_VFS_LFS1 ?= 1 # Now controlled by Kconfig: CONFIG_MICROPY_VFS_LFS1
 
 SRC_S += shared/runtime/gchelper_thumb1.s
 

@@ -1,0 +1,62 @@
+# Kconfig - Optimisation Levels
+
+comment "Optimisation Settings"
+
+config MICROPY_OPT_COMPUTED_GOTO
+    bool "Use computed goto for VM dispatch (GCC/Clang)"
+    default y
+    help
+      Use computed goto for the main virtual machine dispatch loop.
+      Usually faster on GCC and Clang, but less portable.
+
+config MICROPY_OPT_CACHE_MAP_LOOKUP_IN_BYTECODE
+    bool "Cache map lookups in bytecode"
+    default y
+    help
+      Optimize map (dict) lookups by caching results directly in bytecode.
+      Can improve performance for attribute access and globals.
+
+config MICROPY_OPT_MAP_LOOKUP_CACHE
+    bool "Enable map lookup cache (RAM cost)"
+    default y if !PORT_STM32_M0 && !PORT_CC3200 # Disabled on M0/CC3200
+    default n if PORT_STM32_M0 || PORT_CC3200
+    help
+      Use extra RAM to cache map lookups by remembering the likely location of
+      the index. Avoids hash computation on unordered maps and linear search
+      on ordered maps. Improves performance but uses RAM.
+      Disabled by default on low-RAM M0 cores and CC3200.
+
+config MICROPY_OPT_MPZ_BITWISE
+    bool "Optimise MPZ bitwise operations"
+    depends on MICROPY_LONGINT_IMPL_MPZ
+    default y if !PORT_CC3200
+    default n if PORT_CC3200
+    help
+      Enable specific optimisations for bitwise operations on MPZ long integers.
+
+config MICROPY_OPT_MATH_FACTORIAL
+    bool "Optimise math.factorial()"
+    # Depends on MICROPY_PY_MATH being enabled, add later in modules config
+    default y if !PORT_CC3200
+    default n if PORT_CC3200
+    help
+      Optimise the math.factorial() function.
+
+config MICROPY_OPT_LOAD_ATTR_FAST_PATH
+    bool "Optimize LOAD_ATTR opcode"
+    default y if !PORT_CC3200
+    default n if PORT_CC3200
+    help
+      Use a fast path for the LOAD_ATTR bytecode instruction.
+
+config MICROPY_OPT_MAP_LOOKUP_CACHE
+    bool "Optimize map lookup cache"
+    default y
+    help
+      Enable optimizations for the internal map lookup cache.
+
+config MICROPY_OPT_LEXER_SINGLE_CHAR_FAST_PATH
+    bool "Optimize lexer single character fast path"
+    default y
+    help
+      Optimize the lexer for single character tokens.

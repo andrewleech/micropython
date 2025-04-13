@@ -26,6 +26,13 @@
 #ifndef MICROPY_INCLUDED_PY_MPCONFIG_H
 #define MICROPY_INCLUDED_PY_MPCONFIG_H
 
+// Automatically include Kconfig generated configuration first, if it exists.
+// This allows Kconfig settings (CONFIG_...) to override settings below.
+// The path is typically provided via CFLAGS, e.g. -DMICROPY_KCONFIG_AUTOCONF_H='"build/mpconfig_kconfig.h"'
+#ifdef MICROPY_KCONFIG_AUTOCONF_H
+#include MICROPY_KCONFIG_AUTOCONF_H
+#endif
+
 // Current version of MicroPython. This is used by sys.implementation.version
 // as well as a fallback to generate MICROPY_GIT_TAG if the git repo or tags
 // are unavailable.
@@ -62,6 +69,13 @@
 // This file contains default configuration settings for MicroPython.
 // You can override any of the options below using mpconfigport.h file
 // located in a directory of your port.
+
+// Automatically include Kconfig generated configuration first, if it exists.
+// This allows Kconfig settings (CONFIG_...) to override settings below.
+// The path is typically provided via CFLAGS, e.g. -DMICROPY_KCONFIG_AUTOCONF_H='"build/mpconfig_kconfig.h"'
+#ifdef MICROPY_KCONFIG_AUTOCONF_H
+#include MICROPY_KCONFIG_AUTOCONF_H
+#endif
 
 // mpconfigport.h is a file containing configuration settings for a
 // particular port. mpconfigport.h is actually a default name for

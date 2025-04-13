@@ -1,0 +1,9 @@
+menu "MicroPython Core"
+
+source "py/Kconfig.features"
+source "py/Kconfig.optimise"
+source "py/Kconfig.types"
+source "py/Kconfig.modules"
+source "py/Kconfig.memory"
+
+endmenu # MicroPython Core

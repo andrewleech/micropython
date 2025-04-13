@@ -48,6 +48,11 @@ QSTR_GLOBAL_DEPENDENCIES += mpconfigboard_common.h $(BOARD_DIR)/mpconfigboard.h 
 MICROPY_ROM_TEXT_COMPRESSION ?= 1
 
 # File containing description of content to be frozen into firmware.
+ifeq ($(CONFIG_MICROPY_MODULE_FROZEN),y)
+  ifeq ($(FROZEN_MANIFEST),)
+    $(error FROZEN_MANIFEST is not set)
+  endif
+endif
 FROZEN_MANIFEST ?= boards/manifest.py
 
 # Location of mboot (or other bootloader) if the device has one.
@@ -133,18 +138,21 @@ MICROPY_FLOAT_IMPL = double
 endif
 endif
 
+endif
+
 # Configure floating point support
-ifeq ($(MICROPY_FLOAT_IMPL),double)
+ifeq ($(CONFIG_MICROPY_FLOAT_IMPL_DOUBLE),y)
 CFLAGS += -DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_DOUBLE
-else ifeq ($(MICROPY_FLOAT_IMPL),none)
+else ifeq ($(CONFIG_MICROPY_FLOAT_IMPL_NONE),y)
 CFLAGS += -DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_NONE
 else
+# Default to single precision float
 CFLAGS += -DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_FLOAT
 CFLAGS += -fsingle-precision-constant
 endif
 
 # Configure linker include dir for ram/rom isr support
-ifeq ($(MICROPY_HW_ENABLE_ISR_UART_FLASH_FUNCS_IN_RAM),1)
+ifeq ($(CONFIG_MICROPY_HW_ENABLE_ISR_UART_FLASH_FUNCS_IN_RAM),y)
 CFLAGS += -DMICROPY_HW_ENABLE_ISR_UART_FLASH_FUNCS_IN_RAM=1
 LD_ISR_DIR = boards/common_isr_ram
 else
@@ -489,7 +497,7 @@ endif
 
 all: $(TOP)/lib/stm32lib/README.md all_main $(BUILD)/firmware.hex
 
-ifeq ($(MBOOT_ENABLE_PACKING),1)
+ifeq ($(CONFIG_MBOOT_ENABLE_PACKING),y)
 all_main: $(BUILD)/firmware.pack.dfu
 else
 all_main: $(BUILD)/firmware.dfu

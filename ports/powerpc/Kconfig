@@ -1,0 +1,35 @@
+menu "PowerPC Port Options"
+    depends on PORT_POWERPC
+
+    comment "PowerPC Specific Settings"
+
+    # This port is currently minimal and experimental.
+    # Most configuration is via mpconfigport.h and default Kconfig values.
+
+    # Add potential future PowerPC-specific Kconfig options here.
+    # Examples might include:
+    # config MICROPY_POWERPC_MMU
+    #    bool "Enable MMU support routines"
+    #    default n
+
+    comment "Common Option Defaults for PowerPC"
+    # Note: Defaults for common options are generally handled in py/ or extmod/ Kconfig.
+    # Check common Kconfig files for specific default logic based on PORT_POWERPC.
+    # Key defaults include:
+    # - Many features disabled (compiler opts, math, io, etc.)
+    # - MICROPY_MEM_STATS: n
+    # - MICROPY_DEBUG_PRINTERS: y
+    # - MICROPY_HELPER_LEXER_UNIX: n
+    # - MICROPY_ENABLE_SOURCE_LINE: n
+    # - MICROPY_ENABLE_DOC_STRING: n
+    # - MICROPY_ERROR_REPORTING: TERSE
+    # - MICROPY_BUILTIN_METHOD_CHECK_SELF_ARG: n
+    # - MICROPY_PY_ASYNC_AWAIT: n
+    # - MICROPY_MODULE_BUILTIN_INIT: y
+    # - Many builtins enabled (bytes, memoryview, set, slice, property, etc.)
+    # - MICROPY_PY_SYS: y
+    # - MICROPY_CPYTHON_COMPAT: n
+    # - MICROPY_FLOAT_IMPL: NONE
+    # - MICROPY_ENABLE_PYSTACK: y
+
+endmenu # PowerPC Port Options

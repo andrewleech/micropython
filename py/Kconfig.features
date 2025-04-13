@@ -1,0 +1,291 @@
+# Kconfig - Core Features
+
+comment "Core Features"
+
+config MICROPY_ENABLE_COMPILER
+    bool "Enable the compiler"
+    default y
+    help
+      Enable the MicroPython compiler. If disabled, only frozen bytecode
+      or REPL can be used.
+
+config MICROPY_ENABLE_GC
+    bool "Enable garbage collector"
+    default y
+    help
+      Enable the garbage collector.
+
+config MICROPY_ENABLE_FINALISER
+    bool "Enable __del__ method for classes"
+    default y
+    depends on MICROPY_ENABLE_GC
+    help
+      Enable support for the __del__ method in classes, which is called
+      when an object is garbage collected.
+
+config MICROPY_COMP_TRIPLE_TUPLE_ASSIGN
+    bool "Optimise triple tuple assignment (a,b,c = d,e,f)"
+    depends on MICROPY_COMP_DOUBLE_TUPLE_ASSIGN
+    default y if !PORT_CC3200 && !PORT_POWERPC
+    default n if PORT_CC3200 || PORT_POWERPC
+    help
+      Further optimize tuple unpacking for exactly three elements.
+      Requires double tuple assignment optimization.
+
+config MICROPY_ENABLE_PYSTACK
+    bool "Enable pystack for handling Python stack overflow"
+    default y
+    help
+      Use a separate stack for Python execution to detect overflows.
+
+config MICROPY_PYSTACK_SIZE
+    int "Python stack size (bytes)"
+    depends on MICROPY_ENABLE_PYSTACK
+    default 1536
+    help
+      Size of the Python execution stack.
+
+config MICROPY_STACK_CHECK
+    bool "Enable stack checking"
+    default y if PORT_NRF # Default on for nRF
+    default n # Often enabled per-port
+    help
+      Enable runtime stack checking. Can impact performance.
+      Often enabled by default in specific port configurations.
+
+config MICROPY_HELPER_REPL
+    bool "Enable REPL helper functions"
+    default y
+    help
+      Provide helper functions for the REPL, like help().
+
+config MICROPY_REPL_EMACS_KEYS
+    bool "Enable emacs-style key bindings in REPL"
+    default y if !PORT_CC3200
+    default n if PORT_CC3200
+    help
+      Enable emacs-like key bindings (Ctrl-A, Ctrl-E, etc.) in the REPL.
+
+config MICROPY_HELPER_LEXER_UNIX
+    bool "Enable Unix-like lexer features in REPL"
+    depends on MICROPY_HELPER_REPL
+    default y # Common for interactive ports
+    help
+      Enable features like auto-indent and tab completion in the REPL
+      similar to standard Python on Unix.
+
+config MICROPY_ENABLE_DOC_STRING
+    bool "Store docstrings"
+    default y
+    help
+      Store docstrings for functions and classes. Increases code size.
+
+config MICROPY_ENABLE_SOURCE_LINE
+    bool "Store source line number for exceptions"
+    default y
+    help
+      Store the source file line number where exceptions occur.
+      Increases bytecode size.
+
+config MICROPY_ENABLE_EMERGENCY_EXCEPTION_BUF
+    bool "Enable emergency exception buffer"
+    default y
+    help
+      Allocate a small static buffer for exceptions when memory allocation fails.
+
+config MICROPY_EMERGENCY_EXCEPTION_BUF_SIZE
+    int "Emergency exception buffer size"
+    depends on MICROPY_ENABLE_EMERGENCY_EXCEPTION_BUF
+    default 256
+    help
+      Size in bytes of the emergency exception buffer.
+
+config MICROPY_LONGINT_IMPL
+    choice
+        prompt "Long integer implementation"
+        default MICROPY_LONGINT_IMPL_MPZ
+        help
+          Select the library to use for arbitrary-precision integers.
+
+    config MICROPY_LONGINT_IMPL_NONE
+        bool # Added type
+        prompt "None (no long integers)"
+        help
+          Disable arbitrary-precision integers. Only small integers are supported.
+
+    config MICROPY_LONGINT_IMPL_LONGLONG
+        bool # Added type
+        prompt "long long"
+        help
+          Use C 'long long' for limited large integer support.
+          Faster but limited precision based on the C type.
+
+    config MICROPY_LONGINT_IMPL_MPZ
+        bool # Added type
+        prompt "MPZ library (arbitrary precision)"
+        select MICROPY_ENABLE_SCHEDULER if !MICROPY_NLR_SETJMP # MPZ uses scheduler
+        help
+          Use the included MPZ library for full arbitrary-precision integers.
+          Required for full Python compatibility.
+
+    endchoice
+
+config MICROPY_ERROR_REPORTING
+    choice
+        prompt "Error reporting verbosity"
+        default MICROPY_ERROR_REPORTING_NORMAL if !PORT_ESP8266 && !PORT_SAMD && !PORT_PIC16BIT && !PORT_POWERPC && !PORT_CC3200
+        default MICROPY_ERROR_REPORTING_TERSE if PORT_ESP8266 || PORT_SAMD || PORT_PIC16BIT || PORT_POWERPC || PORT_CC3200 # Terse for these
+        help
+          Select the level of detail in error messages.
+
+    config MICROPY_ERROR_REPORTING_NONE
+        bool # Added type
+        prompt "None"
+        help
+          Disable error reporting entirely.
+
+    config MICROPY_ERROR_REPORTING_TERSE
+        bool # Added type
+        prompt "Terse"
+        help
+          Provide minimal error messages.
+
+    config MICROPY_ERROR_REPORTING_NORMAL
+        bool # Added type
+        prompt "Normal"
+        help
+          Provide standard Python-like error messages.
+
+    config MICROPY_ERROR_REPORTING_DETAILED
+        bool # Added type
+        prompt "Detailed"
+        depends on MICROPY_ENABLE_SOURCE_LINE
+        help
+          Provide detailed error messages including source line numbers.
+
+    endchoice
+
+    config MICROPY_ERROR_REPORTING_NONE
+        bool "None"
+        help
+          Disable error reporting entirely.
+
+    config MICROPY_ERROR_REPORTING_TERSE
+        bool "Terse"
+        help
+          Provide minimal error messages.
+
+    config MICROPY_ERROR_REPORTING_NORMAL
+        bool "Normal"
+        help
+          Provide standard Python-like error messages.
+
+    config MICROPY_ERROR_REPORTING_DETAILED
+        bool "Detailed"
+        depends on MICROPY_ENABLE_SOURCE_LINE
+        help
+          Provide detailed error messages including source line numbers.
+
+    endchoice
+
+config MICROPY_PY_BUILTINS_COMPLEX
+    bool "Enable complex type"
+    depends on MICROPY_PY_BUILTINS_FLOAT # Complex numbers require float
+    default y if !PORT_SAMD
+    default n if PORT_SAMD
+    help
+      Enable the built-in complex number type.
+
+config MICROPY_WARNINGS
+    bool "Enable warnings module support"
+    default y
+    help
+      Enable the 'warnings' module and internal warning framework.
+
+config MICROPY_PY_ASYNC_AWAIT
+    bool "Enable async/await keywords"
+    default y if !PORT_PIC16BIT && !PORT_POWERPC
+    default n if PORT_PIC16BIT || PORT_POWERPC
+    help
+      Enable native async/await syntax (requires asyncio or similar).
+
+config MICROPY_PY_BUILTINS_NOTIMPLEMENTED
+    bool "Enable NotImplemented singleton"
+    default y
+    help
+      Enable the NotImplemented object used in comparisons.
+
+config MICROPY_PY_BUILTINS_INPUT
+    bool "Enable input() function"
+    default y
+    help
+      Enable the built-in input() function.
+
+config MICROPY_PY_BUILTINS_HELP
+    bool "Enable help() function"
+    default y
+    select MICROPY_PY_BUILTINS_HELP_MODULES if MICROPY_MODULE_FROZEN_MPY || MICROPY_MODULE_FROZEN_STR
+    help
+      Enable the built-in help() function.
+
+config MICROPY_PY_BUILTINS_HELP_MODULES
+    bool "Include module information in help()"
+    depends on MICROPY_PY_BUILTINS_HELP
+    default n # Enabled automatically if frozen modules are used
+    help
+      List available modules when help() is called without arguments.
+
+config MICROPY_PY_BUILTINS_EVAL_EXEC
+    bool "Enable eval() and exec() functions"
+    default y
+    depends on MICROPY_ENABLE_COMPILER
+    help
+      Enable the eval() and exec() functions for dynamic code execution.
+
+config MICROPY_PY_BUILTINS_EXECFILE
+    bool "Enable execfile() function (MicroPython extension)"
+    default y if !PORT_CC3200
+    default n if PORT_CC3200
+    depends on MICROPY_ENABLE_COMPILER
+    help
+      Enable the MicroPython-specific execfile() function.
+
+config MICROPY_PY_TRACKED_ALLOC
+    bool "Enable tracked memory allocation (for SSL/BTstack)"
+    default y if MICROPY_SSL_MBEDTLS || MICROPY_BLUETOOTH_BTSTACK # Enabled if certain libs used
+    default n
+    help
+      Enable tracking of memory allocated via m_tracked_calloc/m_tracked_free.
+      Required by some libraries like mbedTLS and BTstack.
+
+config MICROPY_USE_INTERNAL_ERRNO
+    bool "Use internal errno implementation"
+    default y if PORT_STM32 || PORT_ESP8266 || PORT_RENESAS_RA
+    default n
+    help
+      Use MicroPython's internal list of errno values instead of relying on the
+      system's errno (e.g., from a C library). Required on some bare-metal ports.
+
+config MICROPY_SCHEDULER_STATIC_NODES
+    bool "Support static nodes in the scheduler"
+    depends on MICROPY_ENABLE_SCHEDULER
+    default y if PORT_STM32 || PORT_RENESAS_RA
+    default n
+    help
+      Allow statically allocated nodes (with C callbacks) to be scheduled.
+
+config MICROPY_ENABLE_SCHEDULER
+    bool "Enable the MicroPython scheduler"
+    default y
+    help
+      Enable the cooperative scheduler used for background tasks like
+      handling interrupts and running asyncio.
+
+config MICROPY_SCHEDULER_DEPTH
+    int "Scheduler queue depth"
+    depends on MICROPY_ENABLE_SCHEDULER
+    default 8 if PORT_STM32 || PORT_RENESAS_RA
+    default 64 # General default
+    help
+      Maximum number of items in the scheduler queue.
+      STM32 and Renesas RA ports reduce this default.

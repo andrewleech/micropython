@@ -1,0 +1,34 @@
+menu "Renesas RA Port Options"
+    depends on PORT_RENESAS_RA
+
+    comment "Renesas RA Specific Settings"
+
+    # Note: Many hardware features (Clock settings, Peripheral enables like USB,
+    #       Ethernet PHY, specific timer/serial instances) are configured via C defines
+    #       in mpconfigboard.h or potentially via the Renesas FSP Configuration tool,
+    #       not directly via Kconfig options here currently.
+
+    # Add potential future Renesas RA-specific Kconfig options here.
+    # Examples:
+    # config MICROPY_HW_ETHERNET_ENABLED
+    #    bool "Enable Ethernet MAC/PHY"
+    #    default n
+
+    comment "Common Option Defaults for Renesas RA"
+    # Note: Defaults for common options are generally handled in py/ or extmod/ Kconfig.
+    # Check common Kconfig files for specific default logic based on PORT_RENESAS_RA.
+    # Key defaults include:
+    # - MICROPY_ALLOC_PATH_MAX: 128
+    # - MICROPY_USE_INTERNAL_ERRNO: y
+    # - MICROPY_SCHEDULER_STATIC_NODES: y
+    # - MICROPY_SCHEDULER_DEPTH: 8
+    # - MICROPY_PY_SYS_PLATFORM: "renesas-ra"
+    # - MICROPY_PY_OS_DUPTERM: 3
+    # - MICROPY_PY_OS_DUPTERM_BUILTIN_STREAM: y
+    # - MICROPY_PY_TIME_GMTIME_LOCALTIME_MKTIME: y
+    # - MICROPY_PY_TIME_TIME_TIME_NS: y
+    # - MICROPY_PY_USSL: y (via mpconfigport.mk default? Needs check)
+    # - MICROPY_PY_UWEBSOCKET: y (via mpconfigport.mk default? Needs check)
+    # - MICROPY_PY_WEBREPL: y (via mpconfigport.mk default? Needs check)
+
+endmenu # Renesas RA Port Options

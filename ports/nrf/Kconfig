@@ -1,0 +1,94 @@
+menu "nRF Port Options"
+    depends on PORT_NRF
+
+    # --- nRF Specific Features --- #
+    comment "nRF Port Features"
+
+    config MICROPY_PY_NRF
+        bool "Enable nrf module"
+        default y
+        help
+          Enable the 'nrf' module providing nRF-specific functions, such as
+          accessing the UICR (User Information Configuration Registers).
+
+    config MICROPY_HW_ENABLE_INTERNAL_FLASH_STORAGE
+        bool "Enable internal flash for filesystem storage"
+        default y
+        help
+          Use a portion of the nRF SoC's internal flash memory for a filesystem,
+          typically accessible via `uos`.
+
+    config MICROPY_HW_ENABLE_RNG
+        bool "Enable Hardware Random Number Generator (RNG)"
+        default n
+        help
+          Enable the nRF's hardware Random Number Generator peripheral.
+          If enabled, `uos.urandom()` will use this as its source of randomness.
+
+    config MICROPY_MBFS
+        bool "Enable micro:bit filesystem (MBFS)"
+        depends on !MICROPY_VFS # Usually mutually exclusive with VFS
+        default n
+        help
+          Enable the simple read-only filesystem format used by the micro:bit.
+          This system stores Python scripts directly appended to the main firmware
+          image after a magic marker. Typically only used for micro:bit boards.
+          This is generally incompatible with VFS.
+
+    config MICROPY_PY_MUSIC
+        bool "Enable music module (micro:bit compatibility)"
+        default n
+        help
+          Enable the 'music' module providing pitch/duration based sound playback,
+          primarily included for compatibility with BBC micro:bit educational projects.
+          Requires a PWM output connected to a speaker or buzzer, configured by the board.
+
+    # --- nRF USB Device Options --- #
+    comment "USB Device Options"
+
+    config MICROPY_HW_ENABLE_USBDEV
+        bool "Enable USB Device support"
+        default n # Enabled by specific boards like nRF52840 Dongle
+        help
+          Enable the nRF's built-in USB device controller. Required for any USB
+          functionality like CDC (Serial), MSC (Mass Storage), or HID.
+
+    config MICROPY_HW_USB_CDC_1200BPS_TOUCH
+        bool "Enable 1200bps touch for USB CDC bootloader entry"
+        depends on MICROPY_HW_ENABLE_USBDEV
+        default n # Requires board support
+        help
+          Enable the feature where briefly setting the USB CDC serial bitrate
+          to 1200bps by the host computer triggers entry into the bootloader.
+          This requires specific support in the board's bootloader and hardware setup.
+
+    # --- Common Option Notes --- #
+    comment "Common Option Defaults for nRF"
+    # Note: Defaults for common options are generally handled in py/ or extmod/ Kconfig.
+    # Check common Kconfig files for specific default logic based on PORT_NRF / NRF51 / NRF52.
+    # Key defaults include:
+    # - MICROPY_STACK_CHECK: y
+    # - MICROPY_REPL_INFO: y
+    # - MICROPY_KBD_EXCEPTION: y
+    # - MICROPY_FLOAT_IMPL: float (None on nRF51)
+    # - MICROPY_ALLOC_GC_STACK_SIZE: 32 (nRF51), 64 (nRF52)
+    # - MICROPY_PY_SYS_PLATFORM: "nrf"
+    # - MICROPY_STREAMS_NON_BLOCK: y
+    # - MICROPY_CAN_OVERRIDE_BUILTINS: y
+    # - MICROPY_PY_OS_DUPTERM: 1
+    # - MICROPY_PY_OS_DUPTERM_STREAM_DETACHED_ATTACHED: y
+    # - MICROPY_PY_BUILTINS_HELP_MODULES: y
+    # - MICROPY_MODULE_BUILTIN_INIT: y
+    # - MICROPY_PY_MICROPYTHON_MEM_INFO: y
+    # - MICROPY_PY_SYS_MAXSIZE: y
+    # - MICROPY_PY_RANDOM_EXTRA_FUNCS: y
+
+endmenu # nRF Port Options
+
+# Define SoC series symbols for conditional logic (set by build system/board config)
+config SOC_SERIES_NRF51
+    bool
+config SOC_SERIES_NRF52
+    bool
+config SOC_SERIES_NRF91
+    bool

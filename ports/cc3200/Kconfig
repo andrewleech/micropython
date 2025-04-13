@@ -1,0 +1,74 @@
+menu "CC3200 Port Options"
+    depends on PORT_CC3200
+
+    comment "CC3200 Port Features"
+
+    config MICROPY_PORT_HAS_TELNET
+        bool "Enable Telnet server for REPL"
+        default y
+        select MICROPY_PY_NETWORK # Depends on networking
+        help
+          Enable the built-in Telnet server, allowing REPL access over the
+          network using a Telnet client.
+
+    config MICROPY_PORT_HAS_FTP
+        bool "Enable FTP server for file access"
+        default y
+        select MICROPY_PY_NETWORK # Depends on networking
+        select MICROPY_VFS # Depends on VFS
+        help
+          Enable the built-in FTP server, allowing filesystem access (upload,
+          download, list files) using an FTP client.
+          Requires VFS to be enabled.
+
+    comment "Default WLAN AP Configuration"
+
+    config MICROPY_PORT_WLAN_AP_SSID
+        string "Default WLAN AP SSID"
+        default "wipy-wlan"
+        help
+          The default Service Set IDentifier (SSID) or network name used
+          when the CC3200 device operates in Wi-Fi Access Point (AP) mode.
+
+    config MICROPY_PORT_WLAN_AP_KEY
+        string "Default WLAN AP Key (Password)"
+        default "www.wipy.io"
+        help
+          The default password (WPA key) used when the CC3200 device
+          operates in Wi-Fi Access Point (AP) mode with security enabled.
+
+    config MICROPY_PORT_WLAN_AP_SECURITY
+        # This needs mapping from SL_SEC_TYPE_* defines used in the code.
+        int "Default WLAN AP Security Type (0=Open, 2=WPA/WPA2)"
+        default 2 # Assuming SL_SEC_TYPE_WPA_WPA2 maps to 2
+        help
+          The default security type for the Wi-Fi Access Point mode.
+          Common values are 0 for Open (no security) and 2 for WPA/WPA2.
+          The specific value depends on the underlying TI SimpleLink SDK constants.
+
+    config MICROPY_PORT_WLAN_AP_CHANNEL
+        int "Default WLAN AP Channel"
+        range 1 13
+        default 5
+        help
+          The default Wi-Fi channel (1-13) used when the CC3200 device
+          operates in Access Point (AP) mode.
+
+    comment "Common Option Defaults for CC3200"
+    # Note: Defaults for common options are generally handled in py/ or extmod/ Kconfig.
+    # Check common Kconfig files for specific default logic based on PORT_CC3200.
+    # Key defaults include:
+    # - Many features disabled (incl. float, some compiler opts, some builtins)
+    # - MICROPY_PY_THREAD: y
+    # - MICROPY_PY_ERRNO: y
+    # - MICROPY_PY_ERRNO_ERRORCODE: n
+    # - MICROPY_PY_SELECT: y
+    # - MICROPY_PY_TIME: y
+    # - MICROPY_PY_TIME_GMTIME_LOCALTIME_MKTIME: y
+    # - MICROPY_PY_TIME_TIME_TIME_NS: y
+    # - MICROPY_VFS: y
+    # - MICROPY_VFS_FAT: y
+    # - MICROPY_FATFS_REENTRANT: y
+    # - MICROPY_PY_OS_DUPTERM: 1
+
+endmenu # CC3200 Port Options

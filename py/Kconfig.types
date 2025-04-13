@@ -1,0 +1,133 @@
+# Kconfig - Python Types
+
+comment "Built-in Types"
+
+config MICROPY_FLOAT_IMPL
+    choice
+        prompt "Floating point implementation"
+        default MICROPY_FLOAT_IMPL_NONE if PORT_NRF51
+        default MICROPY_FLOAT_IMPL_FLOAT if !PORT_ESP8266 && !PORT_NRF51
+        default MICROPY_FLOAT_IMPL_FLOAT if PORT_ESP8266 # ESP8266 also defaults to float
+        help
+          Select the C type used for floating point numbers.
+
+    config MICROPY_FLOAT_IMPL_NONE
+        bool "None (no floating point)"
+        help
+          Disable floating point support entirely.
+
+    config MICROPY_FLOAT_IMPL_FLOAT
+        bool "float (single precision)"
+        help
+          Use the C 'float' type (typically 32-bit IEEE 754).
+
+    config MICROPY_FLOAT_IMPL_DOUBLE
+        bool "double (double precision)"
+        help
+          Use the C 'double' type (typically 64-bit IEEE 754).
+          Increases code size and memory usage.
+
+    endchoice
+
+config MICROPY_PY_BUILTINS_FLOAT
+    bool "Enable float type"
+    default y if !MICROPY_FLOAT_IMPL_NONE
+    # Automatically disable if float impl is none
+    help
+      Enable the built-in float type and operations.
+
+config MICROPY_PY_BUILTINS_COMPLEX
+    bool "Enable complex type"
+    depends on MICROPY_PY_BUILTINS_FLOAT # Complex numbers require float
+    default y
+    help
+      Enable the built-in complex number type.
+
+config MICROPY_PY_BUILTINS_BYTES
+    bool "Enable bytes type"
+    default y
+    help
+      Enable the built-in bytes type.
+
+config MICROPY_PY_BUILTINS_BYTEARRAY
+    bool "Enable bytearray type"
+    default y if !PORT_PIC16BIT
+    default n if PORT_PIC16BIT
+    help
+      Enable the built-in bytearray type.
+
+config MICROPY_PY_BUILTINS_STR_UNICODE
+    bool "Enable unicode support in str"
+    default y
+    select MICROPY_WCHAR_SIGNED if !ARCH_XTENSA # Workaround for xtensa toolchain issues
+    help
+      Enable full unicode (UTF-8) support in strings.
+      If disabled, strings only support ASCII.
+
+config MICROPY_PY_BUILTINS_STR_CENTER
+    bool "Enable str.center() method"
+    default y if !PORT_CC3200
+    default n if PORT_CC3200
+    help
+      Enable the center() method for strings.
+
+config MICROPY_PY_BUILTINS_STR_PARTITION
+    bool "Enable str.partition() and str.rpartition() methods"
+    default y if !PORT_CC3200
+    default n if PORT_CC3200
+    help
+      Enable partition() and rpartition() methods for strings.
+
+config MICROPY_PY_BUILTINS_STR_SPLITLINES
+    bool "Enable str.splitlines() method"
+    default y if !PORT_CC3200
+    default n if PORT_CC3200
+    help
+      Enable the splitlines() method for strings.
+
+config MICROPY_PY_BUILTINS_MEMORYVIEW
+    bool "Enable memoryview type"
+    default y if !PORT_CC3200 && !PORT_PIC16BIT
+    default n if PORT_CC3200 || PORT_PIC16BIT
+    help
+      Enable the memoryview object.
+
+config MICROPY_PY_BUILTINS_SET
+    bool "Enable set type"
+    default y if !PORT_PIC16BIT
+    default n if PORT_PIC16BIT
+    help
+      Enable the built-in set type.
+
+config MICROPY_PY_BUILTINS_FROZENSET
+    bool "Enable frozenset type"
+    default y if !PORT_CC3200 && !PORT_PIC16BIT
+    default n if PORT_CC3200 || PORT_PIC16BIT
+    help
+      Enable the built-in frozenset type.
+
+config MICROPY_PY_BUILTINS_PROPERTY
+    bool "Enable property decorator/type"
+    default y if !PORT_PIC16BIT
+    default n if PORT_PIC16BIT
+    help
+      Enable the @property decorator and property() built-in.
+
+config MICROPY_PY_BUILTINS_SLICE
+    bool "Enable slice object"
+    default y if !PORT_PIC16BIT
+    default n if PORT_PIC16BIT
+    help
+      Enable slice objects (e.g., used in __getitem__).
+
+config MICROPY_PY_BUILTINS_RANGE_BINOP
+    bool "Enable binary operations on range objects"
+    default n
+    help
+      Allow binary operations like `==` between range objects.
+
+config MICROPY_PY_BUILTINS_REVERSED
+    bool "Enable reversed() built-in function"
+    default y
+    help
+      Enable the reversed() built-in function for iterators.

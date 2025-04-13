@@ -1,0 +1,31 @@
+menu "MIMXRT Port Options"
+    depends on PORT_MIMXRT
+
+    comment "MIMXRT Specific Features"
+    # Add MIMXRT-specific Kconfig options here. Examples might include:
+    # - SDRAM configuration
+    # - Ethernet PHY selection
+    # - Specific peripheral enables not covered globally
+
+    # config MICROPY_HW_SDRAM_SIZE_MB
+    #    int "SDRAM Size (MB)"
+    #    default 32
+    #    help
+    #      Configure the size of the external SDRAM if present.
+
+    # config MICROPY_HW_ETH_PHY
+    #    choice
+    #        prompt "Ethernet PHY"
+    #        default MICROPY_HW_ETH_PHY_LAN8720
+    #    config MICROPY_HW_ETH_PHY_LAN8720
+    #        bool "LAN8720"
+    #    config MICROPY_HW_ETH_PHY_KSZ8081
+    #        bool "KSZ8081"
+    #    endchoice
+
+    comment "Common Option Defaults for MIMXRT"
+    # Note: Defaults for common options are generally handled in py/ or extmod/ Kconfig.
+    # MIMXRT port typically enables a rich set of features.
+    # Check common Kconfig files for specific default logic.
+
+endmenu # MIMXRT Port Options

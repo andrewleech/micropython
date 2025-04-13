@@ -1,0 +1,31 @@
+menu "PIC16BIT Port Options"
+    depends on PORT_PIC16BIT
+
+    comment "PIC16BIT Specific Settings"
+
+    # Currently, this port has minimal features enabled and few specific options.
+    # Most configuration is handled via mpconfigport.h and the default settings
+    # in the common Kconfig files (many features are disabled by default for PIC16BIT).
+
+    # Add potential future PIC16BIT-specific Kconfig options here.
+    # Examples:
+    # config MICROPY_HW_UART_PORT
+    #    int "UART Port Number for REPL"
+    #    default 1
+
+    comment "Common Option Defaults for PIC16BIT"
+    # Note: Defaults for common options are generally handled in py/ or extmod/ Kconfig.
+    # Check common Kconfig files for specific default logic based on PORT_PIC16BIT.
+    # Key defaults include:
+    # - Many features disabled (compiler opts, many builtins, float, io, collections, etc.)
+    # - MICROPY_ALLOC_PATH_MAX: 64
+    # - MICROPY_MEM_STATS: n
+    # - MICROPY_HELPER_LEXER_UNIX: n
+    # - MICROPY_ENABLE_SOURCE_LINE: n
+    # - MICROPY_ENABLE_DOC_STRING: n
+    # - MICROPY_ERROR_REPORTING: TERSE
+    # - MICROPY_PY_GC: y
+    # - MICROPY_FLOAT_IMPL: NONE
+    # - MICROPY_CPYTHON_COMPAT: n
+
+endmenu # PIC16BIT Port Options

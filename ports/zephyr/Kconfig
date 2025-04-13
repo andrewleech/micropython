@@ -41,6 +41,8 @@ config MICROPY_VFS_LFS1
 config MICROPY_VFS_LFS2
 	bool "LittleFs version 2 file system"
 
+
 endmenu # MicroPython Options
 
-source "Kconfig.zephyr"
+# Kconfig.zephyr is typically sourced by Zephyr's build system, not directly here.
+# source "Kconfig.zephyr"

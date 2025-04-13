@@ -1,0 +1,64 @@
+menu "SAMD Port Options"
+    depends on PORT_SAMD
+
+    comment "SAMD Specific Settings"
+
+    config MICROPY_HW_CODESIZE
+        string "Available Code Size (e.g., 184K, 368K)"
+        default "184K" if SOC_SERIES_SAMD21 # Default for SAMD21
+        default "368K" if SOC_SERIES_SAMD51 # Default for SAMD51
+        help
+          Specifies the approximate available code size on the target MCU.
+          This influences which features (like frozen modules) are included
+          by default based on the MCU series.
+          (This is usually set automatically by the build system based on the selected MCU).
+
+    config MICROPY_HW_MCUFLASH
+        bool "Use internal MCU flash for primary filesystem"
+        depends on MICROPY_VFS
+        default y if !(MICROPY_HW_QSPIFLASH || MICROPY_HW_SPIFLASH)
+        help
+            Use a portion of the internal flash memory of the SAMD MCU for
+            the primary filesystem (usually mounted at "/").
+            This is the default filesystem location if no external QSPI or SPI
+            flash is configured for the board.
+
+    # Placeholders for board-specific QSPI/SPI flash config
+    # These would typically be selected/enabled by the board's Kconfig fragment
+    # or mpconfigboard.h/mk based on hardware presence.
+    config MICROPY_HW_QSPIFLASH
+        bool "QSPI Flash Chip Present"
+        default n
+        help
+          Indicates that an external QSPI flash chip is present and configured
+          on the board, potentially for use as a filesystem or for other storage.
+
+    config MICROPY_HW_SPIFLASH
+        bool "SPI Flash Chip Present"
+        default n
+        help
+          Indicates that an external SPI flash chip is present and configured
+          on the board, potentially for use as a filesystem or for other storage.
+
+    # Add other SAMD specific options here, e.g.
+    # config MICROPY_HW_ENABLE_SERCOM_ANALOG_INPUT
+    #    bool "Enable Analog Input on SERCOM pads"
+    #    default n
+
+    comment "Common Option Defaults for SAMD"
+    # Note: Defaults for common options are generally handled in py/ or extmod/ Kconfig.
+    # Check common Kconfig files for specific default logic based on PORT_SAMD.
+    # Key defaults include:
+    # - MICROPY_PY_BUILTINS_COMPLEX: n
+    # - MICROPY_ERROR_REPORTING: TERSE
+    # - MICROPY_PY_OS_DUPTERM: 3
+    # - MICROPY_PY_TIME_GMTIME_LOCALTIME_MKTIME: y
+    # - MICROPY_PY_TIME_TIME_TIME_NS: y
+
+endmenu # SAMD Port Options
+
+# Define SoC series symbols for conditional logic (set by build system/board config)
+config SOC_SERIES_SAMD21
+    bool
+config SOC_SERIES_SAMD51
+    bool

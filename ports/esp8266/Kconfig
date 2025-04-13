@@ -1,0 +1,27 @@
+menu "ESP8266 Port Options"
+    depends on PORT_ESP8266
+
+# Common options below are defined in py/ or extmod/ Kconfig files.
+# Default values for ESP8266 are set there using 'if PORT_ESP8266'.
+# Relevant common options and their ESP8266 defaults:
+# - Most MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES features are disabled
+# - MICROPY_FLOAT_IMPL: float
+# - MICROPY_PY_LWIP: y
+# - MICROPY_PY_LWIP_SOCK_RAW: y
+# - MICROPY_PY_WEBSOCKET: y
+# - MICROPY_PY_WEBREPL: y
+# - MICROPY_PY_OS_DUPTERM: 2
+# - MICROPY_PY_OS_UNAME_RELEASE_DYNAMIC: y
+# - MICROPY_PY_WEBREPL_STATIC_FILEBUF: y
+# - MICROPY_PY_STR_BYTES_CMP_WARN: y
+# - MICROPY_STREAMS_POSIX_API: y
+
+# Port-specific options:
+config MICROPY_ESP8266_APA102
+    bool "Enable APA102 driver support"
+    depends on PORT_ESP8266
+    default y
+    help
+      Include support for driving APA102 RGB LEDs using hardware SPI on ESP8266.
+
+endmenu # ESP8266 Port Options

@@ -1,0 +1,179 @@
+# Kconfig - Memory Management
+
+comment "Garbage Collection"
+
+config MICROPY_ENABLE_GC
+    # This is defined in py/Kconfig.features now, keep dependency here
+    # bool "Enable Garbage Collector (GC)"
+    # default y
+    # help
+    #   Enables the mark-and-sweep garbage collector to reclaim unused memory.
+    #   Essential for general Python usage. Disabling severely limits usability
+    #   and requires manual memory management for any allocations.
+    pass
+
+config MICROPY_GC_ALLOC_THRESHOLD
+    int "GC allocation threshold (0=auto)"
+    depends on MICROPY_ENABLE_GC
+    default 0
+    help
+      Controls how many memory blocks can be allocated before an automatic
+      garbage collection cycle is triggered. Setting to 0 enables automatic
+      threshold adjustment based on heap size and usage, which is generally
+      recommended.
+
+config MICROPY_GC_HEAP_SIZE
+    hex "Default GC heap size (bytes) if not set by port (0=port must set)"
+    depends on MICROPY_ENABLE_GC
+    default 0
+    help
+      The default size of the Garbage Collector heap in bytes. This value is
+      used only if the specific port does not define its own heap size.
+      Ports typically override this based on available RAM. Setting to 0 here
+      means the port *must* define the heap size (e.g., via linker script
+      or board configuration).
+
+config MICROPY_GC_STACK_ENTRY_TYPE
+    # Cannot be configured via Kconfig easily, depends on calculated heap size
+    # and potentially MICROPY_HW_SDRAM_SIZE.
+    # default uint16_t if !MICROPY_HW_SDRAM_SIZE # STM32 default
+    # default uint32_t if MICROPY_HW_SDRAM_SIZE # STM32 default
+    pass
+
+config MICROPY_GC_CONSERVATIVE_CLEAR
+    bool "Clear GC memory before use (performance cost)"
+    depends on MICROPY_ENABLE_GC
+    default y if !PORT_UNIX # Unix port often uses system malloc which clears
+    default n if PORT_UNIX
+    help
+      Always clear memory to zero when it is allocated or reallocated by
+      the garbage collector. Helps prevent potential issues with stale pointers
+      holding onto old data, but incurs a performance cost for the clearing operation.
+      Can be disabled if the underlying allocator guarantees zeroed memory
+      (like standard calloc, often used by the Unix port) or if the small risk
+      of issues from stale pointers is acceptable for performance gains.
+
+config MICROPY_GC_SPLIT_HEAP
+    bool "(Experimental) Split GC heap into fixed-size pools"
+    depends on MICROPY_ENABLE_GC
+    default n
+    help
+      Experimental feature to divide the GC heap into multiple pools, each
+      managing blocks of a fixed size. This might improve fragmentation
+      in some scenarios but is generally less flexible than a single heap.
+
+config MICROPY_GC_SPLIT_HEAP_AUTO
+    bool "(Experimental) Automatically determine GC split heap sizes"
+    depends on MICROPY_GC_SPLIT_HEAP
+    default y
+    help
+      If the split heap is enabled, this option allows the runtime to
+      automatically determine the sizes and number of pools based on usage patterns.
+
+config MICROPY_GC_MULTI_HEAP
+    bool "(Experimental) Enable multiple non-contiguous GC heaps"
+    depends on MICROPY_ENABLE_GC
+    default n
+    help
+      Experimental feature allowing multiple, potentially non-contiguous
+      memory regions (e.g., internal RAM and external PSRAM) to be used
+      for the GC heap. Requires port-specific support.
+
+comment "Memory Allocation Tuning"
+
+config MICROPY_ALLOC_PATH_MAX
+    int "Maximum path length for filesystem operations"
+    default 64 if PORT_PIC16BIT
+    default 128 if PORT_STM32 || PORT_ESP8266 || PORT_RENESAS_RA
+    default 256 # General default
+    help
+      Maximum length (in characters) of file paths supported by the VFS layer
+      and related modules like 'os'. Affects buffer sizes allocated for paths.
+      Reduced on some ports (STM32, ESP8266, Renesas RA, PIC16BIT) to save RAM.
+      The Unix port uses the system's PATH_MAX.
+
+config MICROPY_ALLOC_PARSE_CHUNK_INIT
+    int "Initial allocation size for parser chunks (bytes)"
+    default 64
+    help
+      Initial size in bytes allocated for chunks used by the parser.
+      Smaller values might lead to more frequent reallocations during parsing
+      of complex code, while larger values might waste memory initially.
+
+config MICROPY_MEM_STATS
+    bool "Enable memory statistics (gc.mem_alloc/free)"
+    default y if PORT_QEMU
+    default n if PORT_PIC16BIT || PORT_POWERPC
+    default n # Usually disabled by default, enabled per-port for debugging
+    help
+      Enable runtime tracking and reporting of memory allocation statistics,
+      accessible via functions like `gc.mem_alloc()` and `gc.mem_free()`.
+      Adds some overhead, primarily intended for debugging memory usage.
+
+config MICROPY_MALLOC_USES_ALLOCATED_SIZE
+    bool "Assume malloc tracks allocated block size"
+    default y if PORT_QEMU
+    default n
+    help
+      Assume the underlying C malloc implementation (if used by the port
+      or libraries) can report the actual allocated size of a memory block
+      (e.g., via `malloc_usable_size`). This is needed for accurate memory
+      statistics (`MICROPY_MEM_STATS`) if the C heap is used directly by
+      some components alongside the MicroPython GC heap.
+
+comment "QSTR (Interned Strings) Settings"
+
+config MICROPY_QSTR_BYTES_IN_HASH
+    int "Bytes stored in qstr hash (1 or 2)"
+    range 1 2
+    default 1
+    help
+      Number of bytes of the string hash stored alongside the qstr entry.
+      Using 1 byte saves RAM but increases the chance of hash collisions,
+      which slightly slows down string lookups in the worst case.
+      Using 2 bytes uses more RAM but reduces collision probability.
+
+config MICROPY_QSTR_EXTRA_POOL
+    string "Qstr pool implementation for frozen strings"
+    default "mp_qstr_frozen_const_pool"
+    help
+      Specify the qstr pool implementation to use specifically for frozen strings.
+      The default `mp_qstr_frozen_const_pool` is suitable for strings stored in
+      read-only memory (ROM).
+
+config MICROPY_QSTR_DUPLICATE_LAST_BYTES
+    int "Number of trailing bytes stored for qstr duplicate check"
+    default 0
+    help
+      Store the last N bytes of a qstr to speed up detection of duplicate strings
+      during the interning process (qstr creation). A value of 0 disables this
+      optimization. Using > 0 may speed up compilation slightly but uses
+      extra RAM to store these trailing bytes for every interned string.
+
+comment "ROM/Code Options"
+
+config MICROPY_PERSISTENT_CODE_LOAD
+    bool "Support loading persistent code (.mpy files)"
+    default y
+    help
+      Enable the ability to load and execute pre-compiled bytecode from
+      .mpy files (either frozen or loaded from a filesystem).
+
+config MICROPY_PERSISTENT_CODE_SAVE
+    bool "Support saving persistent code (for mpy-cross)"
+    depends on MICROPY_PERSISTENT_CODE_LOAD # Saving implies loading capability
+    default y # Typically enabled for mpy-cross, disabled on device
+    help
+      Enable the ability to generate .mpy files. This is primarily needed
+      for the `mpy-cross` compiler, not usually for target device firmware.
+      Adds metadata overhead to code objects.
+
+config MICROPY_ROM_TEXT_COMPRESSION
+    bool "Enable compression of frozen ROM text data"
+    default y if PORT_ALIF
+    default n
+    help
+      Compress certain frozen data structures (like docstrings, error messages)
+      using a simple dictionary-based compression algorithm. This saves ROM space
+      but requires extra RAM for the compression dictionary at runtime and adds
+      a small overhead for decompression when the data is accessed.

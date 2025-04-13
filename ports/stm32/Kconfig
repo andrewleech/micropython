@@ -1,0 +1,58 @@
+menu "STM32 Port Options"
+    depends on PORT_STM32
+
+# Common options below are defined in py/ or extmod/ Kconfig files.
+# Default values for STM32 are set there using 'if PORT_STM32'.
+# Relevant common options and their STM32 defaults:
+# - MICROPY_FLOAT_IMPL: float (can be board overridden)
+# - MICROPY_PY_THREAD: n
+# - MICROPY_PY_NETWORK: y
+# - MICROPY_PY_NETWORK_PPP_LWIP: n
+# - MICROPY_PY_SOCKET: y (if MICROPY_PY_NETWORK)
+# - MICROPY_VFS_FAT: y
+# - MICROPY_VFS_ROM: y (if HW ROMFS enabled)
+# - MICROPY_HW_ENABLE_RNG: y (used by uos.urandom default)
+# - MICROPY_PY_LWIP_SOCK_RAW: y
+# - MICROPY_PY_WEBSOCKET: y (if lwIP)
+# - MICROPY_PY_WEBREPL: y (if lwIP)
+# - MICROPY_PY_OS_DUPTERM: 3
+# - MICROPY_PY_OS_DUPTERM_BUILTIN_STREAM: y
+# - MICROPY_PY_OS_DUPTERM_STREAM_DETACHED_ATTACHED: y
+# - MICROPY_FATFS_ENABLE_LFN: n
+
+# Port-specific options:
+config MBOOT_ENABLE_PACKING
+    bool "Enable Mboot firmware packing (encryption/signing)"
+    default n
+    help
+      Enable support for encrypted and/or signed firmware updates using Mboot.
+      Requires MBOOT_PACK_KEYS_FILE to be defined, usually in the board config.
+
+config MBOOT_PACK_CHUNKSIZE
+    int "Mboot packing chunk size"
+    depends on MBOOT_ENABLE_PACKING
+    default 16384
+    help
+      Chunk size used for encrypting/signing firmware for Mboot.
+      Must match the Mboot configuration.
+
+config MBOOT_PACK_KEYS_FILE
+    string "Mboot packing keys file"
+    depends on MBOOT_ENABLE_PACKING
+    default "$(BOARD_DIR)/mboot_keys.h"  # This won't work directly, needs translation in Makefile
+    help
+      Path to the header file containing keys for Mboot firmware packing.
+      The Makefile needs to translate this Kconfig string path into a usable Make variable.
+
+    config MICROPY_HW_ENABLE_ISR_UART_FLASH_FUNCS_IN_RAM
+        bool "Place ISR/UART/Flash functions in RAM"
+        default n
+        help
+            Place critical interrupt handlers, UART drivers, and flash programming
+            functions into RAM. This is sometimes necessary if these functions
+            need to run while the flash is being modified or cannot be accessed,
+            or for performance reasons. Increases RAM usage.
+
+    # Add other truly STM32-specific Kconfig options here.
+
+endmenu # STM32 Port Options

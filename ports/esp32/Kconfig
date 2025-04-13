@@ -1,0 +1,35 @@
+menu "ESP32 Port Options"
+    depends on PORT_ESP32
+
+    comment "ESP32 Specific Settings"
+
+    # Note: Many core ESP32 features (CPU freq, Flash/RAM config, WiFi, Bluetooth,
+    #       peripherals like TWAI/CAN, I2S, etc.) are configured via the ESP-IDF
+    #       Kconfig system (usually run via `idf.py menuconfig`), not directly here.
+    #       This file mainly controls MicroPython-level integration or options
+    #       not covered by IDF's Kconfig.
+
+    config MICROPY_HW_ENABLE_SDCARD
+        bool "Enable SD Card Host driver (sdmmc_host)"
+        default n
+        help
+          Enable the ESP-IDF SD Card Host driver (`sdmmc_host`) for SD card access
+          (typically via SDIO or SPI, depending on board hardware).
+          Requires appropriate pins configured in the board files and enabling
+          SD/MMC support in the ESP-IDF configuration.
+          If enabled, allows mounting SD cards in the VFS.
+
+    # Example of a potential future ESP32-specific option:
+    # config MICROPY_ESP32_SPIRAM_SUPPORT
+    #    bool "Enable PSRAM/SPIRAM Support"
+    #    default n # Usually set via IDF Kconfig
+    #    help
+    #      Configure MicroPython heap to utilize available PSRAM/SPIRAM.
+    #      Requires PSRAM to be enabled and configured in ESP-IDF Kconfig.
+
+    comment "Common Option Defaults for ESP32"
+    # Common options are defined in py/ or extmod/. Defaults are generally
+    # set based on ESP-IDF Kconfig or standard MicroPython levels.
+    # Check common Kconfig files for specific default logic.
+
+endmenu # ESP32 Port Options

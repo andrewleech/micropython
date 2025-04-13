@@ -1,0 +1,23 @@
+menu "WebAssembly Port Options"
+    depends on PORT_WEBASSEMBLY
+
+    comment "WebAssembly Specific Settings"
+
+    # This port runs in a web browser or Node.js environment using Emscripten.
+    # Configuration is primarily via mpconfigport.h and Emscripten build flags.
+
+    # Add potential future WebAssembly-specific Kconfig options here.
+    # Examples might include:
+    # config MICROPY_WASM_NODEJS
+    #    bool "Target Node.js environment"
+    #    default n
+    # config MICROPY_WASM_FETCH_ENABLED
+    #    bool "Enable Fetch API support"
+    #    default y
+
+    comment "Common Option Defaults for WebAssembly"
+    # Note: Defaults for common options are generally handled in py/ or extmod/ Kconfig.
+    # WebAssembly likely enables a rich feature set similar to Unix.
+    # Check common Kconfig files for specific default logic based on PORT_WEBASSEMBLY.
+
+endmenu # WebAssembly Port Options

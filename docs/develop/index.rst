@@ -19,6 +19,7 @@ MicroPython to a new platform and implementing a core MicroPython library.
    memorymgt.rst
    library.rst
    optimizations.rst
+   kconfig.rst
    qstr.rst
    maps.rst
    publiccapi.rst

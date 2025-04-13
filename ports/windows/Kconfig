@@ -1,0 +1,37 @@
+menu "Windows Port Options"
+    depends on PORT_WINDOWS # Assuming PORT_WINDOWS will be the symbol for this port
+
+    # --- Windows Specific Features --- #
+    comment "Windows Port Features"
+
+    config MICROPY_FORCE_32BIT
+        bool "Force 32-bit build on 64-bit host"
+        default n
+        help
+          Compile the Windows port as a 32-bit binary even when the host
+          system is 64-bit. Requires appropriate compiler support (e.g., /MACHINE:X86 for MSVC).
+
+    choice
+        prompt "Readline Implementation"
+        default MICROPY_USE_READLINE_MPY
+        help
+          Select the readline implementation for the REPL.
+
+    config MICROPY_USE_READLINE_NONE
+        bool "None (simple input)"
+        help
+          Disable readline features, use basic standard input.
+
+    config MICROPY_USE_READLINE_MPY
+        bool "MicroPython readline"
+        help
+          Use the built-in MicroPython readline implementation.
+
+    endchoice
+
+    # --- Common Option Notes --- #
+    comment "Common Option Defaults for Windows"
+    # Note: Defaults for common options are generally handled in py/ or extmod/ Kconfig.
+    # Windows port typically aligns closely with full features.
+
+endmenu # Windows Port Options

@@ -1,0 +1,29 @@
+# Kconfig for Drivers
+
+menu "Shared Drivers"
+
+comment "Generic Driver Options"
+
+config MICROPY_HW_ENABLE_SDCARD
+    bool "Enable generic SD Card driver (SPI)"
+    default n # Usually enabled by ports needing it
+    help
+      Include the generic SD Card driver layer which uses an SPI interface.
+      Requires the port to provide low-level SPI communication functions
+      and GPIO control for the chip select (CS) pin.
+      If selected, the `sdcard` module and VFS support for SD cards may be
+      enabled by the port.
+
+config MICROPY_HW_SPIFLASH_ENABLE_CACHE
+    bool "Enable cache for generic SPI Flash driver"
+    default y
+    help
+      Enable a RAM-based cache for the generic SPI Flash driver.
+      This can improve performance for filesystem operations on SPI flash
+      by reducing the number of physical read/write operations, at the cost
+      of increased RAM usage for the cache buffer.
+
+# Add other generic driver options here if needed
+# e.g., options for generic I2C drivers, display drivers, etc.
+
+endmenu # Shared Drivers

@@ -1,0 +1,199 @@
+# Kconfig - Built-in Modules
+
+comment "Built-in Modules"
+
+config MICROPY_PY_ARRAY
+    bool "Enable array module"
+    default y if !PORT_PIC16BIT
+    default n if PORT_PIC16BIT
+    select MICROPY_PY_BUILTINS_BYTEARRAY # array relies on bytearray implementation details
+    help
+      Enable the 'array' module for efficient numeric arrays.
+
+config MICROPY_PY_ARRAY_SLICE_ASSIGN
+    bool "Enable slice assignment for arrays"
+    depends on MICROPY_PY_ARRAY
+    default y if !PORT_CC3200
+    default n if PORT_CC3200
+    help
+      Allow assigning to slices of array objects.
+
+config MICROPY_PY_COLLECTIONS
+    bool "Enable collections module"
+    default y if !PORT_PIC16BIT
+    default n if PORT_PIC16BIT
+    help
+      Enable the 'collections' module.
+
+config MICROPY_PY_COLLECTIONS_DEQUE
+    bool "Enable collections.deque"
+    depends on MICROPY_PY_COLLECTIONS
+    default y
+    help
+      Enable the deque object in the collections module.
+
+config MICROPY_PY_COLLECTIONS_ORDEREDDICT
+    bool "Enable collections.OrderedDict"
+    depends on MICROPY_PY_COLLECTIONS
+    default y if !PORT_CC3200
+    default n if PORT_CC3200
+    help
+      Enable the OrderedDict object in the collections module.
+      Note: Since Python 3.7, standard dicts are ordered, making this
+      less critical unless specific OrderedDict behavior is needed.
+
+config MICROPY_PY_COLLECTIONS_NAMEDTUPLE
+    bool "Enable collections.namedtuple"
+    depends on MICROPY_PY_COLLECTIONS
+    default y
+    select MICROPY_PY_SYS_MAXSIZE # namedtuple uses sys.maxsize
+    help
+      Enable the namedtuple factory function in the collections module.
+
+config MICROPY_PY_MATH
+    bool "Enable math module"
+    default y if !PORT_PIC16BIT && !PORT_POWERPC
+    default n if PORT_PIC16BIT || PORT_POWERPC
+    select MICROPY_PY_BUILTINS_FLOAT if !MICROPY_FLOAT_IMPL_NONE # math needs float
+    help
+      Enable the 'math' module for floating-point math functions.
+
+config MICROPY_PY_CMATH
+    bool "Enable cmath module"
+    depends on MICROPY_PY_BUILTINS_COMPLEX # cmath needs complex
+    default y if !PORT_PIC16BIT && !PORT_POWERPC
+    default n if PORT_PIC16BIT || PORT_POWERPC
+    help
+      Enable the 'cmath' module for complex number math functions.
+
+config MICROPY_PY_IO
+    bool "Enable io module"
+    default y if !PORT_PIC16BIT && !PORT_POWERPC
+    default n if PORT_PIC16BIT || PORT_POWERPC
+    help
+      Enable the 'io' module, including StringIO and BytesIO.
+
+config MICROPY_PY_IO_FILEIO
+    bool "Enable io.FileIO"
+    depends on MICROPY_PY_IO
+    default y # Usually enabled on ports with filesystem
+    help
+      Enable io.FileIO for raw file access. Requires VFS support.
+
+config MICROPY_PY_STRUCT
+    bool "Enable struct module"
+    default y if !PORT_PIC16BIT
+    default n if PORT_PIC16BIT
+    help
+      Enable the 'struct' module for packing/unpacking binary data.
+
+config MICROPY_PY_GC
+    bool "Enable gc module"
+    depends on MICROPY_ENABLE_GC
+    default y if !PORT_PIC16BIT
+    default n if PORT_PIC16BIT
+    help
+      Enable the 'gc' module for interacting with the garbage collector.
+
+config MICROPY_PY_SYS
+    bool "Enable sys module"
+    default y if !PORT_PIC16BIT
+    default n if PORT_PIC16BIT
+    help
+      Enable the 'sys' module for system-specific parameters and functions.
+
+config MICROPY_PY_SYS_MAXSIZE
+    bool "Enable sys.maxsize constant"
+    depends on MICROPY_PY_SYS
+    default y
+    help
+      Enable the sys.maxsize constant.
+
+config MICROPY_PY_SYS_MODULES
+    bool "Enable sys.modules dictionary"
+    depends on MICROPY_PY_SYS
+    default y
+    help
+      Enable the sys.modules dictionary.
+
+config MICROPY_PY_SYS_EXIT
+    bool "Enable sys.exit() function"
+    depends on MICROPY_PY_SYS
+    default y
+    help
+      Enable the sys.exit() function.
+
+config MICROPY_PY_SYS_STDFILES
+    bool "Enable sys.stdin/stdout/stderr stream objects"
+    depends on MICROPY_PY_SYS
+    default y
+    help
+      Enable the standard I/O stream objects in the sys module.
+
+config MICROPY_PY_SYS_STDIO_BUFFER
+    bool "Enable buffering on sys stdio streams"
+    depends on MICROPY_PY_SYS_STDFILES
+    default n # Often enabled per-port
+    help
+      Enable buffering for sys.stdin/stdout/stderr.
+
+config MICROPY_PY_SYS_PLATFORM
+    string "Platform identifier string (sys.platform)"
+    depends on MICROPY_PY_SYS
+    default "nrf" if PORT_NRF
+    default "samd" if PORT_SAMD
+    default "renesas-ra" if PORT_RENESAS_RA
+    default "qemu" if PORT_QEMU
+    default "unix" if PORT_UNIX
+    default "pyboard" if PORT_STM32
+    default "esp8266" if PORT_ESP8266
+    default "esp32" if PORT_ESP32
+    # Add other ports here...
+    default "unknown"
+    help
+      The string returned by sys.platform, identifying the OS/platform.
+
+config MICROPY_PY_ERRNO
+    bool "Enable errno module"
+    default y
+    select MICROPY_PY_IO # errno uses io module
+    help
+      Enable the 'errno' module for POSIX error codes.
+
+config MICROPY_PY_ERRNO_ERRORCODE
+    bool "Enable errno.errorcode dictionary"
+    depends on MICROPY_PY_ERRNO
+    default y
+    help
+      Include the errno.errorcode dictionary mapping codes to names.
+
+config MICROPY_PY_THREAD
+    bool "Enable _thread module"
+    default n # Requires port support
+    select MICROPY_ENABLE_SCHEDULER # Threads rely on the scheduler
+    help
+      Enable the '_thread' module for multi-threading. Requires
+      port-specific implementation and locking.
+
+config MICROPY_PY_THREAD_GIL
+    bool "Enable Global Interpreter Lock (GIL)"
+    depends on MICROPY_PY_THREAD
+    default y
+    help
+      Use a GIL to protect access to MicroPython state in multi-threading.
+      Disabling requires careful handling in C extensions.
+
+config MICROPY_PY_THREAD_GIL_VM_DIVISOR
+    int "GIL VM execution divisor"
+    depends on MICROPY_PY_THREAD_GIL
+    default 32
+    help
+      Controls how often the GIL is released during bytecode execution
+      (every N opcodes). Lower values increase thread switching frequency.
+
+config MICROPY_PY_UERRNO # Alias for MICROPY_PY_ERRNO
+    default y if MICROPY_PY_ERRNO
+    bool
+    # This is just an alias, controlled by MICROPY_PY_ERRNO
+
+endmenu # Core Modules

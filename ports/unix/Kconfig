@@ -1,0 +1,132 @@
+menu "Unix Port Options"
+    depends on PORT_UNIX
+
+    comment "Build Options"
+
+    config MICROPY_FORCE_32BIT
+        bool "Force 32-bit build on 64-bit host"
+        default n
+        help
+          Compile the Unix port as a 32-bit binary even when the host
+          system is 64-bit. Requires appropriate compiler support (e.g., -m32 flag).
+
+    config MICROPY_STANDALONE
+        bool "Build standalone (use bundled libraries)"
+        default n
+        help
+          Avoid using system-installed libraries like libffi, use the versions
+          bundled as submodules within the MicroPython source tree instead.
+          Useful for creating more self-contained binaries or when system libraries
+          are unavailable or incompatible.
+
+    config MICROPY_UNIX_COVERAGE
+        bool "Enable code coverage build (for development)"
+        default n
+        help
+          Build the unix port with gcov instrumentation (`-fprofile-arcs -ftest-coverage`)
+          for code coverage analysis. This is intended for development and testing.
+
+    comment "REPL Configuration"
+
+    choice
+        prompt "Readline Implementation"
+        default MICROPY_USE_READLINE_MPY
+        help
+          Select the readline implementation for the interactive REPL, providing
+          features like history and line editing.
+
+    config MICROPY_USE_READLINE_NONE
+        bool "None (simple input)"
+        help
+          Disable readline features entirely. Use basic standard input with no
+          history or advanced editing capabilities.
+
+    config MICROPY_USE_READLINE_MPY
+        bool "MicroPython readline"
+        help
+          Use the built-in MicroPython readline implementation, providing basic
+          history and emacs-style line editing (if enabled).
+
+    # Option for system readline could be added here if needed
+    # config MICROPY_USE_READLINE_SYSTEM
+    #     bool "System readline"
+    #     help
+    #       Use the system's readline library (e.g., GNU Readline). Requires
+    #       the corresponding development library (e.g., libreadline-dev) installed.
+    #       May offer more advanced features but adds an external dependency.
+
+    endchoice
+
+    comment "Optional Modules"
+
+    config MICROPY_PY_FFI
+        bool "Enable ffi module (Foreign Function Interface)"
+        default y
+        select MICROPY_LIB_LIBFFI if !MICROPY_STANDALONE
+        help
+          Enable the 'ffi' module to load shared libraries and call C functions
+          directly from Python code. If MICROPY_STANDALONE is not set,
+          requires the libffi development library installed on the host system.
+
+    config MICROPY_PY_JNI
+        bool "Enable jni module (Java Native Interface - Experimental)"
+        default n
+        help
+          Enable the experimental 'jni' module for basic interaction with a
+          Java Virtual Machine (JVM) using the Java Native Interface (JNI).
+          Requires a JDK installed and configured.
+
+    config MICROPY_PY_TERMIOS
+        bool "Enable termios module (POSIX terminal control)"
+        default y
+        help
+          Enable the 'termios' module, providing an interface to the POSIX
+          terminal control API for manipulating TTY settings.
+
+    config MICROPY_PY_SOCKET
+        bool "Enable socket module (standard networking)"
+        depends on MICROPY_PY_NETWORK # Depends on network stack
+        default y
+        help
+          Enable the standard 'socket' module for network programming.
+          On the Unix port, this uses the standard POSIX socket API.
+
+    comment "Port-specific Behaviour"
+
+    config MICROPY_EPOCH_IS_1970
+        bool "VFS stat functions use 1970 epoch"
+        default y
+        help
+          Configure VFS stat functions (like the time fields in `uos.stat()`)
+          to return time values based on the standard Unix epoch (seconds since 1970-01-01).
+          If disabled, the epoch defaults to 2000-01-01.
+
+    config MICROPY_SELECT_REMAINING_TIME
+        bool "Assume select() updates timeout on EINTR"
+        default y
+        help
+          Assume that the `select()` system call, when interrupted by a signal
+          (returning EINTR), correctly updates the timeout argument to reflect
+          the remaining time. This is POSIX standard behavior, but disabling
+          might be necessary for compatibility with very old or non-compliant systems.
+
+    config MICROPY_MODULE_OVERRIDE_MAIN_IMPORT
+        bool "Allow importing file with __name__ == '__main__'"
+        default y
+        help
+          Enable the behavior where importing a `.py` file directly (e.g., using
+          the `-m` command-line flag) sets its `__name__` attribute to `'__main__'`
+          instead of the module's filename.
+
+    config MICROPY_PY_SYS_EXECUTABLE
+        bool "Provide sys.executable path"
+        default y
+        help
+          Enable the `sys.executable` variable, which contains the absolute path
+          to the running MicroPython executable.
+
+    # Placeholder for library selection
+    config MICROPY_LIB_LIBFFI
+        bool
+
+endmenu # Unix Port Options

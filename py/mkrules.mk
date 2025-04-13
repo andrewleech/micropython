@@ -7,6 +7,10 @@ endif
 # Enable in-progress/breaking changes that are slated for MicroPython 2.x.
 MICROPY_PREVIEW_VERSION_2 ?= 0
 
+# Include Kconfig generated make defines
+# Must be included early to define variables like MICROPY_PY_FFI
+-include $(abspath $(TOP))/build/autoconf.mk
+
 ifeq ($(MICROPY_PREVIEW_VERSION_2),1)
 CFLAGS += -DMICROPY_PREVIEW_VERSION_2=1
 endif
@@ -20,7 +24,7 @@ OBJ_EXTRA_ORDER_DEPS =
 # Generate header files.
 OBJ_EXTRA_ORDER_DEPS += $(HEADER_BUILD)/moduledefs.h $(HEADER_BUILD)/root_pointers.h
 
-ifeq ($(MICROPY_ROM_TEXT_COMPRESSION),1)
+ifeq ($(CONFIG_MICROPY_ROM_TEXT_COMPRESSION),y)
 # If compression is enabled, trigger the build of compressed.data.h...
 OBJ_EXTRA_ORDER_DEPS += $(HEADER_BUILD)/compressed.data.h
 # ...and enable the MP_COMPRESSED_ROM_TEXT macro (used by MP_ERROR_TEXT).

@@ -1,0 +1,29 @@
+menu "QEMU Port Options"
+    depends on PORT_QEMU
+
+    comment "QEMU Specific Settings"
+
+    # The QEMU port is primarily for testing the core MicroPython VM and runtime
+    # in a simulated environment. It doesn't enable many hardware-specific modules.
+    # Most common features are enabled via mpconfigport.h.
+
+    # Add potential future QEMU-specific Kconfig options here.
+    # Examples might include selecting the QEMU machine type or specific
+    # simulated devices.
+
+    comment "Common Option Defaults for QEMU"
+    # Note: Defaults for common options are generally handled in py/ or extmod/ Kconfig.
+    # Check common Kconfig files for specific default logic based on PORT_QEMU.
+    # Key defaults include:
+    # - MICROPY_MALLOC_USES_ALLOCATED_SIZE: y
+    # - MICROPY_MEM_STATS: y
+    # - MICROPY_FLOAT_IMPL: float
+    # - MICROPY_PY_SYS_PLATFORM: "qemu"
+    # - MICROPY_PY_SELECT: n
+    # - MICROPY_PY_TIME: n
+    # - MICROPY_PY_ASYNCIO: n
+    # - MICROPY_VFS: y
+    # - MICROPY_VFS_ROM: y
+    # - MICROPY_VFS_ROM_IOCTL: n
+
+endmenu # QEMU Port Options

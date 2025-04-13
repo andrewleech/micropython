@@ -1,5 +1,10 @@
 # CMake fragment for MicroPython core py component
 
+# Include Kconfig generated cmake settings if available
+if(EXISTS "${CMAKE_BINARY_DIR}/config.cmake")
+    include("${CMAKE_BINARY_DIR}/config.cmake")
+endif()
+
 set(MICROPY_PY_DIR "${MICROPY_DIR}/py")
 
 list(APPEND MICROPY_INC_CORE "${MICROPY_DIR}")

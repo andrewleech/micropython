@@ -1,0 +1,4 @@
+# Kconfig for Shared Code
+
+# Currently no shared config options identified, but structure is ready.
+# Options common to multiple ports but not core could go here.

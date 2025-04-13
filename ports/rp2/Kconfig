@@ -1,0 +1,39 @@
+menu "RP2 Port Options"
+    depends on PORT_RP2
+
+    comment "RP2 Specific Features"
+
+    config MICROPY_HW_ENABLE_DOUBLE_TAP
+        bool "Enable double-tap reset to enter BOOTSEL"
+        default y
+        help
+          Enable the feature where rapidly double-tapping the reset button
+          (or RUN pin) causes the RP2040 to enter the USB Mass Storage
+          bootloader mode (BOOTSEL).
+
+    config MICROPY_C_HEAP_SIZE
+        hex "C Heap Size (bytes) (0=disable)"
+        default 0
+        help
+          Size of a dedicated C heap in bytes, allocated separately from the
+          MicroPython GC heap. If enabled (non-zero), this heap is used by
+          certain libraries or components that require standard `malloc`.
+          If set to 0, the GC heap is used for C allocations if needed,
+          or C allocations might fail if not supported by the GC allocator.
+          Note: The RP2 port often does not require a separate C heap.
+
+    # Add other RP2 specific options here, e.g.:
+    # config MICROPY_HW_RP2_PIO_NUM_STATE_MACHINES
+    #    int "Number of PIO State Machines to reserve"
+    #    range 0 8
+    #    default 4
+    #    help
+    #      Specify how many PIO state machines are reserved for use by the
+    #      `rp2` module. The rest remain available for other uses.
+
+    comment "Common Option Defaults for RP2"
+    # Note: Defaults for common options are generally handled in py/ or extmod/ Kconfig.
+    # RP2 port typically enables a rich set of features.
+    # Check common Kconfig files for specific default logic.
+
+endmenu # RP2 Port Options

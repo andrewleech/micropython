@@ -70,8 +70,10 @@ endif()
 # A board may also have enabled additional components.
 set(MICROPY_SSL_MBEDTLS ON)
 
+endif()
+
 # Use the local cyw43_driver instead of the one in pico-sdk
-if (MICROPY_PY_NETWORK_CYW43)
+if (CONFIG_MICROPY_PY_NETWORK_CYW43)
     set(PICO_CYW43_DRIVER_PATH ${MICROPY_DIR}/lib/cyw43-driver)
 endif()
 
@@ -318,7 +320,7 @@ if (MICROPY_PY_LWIP)
     )
 endif()
 
-if(MICROPY_PY_BLUETOOTH)
+if (CONFIG_MICROPY_PY_BLUETOOTH)
     list(APPEND MICROPY_SOURCE_PORT mpbthciport.c)
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
         MICROPY_PY_BLUETOOTH=1
@@ -327,20 +329,20 @@ if(MICROPY_PY_BLUETOOTH)
     )
 endif()
 
-if (MICROPY_PY_BLUETOOTH_CYW43)
+if (CONFIG_MICROPY_PY_BLUETOOTH_CYW43)
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
         CYW43_ENABLE_BLUETOOTH=1
         MICROPY_PY_BLUETOOTH_CYW43=1
     )
 
-    if (MICROPY_BLUETOOTH_BTSTACK)
+    if (CONFIG_MICROPY_BLUETOOTH_BTSTACK)
         target_link_libraries(${MICROPY_TARGET}
             pico_btstack_hci_transport_cyw43
         )
     endif()
 endif()
 
-if (MICROPY_BLUETOOTH_BTSTACK)
+if (CONFIG_MICROPY_BLUETOOTH_BTSTACK)
     list(APPEND GIT_SUBMODULES lib/btstack)
 
     list(APPEND MICROPY_SOURCE_PORT mpbtstackport.c)
@@ -358,7 +360,7 @@ if (MICROPY_BLUETOOTH_BTSTACK)
     list(APPEND MICROPY_INC_CORE ${BTSTACK_INCLUDE})
 endif()
 
-if(MICROPY_BLUETOOTH_NIMBLE)
+if(CONFIG_MICROPY_BLUETOOTH_NIMBLE)
     list(APPEND GIT_SUBMODULES lib/mynewt-nimble)
     if(NOT UPDATE_SUBMODULES AND NOT EXISTS ${MICROPY_DIR}/lib/mynewt-nimble/nimble/host/include/host/ble_hs.h)
         message(FATAL_ERROR " mynewt-nimble not initialized.\n Run 'make BOARD=${MICROPY_BOARD} submodules'")
@@ -386,7 +388,7 @@ target_include_directories(${MICROPY_TARGET} PRIVATE
     ${MICROPY_DIR}/shared/tinyusb/
 )
 
-if (MICROPY_PY_NETWORK_CYW43)
+if (CONFIG_MICROPY_PY_NETWORK_CYW43)
     list(APPEND GIT_SUBMODULES lib/cyw43-driver)
     if(NOT UPDATE_SUBMODULES AND NOT EXISTS ${MICROPY_DIR}/lib/cyw43-driver/src/cyw43.h)
         message(FATAL_ERROR " cyw43-driver not initialized.\n Run 'make BOARD=${MICROPY_BOARD} submodules'")
@@ -415,7 +417,7 @@ if (MICROPY_PY_NETWORK_CYW43)
 
 endif()
 
-if (MICROPY_PY_NETWORK_NINAW10)
+if (CONFIG_MICROPY_PY_NETWORK_NINAW10)
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
         MICROPY_PY_NETWORK_NINAW10=1
     )
@@ -433,20 +435,32 @@ if (MICROPY_PY_NETWORK_NINAW10)
     )
 endif()
 
-if (MICROPY_PY_NETWORK_WIZNET5K)
+if (CONFIG_MICROPY_PY_NETWORK_WIZNET5K_NONE) # Check if *any* Wiznet is selected
+else()
     list(APPEND GIT_SUBMODULES lib/wiznet5k)
     if(NOT UPDATE_SUBMODULES AND NOT EXISTS ${MICROPY_DIR}/lib/wiznet5k/README.md)
         message(FATAL_ERROR " wiznet5k not initialized.\n Run 'make BOARD=${MICROPY_BOARD} submodules'")
     endif()
 
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
-        MICROPY_PY_NETWORK_WIZNET5K=1
+        MICROPY_PY_NETWORK_WIZNET5K=1 # Keep this define for now?
         WIZCHIP_PREFIXED_EXPORTS=1
-        _WIZCHIP_=${MICROPY_PY_NETWORK_WIZNET5K}
+        # _WIZCHIP_ gets set based on choice below
         WIZCHIP_YIELD=mpy_wiznet_yield
     )
 
-    if (MICROPY_PY_LWIP)
+    if(CONFIG_MICROPY_PY_NETWORK_WIZNET5K_W5100)
+        target_compile_definitions(${MICROPY_TARGET} PRIVATE _WIZCHIP_=5100)
+        list(APPEND MICROPY_SOURCE_LIB ${MICROPY_DIR}/lib/wiznet5k/Ethernet/W5100/w5100.c ${MICROPY_DIR}/lib/wiznet5k/Ethernet/W5100S/w5100s.c)
+    elseif(CONFIG_MICROPY_PY_NETWORK_WIZNET5K_W5200)
+        target_compile_definitions(${MICROPY_TARGET} PRIVATE _WIZCHIP_=5200)
+        list(APPEND MICROPY_SOURCE_LIB ${MICROPY_DIR}/lib/wiznet5k/Ethernet/W5200/w5200.c)
+    elseif(CONFIG_MICROPY_PY_NETWORK_WIZNET5K_W5500)
+        target_compile_definitions(${MICROPY_TARGET} PRIVATE _WIZCHIP_=5500)
+        list(APPEND MICROPY_SOURCE_LIB ${MICROPY_DIR}/lib/wiznet5k/Ethernet/W5500/w5500.c)
+    endif()
+
+    if (CONFIG_MICROPY_PY_LWIP)
         target_compile_definitions(${MICROPY_TARGET} PRIVATE
             # When using MACRAW mode (with lwIP), maximum buffer space must be used for the raw socket
             WIZCHIP_USE_MAX_BUFFER=1
@@ -459,11 +473,6 @@ if (MICROPY_PY_NETWORK_WIZNET5K)
     )
 
     list(APPEND MICROPY_SOURCE_LIB
-        ${MICROPY_DIR}/lib/wiznet5k/Ethernet/W5100/w5100.c
-        ${MICROPY_DIR}/lib/wiznet5k/Ethernet/W5100S/w5100s.c
-        ${MICROPY_DIR}/lib/wiznet5k/Ethernet/W5200/w5200.c
-        ${MICROPY_DIR}/lib/wiznet5k/Ethernet/W5300/w5300.c
-        ${MICROPY_DIR}/lib/wiznet5k/Ethernet/W5500/w5500.c
         ${MICROPY_DIR}/lib/wiznet5k/Ethernet/socket.c
         ${MICROPY_DIR}/lib/wiznet5k/Ethernet/wizchip_conf.c
         ${MICROPY_DIR}/lib/wiznet5k/Internet/DNS/dns.c
@@ -516,7 +525,7 @@ target_compile_options(${MICROPY_TARGET} PRIVATE
 )
 
 target_link_options(${MICROPY_TARGET} PRIVATE
-    -Wl,--defsym=__micropy_c_heap_size__=${MICROPY_C_HEAP_SIZE}
+    -Wl,--defsym=__micropy_c_heap_size__=${CONFIG_MICROPY_C_HEAP_SIZE} # Use Kconfig value
     -Wl,--wrap=dcd_event_handler
     -Wl,--wrap=runtime_init_clocks
 )

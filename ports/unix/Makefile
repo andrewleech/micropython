@@ -100,7 +100,7 @@ endif
 # while cross-compile ports require gcc, so we test here for OSX and
 # if necessary override the value of 'CC' set in py/mkenv.mk
 ifeq ($(UNAME_S),Darwin)
-ifeq ($(MICROPY_FORCE_32BIT),1)
+ifeq ($(CONFIG_MICROPY_FORCE_32BIT),y)
 CC = clang -m32
 else
 CC = clang
@@ -142,15 +142,15 @@ CFLAGS += -DMICROPY_PY_THREAD=1 -DMICROPY_PY_THREAD_GIL=0
 LDFLAGS += $(LIBPTHREAD)
 endif
 
-ifeq ($(MICROPY_PY_SSL),1)
-ifeq ($(MICROPY_SSL_AXTLS),1)
+ifeq ($(CONFIG_MICROPY_PY_SSL),y)
+ifeq ($(CONFIG_MICROPY_SSL_AXTLS),y)
 
 endif
 endif
 
 # If the variant enables it, enable modbluetooth.
-ifeq ($(MICROPY_PY_BLUETOOTH),1)
-ifeq ($(MICROPY_BLUETOOTH_BTSTACK),1)
+ifeq ($(CONFIG_MICROPY_PY_BLUETOOTH),y)
+ifeq ($(CONFIG_MICROPY_BLUETOOTH_BTSTACK),y)
 HAVE_LIBUSB := $(shell (which pkg-config > /dev/null && pkg-config --exists libusb-1.0) 2>/dev/null && echo '1')
 
 # Figure out which BTstack transport to use.
@@ -166,9 +166,9 @@ SRC_BTSTACK_C += lib/btstack/platform/embedded/btstack_run_loop_embedded.c
 endif
 endif
 
-ifeq ($(MICROPY_PY_FFI),1)
+ifeq ($(CONFIG_MICROPY_PY_FFI),y)
 
-ifeq ($(MICROPY_STANDALONE),1)
+ifeq ($(CONFIG_MICROPY_STANDALONE),y)
 # Build libffi from source.
 GIT_SUBMODULES += lib/libffi
 DEPLIBS += libffi

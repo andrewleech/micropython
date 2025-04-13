@@ -1,0 +1,110 @@
+mainmenu "MicroPython Configuration"
+
+# Default to a common configuration file name
+config KCONFIG_CONFIG
+	string
+	option env="KCONFIG_CONFIG"
+	default ".config"
+
+# Build directory
+config KCONFIG_BUILD_DIR
+	string
+	option env="KCONFIG_BUILD_DIR"
+	default "build"
+
+# Define ARCH for Kconfig scripts (optional, but good practice)
+config ARCH
+	string
+	option env="ARCH"
+	default "arm"
+
+# Include Kconfig files from subdirectories
+source "py/Kconfig"
+source "extmod/Kconfig"
+source "drivers/Kconfig"
+source "shared/Kconfig"
+
+# Conditionally include port-specific Kconfig files based on PORT variable
+choice
+    prompt "Target Port"
+    optional
+
+config PORT_UNIX
+    bool "Unix Port"
+config PORT_STM32
+    bool "STM32 Port"
+config PORT_ESP32
+    bool "ESP32 Port"
+config PORT_ESP8266
+    bool "ESP8266 Port"
+config PORT_RP2
+    bool "RP2 Port"
+config PORT_MIMXRT
+    bool "MIMXRT Port"
+config PORT_SAMD
+    bool "SAMD Port"
+config PORT_NRF
+    bool "nRF Port"
+config PORT_CC3200
+    bool "CC3200 Port"
+config PORT_PIC16BIT
+    bool "PIC16BIT Port"
+config PORT_POWERPC
+    bool "PowerPC Port"
+config PORT_QEMU
+    bool "QEMU Port"
+config PORT_RENESAS_RA
+    bool "Renesas RA Port"
+config PORT_WEBASSEMBLY
+    bool "WebAssembly Port"
+config PORT_ZEPHYR
+    bool "Zephyr Port"
+
+endchoice
+
+# Source port Kconfig if selected
+if PORT_UNIX
+source "ports/unix/Kconfig"
+endif
+if PORT_STM32
+source "ports/stm32/Kconfig"
+endif
+if PORT_ESP32
+source "ports/esp32/Kconfig"
+endif
+if PORT_ESP8266
+source "ports/esp8266/Kconfig"
+endif
+if PORT_RP2
+source "ports/rp2/Kconfig"
+endif
+if PORT_MIMXRT
+source "ports/mimxrt/Kconfig"
+endif
+if PORT_SAMD
+source "ports/samd/Kconfig"
+endif
+if PORT_NRF
+source "ports/nrf/Kconfig"
+endif
+if PORT_CC3200
+source "ports/cc3200/Kconfig"
+endif
+if PORT_PIC16BIT
+source "ports/pic16bit/Kconfig"
+endif
+if PORT_POWERPC
+source "ports/powerpc/Kconfig"
+endif
+if PORT_QEMU
+source "ports/qemu/Kconfig"
+endif
+if PORT_RENESAS_RA
+source "ports/renesas-ra/Kconfig"
+endif
+if PORT_WEBASSEMBLY
+source "ports/webassembly/Kconfig"
+endif
+if PORT_ZEPHYR
+source "ports/zephyr/Kconfig"
+endif

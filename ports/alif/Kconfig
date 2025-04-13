@@ -1,0 +1,53 @@
+menu "Alif Ensemble Port Options"
+    depends on PORT_ALIF # Assuming PORT_ALIF will be the symbol for this port
+
+    config MICROPY_HW_BOARD_NAME
+        string "Board Name"
+        default "ALIF_ENSEMBLE" if BOARD_ALIF_ENSEMBLE
+        default "OPENMV_AE3" if BOARD_OPENMV_AE3
+        # Add other Alif boards here
+        default "Unknown Alif Board"
+        help
+          The specific Alif Ensemble family board being targeted.
+          This determines pin definitions and default hardware configurations.
+
+    config MICROPY_HW_MCU_NAME
+        string "MCU Name"
+        default "Ensemble_M55_HP" if MCU_CORE_M55_HP
+        default "Ensemble_M55_HE" if MCU_CORE_M55_HE
+        # Add other MCU cores here
+        default "Unknown Ensemble MCU"
+        help
+          The specific MCU core within the Alif Ensemble series being targeted.
+
+    # --- Alif Specific Features --- #
+    comment "Alif Port Features"
+
+    # Add Alif-specific Kconfig options here. Examples might include:
+    # config MICROPY_HW_ETH_PHY_TYPE
+    #    string "Ethernet PHY Type"
+    #    default "LAN8742A"
+
+    # config MICROPY_HW_ENABLE_CAMERA
+    #    bool "Enable Camera Interface"
+    #    default n
+
+    # --- Common Option Notes --- #
+    comment "Common Option Defaults for Alif"
+    # - MICROPY_ROM_TEXT_COMPRESSION: Default enabled
+    # - MICROPY_FLOAT_IMPL: Default set to double
+    # - MICROPY_VFS_FAT: Default enabled
+    # - MICROPY_VFS_LFS2: Default enabled
+
+endmenu # Alif Ensemble Port Options
+
+# Define boolean symbols for board and MCU names for conditional logic
+config BOARD_ALIF_ENSEMBLE
+    bool
+config BOARD_OPENMV_AE3
+    bool
+config MCU_CORE_M55_HP
+    bool
+config MCU_CORE_M55_HE
+    bool
+

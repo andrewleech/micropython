@@ -1,0 +1,747 @@
+# Kconfig for External Modules (extmod)
+
+menu "External Modules"
+
+config MICROPY_PY_UASYNCIO
+    bool "Enable uasyncio module"
+    select MICROPY_PY_COLLECTIONS_DEQUE # asyncio uses deque
+    select MICROPY_ENABLE_SCHEDULER # asyncio uses scheduler
+    select MICROPY_PY_BUILTINS_STOPITERATION_EXTRA_INFO
+    default y if !PORT_QEMU
+    default n if PORT_QEMU
+    help
+      Enable the cooperative multitasking library uasyncio.
+
+config MICROPY_PY_SELECT
+    bool "Enable uselect module"
+    default y if !PORT_QEMU && !PORT_CC3200
+    default n if PORT_QEMU || PORT_CC3200
+    help
+      Enable the 'uselect' module for I/O polling (poll object).
+
+config MICROPY_PY_UJSON
+    bool "Enable ujson module"
+    default y
+    help
+      Enable the 'ujson' module for JSON encoding/decoding.
+
+config MICROPY_PY_URE
+    bool "Enable ure module"
+    default y
+    help
+      Enable the 'ure' module for regular expressions (subset of 're').
+
+config MICROPY_PY_URE_MATCH_GROUPS
+    bool "Enable group support in ure.match"
+    depends on MICROPY_PY_URE
+    default y
+    help
+      Enable capturing groups in regular expression matches.
+
+config MICROPY_PY_URE_MATCH_SPAN_START_END
+    bool "Enable span(), start(), end() methods for ure.match"
+    depends on MICROPY_PY_URE
+    default y
+    help
+      Enable methods to get the start/end indices of matches and groups.
+
+config MICROPY_PY_URE_SUB
+    bool "Enable ure.sub() method"
+    depends on MICROPY_PY_URE
+    default y
+    help
+      Enable the substitution method in the ure module.
+
+config MICROPY_PY_URE_DEBUG
+    bool "Enable debug output for ure"
+    depends on MICROPY_PY_URE
+    default n
+    help
+      Enable internal debugging output for the ure module.
+
+config MICROPY_PY_UHEAPQ
+    bool "Enable uheapq module"
+    default y if !PORT_CC3200
+    default n if PORT_CC3200
+    help
+      Enable the 'uheapq' module for heap queue algorithm (priority queue).
+
+config MICROPY_PY_OS
+    bool "Enable uos module"
+    default y
+    help
+      Enable the 'uos' module, providing OS-like functions.
+      Specific functions depend on VFS and port capabilities.
+
+config MICROPY_PY_OS_INCLUDEFILE
+    # Path handled by build system, not Kconfig
+    pass
+
+config MICROPY_PY_OS_DUPTERM
+    int "Number of duplicate REPL terminals supported"
+    depends on MICROPY_PY_OS
+    default 1 if PORT_NRF || PORT_CC3200
+    default 3 if PORT_STM32 || PORT_SAMD
+    default 2 if PORT_ESP8266
+    default 1 if PORT_UNIX
+    default 0 # Otherwise
+    help
+      Maximum number of streams that can be configured for REPL duplication
+      using uos.dupterm(). 0 disables the feature.
+
+config MICROPY_PY_OS_DUPTERM_BUILTIN_STREAM
+    bool "Enable uos.dupterm() on built-in stream"
+    depends on MICROPY_PY_OS_DUPTERM > 0
+    default y if PORT_STM32 || PORT_RENESAS_RA
+    default n
+    help
+      Allow uos.dupterm() to be called on the initial built-in REPL stream
+      (e.g., the first UART or USB CDC).
+
+config MICROPY_PY_OS_DUPTERM_STREAM_DETACHED_ATTACHED
+    bool "Enable uos.dupterm() detach/attach notifications"
+    depends on MICROPY_PY_OS_DUPTERM > 0
+    default y if PORT_STM32 || PORT_RENESAS_RA || PORT_NRF
+    default n
+    help
+      Generate special characters (ETX/ACK) when dupterm streams are
+      detached/attached.
+
+config MICROPY_PY_OS_SYNC
+    bool "Enable uos.sync() function"
+    depends on MICROPY_PY_OS && MICROPY_VFS # Assumes sync is VFS related
+    default y
+    help
+      Enable the uos.sync() function to synchronize filesystem buffers.
+      Requires VFS support.
+
+config MICROPY_PY_OS_UNAME
+    bool "Enable uos.uname() function"
+    depends on MICROPY_PY_OS
+    default y
+    help
+      Enable the uos.uname() function to get system identification.
+
+config MICROPY_PY_OS_UNAME_RELEASE_DYNAMIC
+    bool "Make uos.uname().release dynamic"
+    depends on MICROPY_PY_OS_UNAME
+    default y if PORT_ESP8266
+    default n
+    help
+        Make the release field of uos.uname() dynamically generated at runtime
+        (e.g., from SDK version) rather than fixed at compile time.
+
+config MICROPY_PY_OS_URANDOM
+    bool "Enable uos.urandom() function"
+    depends on MICROPY_PY_OS && MICROPY_PY_URANDOM
+    default y if MICROPY_HW_ENABLE_RNG # Default based on RNG hardware
+    default n
+    help
+      Enable the uos.urandom() function. Requires urandom module and
+      underlying hardware RNG support (e.g. MICROPY_HW_ENABLE_RNG).
+
+config MICROPY_PY_HASHLIB
+    bool "Enable uhashlib module"
+    default y
+    help
+      Enable the 'uhashlib' module for hashing algorithms (SHA256).
+
+config MICROPY_PY_UHASHLIB_SHA1
+    bool "Enable SHA1 in uhashlib"
+    depends on MICROPY_PY_UHASHLIB
+    select MICROPY_CRYPTO # Needs crypto enabled in port
+    default y if MICROPY_PY_SSL # Default based on SSL need
+    default n
+    help
+      Enable the SHA1 hashing algorithm (requires crypto support).
+
+config MICROPY_PY_UHASHLIB_SHA224
+    bool "Enable SHA224 in uhashlib"
+    depends on MICROPY_PY_UHASHLIB
+    default n # Not typically included
+    help
+      Enable the SHA224 hashing algorithm.
+
+config MICROPY_PY_UHASHLIB_MD5
+    bool "Enable MD5 in uhashlib"
+    depends on MICROPY_PY_UHASHLIB
+    select MICROPY_CRYPTO
+    default y if MICROPY_PY_SSL # Default based on SSL need
+    default n
+    help
+      Enable the MD5 hashing algorithm (requires crypto support).
+
+config MICROPY_PY_UBINASCII
+    bool "Enable ubinascii module"
+    default y
+    help
+      Enable the 'ubinascii' module for binary/ASCII conversions (hexlify, etc.).
+
+config MICROPY_PY_UBINASCII_CRC32
+    bool "Enable CRC32 in ubinascii"
+    depends on MICROPY_PY_UBINASCII
+    default y
+    help
+      Enable the crc32 function in ubinascii.
+
+config MICROPY_PY_URANDOM
+    bool "Enable urandom module"
+    default y
+    help
+      Enable the 'urandom' module for random numbers. Requires port support
+      for a hardware RNG or pseudo-random number generator.
+
+config MICROPY_PY_URANDOM_EXTRA_FUNCS
+    bool "Enable extra functions in urandom (seed, getrandbits)"
+    depends on MICROPY_PY_URANDOM
+    default n # Often enabled per-port
+    help
+      Enable functions like seed() and getrandbits() in urandom.
+
+config MICROPY_PY_UTIME
+    bool "Enable utime module"
+    default y if !PORT_QEMU && !PORT_CC3200
+    default n if PORT_QEMU || PORT_CC3200
+    help
+      Enable the 'utime' module for time-related functions.
+      Most functions require port-specific implementations.
+
+config MICROPY_PY_TIME_GMTIME_LOCALTIME_MKTIME
+    bool "Enable time.gmtime/localtime/mktime functions"
+    depends on MICROPY_PY_UTIME
+    default y if PORT_STM32 || PORT_ESP8266 || PORT_RENESAS_RA || PORT_SAMD || PORT_CC3200
+    default n
+    help
+      Enable the time conversion functions gmtime(), localtime(), and mktime().
+      These require significant code size and C library support for time handling.
+
+config MICROPY_PY_TIME_TIME_TIME_NS
+    bool "Enable time.time/time_ns functions"
+    depends on MICROPY_PY_UTIME
+    default y if PORT_STM32 || PORT_ESP8266 || PORT_RENESAS_RA || PORT_SAMD || PORT_CC3200
+    default n
+    help
+      Enable the functions time.time() and time.time_ns() which return the
+      number of seconds/nanoseconds since the epoch. Requires RTC support.
+
+config MICROPY_PY_UTIME_MP_HAL
+    bool "Use mp_hal functions for utime where possible"
+    depends on MICROPY_PY_UTIME
+    default y
+    help
+      Use functions from mp_hal (e.g., mp_hal_ticks_ms) to implement
+      parts of utime, reducing port-specific code.
+
+config MICROPY_PY_UZLIB
+    bool "Enable uzlib module"
+    default y
+    help
+      Enable the 'uzlib' module for Zlib decompression.
+
+config MICROPY_PY_UCRYPTOLIB
+    bool "Enable ucryptolib module"
+    select MICROPY_CRYPTO
+    default y if MICROPY_PY_SSL # Default based on SSL need
+    default n
+    help
+      Enable the 'ucryptolib' module for simple AES encryption/decryption.
+      Requires crypto support in the port.
+
+config MICROPY_PY_FRAMEBUF
+    bool "Enable framebuf module"
+    default y
+    help
+      Enable the 'framebuf' module for creating and manipulating frame buffers.
+
+config MICROPY_PY_BTREE
+    bool "Enable btree module"
+    default y
+    select MICROPY_PY_IO # btree uses io
+    help
+      Enable the 'btree' module, a simple B-tree database stored in a file.
+
+config MICROPY_PY_DEFLATE
+    bool "Enable deflate module"
+    default y if !PORT_CC3200
+    default n if PORT_CC3200
+    help
+      Enable the 'deflate' module for DEFLATE compression/decompression.
+
+config MICROPY_PY_DEFLATE_COMPRESS
+    bool "Enable compression support in deflate"
+    depends on MICROPY_PY_DEFLATE
+    default n # Decompression is more common on MCU
+    help
+      Enable compression functionality in the deflate module.
+
+config MICROPY_PY_WEBSOCKET
+    bool "Enable websocket module (client)"
+    depends on MICROPY_PY_USOCKET # Depends on usocket
+    default n
+    help
+      Enable the 'websocket' module for client-side WebSocket connections.
+      Requires usocket support.
+
+config MICROPY_PY_WEBREPL
+    bool "Enable WebREPL module (server)"
+    depends on MICROPY_PY_USOCKET # Depends on usocket
+    default n
+    help
+      Enable the WebREPL server for accessing the REPL over WebSocket.
+      Requires usocket support.
+
+config MICROPY_PY_WEBREPL_DELAY
+    int "WebREPL processing delay (ms)"
+    depends on MICROPY_PY_WEBREPL
+    default 20
+    help
+      Delay in milliseconds between processing WebREPL requests.
+
+config MICROPY_PY_WEBREPL_STATIC_FILEBUF
+    bool "Use static buffer for WebREPL file transfers"
+    depends on MICROPY_PY_WEBREPL
+    default y if PORT_ESP8266
+    default n
+    help
+      Use a static buffer for handling file uploads/downloads via WebREPL.
+      May save RAM compared to dynamic allocation, useful on constrained devices.
+
+config MICROPY_PY_WEBREPL_PASS
+    string "WebREPL password"
+    depends on MICROPY_PY_WEBREPL
+    default "micropython"
+    help
+      Password required to connect to the WebREPL server.
+
+# --- VFS --- 
+menu "Virtual Filesystem (VFS)"
+
+# Define the core VFS option first
+config MICROPY_VFS
+    bool "Enable Virtual Filesystem (VFS)"
+    default y
+    help
+      Enable the Virtual Filesystem layer, allowing multiple filesystem types
+      to be mounted and accessed transparently.
+
+# VFS implementations depend on the core VFS option
+config MICROPY_VFS_LFS1
+    bool "Enable LittleFS v1 support"
+    depends on MICROPY_VFS
+    select MICROPY_LFS1 # Selects the library code
+    default n
+    help
+      Include LittleFS v1 filesystem driver.
+
+config MICROPY_VFS_LFS2
+    bool "Enable LittleFS v2 support"
+    depends on MICROPY_VFS
+    select MICROPY_LFS2 # Selects the library code
+    default y
+    help
+      Include LittleFS v2 filesystem driver.
+
+config MICROPY_VFS_FAT
+    bool "Enable FAT filesystem support"
+    depends on MICROPY_VFS
+    select MICROPY_FATFS # Selects the library code
+    default y
+    help
+      Include FAT filesystem driver (using ff.c from ChaN FatFs).
+
+config MICROPY_FATFS_ENABLE_LFN
+    bool "Enable LFN (Long File Names) support in FATFS"
+    depends on MICROPY_VFS_FAT
+    default y if !PORT_STM32 # STM32 often disables LFN for size
+    default n if PORT_STM32
+    help
+      Enable support for Long File Names (LFN) in the FAT filesystem.
+      Requires more code space and RAM for LFN buffer.
+      Commonly disabled on resource-constrained STM32 boards.
+
+config MICROPY_FATFS_RPATH
+    int "FATFS Max recursive path depth"
+    depends on MICROPY_VFS_FAT
+    default 2
+    help
+      Maximum depth for recursive path functions like findfirst/findnext.
+      Value 0 disables this feature.
+
+config MICROPY_FATFS_MAX_SS
+    int "FATFS Maximum sector size"
+    depends on MICROPY_VFS_FAT
+    default 4096
+    help
+      Maximum sector size supported by the FAT filesystem driver.
+      Usually 512 or 4096.
+
+config MICROPY_FATFS_LFN_CODE_PAGE
+    int "FATFS LFN Codepage for Unicode"
+    depends on MICROPY_VFS_FAT && MICROPY_FATFS_ENABLE_LFN
+    default 437 # U.S. OEM
+    help
+      OEM code page to use for LFN (Long File Name) Unicode conversion.
+      See FatFs documentation (ffconf.h) for options. 1=ASCII/SFN only.
+
+config MICROPY_FATFS_REENTRANT
+    bool "Enable FatFS reentrancy support"
+    depends on MICROPY_VFS_FAT
+    default y if PORT_CC3200
+    default n
+    help
+      Enable reentrancy support in FatFS using sync primitives.
+      Required when FatFS is used in a multi-threaded environment (e.g., with FreeRTOS).
+
+config MICROPY_FATFS_TIMEOUT
+    int "FatFS timeout for sync objects (ms)"
+    depends on MICROPY_FATFS_REENTRANT
+    default 2500
+    help
+      Timeout in milliseconds when waiting for FatFS synchronization objects.
+
+config MICROPY_FATFS_SYNC_T
+    # Type handled by build system / C code, not Kconfig
+    pass
+
+config MICROPY_VFS_POSIX
+    bool "Enable POSIX filesystem support"
+    depends on MICROPY_VFS
+    default y if PORT_UNIX
+    default n
+    help
+      Enable VFS driver using standard POSIX filesystem functions.
+      Typically only used by the Unix port.
+
+config MICROPY_VFS_ROM
+    bool "Enable ROM filesystem support"
+    depends on MICROPY_VFS
+    default y if PORT_QEMU
+    default n # Enabled by ports using frozen ROM fs
+    help
+      Enable VFS driver for read-only filesystem baked into firmware.
+
+config MICROPY_VFS_ROM_IOCTL
+    bool "Enable ioctl for ROM filesystem"
+    depends on MICROPY_VFS_ROM
+    default n # QEMU disables this
+    help
+      Enable the ioctl function specifically for the ROM VFS driver.
+
+endmenu # VFS
+
+# --- Networking ---
+menu "Networking"
+
+# Define the core Network option first
+config MICROPY_PY_NETWORK
+    bool "Enable network module"
+    default y
+    help
+      Enable the top-level 'network' module.
+
+# Other network options depend on the core network option
+config MICROPY_PY_NETWORK_HOSTNAME_DEFAULT
+    string "Default network hostname"
+    depends on MICROPY_PY_NETWORK
+    default "mpy-xxxxxx"
+    help
+      Default hostname for network interfaces.
+      "xxxxxx" is usually replaced by MAC address digits.
+
+config MICROPY_PY_USOCKET
+    bool "Enable usocket module"
+    depends on MICROPY_PY_NETWORK
+    default y
+    help
+      Enable the 'usocket' module for BSD socket interface.
+      Requires a network stack implementation in the port.
+
+config MICROPY_PY_USOCKET_LISTEN_BACKLOG_DEFAULT
+    int "Default backlog size for socket listen()"
+    depends on MICROPY_PY_USOCKET
+    default 5
+    help
+      Default value for the backlog argument in socket.listen().
+
+config MICROPY_PY_USSL
+    bool "Enable ussl module"
+    depends on MICROPY_PY_NETWORK # Added dependency
+    select MICROPY_PY_IO # ussl uses io
+    select MICROPY_PY_SYS # ussl uses sys
+    default n
+    help
+      Enable the 'ussl' module for TLS/SSL connections.
+      Requires a TLS stack (mbedTLS or axTLS) enabled below or by the port.
+
+choice
+    prompt "TLS/SSL Library"
+    depends on MICROPY_PY_USSL
+    optional # Port might provide its own implementation
+
+config MICROPY_SSL_MBEDTLS
+    bool "Use mbedTLS library"
+    select MICROPY_MBEDTLS # Selects the library code
+    help
+      Use the mbedTLS library as the backend for the ussl module.
+
+config MICROPY_SSL_AXTLS
+    bool "Use axTLS library"
+    select MICROPY_AXTLS # Selects the library code
+    help
+      Use the axTLS library as the backend for the ussl module.
+
+endchoice
+
+config MICROPY_PY_LWIP
+    bool "Enable lwIP bindings (low-level)"
+    depends on MICROPY_PY_NETWORK # Added dependency
+    select MICROPY_LWIP # Selects the library code
+    default n
+    help
+      Enable low-level bindings to the lwIP TCP/IP stack.
+      Usually not needed for typical socket programming.
+
+config MICROPY_PY_LWIP_LOOPBACK
+    bool "Enable loopback interface in lwIP"
+    depends on MICROPY_PY_LWIP
+    default n
+    help
+      Enable the loopback network interface in lwIP.
+
+config MICROPY_PY_LWIP_SOCK_RAW
+    bool "Enable raw sockets in lwIP"
+    depends on MICROPY_PY_LWIP
+    default y if PORT_STM32 # Default on for STM32
+    default n
+    help
+      Enable support for raw sockets when using the lwIP network stack.
+
+config MICROPY_PY_NETWORK_WIZNET5K
+    choice
+        prompt "WIZnet W5x00 chip type"
+        depends on MICROPY_PY_NETWORK
+        optional
+        default MICROPY_PY_NETWORK_WIZNET5K_NONE
+        help
+            Select the WIZnet W5x00 chip model used for Ethernet networking.
+            Requires appropriate SPI driver configured in the port.
+
+    config MICROPY_PY_NETWORK_WIZNET5K_NONE
+        bool "None"
+
+    config MICROPY_PY_NETWORK_WIZNET5K_W5100
+        bool "W5100"
+        select MICROPY_WIZNET5K # Selects the library code
+
+    config MICROPY_PY_NETWORK_WIZNET5K_W5200
+        bool "W5200"
+        select MICROPY_WIZNET5K
+
+    config MICROPY_PY_NETWORK_WIZNET5K_W5500
+        bool "W5500"
+        select MICROPY_WIZNET5K
+
+    endchoice
+
+config MICROPY_PY_NETWORK_CYW43
+    bool "Enable CYW43 WiFi driver"
+    depends on MICROPY_PY_NETWORK
+    select MICROPY_CYW43_DRIVER
+    default n
+    help
+      Enable network support using the CYW43 WiFi/Bluetooth chip driver.
+      Requires appropriate low-level bus (SPI/SDIO) configured in the port.
+
+config MICROPY_PY_NETWORK_ESP_HOSTED
+    bool "Enable ESP-Hosted network driver"
+    depends on MICROPY_PY_NETWORK
+    select MICROPY_PROTOBUF_C # Selects protobuf-c library
+    select MICROPY_ESP_HOSTED # Selects driver code
+    default n
+    help
+      Enable network support using an external ESP32 acting as a network
+      co-processor via the ESP-Hosted protocol (usually over SPI).
+      Requires appropriate low-level bus configured in the port.
+
+endmenu # Networking
+
+# --- Bluetooth --- depends on MICROPY_PY_BLUETOOTH
+menu "Bluetooth"
+
+config MICROPY_PY_BLUETOOTH
+    bool "Enable Bluetooth support"
+    default n
+    help
+      Enable the 'bluetooth' module and associated functionality.
+      Requires selecting a Bluetooth stack (NimBLE or BTstack) below or in the port.
+
+config MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
+    bool "Enable Bluetooth Central Role"
+    depends on MICROPY_PY_BLUETOOTH
+    default y if PORT_UNIX # Unix port enables this by default
+    default n
+    help
+      Enable support for acting as a Bluetooth Central device (connecting to peripherals).
+
+config MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
+    bool "Enable Bluetooth L2CAP Channels"
+    depends on MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_NIMBLE # Currently NimBLE specific
+    default n
+    help
+      Enable support for L2CAP connection-oriented channels.
+      (Currently only implemented for the NimBLE stack).
+
+choice
+    prompt "Bluetooth Host Stack"
+    depends on MICROPY_PY_BLUETOOTH
+    optional # Port might provide its own stack
+
+config MICROPY_BLUETOOTH_NIMBLE
+    bool "NimBLE"
+    select MICROPY_NIMBLE # Selects the library code
+    help
+      Use the Apache NimBLE Bluetooth stack implementation.
+
+config MICROPY_BLUETOOTH_BTSTACK
+    bool "BTstack"
+    select MICROPY_BTSTACK # Selects the library code
+    help
+      Use the BlueKitchen BTstack Bluetooth stack implementation.
+
+endchoice
+
+# BTstack specific options
+config MICROPY_BLUETOOTH_BTSTACK_USB
+    bool "Use USB transport for BTstack"
+    depends on MICROPY_BLUETOOTH_BTSTACK
+    default n
+    help
+      Use USB as the HCI transport layer for BTstack.
+      Requires USB host support in the port.
+
+config MICROPY_BLUETOOTH_BTSTACK_H4
+    bool "Use H4 UART transport for BTstack"
+    depends on MICROPY_BLUETOOTH_BTSTACK
+    default y
+    help
+      Use H4 (standard HCI over UART) as the transport layer for BTstack.
+      Requires UART configured in the port.
+
+config MICROPY_BLUETOOTH_BTSTACK_ENABLE_CLASSIC
+    bool "Enable Bluetooth Classic support in BTstack"
+    depends on MICROPY_BLUETOOTH_BTSTACK
+    default n
+    help
+      Enable support for Bluetooth Classic (BR/EDR) protocols in BTstack.
+
+endmenu # Bluetooth
+
+# --- OpenAMP --- depends on MICROPY_PY_OPENAMP
+menu "OpenAMP"
+
+config MICROPY_PY_OPENAMP
+    bool "Enable OpenAMP module"
+    select MICROPY_OPENAMP # Selects library code
+    select MICROPY_LIBMETAL # Selects library code
+    default n
+    help
+      Enable the 'openamp' module for inter-processor communication
+      using the OpenAMP framework (RPMsg, virtio).
+      Requires port configuration for shared memory and IPC.
+
+config MICROPY_PY_OPENAMP_REMOTEPROC
+    bool "Enable remoteproc support in OpenAMP"
+    depends on MICROPY_PY_OPENAMP
+    default n
+    help
+      Enable remoteproc framework support for managing the lifecycle
+      of the remote processor (loading firmware, starting/stopping).
+
+choice
+    prompt "OpenAMP Role"
+    depends on MICROPY_PY_OPENAMP
+    default MICROPY_PY_OPENAMP_MODE_HOST
+
+config MICROPY_PY_OPENAMP_MODE_HOST
+    bool "Host (Master)"
+    help
+      Configure the OpenAMP stack to run as the host (master) processor.
+
+config MICROPY_PY_OPENAMP_MODE_DEVICE
+    bool "Device (Remote)"
+    help
+      Configure the OpenAMP stack to run as the device (remote) processor.
+
+endchoice
+
+endmenu # OpenAMP
+
+# --- Placeholder for library selections --- #
+# These are selected by features above but defined here for clarity
+config MICROPY_FATFS
+    bool
+config MICROPY_LFS1
+    bool
+config MICROPY_LFS2
+    bool
+config MICROPY_LWIP
+    bool
+config MICROPY_MBEDTLS
+    bool
+config MICROPY_AXTLS
+    bool
+config MICROPY_NIMBLE
+    bool
+config MICROPY_BTSTACK
+    bool
+config MICROPY_WIZNET5K
+    bool
+config MICROPY_CYW43_DRIVER
+    bool
+config MICROPY_ESP_HOSTED
+    bool
+config MICROPY_PROTOBUF_C
+    bool
+config MICROPY_OPENAMP
+    bool
+config MICROPY_LIBMETAL
+    bool
+config MICROPY_CRYPTO
+    bool # Generic crypto backend dependency, selected by modules needing it
+
+endmenu # External Modules
+
+# --- Placeholder for library selections --- #
+# These are selected by features above but defined here for clarity
+config MICROPY_FATFS
+    bool
+config MICROPY_LFS1
+    bool
+config MICROPY_LFS2
+    bool
+config MICROPY_LWIP
+    bool
+config MICROPY_MBEDTLS
+    bool
+config MICROPY_AXTLS
+    bool
+config MICROPY_NIMBLE
+    bool
+config MICROPY_BTSTACK
+    bool
+config MICROPY_WIZNET5K
+    bool
+config MICROPY_CYW43_DRIVER
+    bool
+config MICROPY_ESP_HOSTED
+    bool
+config MICROPY_PROTOBUF_C
+    bool
+config MICROPY_OPENAMP
+    bool
+config MICROPY_LIBMETAL
+    bool
+config MICROPY_CRYPTO
+    bool # Generic crypto backend dependency, selected by modules needing it
+
+endmenu # External Modules
