@@ -1001,6 +1001,12 @@ static mp_obj_t lwip_socket_bind(mp_obj_t self_in, mp_obj_t addr_in) {
             err = udp_bind(socket->pcb.udp, &bind_addr, port);
             break;
         }
+        case MOD_NETWORK_SOCK_RAW: {
+            if (port == 0) {
+                err = raw_bind(socket->pcb.raw, &bind_addr);
+            }
+            break;
+        }
     }
 
     if (err != ERR_OK) {
