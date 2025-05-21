@@ -35,6 +35,7 @@ set(MICROPY_SOURCE_EXTMOD
     ${MICROPY_EXTMOD_DIR}/modhashlib.c
     ${MICROPY_EXTMOD_DIR}/modheapq.c
     ${MICROPY_EXTMOD_DIR}/modjson.c
+    ${MICROPY_EXTMOD_DIR}/modtoml.c
     ${MICROPY_EXTMOD_DIR}/modos.c
     ${MICROPY_EXTMOD_DIR}/modplatform.c
     ${MICROPY_EXTMOD_DIR}/modrandom.c
@@ -258,6 +259,31 @@ if(MICROPY_SSL_MBEDTLS)
 
     list(APPEND MICROPY_INC_CORE
         "${MICROPY_LIB_MBEDTLS_DIR}/include"
+    )
+endif()
+
+# Library for TOML parsing
+
+if(MICROPY_PY_TOML)
+    add_library(micropy_lib_toml INTERFACE)
+
+    set(MICROPY_LIB_TOML_DIR "${MICROPY_DIR}/lib/tomlc17")
+    list(APPEND GIT_SUBMODULES lib/tomlc17)
+
+    target_include_directories(micropy_lib_toml INTERFACE
+        ${MICROPY_LIB_TOML_DIR}/src
+    )
+
+    target_sources(micropy_lib_toml INTERFACE
+        ${MICROPY_LIB_TOML_DIR}/src/tomlc17.c
+    )
+
+    list(APPEND MICROPY_INC_CORE
+        ${MICROPY_LIB_TOML_DIR}/src
+    )
+
+    list(APPEND MICROPY_DEF_CORE
+        MICROPY_PY_TOML=1
     )
 endif()
 

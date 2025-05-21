@@ -41,6 +41,7 @@ SRC_EXTMOD_C += \
 	extmod/modre.c \
 	extmod/modselect.c \
 	extmod/modsocket.c \
+	extmod/modtoml.c \
 	extmod/modtls_axtls.c \
 	extmod/modtls_mbedtls.c \
 	extmod/mbedtls/mbedtls_alt.c \
@@ -72,6 +73,20 @@ SRC_EXTMOD_C += \
 	shared/libc/printf.c \
 
 SRC_THIRDPARTY_C += \
+
+# Add TOML library if needed
+ifeq ($(MICROPY_PY_TOML),1)
+TOMLC17_DIR = lib/tomlc17
+GIT_SUBMODULES += $(TOMLC17_DIR)
+CFLAGS_EXTMOD += -DMICROPY_PY_TOML=1
+CFLAGS_THIRDPARTY += -I$(TOP)/$(TOMLC17_DIR)/src
+SRC_THIRDPARTY_C += $(addprefix $(TOMLC17_DIR)/src/,\
+	tomlc17.c \
+)
+
+# Disable warnings in tomlc17
+$(BUILD)/$(TOMLC17_DIR)/src/tomlc17.o: CFLAGS += -Wno-float-conversion -Wno-char-subscripts -Wno-format
+endif
 
 PY_O += $(addprefix $(BUILD)/, $(SRC_EXTMOD_C:.c=.o))
 PY_O += $(addprefix $(BUILD)/, $(SRC_THIRDPARTY_C:.c=.o))
