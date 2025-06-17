@@ -142,7 +142,6 @@ PY_CORE_O_BASENAME = $(addprefix py/,\
 	warning.o \
 	profile.o \
 	localnames.o \
-	rawcode_cleanup.o \
 	debug_locals.o \
 	map.o \
 	obj.o \

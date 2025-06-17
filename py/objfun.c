@@ -38,7 +38,6 @@
 #include "py/profile.h"
 #if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
 #include "py/localnames.h"
-#include "py/rawcode_cleanup.h"
 #endif
 
 #if MICROPY_DEBUG_VERBOSE // print debugging info
