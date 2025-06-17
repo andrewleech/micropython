@@ -27,19 +27,19 @@
 #include "py/runtime.h"
 #include "py/localnames.h"
 
-#if MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+#if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
 
 // Initialize the local names structure
 void mp_local_names_init(mp_local_names_t *local_names) {
     if (local_names == NULL) {
         return;
     }
-    
+
     local_names->num_locals = 0;
     local_names->order_count = 0;
-    
+
     // Initialize all entries with null qstrs and invalid indices
-    for (uint16_t i = 0; i < MP_LOCAL_NAMES_MAX; i++) {
+    for (uint16_t i = 0; i < MICROPY_PY_SYS_SETTRACE_NAMES_MAX; i++) {
         local_names->local_names[i] = MP_QSTRnull;
         local_names->local_nums[i] = UINT16_MAX; // Invalid index marker
     }
@@ -47,10 +47,10 @@ void mp_local_names_init(mp_local_names_t *local_names) {
 
 // Get the name of a local variable by its index
 qstr mp_local_names_get_name(const mp_local_names_t *local_names, uint16_t local_num) {
-    if (local_names == NULL || local_num >= MP_LOCAL_NAMES_MAX) {
+    if (local_names == NULL || local_num >= MICROPY_PY_SYS_SETTRACE_NAMES_MAX) {
         return MP_QSTRnull;
     }
-    
+
     // Direct array access
     return local_names->local_names[local_num];
 }
@@ -60,19 +60,19 @@ uint16_t mp_local_names_get_local_num(const mp_local_names_t *local_names, uint1
     if (local_names == NULL || order_idx >= local_names->order_count) {
         return UINT16_MAX; // Invalid index
     }
-    
+
     return local_names->local_nums[order_idx];
 }
 
 // Add or update a name mapping for a local variable
 void mp_local_names_add(mp_local_names_t *local_names, uint16_t local_num, qstr qstr_name) {
-    if (local_names == NULL || local_num >= MP_LOCAL_NAMES_MAX) {
+    if (local_names == NULL || local_num >= MICROPY_PY_SYS_SETTRACE_NAMES_MAX) {
         return;
     }
 
     // Debug the mapping
-    mp_printf(&mp_plat_print, "DEBUG_ADD_NAME: Adding local name mapping: slot %d -> '%s'\n", 
-             local_num, qstr_str(qstr_name));
+    mp_printf(&mp_plat_print, "DEBUG_ADD_NAME: Adding local name mapping: slot %d -> '%s'\n",
+        local_num, qstr_str(qstr_name));
 
     // Store name directly using local_num as index
     local_names->local_names[local_num] = qstr_name;
@@ -83,40 +83,40 @@ void mp_local_names_add(mp_local_names_t *local_names, uint16_t local_num, qstr 
     }
 
     // Also store in order of definition for correct runtime mapping
-    if (local_names->order_count < MP_LOCAL_NAMES_MAX) {
+    if (local_names->order_count < MICROPY_PY_SYS_SETTRACE_NAMES_MAX) {
         uint16_t idx = local_names->order_count;
         local_names->local_nums[idx] = local_num;
         local_names->order_count++;
 
         // Debug the order mapping
-        mp_printf(&mp_plat_print, "DEBUG_ORDER_MAP: Source order idx %d -> runtime slot %d\n", 
-                 idx, local_num);
+        mp_printf(&mp_plat_print, "DEBUG_ORDER_MAP: Source order idx %d -> runtime slot %d\n",
+            idx, local_num);
     }
 
     // Enhance debug output to capture runtime behavior
-    mp_printf(&mp_plat_print, "DEBUG_RUNTIME_SLOT: Local %d ('%s') -> Runtime Slot calculation\n", 
-              local_num, qstr_str(qstr_name));
+    mp_printf(&mp_plat_print, "DEBUG_RUNTIME_SLOT: Local %d ('%s') -> Runtime Slot calculation\n",
+        local_num, qstr_str(qstr_name));
 
     // Refine runtime slot mapping logic
     // Test the hypothesis that variables are assigned from highest slots down
     uint16_t runtime_slot = local_num; // Default to direct mapping
-    
+
     if (local_names->order_count > 0) {
         // Find position in order array
         for (uint16_t i = 0; i < local_names->order_count; ++i) {
             if (local_names->local_nums[i] == local_num) {
                 // Try different slot assignment strategies
-                
+
                 // Strategy 1: Sequential after parameters (traditional)
                 runtime_slot = i;
-                
+
                 // Strategy 2: Reverse order assignment (testing hypothesis)
                 // This would assign first variable to highest available slot
-                // uint16_t reverse_slot = MP_LOCAL_NAMES_MAX - 1 - i;
+                // uint16_t reverse_slot = MICROPY_PY_SYS_SETTRACE_NAMES_MAX - 1 - i;
                 // runtime_slot = reverse_slot;
-                
+
                 mp_printf(&mp_plat_print, "DEBUG_RUNTIME_SLOT: Variable '%s' order_idx=%d -> runtime_slot=%d\n",
-                          qstr_str(qstr_name), i, runtime_slot);
+                    qstr_str(qstr_name), i, runtime_slot);
                 break;
             }
         }
@@ -126,10 +126,10 @@ void mp_local_names_add(mp_local_names_t *local_names, uint16_t local_num, qstr 
 
 // Get the runtime slot for a local variable by its index
 uint16_t mp_local_names_get_runtime_slot(const mp_local_names_t *local_names, uint16_t local_num) {
-    if (local_names == NULL || local_num >= MP_LOCAL_NAMES_MAX) {
+    if (local_names == NULL || local_num >= MICROPY_PY_SYS_SETTRACE_NAMES_MAX) {
         return UINT16_MAX; // Invalid slot
     }
     return local_names->runtime_slots[local_num];
 }
 
-#endif // MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+#endif // MICROPY_PY_SYS_SETTRACE_SAVE_NAMES

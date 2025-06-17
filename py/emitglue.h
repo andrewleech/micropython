@@ -28,7 +28,7 @@
 
 #include "py/obj.h"
 #include "py/bc.h"
-#if MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+#if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
 #include "py/localnames.h"
 #endif
 
@@ -99,7 +99,7 @@ typedef struct _mp_raw_code_t {
     uint32_t asm_n_pos_args : 8;
     uint32_t asm_type_sig : 24; // compressed as 2-bit types; ret is MSB, then arg0, arg1, etc
     #endif
-    #if MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+    #if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
     mp_local_names_t local_names;       // Maps local variable indices to names
     #endif
 } mp_raw_code_t;

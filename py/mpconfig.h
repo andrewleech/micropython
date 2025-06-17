@@ -239,8 +239,8 @@
 #endif
 
 // If not explicitly enabled, disable local variable name saving
-#ifndef MICROPY_SAVE_LOCAL_VARIABLE_NAMES
-#define MICROPY_SAVE_LOCAL_VARIABLE_NAMES (0)
+#ifndef MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
+#define MICROPY_PY_SYS_SETTRACE_SAVE_NAMES (0)
 #endif
 
 // Strings this length or less will be interned by the parser

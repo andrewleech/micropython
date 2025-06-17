@@ -33,13 +33,13 @@
 #include "py/runtime.h"
 #include "py/profile.h"
 
-#if MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+#if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
 #include "py/localnames.h"
 
 // Debug function to print the actual local variable assignments
 void mp_debug_print_local_variables(const mp_raw_code_t *rc, const mp_obj_t *state, uint16_t n_state) {
     mp_printf(&mp_plat_print, "DEBUG: Local variable mapping for %p\n", rc);
-    
+
     // First print by ordering information
     mp_printf(&mp_plat_print, "DEBUG: Variables in source order (order_count=%d):\n", rc->local_names.order_count);
     for (uint16_t idx = 0; idx < rc->local_names.order_count; idx++) {
@@ -47,7 +47,7 @@ void mp_debug_print_local_variables(const mp_raw_code_t *rc, const mp_obj_t *sta
         if (local_num == UINT16_MAX) {
             continue;
         }
-        
+
         qstr name = mp_local_names_get_name(&rc->local_names, local_num);
         mp_printf(&mp_plat_print, "  [%d] local_num=%d, name=%q = ", idx, local_num, name);
         if (local_num < n_state && state[local_num] != MP_OBJ_NULL) {
@@ -57,10 +57,10 @@ void mp_debug_print_local_variables(const mp_raw_code_t *rc, const mp_obj_t *sta
         }
         mp_printf(&mp_plat_print, "\n");
     }
-    
+
     // Print the direct mapping from local_num to name
     mp_printf(&mp_plat_print, "DEBUG: Direct local_num to name mapping:\n");
-    for (uint16_t i = 0; i < MP_LOCAL_NAMES_MAX && i < n_state; i++) {
+    for (uint16_t i = 0; i < MICROPY_PY_SYS_SETTRACE_NAMES_MAX && i < n_state; i++) {
         qstr name = mp_local_names_get_name(&rc->local_names, i);
         if (name != MP_QSTRnull) {
             mp_printf(&mp_plat_print, "  local_num %d = %q (", i, name);
@@ -72,7 +72,7 @@ void mp_debug_print_local_variables(const mp_raw_code_t *rc, const mp_obj_t *sta
             mp_printf(&mp_plat_print, ")\n");
         }
     }
-    
+
     // Also print all values in the state array for reference
     mp_printf(&mp_plat_print, "DEBUG: Complete state array (n_state=%d):\n", n_state);
     for (uint16_t i = 0; i < n_state; i++) {
@@ -92,20 +92,20 @@ mp_obj_t mp_debug_locals_info(void) {
         mp_print_str(&mp_plat_print, "No active code state or function\n");
         return mp_const_none;
     }
-    
+
     mp_print_str(&mp_plat_print, "\n=== DEBUG LOCALS INFO ===\n");
     mp_printf(&mp_plat_print, "Code state: %p, n_state: %d\n", code_state, code_state->n_state);
-    
+
     // Print function details
     const mp_raw_code_t *rc = code_state->fun_bc->rc;
-    mp_printf(&mp_plat_print, "Function: prelude.n_pos_args=%d, prelude.n_kwonly_args=%d\n", 
-              rc->prelude.n_pos_args, rc->prelude.n_kwonly_args);
-    
+    mp_printf(&mp_plat_print, "Function: prelude.n_pos_args=%d, prelude.n_kwonly_args=%d\n",
+        rc->prelude.n_pos_args, rc->prelude.n_kwonly_args);
+
     // Print the mappings and the state values
     mp_debug_print_local_variables(rc, code_state->state, code_state->n_state);
-    
+
     mp_print_str(&mp_plat_print, "=== END DEBUG INFO ===\n\n");
     return mp_const_none;
 }
 
-#endif // MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+#endif // MICROPY_PY_SYS_SETTRACE_SAVE_NAMES

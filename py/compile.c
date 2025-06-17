@@ -38,7 +38,7 @@
 #include "py/nativeglue.h"
 #include "py/persistentcode.h"
 #include "py/smallint.h"
-#if MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+#if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
 #include "py/localnames.h"
 #endif
 
@@ -3437,28 +3437,28 @@ static void scope_compute_things(scope_t *scope) {
             scope->num_locals += 1;
         }
     }
-    
-    #if MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+
+    #if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
     // Save the local variable names in the raw_code for debugging
     if (SCOPE_IS_FUNC_LIKE(scope->kind) && scope->num_locals > 0) {
         // Initialize local_names structure (already done in mp_emit_glue_new_raw_code)
-        
+
         mp_printf(&mp_plat_print, "COMPILE: Saving local variable names for scope with %d locals\n", scope->num_locals);
-        
+
         // Populate with variable names - examining the assignment order
         for (int i = 0; i < scope->id_info_len; i++) {
             id_info_t *id = &scope->id_info[i];
-            if ((id->kind == ID_INFO_KIND_LOCAL || id->kind == ID_INFO_KIND_CELL) && 
-                id->local_num < scope->num_locals && 
-                id->local_num < MP_LOCAL_NAMES_MAX) {
-                
-                mp_printf(&mp_plat_print, "COMPILE: Variable '%s' -> local_num=%d (kind=%d, flags=0x%x)\n", 
-                          qstr_str(id->qst), id->local_num, id->kind, id->flags);
-                
+            if ((id->kind == ID_INFO_KIND_LOCAL || id->kind == ID_INFO_KIND_CELL) &&
+                id->local_num < scope->num_locals &&
+                id->local_num < MICROPY_PY_SYS_SETTRACE_NAMES_MAX) {
+
+                mp_printf(&mp_plat_print, "COMPILE: Variable '%s' -> local_num=%d (kind=%d, flags=0x%x)\n",
+                    qstr_str(id->qst), id->local_num, id->kind, id->flags);
+
                 mp_local_names_add(&scope->raw_code->local_names, id->local_num, id->qst);
             }
         }
-        
+
         mp_printf(&mp_plat_print, "COMPILE: Saved %d variable names\n", scope->raw_code->local_names.order_count);
     }
     #endif

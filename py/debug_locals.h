@@ -30,9 +30,9 @@
 #include "py/obj.h"
 #include "py/emitglue.h"
 
-#if MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+#if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
 // Debug function to print the actual local variable assignments
 void mp_debug_print_local_variables(const mp_raw_code_t *rc, const mp_obj_t *state, uint16_t n_state);
-#endif // MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+#endif // MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
 
 #endif // MICROPY_INCLUDED_PY_DEBUG_LOCALS_H

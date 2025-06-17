@@ -30,17 +30,17 @@
 #include "py/obj.h"
 #include "py/qstr.h"
 
-#if MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+#if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
 
-#define MP_LOCAL_NAMES_MAX 32  // Maximum number of local variables to store names for
+#define MICROPY_PY_SYS_SETTRACE_NAMES_MAX 32  // Maximum number of local variables to store names for
 
 // Structure to hold variable name mappings for a function scope
 typedef struct _mp_local_names_t {
     uint16_t num_locals;                 // Total number of local variables with names
-    qstr local_names[MP_LOCAL_NAMES_MAX];  // Array of variable names, indexed by local_num
-    uint16_t local_nums[MP_LOCAL_NAMES_MAX]; // Reverse mapping: name index -> local_num (for correct state array mapping)
+    qstr local_names[MICROPY_PY_SYS_SETTRACE_NAMES_MAX];  // Array of variable names, indexed by local_num
+    uint16_t local_nums[MICROPY_PY_SYS_SETTRACE_NAMES_MAX]; // Reverse mapping: name index -> local_num (for correct state array mapping)
     uint16_t order_count;                 // Number of variables stored in order they were defined
-    uint16_t runtime_slots[MP_LOCAL_NAMES_MAX]; // Mapping of local_num to runtime slots
+    uint16_t runtime_slots[MICROPY_PY_SYS_SETTRACE_NAMES_MAX]; // Mapping of local_num to runtime slots
 } mp_local_names_t;
 
 // Initialize the local names structure
@@ -58,6 +58,6 @@ void mp_local_names_add(mp_local_names_t *local_names, uint16_t local_num, qstr 
 // Function to get the runtime slot of a local variable by its index
 uint16_t mp_local_names_get_runtime_slot(const mp_local_names_t *local_names, uint16_t local_num);
 
-#endif // MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+#endif // MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
 
 #endif // MICROPY_INCLUDED_PY_LOCALNAMES_H

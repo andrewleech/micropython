@@ -31,7 +31,7 @@
 #include "py/runtime.h"
 #include "py/emitglue.h"
 
-#if MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+#if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
 #include "py/localnames.h"
 
 // Function to free local variable names associated with a raw code
@@ -41,4 +41,4 @@ void mp_raw_code_free_local_names(const mp_raw_code_t *rc) {
     (void)rc;  // Prevent unused parameter warning
 }
 
-#endif // MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+#endif // MICROPY_PY_SYS_SETTRACE_SAVE_NAMES

@@ -28,7 +28,7 @@
 #include "py/bc0.h"
 #include "py/gc.h"
 #include "py/objfun.h"
-#if MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+#if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
 #include "py/localnames.h"
 #endif
 
@@ -137,7 +137,7 @@ static void frame_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
 
 static mp_obj_t frame_f_locals(mp_obj_t self_in) {
     mp_printf(&mp_plat_print, "\n*** FRAME_F_LOCALS CALLED! IMPLEMENTING REVERSE SLOT ASSIGNMENT FIX ***\n");
-    
+
     // This function returns a dictionary of local variables in the current frame.
     if (gc_is_locked()) {
         return MP_OBJ_NULL; // Cannot create locals dict when GC is locked
@@ -151,30 +151,30 @@ static mp_obj_t frame_f_locals(mp_obj_t self_in) {
         return MP_OBJ_FROM_PTR(locals_dict); // Return empty dictionary if state is invalid
     }
 
-#if MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+    #if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
     const mp_raw_code_t *raw_code = code_state->fun_bc->rc;
-    
+
     mp_printf(&mp_plat_print, "DEBUG: Processing frame with %d state slots\n", code_state->n_state);
-    
+
     // First, handle function parameters (these should have fixed positions)
     uint16_t n_pos_args = raw_code->prelude.n_pos_args;
     uint16_t n_kwonly_args = raw_code->prelude.n_kwonly_args;
     uint16_t param_count = n_pos_args + n_kwonly_args;
-    
-    mp_printf(&mp_plat_print, "DEBUG: Parameters: %d positional + %d keyword-only = %d total\n", 
-              n_pos_args, n_kwonly_args, param_count);
-    
+
+    mp_printf(&mp_plat_print, "DEBUG: Parameters: %d positional + %d keyword-only = %d total\n",
+        n_pos_args, n_kwonly_args, param_count);
+
     // Add parameters first (they have fixed slot assignments)
     for (uint16_t i = 0; i < param_count && i < code_state->n_state; i++) {
         if (code_state->state[i] == NULL) {
             continue;
         }
-        
+
         qstr var_name_qstr = MP_QSTRnull;
-        if (i < MP_LOCAL_NAMES_MAX) {
+        if (i < MICROPY_PY_SYS_SETTRACE_NAMES_MAX) {
             var_name_qstr = mp_local_names_get_name(&raw_code->local_names, i);
         }
-        
+
         if (var_name_qstr == MP_QSTRnull) {
             char var_name[16];
             snprintf(var_name, sizeof(var_name), "arg_%d", (int)(i + 1));
@@ -183,79 +183,79 @@ static mp_obj_t frame_f_locals(mp_obj_t self_in) {
                 continue;
             }
         }
-        
+
         mp_printf(&mp_plat_print, "DEBUG: Parameter '%s' -> slot %d\n", qstr_str(var_name_qstr), i);
         mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), code_state->state[i]);
     }
-    
+
     // FIXED: Handle local variables with REVERSE SLOT ASSIGNMENT
     // The bug was that variables are assigned from highest slot down, not sequentially up
-    bool used_slots[MP_LOCAL_NAMES_MAX] = {false};
-    
+    bool used_slots[MICROPY_PY_SYS_SETTRACE_NAMES_MAX] = {false};
+
     // Mark parameter slots as used
     for (uint16_t i = 0; i < param_count; i++) {
-        if (i < MP_LOCAL_NAMES_MAX) {
+        if (i < MICROPY_PY_SYS_SETTRACE_NAMES_MAX) {
             used_slots[i] = true;
         }
     }
-    
+
     // Process variables using their source order but REVERSE slot assignment
     for (uint16_t order_idx = 0; order_idx < raw_code->local_names.order_count; order_idx++) {
         uint16_t local_num = mp_local_names_get_local_num(&raw_code->local_names, order_idx);
-        
-        // Skip parameters and invalid entries  
+
+        // Skip parameters and invalid entries
         if (local_num == UINT16_MAX || local_num < param_count) {
             continue;
         }
-        
+
         qstr var_name_qstr = mp_local_names_get_name(&raw_code->local_names, local_num);
         if (var_name_qstr == MP_QSTRnull) {
             continue;
         }
-        
+
         // REVERSE SLOT ASSIGNMENT: Variables assigned from highest available slot down
         // This is the key fix for the debugger mapping issue
         uint16_t total_locals = code_state->n_state;
         uint16_t reverse_slot = total_locals - 1 - order_idx;
-        
-        mp_printf(&mp_plat_print, "DEBUG: Variable '%s' (order %d) -> REVERSE slot %d\n", 
-                  qstr_str(var_name_qstr), order_idx, reverse_slot);
-        
+
+        mp_printf(&mp_plat_print, "DEBUG: Variable '%s' (order %d) -> REVERSE slot %d\n",
+            qstr_str(var_name_qstr), order_idx, reverse_slot);
+
         // Validate and assign
-        if (reverse_slot >= param_count && reverse_slot < total_locals && 
+        if (reverse_slot >= param_count && reverse_slot < total_locals &&
             code_state->state[reverse_slot] != NULL && !used_slots[reverse_slot]) {
-            
+
             mp_printf(&mp_plat_print, "SUCCESS: '%s' mapped to state[%d] = ", qstr_str(var_name_qstr), reverse_slot);
             mp_obj_print(code_state->state[reverse_slot], PRINT_REPR);
             mp_printf(&mp_plat_print, "\n");
-            
+
             mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), code_state->state[reverse_slot]);
             used_slots[reverse_slot] = true;
-            
+
         } else {
-            mp_printf(&mp_plat_print, "WARNING: Reverse slot assignment failed for '%s', slot %d\n", 
-                      qstr_str(var_name_qstr), reverse_slot);
-            
+            mp_printf(&mp_plat_print, "WARNING: Reverse slot assignment failed for '%s', slot %d\n",
+                qstr_str(var_name_qstr), reverse_slot);
+
             // Fallback: try runtime slot or direct mapping
             uint16_t runtime_slot = mp_local_names_get_runtime_slot(&raw_code->local_names, local_num);
-            if (runtime_slot != UINT16_MAX && runtime_slot < total_locals && 
+            if (runtime_slot != UINT16_MAX && runtime_slot < total_locals &&
                 code_state->state[runtime_slot] != NULL && !used_slots[runtime_slot]) {
-                
-                mp_printf(&mp_plat_print, "FALLBACK: Using runtime slot %d for '%s'\n", 
-                          runtime_slot, qstr_str(var_name_qstr));
+
+                mp_printf(&mp_plat_print, "FALLBACK: Using runtime slot %d for '%s'\n",
+                    runtime_slot, qstr_str(var_name_qstr));
                 mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), code_state->state[runtime_slot]);
                 used_slots[runtime_slot] = true;
             }
         }
     }
-    
-#else
+
+    #else
     // Fallback when variable names aren't saved
     for (size_t i = 0; i < code_state->n_state; ++i) {
         if (code_state->state[i] == NULL) {
             continue;
         }
-        
+
         char var_name[16];
         snprintf(var_name, sizeof(var_name), "local_%02d", (int)(i + 1));
         qstr var_name_qstr = qstr_from_str(var_name);
@@ -264,7 +264,7 @@ static mp_obj_t frame_f_locals(mp_obj_t self_in) {
         }
         mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), code_state->state[i]);
     }
-#endif
+    #endif
 
     mp_printf(&mp_plat_print, "*** FRAME_F_LOCALS COMPLETED ***\n");
     return MP_OBJ_FROM_PTR(locals_dict);

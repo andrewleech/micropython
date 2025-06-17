@@ -36,7 +36,7 @@
 #include "py/bc.h"
 #include "py/stackctrl.h"
 #include "py/profile.h"
-#if MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+#if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
 #include "py/localnames.h"
 #include "py/rawcode_cleanup.h"
 #endif
