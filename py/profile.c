@@ -170,9 +170,12 @@ static mp_obj_t frame_f_locals(mp_obj_t self_in) {
         }
 
         if (var_name_qstr == MP_QSTRnull) {
-            char var_name[16];
-            snprintf(var_name, sizeof(var_name), "arg_%d", (int)(i + 1));
-            var_name_qstr = qstr_from_str(var_name);
+            vstr_t vstr;
+            vstr_init(&vstr, 16); // Initialize with enough space
+            vstr_printf(&vstr, "arg_%d", (int)(order_idx + 1));
+            var_name_qstr = qstr_from_str(vstr_str(&vstr));
+            vstr_clear(&vstr);
+
             if (var_name_qstr == MP_QSTR_NULL) {
                 continue;
             }
@@ -231,9 +234,12 @@ static mp_obj_t frame_f_locals(mp_obj_t self_in) {
         if (code_state->state[reverse_slot] == NULL) {
             continue;
         }
-        char var_name[16];
-        snprintf(var_name, sizeof(var_name), "local_%02d", (int)(order_idx + 1));
-        qstr var_name_qstr = qstr_from_str(var_name);
+        vstr_t vstr;
+        qstr var_name_qstr;
+        vstr_init(&vstr, 16); // Initialize with enough space
+        vstr_printf(&vstr, "local_%d", (int)(order_idx + 1));
+        var_name_qstr = qstr_from_str(vstr_str(&vstr));
+        vstr_clear(&vstr);
         if (var_name_qstr == MP_QSTR_NULL) {
             continue;
         }
