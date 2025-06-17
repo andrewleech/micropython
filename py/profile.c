@@ -223,22 +223,22 @@ static mp_obj_t frame_f_locals(mp_obj_t self_in) {
 
     #else
     // Fallback when variable names aren't saved
-    // TODO: Use reversed slot order here as well
-    for (size_t i = 0; i < code_state->n_state; ++i) {
-        if (code_state->state[i] == NULL) {
+    // Use reverse slot assignment: local variables are numbered from highest slot down
+    uint16_t total_locals = code_state->n_state;
+    for (uint16_t order_idx = 0; order_idx < total_locals; ++order_idx) {
+        uint16_t reverse_slot = total_locals - 1 - order_idx;
+        if (code_state->state[reverse_slot] == NULL) {
             continue;
         }
-
         char var_name[16];
-        snprintf(var_name, sizeof(var_name), "local_%02d", (int)(i + 1));
+        snprintf(var_name, sizeof(var_name), "local_%02d", (int)(order_idx + 1));
         qstr var_name_qstr = qstr_from_str(var_name);
         if (var_name_qstr == MP_QSTR_NULL) {
             continue;
         }
-        mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), code_state->state[i]);
+        mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), code_state->state[reverse_slot]);
     }
     #endif
-
     return MP_OBJ_FROM_PTR(locals_dict);
 }
 
