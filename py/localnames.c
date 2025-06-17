@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2025 Contributors to the MicroPython project
+ * Copyright (c) 2025 Jos Verlinde
  *
  * Permission is hereby granted, free
  * of this software and associated documentation files (the "Software"), to deal
@@ -70,10 +70,6 @@ void mp_local_names_add(mp_local_names_t *local_names, uint16_t local_num, qstr 
         return;
     }
 
-    // Debug the mapping
-    mp_printf(&mp_plat_print, "DEBUG_ADD_NAME: Adding local name mapping: slot %d -> '%s'\n",
-        local_num, qstr_str(qstr_name));
-
     // Store name directly using local_num as index
     local_names->local_names[local_num] = qstr_name;
 
@@ -87,15 +83,7 @@ void mp_local_names_add(mp_local_names_t *local_names, uint16_t local_num, qstr 
         uint16_t idx = local_names->order_count;
         local_names->local_nums[idx] = local_num;
         local_names->order_count++;
-
-        // Debug the order mapping
-        mp_printf(&mp_plat_print, "DEBUG_ORDER_MAP: Source order idx %d -> runtime slot %d\n",
-            idx, local_num);
     }
-
-    // Enhance debug output to capture runtime behavior
-    mp_printf(&mp_plat_print, "DEBUG_RUNTIME_SLOT: Local %d ('%s') -> Runtime Slot calculation\n",
-        local_num, qstr_str(qstr_name));
 
     // Refine runtime slot mapping logic
     // Test the hypothesis that variables are assigned from highest slots down
@@ -105,18 +93,7 @@ void mp_local_names_add(mp_local_names_t *local_names, uint16_t local_num, qstr 
         // Find position in order array
         for (uint16_t i = 0; i < local_names->order_count; ++i) {
             if (local_names->local_nums[i] == local_num) {
-                // Try different slot assignment strategies
-
-                // Strategy 1: Sequential after parameters (traditional)
                 runtime_slot = i;
-
-                // Strategy 2: Reverse order assignment (testing hypothesis)
-                // This would assign first variable to highest available slot
-                // uint16_t reverse_slot = MICROPY_PY_SYS_SETTRACE_NAMES_MAX - 1 - i;
-                // runtime_slot = reverse_slot;
-
-                mp_printf(&mp_plat_print, "DEBUG_RUNTIME_SLOT: Variable '%s' order_idx=%d -> runtime_slot=%d\n",
-                    qstr_str(qstr_name), i, runtime_slot);
                 break;
             }
         }
