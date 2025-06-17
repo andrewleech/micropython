@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2019 Damien P. George
+ * Copyright (c) 2025 Contributors to the MicroPython project
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,21 +24,15 @@
  * THE SOFTWARE.
  */
 
-// Set base feature level.
-#define MICROPY_CONFIG_ROM_LEVEL (MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES)
+#ifndef MICROPY_INCLUDED_PY_RAWCODECLEANUP_H
+#define MICROPY_INCLUDED_PY_RAWCODECLEANUP_H
 
-#define MICROPY_PY_SYS_SETTRACE (1)
-#define MICROPY_SAVE_LOCAL_VARIABLE_NAMES (1) // Save local variable names for debugging
+#include "py/obj.h"
+#include "py/emitglue.h"
 
-#define MICROPY_DEBUG_VERBOSE              (0)
+#if MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+// Function to free local variable names associated with a raw code
+void mp_raw_code_free_local_names(const mp_raw_code_t *rc);
+#endif // MICROPY_SAVE_LOCAL_VARIABLE_NAMES
 
-
-// Disable compiler optimizations for debugging
-#define MICROPY_COMP_CONST                 (0)
-#define MICROPY_COMP_MODULE_CONST          (0)
-#define MICROPY_COMP_DOUBLE_TUPLE_ASSIGN   (0)
-#define MICROPY_COMP_TRIPLE_TUPLE_ASSIGN   (0)
-
-
-// Enable extra Unix features.
-#include "../mpconfigvariant_common.h"
+#endif // MICROPY_INCLUDED_PY_RAWCODECLEANUP_H

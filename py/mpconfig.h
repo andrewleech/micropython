@@ -238,6 +238,11 @@
 #define MICROPY_ALLOC_PARSE_RESULT_INC (16)
 #endif
 
+// If not explicitly enabled, disable local variable name saving
+#ifndef MICROPY_SAVE_LOCAL_VARIABLE_NAMES
+#define MICROPY_SAVE_LOCAL_VARIABLE_NAMES (0)
+#endif
+
 // Strings this length or less will be interned by the parser
 #ifndef MICROPY_ALLOC_PARSE_INTERN_STRING_LEN
 #define MICROPY_ALLOC_PARSE_INTERN_STRING_LEN (10)
