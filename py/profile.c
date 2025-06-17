@@ -145,8 +145,9 @@ static mp_obj_t frame_f_locals(mp_obj_t self_in) {
 
     const mp_code_state_t *code_state = frame->code_state;
 
-    if (code_state == NULL || code_state->state == NULL) {
-        return MP_OBJ_FROM_PTR(locals_dict); // Return empty dictionary if state is invalid
+    if (code_state == NULL || !code_state->state) {
+        // Return empty dictionary if state is invalid
+        return MP_OBJ_FROM_PTR(locals_dict);
     }
 
     #if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
