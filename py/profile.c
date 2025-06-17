@@ -28,6 +28,9 @@
 #include "py/bc0.h"
 #include "py/gc.h"
 #include "py/objfun.h"
+#if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
+#include "py/localnames.h"
+#endif
 
 #if MICROPY_PY_SYS_SETTRACE
 
@@ -85,18 +88,29 @@ static void frame_print(const mp_print_t *print, mp_obj_t o_in, mp_print_kind_t 
         );
 }
 
+static mp_obj_t frame_f_locals(mp_obj_t self_in); // Forward declaration
+
 static void frame_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
-    if (dest[0] != MP_OBJ_NULL) {
+    mp_obj_frame_t *o = MP_OBJ_TO_PTR(self_in);
+
+    if (dest[0] == MP_OBJ_SENTINEL) {
+        // store attr
+        switch (attr) {
+            case MP_QSTR_f_trace:
+                o->f_trace = dest[1];
+                dest[0] = MP_OBJ_NULL;
+                break;
+        }
+        return;
+    } else if (dest[0] != MP_OBJ_NULL) {
         // not load attribute
         return;
     }
 
-    mp_obj_frame_t *o = MP_OBJ_TO_PTR(self_in);
-
     switch (attr) {
         case MP_QSTR_f_back:
             dest[0] = mp_const_none;
-            if (o->code_state->prev_state) {
+            if (o->code_state->prev_state && o->code_state->prev_state->frame) {
                 dest[0] = MP_OBJ_FROM_PTR(o->code_state->prev_state->frame);
             }
             break;
@@ -112,7 +126,127 @@ static void frame_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR_f_lineno:
             dest[0] = MP_OBJ_NEW_SMALL_INT(o->lineno);
             break;
+        case MP_QSTR_f_trace:
+            dest[0] = o->f_trace;
+            break;
+        case MP_QSTR_f_locals:
+            dest[0] = frame_f_locals(self_in);
+            break;
     }
+}
+
+static mp_obj_t frame_f_locals(mp_obj_t self_in) {
+    // This function returns a dictionary of local variables in the current frame.
+    if (gc_is_locked()) {
+        return MP_OBJ_NULL; // Cannot create locals dict when GC is locked
+    }
+    mp_obj_frame_t *frame = MP_OBJ_TO_PTR(self_in);
+    mp_obj_dict_t *locals_dict = mp_obj_new_dict(frame->code_state->n_state);
+
+    const mp_code_state_t *code_state = frame->code_state;
+
+    if (code_state == NULL) {
+        // Return empty dictionary if state is invalid
+        return MP_OBJ_FROM_PTR(locals_dict);
+    }
+
+    #if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
+    const mp_raw_code_t *raw_code = code_state->fun_bc->rc;
+
+    // First, handle function parameters (these should have fixed positions)
+    uint16_t n_pos_args = raw_code->prelude.n_pos_args;
+    uint16_t n_kwonly_args = raw_code->prelude.n_kwonly_args;
+    uint16_t param_count = n_pos_args + n_kwonly_args;
+
+    // Add parameters first (they have fixed slot assignments)
+    for (uint16_t i = 0; i < param_count && i < code_state->n_state; i++) {
+        if (code_state->state[i] == NULL) {
+            continue;
+        }
+
+        qstr var_name_qstr = MP_QSTRnull;
+        if (i < MICROPY_PY_SYS_SETTRACE_NAMES_MAX) {
+            var_name_qstr = mp_local_names_get_name(&raw_code->local_names, i);
+        }
+
+        if (var_name_qstr == MP_QSTRnull) {
+            vstr_t vstr;
+            vstr_init(&vstr, 16); // Initialize with enough space
+            vstr_printf(&vstr, "arg_%d", (int)(order_idx + 1));
+            var_name_qstr = qstr_from_str(vstr_str(&vstr));
+            vstr_clear(&vstr);
+
+            if (var_name_qstr == MP_QSTR_NULL) {
+                continue;
+            }
+        }
+    }
+
+    // Handle local variables with REVERSE SLOT ASSIGNMENT
+    bool used_slots[MICROPY_PY_SYS_SETTRACE_NAMES_MAX] = {false};
+
+    // Mark parameter slots as used
+    for (uint16_t i = 0; i < param_count; i++) {
+        if (i < MICROPY_PY_SYS_SETTRACE_NAMES_MAX) {
+            used_slots[i] = true;
+        }
+    }
+
+    // Process variables using their source order but REVERSE slot assignment
+    for (uint16_t order_idx = 0; order_idx < raw_code->local_names.order_count; order_idx++) {
+        uint16_t local_num = mp_local_names_get_local_num(&raw_code->local_names, order_idx);
+
+        // Skip parameters and invalid entries
+        if (local_num == UINT16_MAX || local_num < param_count) {
+            continue;
+        }
+
+        qstr var_name_qstr = mp_local_names_get_name(&raw_code->local_names, local_num);
+        if (var_name_qstr == MP_QSTRnull) {
+            continue;
+        }
+
+        // REVERSE SLOT ASSIGNMENT: Variables assigned from highest available slot down
+        uint16_t total_locals = code_state->n_state;
+        uint16_t reverse_slot = total_locals - 1 - order_idx;
+        // Validate and assign
+        if (reverse_slot >= param_count && reverse_slot < total_locals &&
+            code_state->state[reverse_slot] != NULL && !used_slots[reverse_slot]) {
+            mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), code_state->state[reverse_slot]);
+            used_slots[reverse_slot] = true;
+        } else {
+            // Fallback: try runtime slot or direct mapping
+            uint16_t runtime_slot = mp_local_names_get_runtime_slot(&raw_code->local_names, local_num);
+            if (runtime_slot != UINT16_MAX && runtime_slot < total_locals &&
+                code_state->state[runtime_slot] != NULL && !used_slots[runtime_slot]) {
+                mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), code_state->state[runtime_slot]);
+                used_slots[runtime_slot] = true;
+            }
+        }
+    }
+
+    #else
+    // Fallback when variable names aren't saved
+    // Use reverse slot assignment: local variables are numbered from highest slot down
+    uint16_t total_locals = code_state->n_state;
+    for (uint16_t order_idx = 0; order_idx < total_locals; ++order_idx) {
+        uint16_t reverse_slot = total_locals - 1 - order_idx;
+        if (code_state->state[reverse_slot] == NULL) {
+            continue;
+        }
+        vstr_t vstr;
+        qstr var_name_qstr;
+        vstr_init(&vstr, 16); // Initialize with enough space
+        vstr_printf(&vstr, "local_%d", (int)(order_idx + 1));
+        var_name_qstr = qstr_from_str(vstr_str(&vstr));
+        vstr_clear(&vstr);
+        if (var_name_qstr == MP_QSTR_NULL) {
+            continue;
+        }
+        mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), code_state->state[reverse_slot]);
+    }
+    #endif
+    return MP_OBJ_FROM_PTR(locals_dict);
 }
 
 MP_DEFINE_CONST_OBJ_TYPE(
@@ -148,6 +282,7 @@ mp_obj_t mp_obj_new_frame(const mp_code_state_t *code_state) {
     o->lineno = mp_prof_bytecode_lineno(rc, o->lasti);
     o->trace_opcodes = false;
     o->callback = MP_OBJ_NULL;
+    o->f_trace = MP_OBJ_NULL;
 
     return MP_OBJ_FROM_PTR(o);
 }
@@ -185,6 +320,33 @@ mp_obj_t mp_prof_settrace(mp_obj_t callback) {
         prof_trace_cb = MP_OBJ_NULL;
     }
     return mp_const_none;
+}
+
+mp_obj_t mp_prof_gettrace(void) {
+    if (prof_trace_cb == MP_OBJ_NULL) {
+        return mp_const_none;
+    }
+    return prof_trace_cb;
+}
+
+mp_obj_t mp_prof_get_frame(size_t depth) {
+
+    mp_code_state_t *code_state = MP_STATE_THREAD(current_code_state);
+
+    for (size_t i = 0; i < depth; i++) {
+        code_state = code_state->prev_state;
+        if (code_state == NULL) {
+            mp_raise_ValueError(MP_ERROR_TEXT("call stack is not deep enough"));
+        }
+    }
+
+    mp_obj_frame_t *frame = MP_OBJ_TO_PTR(mp_obj_new_frame(code_state));
+    if (frame == NULL) {
+        // Couldn't allocate a frame object
+        return MP_OBJ_NULL;
+    }
+
+    return MP_OBJ_FROM_PTR(frame);
 }
 
 mp_obj_t mp_prof_frame_enter(mp_code_state_t *code_state) {
