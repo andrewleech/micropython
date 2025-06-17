@@ -28,16 +28,7 @@
 #define MICROPY_CONFIG_ROM_LEVEL (MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES)
 
 #define MICROPY_PY_SYS_SETTRACE (1)
-#define MICROPY_SAVE_LOCAL_VARIABLE_NAMES (1) // Save local variable names for debugging
-
-#define MICROPY_DEBUG_VERBOSE              (0)
-
-
-// Disable compiler optimizations for debugging
-#define MICROPY_COMP_CONST                 (0)
-#define MICROPY_COMP_MODULE_CONST          (0)
-#define MICROPY_COMP_DOUBLE_TUPLE_ASSIGN   (0)
-#define MICROPY_COMP_TRIPLE_TUPLE_ASSIGN   (0)
+#define MICROPY_PY_SYS_SETTRACE_SAVE_NAMES (1) // Save local variable names for debugging
 
 
 // Enable extra Unix features.
