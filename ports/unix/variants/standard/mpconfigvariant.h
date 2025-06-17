@@ -27,8 +27,9 @@
 // Set base feature level.
 #define MICROPY_CONFIG_ROM_LEVEL (MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES)
 
-#define MICROPY_PY_SYS_SETTRACE (1)
-// #define MICROPY_PY_SYS_SETTRACE_SAVE_NAMES (1) // Save local variable names for debugging
+// #define MICROPY_PY_SYS_SETTRACE (1)
+// Save local variable names for debugging
+// #define MICROPY_PY_SYS_SETTRACE_SAVE_NAMES (1)
 
 
 // Enable extra Unix features.
