@@ -145,7 +145,7 @@ static mp_obj_t frame_f_locals(mp_obj_t self_in) {
 
     const mp_code_state_t *code_state = frame->code_state;
 
-    if (code_state == NULL || !code_state->state) {
+    if (code_state == NULL) {
         // Return empty dictionary if state is invalid
         return MP_OBJ_FROM_PTR(locals_dict);
     }
