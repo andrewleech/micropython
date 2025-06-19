@@ -38,6 +38,9 @@
 #include "py/nativeglue.h"
 #include "py/persistentcode.h"
 #include "py/smallint.h"
+#if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
+#include "py/localnames.h"
+#endif
 
 #if MICROPY_ENABLE_COMPILER
 
@@ -3434,6 +3437,21 @@ static void scope_compute_things(scope_t *scope) {
             scope->num_locals += 1;
         }
     }
+
+    #if MICROPY_PY_SYS_SETTRACE_SAVE_NAMES
+    // Save the local variable names in the raw_code for debugging
+    if (SCOPE_IS_FUNC_LIKE(scope->kind) && scope->num_locals > 0) {
+        // Initialize local_names structure with variable names
+        for (int i = 0; i < scope->id_info_len; i++) {
+            id_info_t *id = &scope->id_info[i];
+            if ((id->kind == ID_INFO_KIND_LOCAL || id->kind == ID_INFO_KIND_CELL) &&
+                id->local_num < scope->num_locals &&
+                id->local_num < MICROPY_PY_SYS_SETTRACE_NAMES_MAX) {
+                mp_local_names_add(&scope->raw_code->local_names, id->local_num, id->qst);
+            }
+        }
+    }
+    #endif
 
     // compute the index of free vars
     // make sure they are in the order of the parent scope

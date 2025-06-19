@@ -39,6 +39,7 @@ set(MICROPY_SOURCE_PY
     ${MICROPY_PY_DIR}/frozenmod.c
     ${MICROPY_PY_DIR}/gc.c
     ${MICROPY_PY_DIR}/lexer.c
+    ${MICROPY_PY_DIR}/localnames.c
     ${MICROPY_PY_DIR}/malloc.c
     ${MICROPY_PY_DIR}/map.c
     ${MICROPY_PY_DIR}/modarray.c
