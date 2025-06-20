@@ -1,0 +1,11 @@
+Test 1: Basic local variable names
+True
+True
+True
+Test 2: Nested function test
+True
+Test 3: No trace callback
+True
+Test 4: Frame access safety
+True
+All tests completed

@@ -3465,6 +3465,27 @@ static void scope_compute_things(scope_t *scope) {
             scope->num_locals += num_free;
         }
     }
+
+    #if MICROPY_PY_SYS_SETTRACE_LOCALNAMES
+    // Save local variable names for debugging
+    if (SCOPE_IS_FUNC_LIKE(scope->kind) && scope->num_locals > 0) {
+        // Allocate array for local variable names
+        qstr *names = m_new0(qstr, scope->num_locals);
+
+        // Populate with variable names from id_info
+        for (int i = 0; i < scope->id_info_len; i++) {
+            id_info_t *id = &scope->id_info[i];
+            if ((id->kind == ID_INFO_KIND_LOCAL || id->kind == ID_INFO_KIND_CELL) &&
+                id->local_num < scope->num_locals) {
+                names[id->local_num] = id->qst;
+            }
+        }
+
+        // Store in raw_code
+        scope->raw_code->local_names = names;
+        scope->raw_code->local_names_len = scope->num_locals;
+    }
+    #endif
 }
 
 #if !MICROPY_EXPOSE_MP_COMPILE_TO_RAW_CODE
