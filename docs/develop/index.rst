@@ -24,3 +24,4 @@ MicroPython to a new platform and implementing a core MicroPython library.
    publiccapi.rst
    extendingmicropython.rst
    porting.rst
+   sys_settrace_localnames.rst
