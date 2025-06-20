@@ -1,0 +1,12 @@
+line:test_simple:30 locals=['local_00', 'local_02']
+line:test_simple:31 locals=['local_00', 'local_01', 'local_02']
+return:test_simple:31 locals=['local_00', 'local_01', 'local_02']
+line:test_with_loop:36 locals=['local_00', 'local_04']
+line:test_with_loop:37 locals=['local_00', 'local_04']
+line:test_with_loop:36 locals=['local_00', 'local_01', 'local_02', 'local_04']
+line:test_with_loop:37 locals=['local_00', 'local_01', 'local_02', 'local_03', 'local_04']
+line:test_with_loop:36 locals=['local_00', 'local_01', 'local_02', 'local_03', 'local_04']
+line:test_with_loop:37 locals=['local_00', 'local_01', 'local_02', 'local_03', 'local_04']
+line:test_with_loop:38 locals=['local_00', 'local_01', 'local_02', 'local_03', 'local_04']
+return:test_with_loop:38 locals=['local_00', 'local_01', 'local_02', 'local_03', 'local_04']
+done

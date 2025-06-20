@@ -134,33 +134,36 @@ static void frame_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
 
 static mp_obj_t frame_f_locals(mp_obj_t self_in) {
     // This function returns a dictionary of local variables in the current frame.
+    // Variables are exposed by index only (e.g., local_00, local_01, etc.)
     if (gc_is_locked()) {
         return MP_OBJ_NULL; // Cannot create locals dict when GC is locked
     }
     mp_obj_frame_t *frame = MP_OBJ_TO_PTR(self_in);
-    mp_obj_dict_t *locals_dict = mp_obj_new_dict(frame->code_state->n_state); // Preallocate dictionary size
+    mp_obj_dict_t *locals_dict = mp_obj_new_dict(frame->code_state->n_state);
 
     const mp_code_state_t *code_state = frame->code_state;
 
     // Validate state array
-    if (code_state == NULL || code_state->state == NULL) {
-        return MP_OBJ_FROM_PTR(locals_dict); // Return empty dictionary if state is invalid
+    if (code_state == NULL) {
+        return MP_OBJ_FROM_PTR(locals_dict);
     }
 
-    // Fallback logic: Use generic names for local variables
+    // Expose local variables by index with generated names
     for (size_t i = 0; i < code_state->n_state; ++i) {
-        char var_name[16];
-        snprintf(var_name, sizeof(var_name), "local_%02d", (int)(i + 1));
-        // Validate value in state array
+        // Skip NULL values
         if (code_state->state[i] == NULL) {
-            continue; // Skip invalid values
+            continue;
         }
-        // Check memory allocation for variable name
+
+        // Generate index-based variable name (local_00, local_01, etc.)
+        char var_name[16];
+        snprintf(var_name, sizeof(var_name), "local_%02d", (int)i);
         qstr var_name_qstr = qstr_from_str(var_name);
         if (var_name_qstr == MP_QSTR_NULL) {
             continue; // Skip if qstr creation fails
         }
-        // Store the name-value pair in the dictionary
+
+        // Store the variable by index
         mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), code_state->state[i]);
     }
     return MP_OBJ_FROM_PTR(locals_dict);
