@@ -1574,7 +1574,7 @@ typedef double mp_float_t;
 #endif
 
 // Whether to save local variable names in bytecode for .mpy debugging (persistent storage)
-// Requires MICROPY_PY_SYS_SETTRACE to be enabled.
+// Requires MICROPY_PY_SYS_SETTRACE and MICROPY_PY_SYS_SETTRACE_LOCALNAMES to be enabled.
 #ifndef MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
 #define MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST (0)
 #endif
