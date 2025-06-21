@@ -96,7 +96,7 @@ typedef struct _mp_raw_code_t {
     uint32_t asm_n_pos_args : 8;
     uint32_t asm_type_sig : 24; // compressed as 2-bit types; ret is MSB, then arg0, arg1, etc
     #endif
-    #if MICROPY_PY_SYS_SETTRACE_LOCALNAMES
+    #if MICROPY_PY_SYS_SETTRACE_LOCALNAMES || MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
     const qstr *local_names;  // Array of local variable names indexed by local_num
     uint16_t local_names_len; // Length of local_names array
     #endif
