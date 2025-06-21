@@ -29,8 +29,9 @@ The feature is controlled by configuration macros:
   Default: ``0`` (disabled)
 
 ``MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST``
-  Enables local variable name preservation in bytecode for .mpy files.
-  Default: ``0`` (disabled, implementation pending)
+  Enables local variable name preservation in bytecode for .mpy files (Phase 2).
+  Requires ``MICROPY_PY_SYS_SETTRACE_LOCALNAMES`` to be enabled.
+  Default: ``0`` (disabled)
 
 Dependencies
 ~~~~~~~~~~~~
@@ -41,13 +42,23 @@ Dependencies
 Memory Usage
 ~~~~~~~~~~~~
 
-When enabled, the feature adds:
+**Phase 1 (RAM Storage):**
+
+When ``MICROPY_PY_SYS_SETTRACE_LOCALNAMES`` is enabled:
 
 * One pointer field (``local_names``) per function in ``mp_raw_code_t``
 * One length field (``local_names_len``) per function in ``mp_raw_code_t``
 * One qstr array per function containing local variable names
 
-Total memory overhead per function: ``8 bytes + (num_locals * sizeof(qstr))``
+Total runtime memory overhead per function: ``8 bytes + (num_locals * sizeof(qstr))``
+
+**Phase 2 (Bytecode Storage):**
+
+When ``MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST`` is enabled:
+
+* Additional .mpy file size: ``1-5 bytes + (num_locals * ~10 bytes)`` per function
+* Runtime memory: Same as Phase 1 when local names are loaded from .mpy files
+* No additional memory when Phase 2 is disabled but .mpy contains local names
 
 Implementation Details
 ----------------------
@@ -357,19 +368,89 @@ Code Review Checklist
 * ✅ Unit tests added for new functionality
 * ✅ Documentation updated
 
+Phase 2: Bytecode Persistence Implementation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Phase 2 extends the feature to preserve local variable names in compiled .mpy files,
+enabling debugging support for pre-compiled bytecode modules.
+
+**Bytecode Format Extension:**
+
+The Phase 2 implementation extends the MicroPython bytecode format by adding local
+variable names to the source info section:
+
+.. code-block:: text
+
+   Source Info Section (Extended):
+       simple_name : var qstr      // Function name
+       argname0    : var qstr      // Argument names  
+       ...
+       argnameN    : var qstr      
+       
+       n_locals    : var uint      // NEW: Number of local variables
+       localname0  : var qstr      // NEW: Local variable names
+       ...
+       localnameM  : var qstr      
+       
+       <line number info>          // Existing line info
+
+**Key Implementation Details:**
+
+* **Backward Compatibility**: .mpy files without local names continue to work
+* **Forward Compatibility**: New .mpy files gracefully degrade on older MicroPython versions
+* **No Version Bump**: Feature detection is done by analyzing source info section size
+* **Conditional Storage**: Local names only stored when ``MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST`` enabled
+
+**File Format Changes:**
+
+* ``py/emitbc.c`` - Extended to write local names during bytecode generation
+* ``py/persistentcode.c`` - Added save/load functions for local names in .mpy files
+* ``py/persistentcode.h`` - Function declarations for Phase 2 functionality
+
+**Compatibility Matrix:**
+
+.. list-table::
+   :header-rows: 1
+
+   * - MicroPython Version
+     - .mpy with local names
+     - .mpy without local names
+   * - Phase 2 enabled
+     - ✅ Full support
+     - ✅ Backward compatible
+   * - Phase 2 disabled
+     - ✅ Graceful degradation
+     - ✅ Normal operation
+   * - Pre-Phase 2
+     - ✅ Ignores local names
+     - ✅ Normal operation
+
+**Memory Overhead for .mpy Files:**
+
+* **Per function**: 1-5 bytes (varint) + ~10 bytes per local variable name
+* **Typical function**: 20-50 bytes overhead for 2-5 local variables
+* **Large functions**: Proportional to number of local variables
+
 File Locations
 ~~~~~~~~~~~~~~
 
-**Core Implementation:**
+**Core Implementation (Phase 1):**
 * ``py/compile.c`` - Local name collection during compilation
 * ``py/emitglue.h`` - Data structures and unified access
 * ``py/emitglue.c`` - Initialization
 * ``py/profile.c`` - Runtime access through ``frame.f_locals``
 * ``py/mpconfig.h`` - Configuration macros
 
+**Bytecode Persistence (Phase 2):**
+* ``py/emitbc.c`` - Extended source info section generation
+* ``py/persistentcode.c`` - .mpy file save/load functions for local names
+* ``py/persistentcode.h`` - Phase 2 function declarations
+
 **Testing:**
-* ``tests/basics/sys_settrace_localnames.py`` - Unit tests
+* ``tests/basics/sys_settrace_localnames.py`` - Phase 1 unit tests
 * ``tests/basics/sys_settrace_localnames_comprehensive.py`` - Integration tests
+* ``tests/basics/sys_settrace_localnames_persist.py`` - Phase 2 tests
 
 **Documentation:**
-* ``docs/develop/sys_settrace_localnames.rst`` - This document
+* ``docs/develop/sys_settrace_localnames.rst`` - This document (comprehensive)
+* ``docs/library/sys.rst`` - User-facing documentation
