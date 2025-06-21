@@ -239,7 +239,7 @@ static mp_obj_t mp_sys_settrace(mp_obj_t obj) {
 }
 MP_DEFINE_CONST_FUN_OBJ_1(mp_sys_settrace_obj, mp_sys_settrace);
 
-static mp_obj_t mp_sys_gettrace() {
+static mp_obj_t mp_sys_gettrace(void) {
     return mp_prof_gettrace();
 }
 MP_DEFINE_CONST_FUN_OBJ_0(mp_sys_gettrace_obj, mp_sys_gettrace);

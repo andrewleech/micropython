@@ -85,6 +85,8 @@ static void frame_print(const mp_print_t *print, mp_obj_t o_in, mp_print_kind_t 
         );
 }
 
+static mp_obj_t frame_f_locals(mp_obj_t self_in); // Forward declaration
+
 static void frame_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     mp_obj_frame_t *o = MP_OBJ_TO_PTR(self_in);
 
@@ -125,9 +127,59 @@ static void frame_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             dest[0] = o->f_trace;
             break;
         case MP_QSTR_f_locals:
-            dest[0] = mp_obj_new_dict(0);
+            dest[0] = frame_f_locals(self_in);
             break;
     }
+}
+
+static mp_obj_t frame_f_locals(mp_obj_t self_in) {
+    // This function returns a dictionary of local variables in the current frame.
+    // Variables are exposed with names when available, otherwise by index (e.g., local_00, local_01, etc.)
+    if (gc_is_locked()) {
+        return MP_OBJ_NULL; // Cannot create locals dict when GC is locked
+    }
+    mp_obj_frame_t *frame = MP_OBJ_TO_PTR(self_in);
+    const mp_code_state_t *code_state = frame->code_state;
+
+    // Validate state array
+    if (code_state == NULL) {
+        return MP_OBJ_FROM_PTR(mp_obj_new_dict(0));
+    }
+
+    mp_obj_dict_t *locals_dict = mp_obj_new_dict(code_state->n_state);
+
+    // Expose local variables with names when available, otherwise use index
+    for (size_t i = 0; i < code_state->n_state; ++i) {
+        mp_obj_t state_obj = code_state->state[i];
+
+        // Skip NULL values
+        if (state_obj == MP_OBJ_NULL) {
+            continue;
+        }
+
+        qstr var_name_qstr = MP_QSTR_NULL;
+
+        #if MICROPY_PY_SYS_SETTRACE_LOCALNAMES || MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
+        // Try to get actual variable name
+        if (code_state->fun_bc != NULL && code_state->fun_bc->rc != NULL) {
+            var_name_qstr = mp_raw_code_get_local_name(code_state->fun_bc->rc, i);
+        }
+        #endif
+
+        // Fall back to index-based name if no actual name available
+        if (var_name_qstr == MP_QSTR_NULL) {
+            char var_name[16];
+            snprintf(var_name, sizeof(var_name), "local_%02d", (int)i);
+            var_name_qstr = qstr_from_str(var_name);
+            if (var_name_qstr == MP_QSTR_NULL) {
+                continue; // Skip if qstr creation fails
+            }
+        }
+
+        // Store the variable
+        mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), state_obj);
+    }
+    return MP_OBJ_FROM_PTR(locals_dict);
 }
 
 MP_DEFINE_CONST_OBJ_TYPE(

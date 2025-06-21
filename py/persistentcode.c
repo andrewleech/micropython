@@ -400,6 +400,11 @@ static mp_raw_code_t *load_raw_code(mp_reader_t *reader, mp_module_context_t *co
             #endif
             scope_flags);
 
+        #if MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
+        // Try to load local variable names from bytecode
+        mp_raw_code_load_local_names(rc, fun_data);
+        #endif
+
     #if MICROPY_EMIT_MACHINE_CODE
     } else {
         const uint8_t *prelude_ptr = NULL;
@@ -912,3 +917,81 @@ mp_obj_t mp_raw_code_save_fun_to_bytes(const mp_module_constants_t *consts, cons
 // An mp_obj_list_t that tracks relocated native code to prevent the GC from reclaiming them.
 MP_REGISTER_ROOT_POINTER(mp_obj_t track_reloc_code_list);
 #endif
+
+#if MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
+
+void mp_raw_code_save_local_names(mp_print_t *print, const mp_raw_code_t *rc) {
+    // Save local variable names to bytecode if available
+    if (rc->local_names != NULL && rc->local_names_len > 0) {
+        // Encode number of local variables
+        mp_print_uint(print, rc->local_names_len);
+
+        // Encode each local variable name as qstr
+        for (uint16_t i = 0; i < rc->local_names_len; i++) {
+            qstr local_name = (rc->local_names[i] != MP_QSTR_NULL) ? rc->local_names[i] : MP_QSTR_;
+            mp_print_uint(print, local_name);
+        }
+    } else {
+        // No local variables to save
+        mp_print_uint(print, 0);
+    }
+}
+
+void mp_raw_code_load_local_names(mp_raw_code_t *rc, const uint8_t *bytecode) {
+    // Parse bytecode to find where local names might be stored
+    const uint8_t *ip = bytecode;
+
+    // Decode function signature
+    MP_BC_PRELUDE_SIG_DECODE(ip);
+
+    // Decode prelude size
+    MP_BC_PRELUDE_SIZE_DECODE(ip);
+
+    // Calculate where argument names end
+    const uint8_t *ip_names = ip;
+
+    // Skip simple name (function name)
+    ip_names = mp_decode_uint_skip(ip_names);
+
+    // Skip argument names
+    for (size_t i = 0; i < n_pos_args + n_kwonly_args; ++i) {
+        ip_names = mp_decode_uint_skip(ip_names);
+    }
+
+    // Check if we have local names data (must be within source info section)
+    const uint8_t *source_info_end = ip + n_info;
+    if (ip_names < source_info_end) {
+        // Try to read local names count
+        const uint8_t *ip_locals = ip_names;
+        mp_uint_t n_locals = mp_decode_uint_value(ip_locals);
+        ip_locals = mp_decode_uint_skip(ip_locals);
+
+        // Validate that we have space for all local names within source info section
+        const uint8_t *ip_test = ip_locals;
+        bool valid = true;
+        for (mp_uint_t i = 0; i < n_locals && valid; i++) {
+            if (ip_test >= source_info_end) {
+                valid = false;
+                break;
+            }
+            ip_test = mp_decode_uint_skip(ip_test);
+        }
+
+        if (valid && n_locals > 0 && n_locals <= 255) {
+            // Allocate and populate local names array
+            qstr *local_names = m_new0(qstr, n_locals);
+            ip_locals = ip_names;
+            mp_decode_uint(&ip_locals); // Skip count
+
+            for (mp_uint_t i = 0; i < n_locals; i++) {
+                mp_uint_t local_qstr = mp_decode_uint(&ip_locals);
+                local_names[i] = (local_qstr == MP_QSTR_) ? MP_QSTR_NULL : local_qstr;
+            }
+
+            rc->local_names = local_names;
+            rc->local_names_len = n_locals;
+        }
+    }
+}
+
+#endif // MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
