@@ -1,0 +1,28 @@
+--- instance0 ---
+Host active
+Waiting for device
+Searching for CDC device...
+CDC device found: USBH_CDC(addr=1, itf=0)
+Registering IRQ handler
+IRQ handler registered
+Waiting for device to send data...
+Device data supposedly sent.
+Waiting for IRQ handler to trigger...
+IRQ: on_rx called
+IRQ: read 13 bytes: b'irq_test_data'
+IRQ handler triggered successfully.
+Data received via IRQ: b'irq_test_data'
+Unregistering IRQ handler
+Host finished
+Host deactivated
+--- instance1 ---
+CDC device configured
+Device waiting for HOST_READY
+HOST_READY received
+Broadcasting DEVICE_READY
+Device waiting for SEND_DATA
+SEND_DATA received
+Device sending b'irq_test_data'...
+CDC write returned: 13 bytes
+Broadcasting DATA_SENT
+Device finished

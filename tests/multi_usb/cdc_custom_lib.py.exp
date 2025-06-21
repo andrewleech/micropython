@@ -1,0 +1,35 @@
+--- instance0 ---
+Host active
+Waiting for device
+Searching for CDC device...
+CDC device found: USBH_CDC(addr=1, itf=...)
+is_connected: True
+Host sending: b'HostToDeviceCustom'
+Bytes written: 18
+Waiting for device to confirm read...
+Device confirmation received.
+Signaling device to send data...
+Waiting for device data...
+Reading data from device...
+Host received chunk: b'DeviceToHostCustom'
+Host received expected data: b'DeviceToHostCustom'
+Host finished
+Host deactivated
+--- instance1 ---
+usb.device.cdc imported successfully
+Device waiting for HOST_READY
+HOST_READY received
+Configuring as CDC device via usb.device.cdc...
+usb.device.cdc.Device configured
+Broadcasting DEVICE_READY
+Device waiting for HOST_DATA_SENT
+HOST_DATA_SENT received. Reading from CDC stream...
+Device received chunk: b'HostToDeviceCustom'
+Device received expected data: b'HostToDeviceCustom'
+Broadcasting DEVICE_READ_CONFIRMED
+Device waiting for SEND_DEVICE_DATA
+SEND_DEVICE_DATA received.
+Device sending: b'DeviceToHostCustom'
+Device write returned: 18
+Broadcasting DEVICE_DATA_SENT
+Device finished

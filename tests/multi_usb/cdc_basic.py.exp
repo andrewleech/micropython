@@ -1,0 +1,35 @@
+--- instance0 ---
+Host active
+Waiting for device
+Searching for CDC device...
+CDC device found: USBH_CDC(addr=1, itf=0)
+is_connected: True
+any (before recv): 0
+Waiting for data from device...
+Device data supposedly sent.
+Reading data...
+Reading 5 bytes
+Received chunk: b'hello'
+Found 'hello'
+Received from device: b'hello'
+Sending 'world' to device...
+Bytes written: 5
+Signaled DATA_SENT_BACK
+Host finished
+Host deactivated
+--- instance1 ---
+CDC device configured
+Device waiting for HOST_READY
+HOST_READY received
+Broadcasting DEVICE_READY
+Device waiting for SEND_DATA
+SEND_DATA received
+Device sending 'hello'...
+CDC write returned: 5 bytes
+Broadcasting DATA_SENT
+Device waiting for DATA_SENT_BACK
+DATA_SENT_BACK received
+Device attempting to read 'world'...
+Received chunk: b'world'
+Received from host: b'world'
+Device finished

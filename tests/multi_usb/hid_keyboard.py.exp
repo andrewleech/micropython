@@ -1,0 +1,35 @@
+--- instance0 ---
+Host active
+Waiting for device
+Searching for HID keyboard device...
+HID keyboard found: Proto=1, UsagePage=1, Usage=6
+Registering HID IRQ handler
+HID IRQ handler registered
+Waiting for device report...
+Device report supposedly sent.
+Waiting for HID IRQ...
+IRQ: HID report received (8 bytes): b'\x00\x00\x04\x00\x00\x00\x00\x00'
+IRQ: HID report received (8 bytes): b'\x00\x00\x00\x00\x00\x00\x00\x00'
+HID IRQ triggered successfully.
+Received report looks like a key press: b'\x00\x00\x00\x00\x00\x00\x00\x00'
+Sending output report (Num Lock ON): b'\x01'
+send_report success: True
+Unregistering HID IRQ handler
+Host finished
+--- instance1 ---
+usb.device.keyboard imported successfully
+Device waiting for HOST_READY
+HOST_READY received
+Configuring as HID Keyboard...
+Keyboard device configured
+Waiting 2s for host enumeration...
+Broadcasting DEVICE_READY
+Device waiting for SEND_REPORT or HOST_ABORT
+SEND_REPORT received
+Sending key press report (key 'a')
+Key press/release sent
+Broadcasting REPORT_SENT
+Waiting for OUTPUT_REPORT_SENT
+OUTPUT_REPORT_SENT received
+Output report presumably received by device handler.
+Device finished
