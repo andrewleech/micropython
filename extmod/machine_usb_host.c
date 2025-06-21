@@ -326,7 +326,11 @@ static mp_obj_t machine_usbh_cdc_write(mp_obj_t self_in, mp_obj_t buf_in) {
     mp_get_buffer_raise(buf_in, &bufinfo, MP_BUFFER_READ);
 
     uint32_t bytes_written = tuh_cdc_write(self->itf_num, bufinfo.buf, bufinfo.len);
-    tuh_cdc_write_flush(self->itf_num);
+    if (bytes_written > 0) {
+        tuh_cdc_write_flush(self->itf_num);
+        // Small delay to allow write to complete
+        mp_hal_delay_ms(1);
+    }
 
     return mp_obj_new_int(bytes_written);
 }
@@ -378,7 +382,11 @@ static mp_uint_t machine_usbh_cdc_write_method(mp_obj_t self_in, const void *buf
     }
 
     uint32_t bytes_written = tuh_cdc_write(self->itf_num, buf_in, size);
-    tuh_cdc_write_flush(self->itf_num);
+    if (bytes_written > 0) {
+        tuh_cdc_write_flush(self->itf_num);
+        // Small delay to allow write to complete
+        mp_hal_delay_ms(1);
+    }
     return bytes_written;
 }
 

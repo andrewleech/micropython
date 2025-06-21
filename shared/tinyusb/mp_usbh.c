@@ -308,6 +308,20 @@ void tuh_cdc_mount_cb(uint8_t idx) {
     // Add to the CDC device list
     mp_obj_usb_host_t *usbh = MP_OBJ_TO_PTR(MP_STATE_VM(usbh));
     mp_obj_list_append(usbh->cdc_list, MP_OBJ_FROM_PTR(cdc));
+
+    // Configure CDC line coding for proper communication
+    // Most CDC devices require line coding to be set before write operations work
+    cdc_line_coding_t line_coding = {
+        .bit_rate = 115200,
+        .stop_bits = 0,    // 1 stop bit
+        .parity = 0,       // no parity
+        .data_bits = 8
+    };
+    tuh_cdc_set_line_coding(idx, &line_coding, NULL, 0);
+
+    // Set control line state (DTR=true, RTS=false)
+    // Many CDC devices require DTR to be asserted before accepting data
+    tuh_cdc_set_control_line_state(idx, true, false, NULL, 0);
 }
 
 // CDC unmount callback
@@ -333,6 +347,17 @@ void tuh_cdc_rx_cb(uint8_t idx) {
                 (mp_obj_t []) {MP_OBJ_FROM_PTR(cdc)}
                 );
         }
+    }
+}
+
+// Called when data write is completed for CDC device
+void tuh_cdc_tx_complete_cb(uint8_t idx) {
+    // Find the CDC device
+    machine_usbh_cdc_obj_t *cdc = find_cdc_by_itf(idx);
+    if (cdc) {
+        // TX completion handling - for now we don't need to do anything special
+        // but this callback is required by TinyUSB for write operations to work
+        // In the future, this could be used to signal write completion events
     }
 }
 
