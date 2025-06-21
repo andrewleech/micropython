@@ -85,6 +85,8 @@ static void frame_print(const mp_print_t *print, mp_obj_t o_in, mp_print_kind_t 
         );
 }
 
+static mp_obj_t frame_f_locals(mp_obj_t self_in); // Forward declaration
+
 static void frame_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     mp_obj_frame_t *o = MP_OBJ_TO_PTR(self_in);
 
@@ -125,9 +127,43 @@ static void frame_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             dest[0] = o->f_trace;
             break;
         case MP_QSTR_f_locals:
-            dest[0] = mp_obj_new_dict(0);
+            dest[0] = frame_f_locals(self_in);
             break;
     }
+}
+
+static mp_obj_t frame_f_locals(mp_obj_t self_in) {
+    // This function returns a dictionary of local variables in the current frame.
+    if (gc_is_locked()) {
+        return MP_OBJ_NULL; // Cannot create locals dict when GC is locked
+    }
+    mp_obj_frame_t *frame = MP_OBJ_TO_PTR(self_in);
+    mp_obj_dict_t *locals_dict = mp_obj_new_dict(frame->code_state->n_state); // Preallocate dictionary size
+
+    const mp_code_state_t *code_state = frame->code_state;
+
+    // Validate state array
+    if (code_state == NULL || code_state->state == NULL) {
+        return MP_OBJ_FROM_PTR(locals_dict); // Return empty dictionary if state is invalid
+    }
+
+    // Fallback logic: Use generic names for local variables
+    for (size_t i = 0; i < code_state->n_state; ++i) {
+        char var_name[16];
+        snprintf(var_name, sizeof(var_name), "local_%02d", (int)(i + 1));
+        // Validate value in state array
+        if (code_state->state[i] == NULL) {
+            continue; // Skip invalid values
+        }
+        // Check memory allocation for variable name
+        qstr var_name_qstr = qstr_from_str(var_name);
+        if (var_name_qstr == MP_QSTR_NULL) {
+            continue; // Skip if qstr creation fails
+        }
+        // Store the name-value pair in the dictionary
+        mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), code_state->state[i]);
+    }
+    return MP_OBJ_FROM_PTR(locals_dict);
 }
 
 MP_DEFINE_CONST_OBJ_TYPE(
