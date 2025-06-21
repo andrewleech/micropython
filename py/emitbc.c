@@ -113,6 +113,12 @@ static void emit_write_code_info_qstr(emit_t *emit, qstr qst) {
     mp_encode_uint(emit, emit_get_cur_to_write_code_info, mp_emit_common_use_qstr(emit->emit_common, qst));
 }
 
+#if MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
+static void emit_write_code_info_uint(emit_t *emit, mp_uint_t val) {
+    mp_encode_uint(emit, emit_get_cur_to_write_code_info, val);
+}
+#endif
+
 #if MICROPY_ENABLE_SOURCE_LINE
 static void emit_write_code_info_bytes_lines(emit_t *emit, mp_uint_t bytes_to_skip, mp_uint_t lines_to_skip) {
     assert(bytes_to_skip > 0 || lines_to_skip > 0);
@@ -345,6 +351,32 @@ void mp_emit_bc_start_pass(emit_t *emit, pass_kind_t pass, scope_t *scope) {
             emit_write_code_info_qstr(emit, qst);
         }
     }
+
+    #if MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
+    // Write local variable names for .mpy debugging support
+    if (SCOPE_IS_FUNC_LIKE(scope->kind) && scope->num_locals > 0) {
+        // Write number of local variables
+        emit_write_code_info_uint(emit, scope->num_locals);
+
+        // Write local variable names indexed by local_num
+        for (int i = 0; i < scope->num_locals; i++) {
+            qstr local_name = MP_QSTR_;
+            // Find the id_info for this local variable
+            for (int j = 0; j < scope->id_info_len; ++j) {
+                id_info_t *id = &scope->id_info[j];
+                if ((id->kind == ID_INFO_KIND_LOCAL || id->kind == ID_INFO_KIND_CELL) &&
+                    id->local_num == i) {
+                    local_name = id->qst;
+                    break;
+                }
+            }
+            emit_write_code_info_qstr(emit, local_name);
+        }
+    } else {
+        // No local variables to save
+        emit_write_code_info_uint(emit, 0);
+    }
+    #endif
 }
 
 bool mp_emit_bc_end_pass(emit_t *emit) {
