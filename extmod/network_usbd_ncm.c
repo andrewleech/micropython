@@ -29,9 +29,7 @@
 
 #if MICROPY_HW_NETWORK_USBNET
 
-#ifndef NO_QSTR
 #include "tusb.h"
-#endif
 
 #include "lwip/ethip6.h"
 #include "lwip/init.h"
