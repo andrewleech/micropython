@@ -125,4 +125,9 @@ mp_obj_t mp_raw_code_save_fun_to_bytes(const mp_module_constants_t *consts, cons
 
 void mp_native_relocate(void *reloc, uint8_t *text, uintptr_t reloc_text);
 
+#if MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
+void mp_raw_code_save_local_names(mp_print_t *print, const mp_raw_code_t *rc);
+void mp_raw_code_load_local_names(mp_raw_code_t *rc, const uint8_t *bytecode);
+#endif
+
 #endif // MICROPY_INCLUDED_PY_PERSISTENTCODE_H

@@ -57,6 +57,10 @@ mp_raw_code_t *mp_emit_glue_new_raw_code(void) {
     #if MICROPY_PY_SYS_SETTRACE
     rc->line_of_definition = 0;
     #endif
+    #if MICROPY_PY_SYS_SETTRACE_LOCALNAMES
+    rc->local_names = NULL;
+    rc->local_names_len = 0;
+    #endif
     return rc;
 }
 

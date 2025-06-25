@@ -96,6 +96,10 @@ typedef struct _mp_raw_code_t {
     uint32_t asm_n_pos_args : 8;
     uint32_t asm_type_sig : 24; // compressed as 2-bit types; ret is MSB, then arg0, arg1, etc
     #endif
+    #if MICROPY_PY_SYS_SETTRACE_LOCALNAMES
+    const qstr *local_names;  // Array of local variable names indexed by local_num
+    uint16_t local_names_len; // Length of local_names array
+    #endif
 } mp_raw_code_t;
 
 // Version of mp_raw_code_t but without the asm_n_pos_args/asm_type_sig entries, which are
@@ -140,5 +144,25 @@ void mp_emit_glue_assign_native(mp_raw_code_t *rc, mp_raw_code_kind_t kind, cons
 
 mp_obj_t mp_make_function_from_proto_fun(mp_proto_fun_t proto_fun, const mp_module_context_t *context, const mp_obj_t *def_args);
 mp_obj_t mp_make_closure_from_proto_fun(mp_proto_fun_t proto_fun, const mp_module_context_t *context, mp_uint_t n_closed_over, const mp_obj_t *args);
+
+// Unified access function for local variable names
+#if MICROPY_PY_SYS_SETTRACE_LOCALNAMES || MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
+static inline qstr mp_raw_code_get_local_name(const mp_raw_code_t *rc, uint16_t local_num) {
+    #if MICROPY_PY_SYS_SETTRACE_LOCALNAMES
+    // Try RAM storage first (source files)
+    if (rc->local_names != NULL && local_num < rc->local_names_len &&
+        rc->local_names[local_num] != MP_QSTR_NULL) {
+        return rc->local_names[local_num];
+    }
+    #endif
+
+    #if MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
+    // Fall back to bytecode storage (.mpy files) - TODO: implement in Phase 2
+    // return mp_bytecode_get_local_name(rc, local_num);
+    #endif
+
+    return MP_QSTR_NULL; // No name available
+}
+#endif
 
 #endif // MICROPY_INCLUDED_PY_EMITGLUE_H
