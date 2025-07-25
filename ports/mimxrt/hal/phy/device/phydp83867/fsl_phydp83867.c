@@ -60,11 +60,8 @@ status_t PHY_DP83867_Init(phy_handle_t *handle, const phy_config_t *config) {
     uint32_t counter = PHY_READID_TIMEOUT_COUNT;
     status_t result;
     uint32_t regValue = 0U;
-    uint32_t id1 = 0U, id2 = 0U;
 
     printf("DP83867: Init started, PHY addr=0x%02lx\n", (unsigned long)config->phyAddr);
-    printf("DP83867: Config - autoNeg=%d, speed=%d, duplex=%d, enableEEE=%d\n", 
-           config->autoNeg, config->speed, config->duplex, config->enableEEE);
 
     /* Init MDIO interface. */
     MDIO_Init(handle->mdioHandle);
@@ -72,148 +69,127 @@ status_t PHY_DP83867_Init(phy_handle_t *handle, const phy_config_t *config) {
     /* Assign phy address. */
     handle->phyAddr = config->phyAddr;
 
+    printf("DP83867: Checking PHY ID at address 0x%02lx\n", (unsigned long)handle->phyAddr);
+
     /* Check PHY ID. */
-    printf("DP83867: Reading PHY ID registers...\n");
-    
-    /* First, let's read both ID registers to see what we get */
-    result = MDIO_Read(handle->mdioHandle, handle->phyAddr, PHY_ID1_REG, &id1);
-    if (result != kStatus_Success) {
-        printf("DP83867: ERROR - Failed to read PHY_ID1_REG (0x02), result=%ld\n", (long)result);
-        return result;
-    }
-    
-    result = MDIO_Read(handle->mdioHandle, handle->phyAddr, PHY_ID2_REG, &id2);
-    if (result != kStatus_Success) {
-        printf("DP83867: ERROR - Failed to read PHY_ID2_REG (0x03), result=%ld\n", (long)result);
-        return result;
-    }
-    
-    printf("DP83867: PHY ID1=0x%04lx (expected 0x%04x), ID2=0x%04lx (expected 0x%04x)\n", 
-           (unsigned long)id1, PHY_CONTROL_ID1, (unsigned long)id2, PHY_CONTROL_ID2);
-    printf("DP83867: Full PHY ID=0x%08lx (expected 0x%08x)\n", 
-           (unsigned long)((id1 << 16) | id2), PHY_FULL_ID);
-    
-    /* Try reading some other registers to check communication */
-    uint32_t bmcr = 0, bmsr = 0;
-    MDIO_Read(handle->mdioHandle, handle->phyAddr, PHY_BASICCONTROL_REG, &bmcr);
-    MDIO_Read(handle->mdioHandle, handle->phyAddr, PHY_BASICSTATUS_REG, &bmsr);
-    printf("DP83867: BMCR (reg 0)=0x%04lx, BMSR (reg 1)=0x%04lx\n", (unsigned long)bmcr, (unsigned long)bmsr);
-    
-    /* Check if we got the expected PHY ID */
-    if (id1 != PHY_CONTROL_ID1) {
-        printf("DP83867: ERROR - PHY ID1 mismatch! Trying alternative addresses...\n");
-        
-        /* Try scanning other addresses */
-        for (uint8_t addr = 0; addr < 32; addr++) {
-            uint32_t test_id1 = 0, test_id2 = 0;
-            if (MDIO_Read(handle->mdioHandle, addr, PHY_ID1_REG, &test_id1) == kStatus_Success &&
-                MDIO_Read(handle->mdioHandle, addr, PHY_ID2_REG, &test_id2) == kStatus_Success) {
-                if (test_id1 != 0 && test_id1 != 0xFFFF) {
-                    printf("  Addr 0x%02x: ID1=0x%04lx, ID2=0x%04lx\n", addr, (unsigned long)test_id1, (unsigned long)test_id2);
-                }
+    do
+    {
+        result = MDIO_Read(handle->mdioHandle, handle->phyAddr, PHY_ID1_REG, &regValue);
+        if (result != kStatus_Success) {
+            printf("DP83867: MDIO read failed, result=0x%08lx\n", (unsigned long)result);
+            return result;
+        }
+        printf("DP83867: PHY ID1 read: 0x%04lx (expected: 0x%04lx), counter=%ld\n", 
+               (unsigned long)regValue, (unsigned long)PHY_CONTROL_ID1, (unsigned long)counter);
+        counter--;
+    } while ((regValue != PHY_CONTROL_ID1) && (counter != 0U));
+
+    if (counter == 0U) {
+        printf("DP83867: PHY ID1 timeout, no valid response\n");
+        /* Let's also try scanning other addresses to see what's there */
+        for (uint32_t addr = 0; addr < 32; addr++) {
+            result = MDIO_Read(handle->mdioHandle, addr, PHY_ID1_REG, &regValue);
+            if (result == kStatus_Success && regValue != 0xFFFF && regValue != 0x0000) {
+                printf("DP83867: Found PHY at addr 0x%02lx, ID1=0x%04lx\n", 
+                       (unsigned long)addr, (unsigned long)regValue);
             }
         }
         return kStatus_Fail;
     }
 
+    printf("DP83867: PHY ID1 verified, resetting PHY\n");
+
     /* Reset PHY. */
-    printf("DP83867: Resetting PHY...\n");
     result = MDIO_Write(handle->mdioHandle, handle->phyAddr, PHY_BASICCONTROL_REG, PHY_BCTL_RESET_MASK);
     if (result != kStatus_Success) {
-        printf("DP83867: ERROR - Failed to write reset command, result=%ld\n", (long)result);
+        printf("DP83867: PHY reset write failed, result=0x%08lx\n", (unsigned long)result);
         return result;
     }
 
+    printf("DP83867: Waiting for reset to complete\n");
+
     /* Wait for reset to complete */
-    printf("DP83867: Waiting for reset to complete...\n");
     counter = PHY_READID_TIMEOUT_COUNT;
     do {
         result = MDIO_Read(handle->mdioHandle, handle->phyAddr, PHY_BASICCONTROL_REG, &regValue);
         if (result != kStatus_Success) {
-            printf("DP83867: ERROR - Failed to read BMCR during reset wait, result=%ld\n", (long)result);
+            printf("DP83867: Reset status read failed, result=0x%08lx\n", (unsigned long)result);
             return result;
         }
         if (counter % 100 == 0) {
-            printf("DP83867: Reset wait - BMCR=0x%04lx, counter=%ld\n", (unsigned long)regValue, (long)counter);
+            printf("DP83867: Reset status: 0x%04lx, counter=%ld\n", 
+                   (unsigned long)regValue, (unsigned long)counter);
         }
         counter--;
     } while ((regValue & PHY_BCTL_RESET_MASK) && (counter != 0U));
 
     if (counter == 0U) {
-        printf("DP83867: ERROR - Reset timeout! BMCR=0x%04lx\n", (unsigned long)regValue);
+        printf("DP83867: Reset timeout\n");
         return kStatus_Fail;
     }
-    printf("DP83867: Reset complete, BMCR=0x%04lx\n", (unsigned long)regValue);
+
+    printf("DP83867: Reset complete, configuring PHY\n");
 
     if (config->autoNeg) {
+        printf("DP83867: Configuring auto-negotiation\n");
         /* Set the auto-negotiation. */
-        printf("DP83867: Configuring auto-negotiation...\n");
-        uint32_t anar = PHY_100BASETX_FULLDUPLEX_MASK | PHY_100BASETX_HALFDUPLEX_MASK | 
-                       PHY_10BASETX_FULLDUPLEX_MASK | PHY_10BASETX_HALFDUPLEX_MASK | 
-                       PHY_IEEE802_3_SELECTOR_MASK;
-        printf("DP83867: Writing ANAR=0x%04lx\n", (unsigned long)anar);
-        result = MDIO_Write(handle->mdioHandle, handle->phyAddr, PHY_AUTONEG_ADVERTISE_REG, anar);
+        result =
+            MDIO_Write(handle->mdioHandle, handle->phyAddr, PHY_AUTONEG_ADVERTISE_REG,
+                PHY_100BASETX_FULLDUPLEX_MASK | PHY_100BASETX_HALFDUPLEX_MASK | PHY_10BASETX_FULLDUPLEX_MASK |
+                PHY_10BASETX_HALFDUPLEX_MASK | PHY_IEEE802_3_SELECTOR_MASK);
         if (result == kStatus_Success) {
-            printf("DP83867: Writing 1000BASE-T control=0x%04x\n", PHY_1000BASET_FULLDUPLEX_MASK);
             result = MDIO_Write(handle->mdioHandle, handle->phyAddr, PHY_1000BASET_CONTROL_REG,
                 PHY_1000BASET_FULLDUPLEX_MASK);
             if (result == kStatus_Success) {
                 result = MDIO_Read(handle->mdioHandle, handle->phyAddr, PHY_BASICCONTROL_REG, &regValue);
                 if (result == kStatus_Success) {
-                    uint32_t newValue = regValue | PHY_BCTL_AUTONEG_MASK | PHY_BCTL_RESTART_AUTONEG_MASK;
-                    printf("DP83867: Enabling autoneg - BMCR 0x%04lx -> 0x%04lx\n", (unsigned long)regValue, (unsigned long)newValue);
-                    result = MDIO_Write(handle->mdioHandle, handle->phyAddr, PHY_BASICCONTROL_REG, newValue);
-                } else {
-                    printf("DP83867: ERROR - Failed to read BMCR for autoneg enable\n");
+                    result = MDIO_Write(handle->mdioHandle, handle->phyAddr, PHY_BASICCONTROL_REG,
+                        (regValue | PHY_BCTL_AUTONEG_MASK | PHY_BCTL_RESTART_AUTONEG_MASK));
                 }
-            } else {
-                printf("DP83867: ERROR - Failed to write 1000BASE-T control\n");
             }
+        }
+        if (result != kStatus_Success) {
+            printf("DP83867: Auto-negotiation setup failed, result=0x%08lx\n", (unsigned long)result);
         } else {
-            printf("DP83867: ERROR - Failed to write ANAR\n");
+            printf("DP83867: Auto-negotiation configured successfully\n");
         }
     } else {
+        printf("DP83867: Configuring manual speed/duplex\n");
         /* Disable isolate mode */
-        printf("DP83867: Manual mode - disabling isolate...\n");
         result = MDIO_Read(handle->mdioHandle, handle->phyAddr, PHY_BASICCONTROL_REG, &regValue);
         if (result != kStatus_Success) {
-            printf("DP83867: ERROR - Failed to read BMCR for isolate disable\n");
+            printf("DP83867: Read basic control failed, result=0x%08lx\n", (unsigned long)result);
             return result;
         }
-        uint32_t newValue = regValue & ~PHY_BCTL_ISOLATE_MASK;
-        printf("DP83867: BMCR isolate disable: 0x%04lx -> 0x%04lx\n", (unsigned long)regValue, (unsigned long)newValue);
-        result = MDIO_Write(handle->mdioHandle, handle->phyAddr, PHY_BASICCONTROL_REG, newValue);
+        regValue &= ~PHY_BCTL_ISOLATE_MASK;
+        result = MDIO_Write(handle->mdioHandle, handle->phyAddr, PHY_BASICCONTROL_REG, regValue);
         if (result != kStatus_Success) {
-            printf("DP83867: ERROR - Failed to write BMCR for isolate disable\n");
+            printf("DP83867: Write basic control failed, result=0x%08lx\n", (unsigned long)result);
             return result;
         }
 
         /* Disable the auto-negotiation and set user-defined speed/duplex configuration. */
-        printf("DP83867: Setting manual speed/duplex...\n");
         result = PHY_DP83867_SetLinkSpeedDuplex(handle, config->speed, config->duplex);
+        if (result != kStatus_Success) {
+            printf("DP83867: Manual speed/duplex setup failed, result=0x%08lx\n", (unsigned long)result);
+        }
     }
     
-    printf("DP83867: Init %s (result=%ld)\n", 
-           result == kStatus_Success ? "SUCCESS" : "FAILED", (long)result);
+    if (result == kStatus_Success) {
+        printf("DP83867: Init completed successfully\n");
+    } else {
+        printf("DP83867: Init failed with result=0x%08lx\n", (unsigned long)result);
+    }
+    
     return result;
 }
 
 status_t PHY_DP83867_Write(phy_handle_t *handle, uint32_t phyReg, uint32_t data) {
-    status_t result = MDIO_Write(handle->mdioHandle, handle->phyAddr, phyReg, data);
-    if (result != kStatus_Success) {
-        printf("DP83867: Write failed - addr=0x%02lx, reg=0x%02lx, data=0x%04lx, result=%ld\n",
-               (unsigned long)handle->phyAddr, (unsigned long)phyReg, (unsigned long)data, (long)result);
-    }
-    return result;
+    return MDIO_Write(handle->mdioHandle, handle->phyAddr, phyReg, data);
 }
 
 status_t PHY_DP83867_Read(phy_handle_t *handle, uint32_t phyReg, uint32_t *dataPtr) {
-    status_t result = MDIO_Read(handle->mdioHandle, handle->phyAddr, phyReg, dataPtr);
-    if (result != kStatus_Success) {
-        printf("DP83867: Read failed - addr=0x%02lx, reg=0x%02lx, result=%ld\n",
-               (unsigned long)handle->phyAddr, (unsigned long)phyReg, (long)result);
-    }
-    return result;
+    return MDIO_Read(handle->mdioHandle, handle->phyAddr, phyReg, dataPtr);
 }
 
 status_t PHY_DP83867_GetAutoNegotiationStatus(phy_handle_t *handle, bool *status) {
