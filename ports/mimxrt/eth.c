@@ -421,7 +421,7 @@ void eth_init_1(eth_t *self, int eth_id, const phy_operations_t *phy_ops, int ph
     uint32_t source_clock = eth_clock_init(eth_id, phy_clock);
 
     const machine_pin_obj_t *reset_pin = NULL;
-    #if defined(pin_ENET_1_INT)
+    #if defined(pin_ENET_1_RESET)
     reset_pin = pin_ENET_1_RESET;
     #endif
     const machine_pin_obj_t *int_pin = NULL;

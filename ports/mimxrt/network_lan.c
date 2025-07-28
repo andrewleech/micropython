@@ -28,7 +28,7 @@
 #include "py/mphal.h"
 #include "extmod/modnetwork.h"
 
-#if defined(IOMUX_TABLE_ENET)
+#if defined(ENET_PHY_ADDRESS) || (ENET_DUAL_PORT)
 
 #include "fsl_phy.h"
 #include "eth.h"
