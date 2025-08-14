@@ -28,13 +28,14 @@
 #include "py/mphal.h"
 #include "extmod/modnetwork.h"
 
-#if defined(IOMUX_TABLE_ENET)
+#if defined(ENET_PHY_ADDRESS) || (ENET_DUAL_PORT)
 
 #include "fsl_phy.h"
 #include "eth.h"
 #include "hal/phy/device/phyksz8081/fsl_phyksz8081.h"
 #include "hal/phy/device/phydp83825/fsl_phydp83825.h"
 #include "hal/phy/device/phydp83848/fsl_phydp83848.h"
+#include "hal/phy/device/phydp83867/fsl_phydp83867.h"
 #include "hal/phy/device/phylan8720/fsl_phylan8720.h"
 #include "hal/phy/device/phyrtl8211f/fsl_phyrtl8211f.h"
 
