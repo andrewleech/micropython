@@ -46,6 +46,9 @@ SRC_GEN = $(BUILD)/natmod_init_gen.c
 MOD_FROM_SRC = $(shell $(MAKE_NATMOD_INIT) --get-name $(SRC) 2>/dev/null)
 ifneq ($(MOD_FROM_SRC),)
 MOD ?= $(MOD_FROM_SRC)
+else
+$(warning Warning: MP_REGISTER_MODULE found but could not extract module name from $(SRC))
+$(warning Consider specifying MOD manually in Makefile if auto-detection fails)
 endif
 else
 # No static module definition
@@ -214,7 +217,12 @@ $(BUILD_DIRS):
 ifneq ($(SRC_GEN),)
 $(SRC_GEN): $(SRC)
 	$(ECHO) "GEN $@"
-	$(Q)$(MAKE_NATMOD_INIT) $(SRC) > $@ || ($(RM) -f $@ && false)
+	$(Q)$(MAKE_NATMOD_INIT) $(SRC) > $@ || { \
+		$(RM) -f $@; \
+		echo "Error: Failed to generate static module init function from $(SRC)"; \
+		echo "Check that MP_REGISTER_MODULE and globals table are properly defined"; \
+		false; \
+	}
 endif
 
 # Preprocess all source files to generate $(CONFIG_H)

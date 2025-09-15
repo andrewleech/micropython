@@ -1,11 +1,40 @@
 #!/usr/bin/env python3
 """
-This pre-processor parses native module source files to find static module
-definitions using MP_REGISTER_MODULE and generates the required mpy_init
-function automatically.
+Native Module Static Definition Generator
 
-This allows native modules to use the same static definition pattern as
-user C modules, reducing boilerplate code.
+This tool automatically generates mpy_init functions for native modules that use
+static module definitions, allowing them to use the same clean declaration pattern
+as user C modules.
+
+Usage:
+    # Generate init function for a static module
+    make_natmod_init.py module.c > natmod_init_gen.c
+
+    # Extract module name for build system
+    make_natmod_init.py --get-name module.c
+
+Supported Patterns:
+    The tool looks for modules that define:
+    1. MP_REGISTER_MODULE(MP_QSTR_module_name, module_obj)
+    2. A globals table named like 'module_name_globals_table[]'
+
+    Example module structure:
+        static const mp_rom_map_elem_t my_module_globals_table[] = {
+            { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_my_module) },
+            { MP_ROM_QSTR(MP_QSTR_function), MP_ROM_PTR(&function_obj) },
+        };
+
+        MP_REGISTER_MODULE(MP_QSTR_my_module, my_module);
+
+Generated Output:
+    Creates a simple mpy_init function that uses MP_DYNRUNTIME_INIT_STATIC_MODULE
+    macro, which handles table iteration and size calculation automatically using
+    MP_ARRAY_SIZE at compile time.
+
+Error Handling:
+    - Validates module and table names as valid C identifiers
+    - Provides clear error messages for common issues
+    - Fails gracefully when patterns aren't found
 """
 
 import sys
@@ -20,29 +49,6 @@ REGISTER_MODULE_PATTERN = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 
-# Pattern to find module object definitions with globals reference
-MODULE_OBJ_PATTERN = re.compile(
-    r"(?:const\s+)?mp_obj_module_t\s+(\w+)\s*=\s*{\s*"
-    r"\.base\s*=\s*{\s*[^}]+}\s*,\s*"
-    r"\.globals\s*=\s*\([^)]*\)\s*&(\w+)",
-    re.MULTILINE | re.DOTALL,
-)
-
-# Pattern to find globals dictionary definition
-GLOBALS_DICT_PATTERN = re.compile(
-    r"static\s+MP_DEFINE_CONST_DICT\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)",
-    re.MULTILINE,
-)
-
-# Pattern to find globals table definition (both traditional and native module style)
-GLOBALS_TABLE_PATTERN = re.compile(
-    r"(?:static\s+)?const\s+(?:mp_rom_map_elem_t|mp_rom_obj_t)\s+(\w+)\s*\[\s*\]\s*=\s*{([^}]+)}",
-    re.MULTILINE | re.DOTALL,
-)
-
-# Pattern to count array elements (rough estimate)
-ARRAY_ELEM_PATTERN = re.compile(r"{[^{}]+}")
-
 
 def find_module_registration(content):
     """Find MP_REGISTER_MODULE declaration in source content."""
@@ -52,82 +58,47 @@ def find_module_registration(content):
     return None, None
 
 
-def find_module_globals(content, module_obj_name):
-    """Find the globals dictionary name for a module object."""
-    # First, find the module object definition
-    for match in MODULE_OBJ_PATTERN.finditer(content):
-        if match.group(1) == module_obj_name:
-            return match.group(2)  # globals dict name
+def validate_identifier(name):
+    """Validate that a name is a valid C identifier."""
+    if not name:
+        return False
+    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", name):
+        return False
+    return True
+
+
+def find_globals_table_name(content, module_name):
+    """Find the globals table name for a static module."""
+    # Look for standard patterns (both mp_rom_map_elem_t and mp_rom_obj_t)
+    patterns = [
+        # Standard user C module pattern: module_globals_table
+        rf"(?:static\s+)?const\s+mp_rom_map_elem_t\s+({module_name}_globals_table)\s*\[\s*\]\s*=",
+        rf"(?:static\s+)?const\s+mp_rom_map_elem_t\s+({module_name}_module_globals_table)\s*\[\s*\]\s*=",
+        # Native module pattern with mp_rom_obj_t (for key-value pairs)
+        rf"(?:static\s+)?const\s+mp_rom_obj_t\s+({module_name}_globals_table)\s*\[\s*\]\s*=",
+        rf"(?:static\s+)?const\s+mp_rom_obj_t\s+({module_name}_module_globals_table)\s*\[\s*\]\s*=",
+        # Generic patterns
+        r"(?:static\s+)?const\s+mp_rom_map_elem_t\s+(\w*globals_table)\s*\[\s*\]\s*=",
+        r"(?:static\s+)?const\s+mp_rom_obj_t\s+(\w*globals_table)\s*\[\s*\]\s*=",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, content)
+        if match:
+            return match.group(1)
+
     return None
 
 
-def find_globals_table(content, globals_dict_name):
-    """Find the globals table name from the globals dictionary."""
-    for match in GLOBALS_DICT_PATTERN.finditer(content):
-        if match.group(1) == globals_dict_name:
-            return match.group(2)  # globals table name
-    return None
-
-
-def count_table_elements(content, table_name):
-    """Count elements in the globals table (approximate)."""
-    match = GLOBALS_TABLE_PATTERN.search(content)
-    if match and match.group(1) == table_name:
-        table_content = match.group(2)
-        # Count opening braces that indicate array elements
-        elements = ARRAY_ELEM_PATTERN.findall(table_content)
-        return len(elements)
-    return 0
-
-
-def generate_mpy_init(module_name, module_obj, globals_table, table_size):
+def generate_mpy_init(module_name, globals_table):
     """Generate the mpy_init function for a static module."""
-    # For native modules, we need different handling
-    if globals_table and not module_obj:
-        # Native module pattern with direct globals table
-        return f'''// Auto-generated by make_natmod_init.py
-// This file is compiled into the native module to provide the init function
+    return f'''// Auto-generated by make_natmod_init.py
+// This file provides the mpy_init function for the '{module_name}' native module
+// DO NOT EDIT - this file is regenerated automatically when source changes
 
 #include "py/dynruntime.h"
 
-// External reference to static globals table
-extern const mp_rom_obj_t {globals_table}[];
-
-// Entry point called when the module is imported
-mp_obj_t mpy_init(mp_obj_fun_bc_t *self, size_t n_args, size_t n_kw, mp_obj_t *args) {{
-    // Initialize the module environment
-    MP_DYNRUNTIME_INIT_ENTRY
-
-    // Register all module globals from the static table
-    const mp_rom_obj_t *table = {globals_table};
-    
-    // Table is key-value pairs, process in steps of 2
-    for (size_t i = 0; i < {table_size} * 2; i += 2) {{
-        // Extract the QSTR key
-        qstr key = MP_OBJ_QSTR_VALUE(table[i]);
-        
-        // Skip __name__ as it's handled by the module system
-        if (key != MP_QSTR___name__) {{
-            mp_store_global(key, table[i + 1]);
-        }}
-    }}
-
-    // Clean up and return
-    MP_DYNRUNTIME_INIT_EXIT
-}}
-
-// Export module name for build system
-const char natmod_module_name[] = "{module_name}";
-'''
-    else:
-        # Traditional module pattern with module object
-        return f'''// Auto-generated by make_natmod_init.py
-// This file is compiled into the native module to provide the init function
-
-#include "py/dynruntime.h"
-
-// External references to static module definitions
-extern const mp_obj_module_t {module_obj};
+// External reference to static globals table from source module
 extern const mp_rom_map_elem_t {globals_table}[];
 
 // Entry point called when the module is imported
@@ -135,25 +106,15 @@ mp_obj_t mpy_init(mp_obj_fun_bc_t *self, size_t n_args, size_t n_kw, mp_obj_t *a
     // Initialize the module environment
     MP_DYNRUNTIME_INIT_ENTRY
 
-    // Register all module globals from the static table
-    const mp_rom_map_elem_t *table = {globals_table};
-    
-    // Iterate through the globals table and register each attribute
-    for (size_t i = 0; i < {table_size}; i++) {{
-        // Extract the QSTR key from the table entry
-        qstr key = MP_OBJ_QSTR_VALUE(table[i].key);
-        
-        // Skip __name__ as it's handled by the module system
-        if (key != MP_QSTR___name__) {{
-            mp_store_global(key, table[i].value);
-        }}
-    }}
+    // Register all globals using the existing macro that handles
+    // table iteration and MP_ARRAY_SIZE calculation automatically
+    MP_DYNRUNTIME_INIT_STATIC_MODULE({globals_table});
 
     // Clean up and return
     MP_DYNRUNTIME_INIT_EXIT
 }}
 
-// Export module name for build system
+// Export module name for build system use
 const char natmod_module_name[] = "{module_name}";
 '''
 
@@ -176,81 +137,38 @@ def process_source_files(source_files, get_name_only=False):
         if not module_name:
             continue
 
+        # Validate module name
+        if not validate_identifier(module_name):
+            print(f"Error: Invalid module name '{module_name}' in {source_file}", file=sys.stderr)
+            continue
+
         if get_name_only:
             # Just return the module name for build system
             return module_name
 
-        # Check for native module pattern (direct globals table without module object)
-        # Look for a globals table with the module name
-        globals_table_match = re.search(
-            rf"const\s+mp_rom_obj_t\s+({module_name}_globals_table)\s*\[\s*\]\s*=", content
-        )
-
-        if globals_table_match:
-            # Native module pattern - direct globals table
-            globals_table = globals_table_match.group(1)
-
-            # Try to find STATIC_MODULE_GLOBALS_COUNT define
-            count_match = re.search(
-                r"#define\s+STATIC_MODULE_GLOBALS_COUNT\s+\(([^)]+)\)", content
-            )
-            if count_match:
-                # Extract the expression, typically something like "MP_ARRAY_SIZE(...) / 2"
-                count_expr = count_match.group(1)
-                # For native modules with key-value pairs, we need the pair count
-                if "/ 2" in count_expr:
-                    # Extract just the number of pairs
-                    table_size = count_expr.split("/ 2")[0].strip()
-                    # Remove MP_ARRAY_SIZE wrapper if present
-                    if "MP_ARRAY_SIZE" in table_size:
-                        table_size = re.search(r"MP_ARRAY_SIZE\(([^)]+)\)", table_size).group(1)
-                        table_size = f"MP_ARRAY_SIZE({table_size}) / 2"
-                else:
-                    table_size = count_expr
-            else:
-                # Count elements manually
-                table_match = GLOBALS_TABLE_PATTERN.search(content)
-                if table_match and table_match.group(1) == globals_table:
-                    table_content = table_match.group(2)
-                    # Count MP_OBJ_NEW_QSTR occurrences as rough estimate
-                    qstr_count = table_content.count("MP_OBJ_NEW_QSTR")
-                    table_size = str(qstr_count // 2) if qstr_count > 0 else "5"
-                else:
-                    table_size = "5"  # Default fallback
-
-            # Generate init function for native module pattern
-            return generate_mpy_init(module_name, None, globals_table, table_size)
-
-        # Traditional pattern - try to find module object and globals
-        globals_dict = find_module_globals(content, module_obj)
-        if not globals_dict:
-            print(
-                f"Warning: Could not find globals dict for module {module_obj}",
-                file=sys.stderr,
-            )
-            continue
-
-        # Find globals table
-        globals_table = find_globals_table(content, globals_dict)
+        # Find the globals table for this module
+        globals_table = find_globals_table_name(content, module_name)
         if not globals_table:
             print(
-                f"Warning: Could not find globals table for dict {globals_dict}",
+                f"Error: Could not find globals table for module '{module_name}' in {source_file}",
+                file=sys.stderr,
+            )
+            print(
+                f"Expected a table named like '{module_name}_globals_table' or similar.",
                 file=sys.stderr,
             )
             continue
 
-        # Count table elements
-        table_size = count_table_elements(content, globals_table)
-        if table_size == 0:
+        # Validate table name
+        if not validate_identifier(globals_table):
             print(
-                f"Warning: Could not determine size of table {globals_table}",
+                f"Error: Invalid globals table name '{globals_table}' in {source_file}",
                 file=sys.stderr,
             )
-            # Use a reasonable default or compute at runtime
-            table_size = "MP_ARRAY_SIZE(" + globals_table + ")"
+            continue
 
-        # Generate init function
-        return generate_mpy_init(module_name, module_obj, globals_table, table_size)
+        # Generate simple init function that uses MP_ARRAY_SIZE
+        return generate_mpy_init(module_name, globals_table)
 
     return None
 

@@ -275,6 +275,51 @@ patterns in native modules:
 These macros help reduce code duplication and make it easier to maintain consistency
 between built-in modules and their native module counterparts.
 
+Troubleshooting static module generation
+-----------------------------------------
+
+The build system automatically detects static module definitions and generates the
+required ``mpy_init`` function. If you encounter issues, check the following:
+
+**Common Issues:**
+
+1. **Module name extraction fails**
+
+   Error: ``MP_REGISTER_MODULE found but could not extract module name``
+
+   - Ensure ``MP_REGISTER_MODULE(MP_QSTR_name, obj)`` is properly formatted
+   - The module name in the first parameter must be a valid C identifier
+   - Consider specifying ``MOD = module_name`` manually in the Makefile
+
+2. **Globals table not found**
+
+   Error: ``Could not find globals table for module 'name'``
+
+   - The globals table should be named ``name_globals_table[]`` or ``name_module_globals_table[]``
+   - Ensure the table is declared as ``static const mp_rom_map_elem_t table_name[]``
+   - Check that the table follows the standard MicroPython format
+
+3. **Build fails with undefined symbols**
+
+   - Make sure all QSTRs used in the table are referenced in your code
+   - Consider adding a ``_qstr_refs()`` function to reference needed QSTRs
+   - Verify that function objects and types are properly defined
+
+**Migration from traditional native modules:**
+
+To convert an existing native module to use static definitions:
+
+1. Replace individual ``mp_store_global()`` calls with a static table
+2. Add ``MP_REGISTER_MODULE()`` declaration
+3. Remove the manual ``mpy_init`` function
+4. The build system will auto-generate the init function
+
+**Debugging:**
+
+- Use ``make V=1`` to see detailed build commands
+- Check the generated ``natmod_init_gen.c`` file for correctness
+- Verify that ``MP_ARRAY_SIZE`` works correctly with your table definition
+
 Compiling the module
 --------------------
 
