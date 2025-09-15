@@ -20,9 +20,27 @@ RTT (Real-Time Transfer) is a technology developed by SEGGER that enables real-t
 - **Non-blocking I/O**: Reads and writes don't block target execution
 - **Static Module**: Uses the new MicroPython static module definition system
 
-## Building
+## RTT Library Modifications
 
-The module automatically downloads RTT source files from the official SEGGER repository during the build process:
+This module uses modified versions of the SEGGER RTT library files to ensure compatibility with MicroPython's native module system. The original RTT library uses global static variables that are placed in the BSS section, which is not supported in MicroPython native modules.
+
+### Files and Modifications
+
+- **SEGGER_RTT_patched.h**: Modified header with dynamic allocation interface
+- **SEGGER_RTT_patched.c**: Implementation using heap-based control block allocation
+- **SEGGER_RTT_Conf.h**: Configuration file (minimal changes)
+
+### Key Changes Made
+
+1. **Global Control Block**: Replaced static `_SEGGER_RTT` with dynamically allocated pointer `_SEGGER_RTT_PTR`
+2. **Initialization Functions**: Added `RTT_InitControlBlock()`, `RTT_GetControlBlock()`, and `RTT_FreeControlBlock()`
+3. **Memory Management**: All control block access now goes through the pointer with proper initialization checks
+4. **Comment Headers**: Added detailed documentation of modifications for future reference
+
+**Original Source**: https://github.com/SEGGERMicro/RTT/tree/main/RTT
+**License**: BSD 3-Clause (preserved from original)
+
+## Building
 
 ```bash
 cd examples/natmod/rtt
@@ -30,6 +48,8 @@ make ARCH=x64  # or your target architecture
 ```
 
 Supported architectures: `x86`, `x64`, `armv7m`, `xtensa`, `xtensawin`, `rv32imc`
+
+The build now uses the locally patched RTT files instead of downloading from the SEGGER repository.
 
 ## Usage
 

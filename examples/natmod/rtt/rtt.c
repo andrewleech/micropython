@@ -8,8 +8,28 @@
 
 #include "py/dynruntime.h"
 
-// Include SEGGER RTT library
-#include "SEGGER_RTT.h"
+// Include patched SEGGER RTT library
+#include "SEGGER_RTT_dynamic.h"
+
+// Global RTT memory - allocated here to avoid BSS issues in RTT library
+SEGGER_RTT_CB _rtt_cb_global;
+char _rtt_up_buffer_global[BUFFER_SIZE_UP];
+char _rtt_down_buffer_global[BUFFER_SIZE_DOWN];
+
+// Provide missing functions for RTT library
+size_t strlen(const char *s) {
+    const char *p = s;
+    while (*p) p++;
+    return p - s;
+}
+
+void *memcpy(void *dest, const void *src, size_t n) {
+    return mp_fun_table.memmove_(dest, src, n);
+}
+
+void *memset(void *s, int c, size_t n) {
+    return mp_fun_table.memset_(s, c, n);
+}
 
 // RTT Stream object type
 mp_obj_full_type_t rtt_stream_type;
@@ -148,22 +168,23 @@ static mp_obj_t rtt_stream_exit(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(rtt_stream_exit_obj, 4, 4, rtt_stream_exit);
 
-// RTT Stream locals dictionary
-static const mp_rom_map_elem_t rtt_stream_locals_table[] = {
-    { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&mp_stream_read_obj) },
-    { MP_ROM_QSTR(MP_QSTR_readinto), MP_ROM_PTR(&mp_stream_readinto_obj) },
-    { MP_ROM_QSTR(MP_QSTR_readline), MP_ROM_PTR(&mp_stream_unbuffered_readline_obj) },
-    { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&mp_stream_write_obj) },
-    { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&rtt_stream_close_obj) },
-    { MP_ROM_QSTR(MP_QSTR___enter__), MP_ROM_PTR(&rtt_stream_enter_obj) },
-    { MP_ROM_QSTR(MP_QSTR___exit__), MP_ROM_PTR(&rtt_stream_exit_obj) },
-};
-static MP_DEFINE_CONST_DICT(rtt_stream_locals_dict, rtt_stream_locals_table);
+// For native modules, we need to set up the locals dict at runtime
+mp_map_elem_t rtt_stream_locals_dict_table[7];
+static MP_DEFINE_CONST_DICT(rtt_stream_locals_dict, rtt_stream_locals_dict_table);
 
 // Module initialization using traditional approach
 // (Static module system doesn't handle type setup yet)
 mp_obj_t mpy_init(mp_obj_fun_bc_t *self, size_t n_args, size_t n_kw, mp_obj_t *args) {
     MP_DYNRUNTIME_INIT_ENTRY
+
+    // Initialize RTT Stream locals dict at runtime
+    rtt_stream_locals_dict_table[0] = (mp_map_elem_t){ MP_OBJ_NEW_QSTR(MP_QSTR_read), MP_OBJ_FROM_PTR(&mp_stream_read_obj) };
+    rtt_stream_locals_dict_table[1] = (mp_map_elem_t){ MP_OBJ_NEW_QSTR(MP_QSTR_readinto), MP_OBJ_FROM_PTR(&mp_stream_readinto_obj) };
+    rtt_stream_locals_dict_table[2] = (mp_map_elem_t){ MP_OBJ_NEW_QSTR(MP_QSTR_readline), MP_OBJ_FROM_PTR(&mp_stream_unbuffered_readline_obj) };
+    rtt_stream_locals_dict_table[3] = (mp_map_elem_t){ MP_OBJ_NEW_QSTR(MP_QSTR_write), MP_OBJ_FROM_PTR(&mp_stream_write_obj) };
+    rtt_stream_locals_dict_table[4] = (mp_map_elem_t){ MP_OBJ_NEW_QSTR(MP_QSTR_close), MP_OBJ_FROM_PTR(&rtt_stream_close_obj) };
+    rtt_stream_locals_dict_table[5] = (mp_map_elem_t){ MP_OBJ_NEW_QSTR(MP_QSTR___enter__), MP_OBJ_FROM_PTR(&rtt_stream_enter_obj) };
+    rtt_stream_locals_dict_table[6] = (mp_map_elem_t){ MP_OBJ_NEW_QSTR(MP_QSTR___exit__), MP_OBJ_FROM_PTR(&rtt_stream_exit_obj) };
 
     // Initialize RTT Stream type
     rtt_stream_type.base.type = mp_fun_table.type_type;
