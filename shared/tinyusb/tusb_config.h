@@ -59,8 +59,23 @@
 #define MICROPY_HW_USB_MSC_INQUIRY_REVISION_STRING "1.00"
 #endif
 
+// #define CFG_TUSB_RHPORT0_MODE (OPT_MODE_NONE)
+// #define CFG_TUSB_RHPORT1_MODE (OPT_MODE_DEVICE)
+
 #ifndef CFG_TUSB_RHPORT0_MODE
+#ifdef MICROPY_HW_TINYUSB_RHPORT0_MODE
+#define CFG_TUSB_RHPORT0_MODE MICROPY_HW_TINYUSB_RHPORT0_MODE
+#else
 #define CFG_TUSB_RHPORT0_MODE   (OPT_MODE_DEVICE)
+#endif
+#endif
+
+#ifndef CFG_TUSB_RHPORT1_MODE
+#ifdef MICROPY_HW_TINYUSB_RHPORT1_MODE
+#define CFG_TUSB_RHPORT1_MODE MICROPY_HW_TINYUSB_RHPORT1_MODE
+#else
+#define CFG_TUSB_RHPORT1_MODE   (OPT_MODE_NONE)
+#endif
 #endif
 
 #if MICROPY_HW_USB_CDC
@@ -94,7 +109,12 @@
 #define CFG_TUD_MSC_BUFSIZE (MICROPY_FATFS_MAX_SS)
 #endif
 
-#define USBD_RHPORT (0) // Currently only one port is supported
+// Board-configurable RHPORT selection
+#ifndef MICROPY_HW_TINYUSB_RHPORT
+#define MICROPY_HW_TINYUSB_RHPORT (0) // Default to port 0
+#endif
+
+#define USBD_RHPORT MICROPY_HW_TINYUSB_RHPORT
 
 // Define built-in interface, string and endpoint numbering based on the above config
 
