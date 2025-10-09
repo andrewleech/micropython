@@ -37,6 +37,15 @@ static inline uint64_t sys_bswap_64(uint64_t val) {
 // Zephyr byte order conversion macros
 // Assumes little-endian host (CONFIG_LITTLE_ENDIAN=1)
 
+// Verify host is little-endian at compile time
+#if defined(__BYTE_ORDER__)
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#error "Big-endian hosts not supported - byte order conversion needs updating"
+#elif __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "Unknown byte order"
+#endif
+#endif
+
 #define sys_le16_to_cpu(val) (val)
 #define sys_cpu_to_le16(val) (val)
 #define sys_be16_to_cpu(val) sys_bswap_16(val)
