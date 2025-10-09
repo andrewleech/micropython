@@ -27,6 +27,7 @@
 #include "py/mphal.h"
 #include "py/runtime.h"
 #include "zephyr_ble_work.h"
+#include "zephyr_ble_atomic.h"
 
 #include <stddef.h>
 
@@ -59,7 +60,7 @@ void k_work_queue_init(struct k_work_q *queue) {
 
 void k_work_queue_start(struct k_work_q *queue, void *stack, size_t stack_size, int prio, const struct k_work_queue_config *cfg) {
     DEBUG_WORK_printf("k_work_queue_start(%p, stack=%p, size=%u, prio=%d, cfg=%p)\n",
-                      queue, stack, (unsigned)stack_size, prio, cfg);
+        queue, stack, (unsigned)stack_size, prio, cfg);
 
     // In MicroPython, we don't create threads
     // Just initialize the queue and set the name
@@ -88,9 +89,12 @@ void k_work_init(struct k_work *work, k_work_handler_t handler) {
 static int k_work_submit_internal(struct k_work_q *queue, struct k_work *work) {
     DEBUG_WORK_printf("k_work_submit_internal(%p, %p)\n", queue, work);
 
+    MICROPY_PY_BLUETOOTH_ENTER
+
     // Check if already pending in any queue
     if (work->pending) {
         DEBUG_WORK_printf("  --> already pending\n");
+        MICROPY_PY_BLUETOOTH_EXIT
         return 0;
     }
 
@@ -106,17 +110,13 @@ static int k_work_submit_internal(struct k_work_q *queue, struct k_work *work) {
         // Find tail and append
         struct k_work *tail = queue->head;
         while (tail->next != NULL) {
-            if (tail == work) {
-                // Work is already in queue
-                DEBUG_WORK_printf("  --> already in queue\n");
-                return 0;
-            }
             tail = tail->next;
         }
         tail->next = work;
         work->prev = tail;
     }
 
+    MICROPY_PY_BLUETOOTH_EXIT
     return 1;
 }
 
@@ -136,7 +136,10 @@ int k_work_submit_to_queue(struct k_work_q *queue, struct k_work *work) {
 int k_work_cancel(struct k_work *work) {
     DEBUG_WORK_printf("k_work_cancel(%p)\n", work);
 
+    MICROPY_PY_BLUETOOTH_ENTER
+
     if (!work->pending) {
+        MICROPY_PY_BLUETOOTH_EXIT
         return 0;
     }
 
@@ -159,6 +162,8 @@ int k_work_cancel(struct k_work *work) {
     work->pending = false;
     work->next = NULL;
     work->prev = NULL;
+
+    MICROPY_PY_BLUETOOTH_EXIT
     return 1;
 }
 
