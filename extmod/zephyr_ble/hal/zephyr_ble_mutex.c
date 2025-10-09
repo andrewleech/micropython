@@ -26,6 +26,8 @@
 
 #include "zephyr_ble_mutex.h"
 
+#include <assert.h>
+
 #define DEBUG_MUTEX_printf(...) // printf(__VA_ARGS__)
 
 // --- Mutex API ---
@@ -53,12 +55,15 @@ void k_mutex_unlock(struct k_mutex *mutex) {
         mutex, mutex->locked - 1);
 
     // Assert that mutex was actually locked
+    #ifndef NDEBUG
+    assert(mutex->locked > 0 && "Unlocking non-locked mutex");
+    #else
     if (mutex->locked == 0) {
-        // In a real implementation this would be a kernel panic
-        // For MicroPython, we'll just skip the decrement
+        // In release builds, silently ignore
         DEBUG_MUTEX_printf("  WARNING: unlocking non-locked mutex\n");
         return;
     }
+    #endif
 
     mutex->locked--;
 }
