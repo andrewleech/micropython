@@ -60,14 +60,25 @@
 #define CONFIG_BT_L2CAP_TX_BUF_COUNT 4
 
 // --- Buffer Configuration ---
+// ACL buffers
 #define CONFIG_BT_BUF_ACL_TX_COUNT 8
 #define CONFIG_BT_BUF_ACL_TX_SIZE 27
 #define CONFIG_BT_BUF_ACL_RX_COUNT 8
 #define CONFIG_BT_BUF_ACL_RX_SIZE 27
+#define CONFIG_BT_BUF_ACL_RX_COUNT_EXTRA CONFIG_BT_MAX_CONN
+
+// Event buffers
 #define CONFIG_BT_BUF_EVT_RX_COUNT 16
 #define CONFIG_BT_BUF_EVT_RX_SIZE 68
+#define CONFIG_BT_BUF_EVT_DISCARDABLE_COUNT 3
+#define CONFIG_BT_BUF_EVT_DISCARDABLE_SIZE 43
+
+// Command buffers
 #define CONFIG_BT_BUF_CMD_TX_COUNT 4
 #define CONFIG_BT_BUF_CMD_TX_SIZE 68
+
+// Flow control (disabled for simplicity in MicroPython)
+#define CONFIG_BT_HCI_ACL_FLOW_CONTROL 0
 
 // --- Advanced Features - Disabled for Phase 1 ---
 #define CONFIG_BT_ISO 0
