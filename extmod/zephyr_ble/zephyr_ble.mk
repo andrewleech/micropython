@@ -36,8 +36,17 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_BLE_EXTMOD_DIR)/hal/, \
 	zephyr_ble_poll.c \
 	)
 
-# TODO: Add Zephyr BLE host sources after dependency analysis
+# Zephyr net_buf library (required by BLE stack)
+SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/lib/net_buf/, \
+	buf.c \
+	buf_simple.c \
+	)
 
+# TODO: Add Zephyr BLE host sources
+
+# Include paths
+# Note: extmod/zephyr_ble/zephyr/ contains our wrapper headers (autoconf.h, kernel.h, etc.)
+# which will be found before lib/zephyr/include/zephyr/ due to include order
 INC += -I$(TOP)/$(ZEPHYR_BLE_EXTMOD_DIR)
 INC += -I$(TOP)/$(ZEPHYR_BLE_EXTMOD_DIR)/hal
 INC += -I$(TOP)/$(ZEPHYR_LIB_DIR)/include

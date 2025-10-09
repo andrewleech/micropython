@@ -48,9 +48,7 @@ void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_exp
 void k_timer_start(struct k_timer *timer, uint32_t duration_ms, uint32_t period_ms);
 void k_timer_stop(struct k_timer *timer);
 
-// Time conversion macros (Zephyr compatible)
-#define K_MSEC(ms) (ms)
-#define K_NO_WAIT 0
+// Note: K_MSEC, K_NO_WAIT, K_FOREVER are defined in zephyr_ble_work.h
 
 // k_yield() abstraction
 static inline void k_yield(void) {

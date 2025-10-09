@@ -19,9 +19,11 @@ target_sources(micropy_extmod_zephyr_ble INTERFACE
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_mutex.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_kernel.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_poll.c
+    ${ZEPHYR_LIB_DIR}/lib/net_buf/buf.c
+    ${ZEPHYR_LIB_DIR}/lib/net_buf/buf_simple.c
 )
 
-# TODO: Add Zephyr BLE host sources after dependency analysis
+# TODO: Add Zephyr BLE host sources
 
 target_compile_definitions(micropy_extmod_zephyr_ble INTERFACE
     MICROPY_BLUETOOTH_ZEPHYR=1

@@ -6,6 +6,9 @@
 #ifndef ZEPHYR_KERNEL_H_
 #define ZEPHYR_KERNEL_H_
 
+// Include autoconf.h first to provide CONFIG_* defines
+#include "zephyr/autoconf.h"
+
 // Include our HAL implementation
 #include "../hal/zephyr_ble_hal.h"
 

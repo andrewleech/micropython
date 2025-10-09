@@ -28,6 +28,7 @@
 #define MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_WORK_H
 
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
 #include "zephyr_ble_timer.h"
 
@@ -70,9 +71,12 @@ typedef struct {
     uint32_t ticks;
 } k_timeout_t;
 
-#define K_NO_WAIT ((k_timeout_t){ .ticks = 0 })
-#define K_FOREVER ((k_timeout_t){ .ticks = 0xFFFFFFFF })
-#define K_MSEC(ms) ((k_timeout_t){ .ticks = (ms) })
+// Tick type (used for timing functions)
+typedef uint32_t k_ticks_t;
+
+#define K_NO_WAIT ((k_timeout_t) { .ticks = 0 })
+#define K_FOREVER ((k_timeout_t) { .ticks = 0xFFFFFFFF })
+#define K_MSEC(ms) ((k_timeout_t) { .ticks = (ms) })
 #define K_SECONDS(s) K_MSEC((s) * 1000)
 
 // Timeout conversion helper

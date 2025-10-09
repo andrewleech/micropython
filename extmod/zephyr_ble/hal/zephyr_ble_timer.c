@@ -56,8 +56,8 @@ void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_exp
 
 void k_timer_start(struct k_timer *timer, uint32_t duration_ms, uint32_t period_ms) {
     DEBUG_TIMER_printf("k_timer_start(%p, %u, %u) tnow=%u\n",
-                      timer, (unsigned)duration_ms, (unsigned)period_ms,
-                      (unsigned)mp_hal_ticks_ms());
+        timer, (unsigned)duration_ms, (unsigned)period_ms,
+        (unsigned)mp_hal_ticks_ms());
 
     // Note: period_ms is not used in current modbluetooth_zephyr.c (always K_NO_WAIT)
     timer->active = true;
@@ -80,7 +80,7 @@ void mp_bluetooth_zephyr_timer_process(void) {
 
         if ((int32_t)(tnow - timer->expiry_ticks) >= 0) {
             DEBUG_TIMER_printf("timer_expire(%p) tnow=%u expiry=%u\n",
-                              timer, (unsigned)tnow, (unsigned)timer->expiry_ticks);
+                timer, (unsigned)tnow, (unsigned)timer->expiry_ticks);
             timer->active = false;
 
             // Call the expiry callback
