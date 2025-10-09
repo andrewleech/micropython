@@ -33,6 +33,7 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_BLE_EXTMOD_DIR)/hal/, \
 	zephyr_ble_sem.c \
 	zephyr_ble_mutex.c \
 	zephyr_ble_kernel.c \
+	zephyr_ble_poll.c \
 	)
 
 # TODO: Add Zephyr BLE host sources after dependency analysis
