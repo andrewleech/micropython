@@ -30,6 +30,9 @@ ZEPHYR_LIB_DIR = lib/zephyr
 SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_BLE_EXTMOD_DIR)/hal/, \
 	zephyr_ble_timer.c \
 	zephyr_ble_work.c \
+	zephyr_ble_sem.c \
+	zephyr_ble_mutex.c \
+	zephyr_ble_kernel.c \
 	)
 
 # TODO: Add Zephyr BLE host sources after dependency analysis
