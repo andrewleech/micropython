@@ -13,6 +13,7 @@ target_include_directories(micropy_extmod_zephyr_ble INTERFACE
 
 target_sources(micropy_extmod_zephyr_ble INTERFACE
     ${ZEPHYR_BLE_EXTMOD_DIR}/modbluetooth_zephyr.c
+    ${ZEPHYR_BLE_EXTMOD_DIR}/hci_driver_stub.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_timer.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_work.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_sem.c
@@ -21,9 +22,21 @@ target_sources(micropy_extmod_zephyr_ble INTERFACE
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_poll.c
     ${ZEPHYR_LIB_DIR}/lib/net_buf/buf.c
     ${ZEPHYR_LIB_DIR}/lib/net_buf/buf_simple.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/hci_core.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/hci_common.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/id.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/addr.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/buf.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/uuid.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/conn.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/l2cap.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/att.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/gatt.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/adv.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/scan.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/smp_null.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/data.c
 )
-
-# TODO: Add Zephyr BLE host sources
 
 target_compile_definitions(micropy_extmod_zephyr_ble INTERFACE
     MICROPY_BLUETOOTH_ZEPHYR=1

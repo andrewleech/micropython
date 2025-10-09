@@ -6,6 +6,7 @@ EXTMOD_DIR = extmod
 ZEPHYR_BLE_EXTMOD_DIR = $(EXTMOD_DIR)/zephyr_ble
 
 SRC_EXTMOD_C += $(ZEPHYR_BLE_EXTMOD_DIR)/modbluetooth_zephyr.c
+SRC_EXTMOD_C += $(ZEPHYR_BLE_EXTMOD_DIR)/hci_driver_stub.c
 
 CFLAGS_EXTMOD += -DMICROPY_BLUETOOTH_ZEPHYR=1
 
@@ -42,7 +43,23 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/lib/net_buf/, \
 	buf_simple.c \
 	)
 
-# TODO: Add Zephyr BLE host sources
+# Zephyr BLE host core sources (Phase 1: minimal GATT support)
+SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/, \
+	hci_core.c \
+	hci_common.c \
+	id.c \
+	addr.c \
+	buf.c \
+	uuid.c \
+	conn.c \
+	l2cap.c \
+	att.c \
+	gatt.c \
+	adv.c \
+	scan.c \
+	smp_null.c \
+	data.c \
+	)
 
 # Include paths
 # Note: extmod/zephyr_ble/zephyr/ contains our wrapper headers (autoconf.h, kernel.h, etc.)
