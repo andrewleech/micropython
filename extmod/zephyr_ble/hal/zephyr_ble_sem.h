@@ -28,6 +28,7 @@
 #define MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_SEM_H
 
 #include <stdint.h>
+#include <errno.h>
 #include "zephyr_ble_work.h"
 
 // Zephyr k_sem abstraction layer for MicroPython
@@ -38,10 +39,6 @@ struct k_sem {
     volatile uint16_t count;
     uint16_t limit;
 };
-
-// Error codes
-#define EAGAIN 11
-#define EBUSY  16
 
 // --- Semaphore API ---
 

@@ -75,7 +75,7 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
 
     // Busy-wait pattern (like NimBLE's ble_npl_sem_pend)
     while (sem->count == 0) {
-        // Check timeout
+        // Check timeout (handles wrap-around correctly using unsigned arithmetic)
         uint32_t elapsed = mp_hal_ticks_ms() - t0;
         if (timeout_ms != 0xFFFFFFFF && elapsed >= timeout_ms) {
             DEBUG_SEM_printf("  --> timeout after %u ms\n", elapsed);
