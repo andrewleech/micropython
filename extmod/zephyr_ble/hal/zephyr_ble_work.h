@@ -147,7 +147,4 @@ static inline struct k_work *k_work_delayable_from_work(struct k_work *work) {
     return work;
 }
 
-#define CONTAINER_OF(ptr, type, member) \
-    ((type *)(((char *)(ptr)) - offsetof(type, member)))
-
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_WORK_H

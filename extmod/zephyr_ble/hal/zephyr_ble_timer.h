@@ -33,6 +33,9 @@
 // Zephyr k_timer abstraction layer for MicroPython
 // Maps Zephyr timer API to MicroPython timer mechanism
 
+// Forward declaration
+struct k_timer;
+
 typedef void (*k_timer_expiry_t)(struct k_timer *timer);
 
 struct k_timer {

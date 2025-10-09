@@ -11,10 +11,6 @@
 // Include our static configuration
 #include "../zephyr_ble_config.h"
 
-// Endianness
-#define CONFIG_LITTLE_ENDIAN 1
-#define CONFIG_BIG_ENDIAN 0
-
 // Net buffer configuration (required by net_buf.h)
 #define CONFIG_NET_BUF 1
 #define CONFIG_NET_BUF_LOG 0
@@ -31,51 +27,6 @@
 
 #define CONFIG_ASSERT_VERBOSE 1
 #define CONFIG_ASSERT_LEVEL 2
-
-// System configuration
-#define CONFIG_HEAP_MEM_POOL_SIZE 0  // We don't use Zephyr heap
-#define CONFIG_KERNEL_MEM_POOL 0
-#define CONFIG_MAIN_STACK_SIZE 2048
-#define CONFIG_IDLE_STACK_SIZE 256
-#define CONFIG_ISR_STACK_SIZE 2048
-#define CONFIG_THREAD_STACK_INFO 0
-#define CONFIG_THREAD_MONITOR 0
-#define CONFIG_THREAD_NAME 0
-#define CONFIG_SCHED_DUMB 0
-#define CONFIG_SCHED_SCALABLE 0
-#define CONFIG_SCHED_MULTIQ 0
-#define CONFIG_WAITQ_SCALABLE 0
-#define CONFIG_COOP_ENABLED 1
-#define CONFIG_PREEMPT_ENABLED 0
-#define CONFIG_PRIORITY_CEILING -127
-
-// Timing
-#define CONFIG_SYS_CLOCK_TICKS_PER_SEC 1000
-#define CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC 1000000
-
-// Logging (disabled for now)
-#define CONFIG_LOG 0
-#define CONFIG_LOG_MINIMAL 0
-#define CONFIG_LOG_MODE_MINIMAL 0
-#define CONFIG_PRINTK 0
-
-// C library
-#define CONFIG_MINIMAL_LIBC 0
-#define CONFIG_PICOLIBC 0
-#define CONFIG_NEWLIB_LIBC 0
-
-// Not using Zephyr RTOS features
-#define CONFIG_MULTITHREADING 0
-#define CONFIG_NUM_COOP_PRIORITIES 16
-#define CONFIG_NUM_PREEMPT_PRIORITIES 15
-#define CONFIG_MAIN_THREAD_PRIORITY 0
-#define CONFIG_COOP_TIME_SLICE 0
-#define CONFIG_TIMESLICING 0
-#define CONFIG_POLL 0
-
-// Memory protection (not used)
-#define CONFIG_THREAD_USERSPACE_LOCAL_DATA 0
-#define CONFIG_MEM_POOL_HEAP_BACKEND 0
 
 // Toolchain
 #ifdef __GNUC__

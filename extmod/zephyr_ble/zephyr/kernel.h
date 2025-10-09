@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdio.h>
 
 // Error codes
 #include <errno.h>
