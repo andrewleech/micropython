@@ -28,6 +28,9 @@
 #define CONFIG_ASSERT_VERBOSE 1
 #define CONFIG_ASSERT_LEVEL 2
 
+// Test mode (disables device tree requirement in hci_core.c)
+#define CONFIG_ZTEST 1
+
 // Toolchain
 #ifdef __GNUC__
 #define CONFIG_TOOLCHAIN_GCC_VARIANT 1

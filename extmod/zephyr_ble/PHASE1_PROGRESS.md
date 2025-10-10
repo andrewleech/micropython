@@ -187,11 +187,20 @@ extmod/zephyr_ble/
 ## Known Issues / Technical Debt
 
 1. **Missing Wrapper Headers** - Need ~15 more wrapper headers before BLE sources will compile
+   - See CODE_REVIEW_SESSION3.md Issue #5 for detailed list
 2. **Logging Integration** - Need to decide: stub out or map to printf?
 3. **Thread Stack Macros** - BLE uses K_KERNEL_STACK_DEFINE, need no-op version
 4. **Settings/Storage** - Disabled for Phase 1, will need NVS integration later
 5. **HCI Transport** - Stub driver needs replacing with actual UART/SPI implementation
+   - Note: recv_cb global in stub has potential race condition (CODE_REVIEW_SESSION3.md Issue #3)
+   - Will be fixed when real HCI driver implemented in Phase 2
 6. **Testing Strategy** - Need test plan for when compilation succeeds
+
+**Code Review Fixes Applied** (Session 3):
+- ✅ Fixed missing net_buf.h include in hci_driver_stub.c
+- ✅ Fixed unused parameter warnings in hci_driver_stub.c
+- ✅ Added CONFIG_ZTEST to autoconf.h (avoids device tree requirement)
+- See CODE_REVIEW_SESSION3.md for full analysis
 
 ---
 

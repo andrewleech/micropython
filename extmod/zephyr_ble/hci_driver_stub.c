@@ -28,6 +28,7 @@
 // This will be replaced with actual HCI UART integration in Phase 2
 
 #include "zephyr/kernel.h"
+#include <zephyr/net_buf.h>
 #include <zephyr/drivers/bluetooth.h>
 #include <errno.h>
 
@@ -38,18 +39,21 @@ static bt_hci_recv_t recv_cb = NULL;
 
 // Stub HCI driver implementation
 static int hci_stub_open(const struct device *dev, bt_hci_recv_t recv) {
+    (void)dev;
     DEBUG_HCI_printf("hci_stub_open(%p, %p)\n", dev, recv);
     recv_cb = recv;
     return 0;
 }
 
 static int hci_stub_close(const struct device *dev) {
+    (void)dev;
     DEBUG_HCI_printf("hci_stub_close(%p)\n", dev);
     recv_cb = NULL;
     return 0;
 }
 
 static int hci_stub_send(const struct device *dev, struct net_buf *buf) {
+    (void)dev;
     DEBUG_HCI_printf("hci_stub_send(%p, %p) - dropping packet\n", dev, buf);
     // For now, just free the buffer
     // In Phase 2, this will forward to actual HCI UART
