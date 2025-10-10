@@ -1,35 +1,19 @@
 /*
- * Zephyr assert wrapper for MicroPython
+ * Zephyr sys/__assert.h wrapper for MicroPython
+ * Maps Zephyr assertions to standard assert
  */
 
-#ifndef ZEPHYR_SYS___ASSERT_H_
-#define ZEPHYR_SYS___ASSERT_H_
+#ifndef ZEPHYR_SYS_ASSERT_H_
+#define ZEPHYR_SYS_ASSERT_H_
 
-#include <stdio.h>
 #include <assert.h>
 
-// Zephyr assertions
-#define __ASSERT(test, fmt, ...) \
-    do { \
-        if (!(test)) { \
-            printf("ASSERTION FAIL [%s:%d]: " fmt "\n", __FILE__, __LINE__,##__VA_ARGS__); \
-            assert(test); \
-        } \
-    } while (0)
+// Zephyr assertion macros map to standard assert
+#define __ASSERT(test, fmt, ...) assert(test)
+#define __ASSERT_NO_MSG(test) assert(test)
 
-#define __ASSERT_NO_MSG(test) \
-    do { \
-        if (!(test)) { \
-            printf("ASSERTION FAIL [%s:%d]\n", __FILE__, __LINE__); \
-            assert(test); \
-        } \
-    } while (0)
-
+// Evaluation macro (executes expression even if asserts disabled)
 #define __ASSERT_EVAL(expr1, expr2, test, fmt, ...) \
-    do { \
-        expr1; \
-        expr2; \
-        __ASSERT(test, fmt,##__VA_ARGS__); \
-    } while (0)
+    do { (void)(expr1); (void)(expr2); assert(test); } while (0)
 
-#endif /* ZEPHYR_SYS___ASSERT_H_ */
+#endif /* ZEPHYR_SYS_ASSERT_H_ */
