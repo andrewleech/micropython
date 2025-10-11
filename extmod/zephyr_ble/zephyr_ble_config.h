@@ -276,8 +276,11 @@ struct arch_esf;
 #define CONFIG_BT_FIXED_PASSKEY 0
 #define CONFIG_BT_USE_DEBUG_KEYS 0
 #define CONFIG_BT_PASSKEY_MAX 999999
+#define CONFIG_BT_SMP_MIN_ENC_KEY_SIZE 7  // Minimum encryption key size (7-16 bytes)
+#define BT_SMP_MIN_ENC_KEY_SIZE CONFIG_BT_SMP_MIN_ENC_KEY_SIZE
 #define CONFIG_BT_PRIVACY 1
 #define CONFIG_BT_RPA 1
+#define CONFIG_BT_CTLR_PRIVACY 0  // No controller privacy (host-only)
 
 // --- L2CAP ---
 #define CONFIG_BT_L2CAP_TX_BUF_COUNT 4
@@ -319,15 +322,16 @@ struct arch_esf;
 // Flow control (disabled for simplicity in MicroPython)
 #define CONFIG_BT_HCI_ACL_FLOW_CONTROL 0
 
-// --- Advanced Features ---
-#define CONFIG_BT_ISO 1
+// --- Advanced Features - Disable for Phase 1 ---
+// TODO: Enable after adding iso.c and cs.c
+#define CONFIG_BT_ISO 0
 #define CONFIG_BT_ISO_BROADCASTER 0
 #define CONFIG_BT_ISO_SYNC_RECEIVER 0
-#define CONFIG_BT_ISO_UNICAST 1
-#define CONFIG_BT_ISO_CENTRAL 1
-#define CONFIG_BT_ISO_PERIPHERAL 1
+#define CONFIG_BT_ISO_UNICAST 0
+#define CONFIG_BT_ISO_CENTRAL 0
+#define CONFIG_BT_ISO_PERIPHERAL 0
 #define CONFIG_BT_DF 0
-#define CONFIG_BT_CHANNEL_SOUNDING 1
+#define CONFIG_BT_CHANNEL_SOUNDING 0
 #define CONFIG_BT_EXT_ADV 0
 
 // --- Host Features ---
@@ -343,6 +347,7 @@ struct arch_esf;
 #define CONFIG_BT_ECC 1
 #define CONFIG_BT_TINYCRYPT_ECC 1
 #define CONFIG_BT_TINYCRYPT_AES_CMAC 1
+#define CONFIG_BT_CTLR_CRYPTO 0  // No controller crypto
 
 // --- Settings/Storage - Disabled for Phase 1 (RAM-only) ---
 #define CONFIG_BT_SETTINGS 0
@@ -361,10 +366,11 @@ struct arch_esf;
 #define CONFIG_BT_SHELL 0
 #define CONFIG_BT_TESTING 0
 
-// --- Classic Bluetooth ---
-#define CONFIG_BT_CLASSIC 1
-#define CONFIG_BT_BREDR 1
-#define CONFIG_BT_MAX_BR_CONN 1
+// --- Classic Bluetooth - Disable for Phase 1 ---
+// TODO: Enable after adding BR/EDR source files (br.c, conn_br.c, ssp.c, l2cap_br.c)
+#define CONFIG_BT_CLASSIC 0
+#define CONFIG_BT_BREDR 0
+#define CONFIG_BT_MAX_BR_CONN 0
 #define CONFIG_BT_HFP_HF 0
 #define CONFIG_BT_HFP_AG 0
 #define CONFIG_BT_A2DP 0
@@ -481,14 +487,14 @@ struct arch_esf;
 #define CONFIG_BT_EATT 0
 #define CONFIG_BT_EATT_MAX 0
 
-// ISO (Isochronous Channels)
-#define CONFIG_BT_ISO_MAX_CHAN 2
+// ISO (Isochronous Channels) - disabled for Phase 1
+#define CONFIG_BT_ISO_MAX_CHAN 0
 #define CONFIG_BT_ISO_MAX_BIG 0
-#define CONFIG_BT_ISO_MAX_CIG 1
-#define CONFIG_BT_ISO_RX_BUF_COUNT 1
-#define CONFIG_BT_ISO_TX_BUF_COUNT 1
-#define CONFIG_BT_ISO_TX_MTU 251
-#define CONFIG_BT_ISO_RX_MTU 251
+#define CONFIG_BT_ISO_MAX_CIG 0
+#define CONFIG_BT_ISO_RX_BUF_COUNT 0
+#define CONFIG_BT_ISO_TX_BUF_COUNT 0
+#define CONFIG_BT_ISO_TX_MTU 0
+#define CONFIG_BT_ISO_RX_MTU 0
 
 // SCO (for classic BT) - disabled
 #define CONFIG_BT_MAX_SCO_CONN 0

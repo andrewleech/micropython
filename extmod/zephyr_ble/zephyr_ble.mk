@@ -71,7 +71,10 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/common/, \
 	rpa.c \
 	)
 
-# Zephyr BLE host core sources
+# Suppress warnings in common sources (third-party Zephyr code)
+$(BUILD)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/common/rpa.o: CFLAGS += -Wno-error=implicit-function-declaration
+
+# Zephyr BLE host core sources (Phase 1: Core + SMP/Keys/ECC/Crypto)
 SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/, \
 	hci_core.c \
 	hci_common.c \
@@ -90,22 +93,17 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/, \
 	smp.c \
 	ecc.c \
 	crypto_psa.c \
-	iso.c \
-	cs.c \
 	)
 
-# BR/EDR Classic Bluetooth support
-SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/classic/, \
-	br.c \
-	conn_br.c \
-	ssp.c \
-	l2cap_br.c \
-	keys_br.c \
-	sdp.c \
-	a2dp.c \
-	rfcomm.c \
-	avdtp.c \
-	)
+# TODO Phase 2: Add ISO audio support
+# iso.c
+
+# TODO Phase 3: Add Channel Sounding support
+# cs.c
+
+# TODO Phase 4: Add BR/EDR Classic Bluetooth support
+# classic/br.c classic/conn_br.c classic/ssp.c classic/l2cap_br.c
+# classic/keys_br.c classic/sdp.c classic/a2dp.c classic/rfcomm.c classic/avdtp.c
 
 # Include paths
 # Note: extmod/zephyr_ble/zephyr/ contains our wrapper headers (autoconf.h, kernel.h, etc.)
