@@ -31,6 +31,9 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
+// Include board configuration first to get all defines
+#include "py/mpconfig.h"
+
 #include "py/runtime.h"
 #include "py/stream.h"
 #include "py/mphal.h"
@@ -44,8 +47,9 @@
 extern const mp_obj_type_t machine_uart_type;
 
 #include "extmod/zephyr_ble/hal/zephyr_ble_hal.h"
+#include "zephyr/device.h"
 #include <zephyr/net_buf.h>
-#include <zephyr/drivers/bluetooth.h>
+#include <zephyr/bluetooth/buf.h>
 
 #define debug_printf(...) mp_printf(&mp_plat_print, "mpzephyrport_rp2: " __VA_ARGS__)
 #define error_printf(...) mp_printf(&mp_plat_print, "mpzephyrport_rp2 ERROR: " __VA_ARGS__)
@@ -54,7 +58,7 @@ extern const mp_obj_type_t machine_uart_type;
 #if defined(MICROPY_HW_BLE_UART_ID)
 
 mp_obj_t mp_zephyr_uart;
-static bt_hci_recv_t recv_cb = NULL;
+static bt_hci_recv_t recv_cb = NULL;  // Returns int: 0 on success, negative on error
 static const struct device *hci_dev = NULL;
 
 // Soft timer for scheduling HCI poll
@@ -151,7 +155,11 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
     }
 
     // Pass buffer to Zephyr BLE stack
-    recv_cb(hci_dev, buf);
+    int recv_ret = recv_cb(hci_dev, buf);
+    if (recv_ret < 0) {
+        error_printf("recv_cb failed: %d\n", recv_ret);
+        net_buf_unref(buf);
+    }
 }
 
 static void mp_zephyr_hci_poll_now(void) {
@@ -238,17 +246,12 @@ static const struct bt_hci_driver_api hci_cyw43_api = {
     .send = hci_cyw43_send,
 };
 
-// HCI device structure
-static const struct device hci_cyw43_dev = {
+// HCI device structure (referenced by Zephyr via DEVICE_DT_GET macro)
+const struct device mp_bluetooth_zephyr_hci_dev = {
     .name = "HCI_CYW43",
     .api = &hci_cyw43_api,
     .data = NULL,
 };
-
-// Get HCI device (called by Zephyr BLE host)
-const struct device *bt_hci_get_device(void) {
-    return &hci_cyw43_dev;
-}
 
 // UART HAL functions for cyw43_bthci_uart.c BT controller initialization
 // These bridge to machine.UART module

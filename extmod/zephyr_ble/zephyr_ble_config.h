@@ -52,6 +52,9 @@ struct arch_esf;
 #define ZEPHYR_INCLUDE_BLUETOOTH_RFCOMM_H_
 #define ZEPHYR_SUBSYS_BLUETOOTH_HOST_CLASSIC_L2CAP_BR_INTERFACE_H_
 
+// Don't block the drivers/bluetooth.h header - we provide a wrapper for it
+// The wrapper includes HCI driver API without device tree dependencies
+
 // Problematic Zephyr system headers that conflict with our HAL wrappers
 #define INCLUDE_ZEPHYR_SYS_ITERABLE_SECTIONS_H_
 #define ZEPHYR_INCLUDE_TOOLCHAIN_H_
@@ -535,6 +538,81 @@ struct arch_esf;
 
 // Forward declarations for stub functions (defined in HAL layer)
 #include <stddef.h>
+#include <stdbool.h>
 int lll_csrand_get(void *buf, size_t len);  // Controller crypto stub
+
+// =============================================================================
+// PART 4: Device Tree Stubs for HCI Device
+// =============================================================================
+
+// Note: Device tree macros (DT_HAS_CHOSEN, DT_CHOSEN, DEVICE_DT_GET) are defined
+// in our zephyr/devicetree.h wrapper.
+
+// HCI device symbol that ports must define
+// The devicetree wrapper's DEVICE_DT_GET() macro returns &mp_bluetooth_zephyr_hci_dev
+struct device;  // Forward declaration
+extern const struct device mp_bluetooth_zephyr_hci_dev;
+
+// HCI bus types (from zephyr/drivers/bluetooth.h)
+#ifndef BT_HCI_BUS_UART
+#define BT_HCI_BUS_UART 0
+#define BT_HCI_BUS_USB 1
+#define BT_HCI_BUS_SDIO 2
+#define BT_HCI_BUS_SPI 3
+#define BT_HCI_BUS_IPC 4
+#define BT_HCI_BUS_VIRTUAL 5
+#endif
+
+// HCI quirks (from zephyr/drivers/bluetooth.h)
+#ifndef BT_HCI_QUIRK_NO_RESET
+#define BT_HCI_QUIRK_NO_RESET BIT(0)
+#define BT_HCI_QUIRK_NO_AUTO_DLE BIT(1)
+#endif
+
+// Device tree property access macros (stubbed)
+// These are used in hci_core.c to get device properties
+#ifndef BT_DT_HCI_BUS_GET
+#define BT_DT_HCI_BUS_GET(node) BT_HCI_BUS_UART
+#define BT_DT_HCI_NAME_GET(node) "mp_bt_hci"
+#define BT_DT_HCI_QUIRKS_GET(node) 0
+#endif
+
+// =============================================================================
+// PART 5: HCI Driver API Structures
+// Replaces zephyr/drivers/bluetooth.h which we block
+// =============================================================================
+
+// Note: struct device and device_is_ready() are defined in our zephyr/device.h wrapper
+// Note: DT_* macros are defined in our zephyr/devicetree.h wrapper
+
+struct net_buf;
+struct device;  // Forward declaration (defined in zephyr/device.h wrapper)
+
+// HCI receive callback type
+typedef int (*bt_hci_recv_t)(const struct device *dev, struct net_buf *buf);
+
+// HCI driver API structure
+struct bt_hci_driver_api {
+    int (*open)(const struct device *dev, bt_hci_recv_t recv);
+    int (*close)(const struct device *dev);
+    int (*send)(const struct device *dev, struct net_buf *buf);
+};
+
+// Note: HCI driver API wrappers (bt_hci_open, bt_hci_close, bt_hci_send)
+// are defined in zephyr/drivers/bluetooth.h wrapper
+
+// H:4 HCI packet type indicators (from Bluetooth spec)
+// Only define if not using actual Zephyr bluetooth headers
+#ifndef BT_HCI_H4_CMD
+#define BT_HCI_H4_CMD  0x01
+#define BT_HCI_H4_ACL  0x02
+#define BT_HCI_H4_SCO  0x03
+#define BT_HCI_H4_EVT  0x04
+#define BT_HCI_H4_ISO  0x05
+#endif
+
+// Note: Buffer types (enum bt_buf_type) and buffer allocation functions
+// (bt_buf_get_evt, bt_buf_get_rx, bt_buf_get_tx, bt_buf_get_type) are defined
+// in zephyr/bluetooth/buf.h. Include that header in files that need them.
 
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_ZEPHYR_BLE_CONFIG_H
