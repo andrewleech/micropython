@@ -303,24 +303,6 @@ int bt_hci_transport_setup(const struct device *dev) {
     mp_printf(&mp_plat_print, "=== HCI: bt_hci_transport_setup called\n");
     (void)dev;
 
-    #if MICROPY_PY_NETWORK_CYW43
-    // Check if CYW43 driver is initialized (WiFi side)
-    extern cyw43_t cyw43_state;
-    bool cyw43_init = cyw43_is_initialized(&cyw43_state);
-    mp_printf(&mp_plat_print, "=== HCI: CYW43 driver initialized: %d\n", cyw43_init);
-
-    if (!cyw43_init) {
-        mp_printf(&mp_plat_print, "=== HCI: Initializing CYW43 driver first\n");
-        extern int cyw43_arch_init(void);
-        int ret = cyw43_arch_init();
-        if (ret != 0) {
-            mp_printf(&mp_plat_print, "=== HCI ERROR: cyw43_arch_init failed: %d\n", ret);
-            return ret;
-        }
-        mp_printf(&mp_plat_print, "=== HCI: CYW43 driver initialized successfully\n");
-    }
-    #endif
-
     // Initialize CYW43 BT controller using cyw43_bthci_uart.c
     mp_printf(&mp_plat_print, "=== HCI: Calling cyw43_bluetooth_controller_init\n");
     extern int cyw43_bluetooth_controller_init(void);
