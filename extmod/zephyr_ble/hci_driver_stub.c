@@ -78,6 +78,7 @@ static const struct device hci_stub_dev = {
 };
 
 // Get HCI device (called by Zephyr BLE host)
+__attribute__((weak))
 const struct device *bt_hci_get_device(void) {
     return &hci_stub_dev;
 }

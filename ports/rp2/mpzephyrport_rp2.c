@@ -26,6 +26,11 @@
 
 // RP2 port integration for Zephyr BLE stack with CYW43 controller
 
+// Suppress deprecation warnings for bt_buf_get_type() - the function still works
+// and we need it for H:4 HCI transport
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 #include "py/runtime.h"
 #include "py/stream.h"
 #include "py/mphal.h"
@@ -35,18 +40,22 @@
 
 #if MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR
 
+// Forward declaration of machine UART type
+extern const mp_obj_type_t machine_uart_type;
+
 #include "extmod/zephyr_ble/hal/zephyr_ble_hal.h"
 #include <zephyr/net_buf.h>
 #include <zephyr/drivers/bluetooth.h>
 
-#define debug_printf(...) // mp_printf(&mp_plat_print, "mpzephyrport_rp2.c: " __VA_ARGS__)
-#define error_printf(...) mp_printf(&mp_plat_print, "mpzephyrport_rp2.c: " __VA_ARGS__)
+#define debug_printf(...) mp_printf(&mp_plat_print, "mpzephyrport_rp2: " __VA_ARGS__)
+#define error_printf(...) mp_printf(&mp_plat_print, "mpzephyrport_rp2 ERROR: " __VA_ARGS__)
 
 // UART interface for CYW43 HCI transport
 #if defined(MICROPY_HW_BLE_UART_ID)
 
 mp_obj_t mp_zephyr_uart;
 static bt_hci_recv_t recv_cb = NULL;
+static const struct device *hci_dev = NULL;
 
 // Soft timer for scheduling HCI poll
 static soft_timer_entry_t mp_zephyr_hci_soft_timer;
@@ -142,7 +151,7 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
     }
 
     // Pass buffer to Zephyr BLE stack
-    recv_cb(buf);
+    recv_cb(hci_dev, buf);
 }
 
 static void mp_zephyr_hci_poll_now(void) {
@@ -152,8 +161,8 @@ static void mp_zephyr_hci_poll_now(void) {
 // Zephyr HCI driver implementation
 
 static int hci_cyw43_open(const struct device *dev, bt_hci_recv_t recv) {
-    (void)dev;
     debug_printf("hci_cyw43_open\n");
+    hci_dev = dev;
     recv_cb = recv;
 
     // Initialize UART for HCI

@@ -25,6 +25,10 @@
 // Debug level (0-4) 1=warning, 2=info, 3=debug, 4=verbose
 // #define MODUSSL_MBEDTLS_DEBUG_LEVEL 1
 
+// BLE UART for CYW43 Bluetooth controller (UART0)
+#define MICROPY_HW_BLE_UART_ID (0)
+#define MICROPY_HW_BLE_UART_BAUDRATE (115200)
+
 #define MICROPY_HW_PIN_EXT_COUNT    CYW43_WL_GPIO_COUNT
 
 int mp_hal_is_pin_reserved(int n);
