@@ -25,29 +25,43 @@
  */
 
 // Wrapper to include cyw43_bthci_uart.c with proper CYW43 BT configuration
+//
+// NOTE: The BT firmware data is defined in cybt_shared_bus.c (part of
+// cyw43_driver_picow library). To avoid duplicate definitions, we declare
+// the firmware data as extern here and skip including the firmware header.
 
-// Include MicroPython HAL to get MP_HAL_MAC_BDADDR
+// Include MicroPython HAL
 #include "py/mphal.h"
 
-// Force-define CYW43 BT UART transport BEFORE any CYW43 includes
+// Force-define CYW43 BT UART transport before any CYW43 includes
 #ifdef CYW43_ENABLE_BLUETOOTH_OVER_UART
 #undef CYW43_ENABLE_BLUETOOTH_OVER_UART
 #endif
 #define CYW43_ENABLE_BLUETOOTH_OVER_UART 1
 
-// Define BT-specific config that should come from cyw43_configport.h
-// but for some reason isn't being picked up
-#define CYW43_BT_FIRMWARE_INCLUDE_FILE      "firmware/cyw43_btfw_43439.h"
-#define CYW43_PIN_BT_REG_ON                 (0)
-#define CYW43_PIN_BT_CTS                    (2)
-#define CYW43_PIN_BT_HOST_WAKE              (3)
-#define CYW43_PIN_BT_DEV_WAKE               (4)
-#define CYW43_HAL_UART_READCHAR_BLOCKING_WAIT CYW43_EVENT_POLL_HOOK
+// Use stub firmware header that declares data as extern
+#define CYW43_BT_FIRMWARE_INCLUDE_FILE "cyw43_btfw_43439_extern.h"
 
-// Also need to ensure CYW43_HAL_MAC_BDADDR is defined
-// This should come from cyw43_config_common.h but define it here just in case
+// Define MAC address index for BDADDR
 #ifndef CYW43_HAL_MAC_BDADDR
-#define CYW43_HAL_MAC_BDADDR                MP_HAL_MAC_BDADDR
+#define CYW43_HAL_MAC_BDADDR MP_HAL_MAC_BDADDR
+#endif
+
+// Define other BT config that should come from cyw43_configport.h
+#ifndef CYW43_PIN_BT_REG_ON
+#define CYW43_PIN_BT_REG_ON                 (0)
+#endif
+#ifndef CYW43_PIN_BT_CTS
+#define CYW43_PIN_BT_CTS                    (2)
+#endif
+#ifndef CYW43_PIN_BT_HOST_WAKE
+#define CYW43_PIN_BT_HOST_WAKE              (3)
+#endif
+#ifndef CYW43_PIN_BT_DEV_WAKE
+#define CYW43_PIN_BT_DEV_WAKE               (4)
+#endif
+#ifndef CYW43_HAL_UART_READCHAR_BLOCKING_WAIT
+#define CYW43_HAL_UART_READCHAR_BLOCKING_WAIT mp_event_handle_nowait()
 #endif
 
 // Include the actual implementation

@@ -292,6 +292,39 @@ void cyw43_await_background_or_timeout_us(uint32_t timeout_us) {
     mp_event_wait_ms(timeout_us / 1000);
 }
 
+// CYW43 HAL function implementations
+// These are defined as static inline or macros in cyw43_config_common.h,
+// but when cyw43-driver sources are compiled with forced zephyr_ble_config.h include,
+// the compiler may not inline them, requiring actual symbols for the linker.
+
+void cyw43_delay_ms(uint32_t ms) {
+    // PendSV may be disabled via CYW43_THREAD_ENTER, so this delay is a busy loop.
+    uint32_t us = ms * 1000;
+    uint32_t start = mp_hal_ticks_us();
+    while (mp_hal_ticks_us() - start < us) {
+        mp_event_handle_nowait();
+    }
+}
+
+void cyw43_schedule_internal_poll_dispatch(void (*func)(void)) {
+    pendsv_schedule_dispatch(PENDSV_DISPATCH_CYW43, func);
+}
+
+void cyw43_hal_get_mac(int idx, uint8_t buf[6]) {
+    mp_hal_get_mac(idx, buf);
+}
+
+void cyw43_delay_us(uint32_t us) {
+    uint32_t start = mp_hal_ticks_us();
+    while (mp_hal_ticks_us() - start < us) {
+        // Tight loop busy-wait for accurate timing
+    }
+}
+
+void cyw43_hal_generate_laa_mac(int idx, uint8_t buf[6]) {
+    mp_hal_generate_laa_mac(idx, buf);
+}
+
 // Bluetooth HCI process stub
 // Only needed for Zephyr BLE (BTstack provides its own in btstack_hci_transport_cyw43.c).
 // Only used if CYW43_ENABLE_BLUETOOTH is set (SPI/SDIO transport).

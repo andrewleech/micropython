@@ -345,26 +345,27 @@ if (MICROPY_PY_BLUETOOTH_CYW43)
         CYW43_INCLUDE_LEGACY_F1_OVERFLOW_WORKAROUND_VARIABLES=1
     )
 
-    # Enable CYW43 UART BT transport (for both BTstack and Zephyr BLE)
-    target_compile_definitions(${MICROPY_TARGET} PRIVATE
-        CYW43_ENABLE_BLUETOOTH_OVER_UART=1
-    )
-
     # Add CYW43 external pin support (needed for LED and other CYW43 GPIO pins)
     list(APPEND MICROPY_SOURCE_PORT
         machine_pin_cyw43.c
     )
 
     if (MICROPY_BLUETOOTH_BTSTACK)
+        # BTstack uses SPI/SDIO BT transport
         target_link_libraries(${MICROPY_TARGET}
             pico_btstack_hci_transport_cyw43
         )
     endif()
 
-    # For Zephyr BLE, add cyw43_bthci_uart.c for BT controller initialization
-    # HCI transport is provided by mpzephyrport_rp2.c
-    # We use a wrapper to ensure CYW43_ENABLE_BLUETOOTH_OVER_UART is defined
     if (MICROPY_BLUETOOTH_ZEPHYR)
+        # Zephyr BLE uses UART BT transport
+        target_compile_definitions(${MICROPY_TARGET} PRIVATE
+            CYW43_ENABLE_BLUETOOTH_OVER_UART=1
+        )
+
+        # Add cyw43_bthci_uart.c for BT controller initialization
+        # HCI transport is provided by mpzephyrport_rp2.c
+        # We use a wrapper to ensure CYW43_ENABLE_BLUETOOTH_OVER_UART is defined
         list(APPEND MICROPY_SOURCE_PORT cyw43_bthci_uart_wrapper.c)
     endif()
 endif()
