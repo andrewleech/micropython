@@ -31,6 +31,10 @@
 
 #include <stddef.h>
 
+// CONTAINER_OF macro (standard container_of pattern)
+#define CONTAINER_OF(ptr, type, field) \
+    ((type *)(((char *)(ptr)) - offsetof(type, field)))
+
 #define DEBUG_WORK_printf(...) // printf(__VA_ARGS__)
 
 // Global linked list of work queues (similar to NimBLE's global_eventq)
@@ -218,7 +222,7 @@ int k_work_schedule_for_queue(struct k_work_q *queue, struct k_work_delayable *d
         return k_work_submit_to_queue(queue, &dwork->work);
     } else {
         // Start timer to submit later
-        k_timer_start(&dwork->timer, delay.ticks, 0);
+        k_timer_start(&dwork->timer, delay, K_NO_WAIT);
         return 1;
     }
 }

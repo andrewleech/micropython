@@ -11,6 +11,10 @@
 // Include our static configuration
 #include "../zephyr_ble_config.h"
 
+// Include sys/util.h early to provide ARRAY_SIZE and other utility macros
+// These are needed by BLE headers like gatt.h
+#include "sys/util.h"
+
 // Net buffer configuration (required by net_buf.h)
 #define CONFIG_NET_BUF 1
 #define CONFIG_NET_BUF_LOG 0

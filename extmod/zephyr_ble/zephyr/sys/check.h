@@ -17,8 +17,4 @@
 #define CHECKIF_RETURN(expr, retval) \
     do { if (expr) { return retval; } } while (0)
 
-// Common error return macros
-#define __ASSERT_NO_MSG(test) \
-    do { if (!(test)) { return -EINVAL; } } while (0)
-
 #endif /* ZEPHYR_SYS_CHECK_H_ */

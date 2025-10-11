@@ -109,4 +109,137 @@ static inline uint32_t sys_get_be32(const uint8_t src[4]) {
            ((uint32_t)src[3]);
 }
 
+static inline uint64_t sys_get_le64(const uint8_t src[8]) {
+    return ((uint64_t)src[0]) |
+           (((uint64_t)src[1]) << 8) |
+           (((uint64_t)src[2]) << 16) |
+           (((uint64_t)src[3]) << 24) |
+           (((uint64_t)src[4]) << 32) |
+           (((uint64_t)src[5]) << 40) |
+           (((uint64_t)src[6]) << 48) |
+           (((uint64_t)src[7]) << 56);
+}
+
+static inline uint64_t sys_get_be64(const uint8_t src[8]) {
+    return (((uint64_t)src[0]) << 56) |
+           (((uint64_t)src[1]) << 48) |
+           (((uint64_t)src[2]) << 40) |
+           (((uint64_t)src[3]) << 32) |
+           (((uint64_t)src[4]) << 24) |
+           (((uint64_t)src[5]) << 16) |
+           (((uint64_t)src[6]) << 8) |
+           ((uint64_t)src[7]);
+}
+
+// Memory copy with byte swap
+static inline void sys_memcpy_swap(void *dst, const void *src, size_t length) {
+    uint8_t *dst_u8 = (uint8_t *)dst;
+    const uint8_t *src_u8 = (const uint8_t *)src;
+    for (size_t i = 0; i < length; i++) {
+        dst_u8[i] = src_u8[length - 1 - i];
+    }
+}
+
+// 24-bit operations
+static inline void sys_put_le24(uint32_t val, uint8_t dst[3]) {
+    dst[0] = val & 0xFF;
+    dst[1] = (val >> 8) & 0xFF;
+    dst[2] = (val >> 16) & 0xFF;
+}
+
+static inline void sys_put_be24(uint32_t val, uint8_t dst[3]) {
+    dst[0] = (val >> 16) & 0xFF;
+    dst[1] = (val >> 8) & 0xFF;
+    dst[2] = val & 0xFF;
+}
+
+static inline uint32_t sys_le24_to_cpu(uint32_t val) {
+    return val & 0xFFFFFF;
+}
+
+static inline uint32_t sys_be24_to_cpu(uint32_t val) {
+    return ((val & 0xFF) << 16) | (val & 0xFF00) | ((val & 0xFF0000) >> 16);
+}
+
+// 40-bit operations
+static inline void sys_put_le40(uint64_t val, uint8_t dst[5]) {
+    dst[0] = val & 0xFF;
+    dst[1] = (val >> 8) & 0xFF;
+    dst[2] = (val >> 16) & 0xFF;
+    dst[3] = (val >> 24) & 0xFF;
+    dst[4] = (val >> 32) & 0xFF;
+}
+
+static inline void sys_put_be40(uint64_t val, uint8_t dst[5]) {
+    dst[0] = (val >> 32) & 0xFF;
+    dst[1] = (val >> 24) & 0xFF;
+    dst[2] = (val >> 16) & 0xFF;
+    dst[3] = (val >> 8) & 0xFF;
+    dst[4] = val & 0xFF;
+}
+
+static inline uint64_t sys_le40_to_cpu(uint64_t val) {
+    return val & 0xFFFFFFFFFFULL;
+}
+
+static inline uint64_t sys_be40_to_cpu(uint64_t val) {
+    return ((val & 0xFF) << 32) | ((val & 0xFF00) << 16) | (val & 0xFF0000) |
+           ((val & 0xFF000000) >> 16) | ((val & 0xFF00000000ULL) >> 32);
+}
+
+// 48-bit operations
+static inline void sys_put_le48(uint64_t val, uint8_t dst[6]) {
+    dst[0] = val & 0xFF;
+    dst[1] = (val >> 8) & 0xFF;
+    dst[2] = (val >> 16) & 0xFF;
+    dst[3] = (val >> 24) & 0xFF;
+    dst[4] = (val >> 32) & 0xFF;
+    dst[5] = (val >> 40) & 0xFF;
+}
+
+static inline void sys_put_be48(uint64_t val, uint8_t dst[6]) {
+    dst[0] = (val >> 40) & 0xFF;
+    dst[1] = (val >> 32) & 0xFF;
+    dst[2] = (val >> 24) & 0xFF;
+    dst[3] = (val >> 16) & 0xFF;
+    dst[4] = (val >> 8) & 0xFF;
+    dst[5] = val & 0xFF;
+}
+
+static inline uint64_t sys_le48_to_cpu(uint64_t val) {
+    return val & 0xFFFFFFFFFFFFULL;
+}
+
+static inline uint64_t sys_be48_to_cpu(uint64_t val) {
+    return ((val & 0xFF) << 40) | ((val & 0xFF00) << 24) | ((val & 0xFF0000) << 8) |
+           ((val & 0xFF000000) >> 8) | ((val & 0xFF00000000ULL) >> 24) |
+           ((val & 0xFF0000000000ULL) >> 40);
+}
+
+// 64-bit operations
+static inline void sys_put_le64(uint64_t val, uint8_t dst[8]) {
+    dst[0] = val & 0xFF;
+    dst[1] = (val >> 8) & 0xFF;
+    dst[2] = (val >> 16) & 0xFF;
+    dst[3] = (val >> 24) & 0xFF;
+    dst[4] = (val >> 32) & 0xFF;
+    dst[5] = (val >> 40) & 0xFF;
+    dst[6] = (val >> 48) & 0xFF;
+    dst[7] = (val >> 56) & 0xFF;
+}
+
+static inline void sys_put_be64(uint64_t val, uint8_t dst[8]) {
+    dst[0] = (val >> 56) & 0xFF;
+    dst[1] = (val >> 48) & 0xFF;
+    dst[2] = (val >> 40) & 0xFF;
+    dst[3] = (val >> 32) & 0xFF;
+    dst[4] = (val >> 24) & 0xFF;
+    dst[5] = (val >> 16) & 0xFF;
+    dst[6] = (val >> 8) & 0xFF;
+    dst[7] = val & 0xFF;
+}
+
+// Unaligned access macro
+#define UNALIGNED_GET(ptr) (*((const typeof(*(ptr)) __attribute__((__packed__)) *)(ptr)))
+
 #endif /* ZEPHYR_SYS_BYTEORDER_H_ */

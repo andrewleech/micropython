@@ -51,6 +51,18 @@
 #error pairing and bonding require synchronous modbluetooth events
 #endif
 
+// Ensure QSTRs for pairing/bonding features are always extracted even when feature is disabled.
+// These are used in config() and method tables when MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING=1.
+// Force QSTR extraction for conditional features - must be outside #ifndef NO_QSTR
+static inline void __attribute__((unused)) _force_qstr_extraction(void) {
+    (void)MP_QSTR_bond;
+    (void)MP_QSTR_mitm;
+    (void)MP_QSTR_io;
+    (void)MP_QSTR_le_secure;
+    (void)MP_QSTR_gap_pair;
+    (void)MP_QSTR_gap_passkey;
+}
+
 // NimBLE can have fragmented data for GATTC events, so requires reassembly.
 #define MICROPY_PY_BLUETOOTH_USE_GATTC_EVENT_DATA_REASSEMBLY MICROPY_BLUETOOTH_NIMBLE
 

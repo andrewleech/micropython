@@ -1,49 +1,48 @@
 /*
  * Zephyr settings/settings.h wrapper for MicroPython
- * Settings/storage API stubs (CONFIG_BT_SETTINGS=0)
+ * Settings subsystem stubs (CONFIG_BT_SETTINGS=0)
  */
 
 #ifndef ZEPHYR_SETTINGS_SETTINGS_H_
 #define ZEPHYR_SETTINGS_SETTINGS_H_
 
-// Settings are disabled (CONFIG_BT_SETTINGS=0 in autoconf.h)
-// All functions are no-ops
+#include <stddef.h>
+#include <stdbool.h>
 
-#define SETTINGS_NAME_SEPARATOR '/'
+// Settings handler definition macro (no-op when settings disabled)
+#define SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO(_hname, _tree, _get, _set, _commit, _export, _prio) \
+    /* No-op: settings disabled */
 
-// Settings handler structure (not used)
-struct settings_handler {
-    const char *name;
-    int (*h_get)(const char *key, char *val, int val_len_max);
-    int (*h_set)(const char *key, size_t len, void *read_cb, void *cb_arg);
-    int (*h_commit)(void);
-    int (*h_export)(int (*export_func)(const char *name, const void *val, size_t val_len));
-};
-
-// Settings API (all no-ops)
-static inline int settings_subsys_init(void) {
-    return 0;
-}
-
-static inline int settings_register(struct settings_handler *handler) {
-    (void)handler;
-    return 0;
-}
-
-static inline int settings_load(void) {
-    return 0;
-}
-
-static inline int settings_save_one(const char *name, const void *value, size_t val_len) {
+// Settings name parsing (stub implementations)
+static inline int settings_name_steq(const char *name, const char *key, const char **next) {
     (void)name;
-    (void)value;
-    (void)val_len;
-    return 0;
+    (void)key;
+    (void)next;
+    return 0;  // Never matches
 }
 
-static inline int settings_delete(const char *name) {
+static inline int settings_name_next(const char *name, const char **next) {
     (void)name;
-    return 0;
+    (void)next;
+    return 0;  // No more components
+}
+
+// Settings load callback type (matching Zephyr's signature)
+typedef int (*settings_read_cb)(void *cb_arg, void *data, size_t len);
+
+// Settings load direct callback type
+typedef int (*settings_load_direct_cb)(const char *key, size_t len,
+                                       settings_read_cb read_cb,
+                                       void *cb_arg, void *param);
+
+// Settings load function (stub)
+static inline int settings_load_subtree_direct(const char *subtree,
+                                                settings_load_direct_cb cb,
+                                                void *param) {
+    (void)subtree;
+    (void)cb;
+    (void)param;
+    return 0;  // No settings to load
 }
 
 #endif /* ZEPHYR_SETTINGS_SETTINGS_H_ */

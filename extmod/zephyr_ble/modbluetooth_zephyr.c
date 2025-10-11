@@ -409,8 +409,7 @@ int mp_bluetooth_gap_advertise_start(bool connectable, int32_t interval_us, cons
         .id = 0,
         .sid = 0,
         .secondary_max_skip = 0,
-        .options = (connectable ? BT_LE_ADV_OPT_CONNECTABLE : 0)
-            | BT_LE_ADV_OPT_ONE_TIME
+        .options = (connectable ? BT_LE_ADV_OPT_CONN : 0)
             | BT_LE_ADV_OPT_USE_IDENTITY
             | BT_LE_ADV_OPT_SCANNABLE,
         .interval_min = interval_us / 625,
@@ -588,7 +587,7 @@ int mp_bluetooth_gatts_register_service(mp_obj_bluetooth_uuid_t *service_uuid, m
 
     // now that the service has been registered, we can assign the handles for the characteristics and the descriptors
     // we are not interested in the handle of the service itself, so we start the loop from index 1
-    for (int i = 1; i < total_attributes; i++) {
+    for (size_t i = 1; i < total_attributes; i++) {
         // store all the relevant handles (characteristics and descriptors defined in Python)
         if (!((uint64_t)(attrs_to_ignore >> i) & (uint64_t)0x01)) {
             if (svc_attributes[i].user_data == NULL) {
@@ -738,7 +737,7 @@ static ssize_t mp_bt_zephyr_gatts_attr_write(struct bt_conn *conn, const struct 
 }
 
 static struct bt_gatt_attr *mp_bt_zephyr_find_attr_by_handle(uint16_t value_handle) {
-    for (int i = 0; i < MP_STATE_PORT(bluetooth_zephyr_root_pointers)->n_services; i++) {
+    for (size_t i = 0; i < MP_STATE_PORT(bluetooth_zephyr_root_pointers)->n_services; i++) {
         int j = 0;
         while (MP_STATE_PORT(bluetooth_zephyr_root_pointers)->services[i]->attrs[j].uuid != NULL) {
             if (MP_STATE_PORT(bluetooth_zephyr_root_pointers)->services[i]->attrs[j].handle == value_handle) {
@@ -990,6 +989,58 @@ static void add_descriptor(struct bt_gatt_attr *chrc, struct add_descriptor *d, 
                 d->permissions & GATT_PERM_MASK,
                 mp_bt_zephyr_gatts_attr_read, mp_bt_zephyr_gatts_attr_write, NULL), attr_desc, 0);
     }
+}
+
+// GATT Client stubs (Phase 1: Server-only)
+int mp_bluetooth_gattc_discover_primary_services(uint16_t conn_handle, const mp_obj_bluetooth_uuid_t *uuid) {
+    (void)conn_handle; (void)uuid;
+    return MP_EOPNOTSUPP; // Phase 1: GATT server only
+}
+
+int mp_bluetooth_gattc_discover_characteristics(uint16_t conn_handle, uint16_t start_handle, uint16_t end_handle, const mp_obj_bluetooth_uuid_t *uuid) {
+    (void)conn_handle; (void)start_handle; (void)end_handle; (void)uuid;
+    return MP_EOPNOTSUPP;
+}
+
+int mp_bluetooth_gattc_discover_descriptors(uint16_t conn_handle, uint16_t start_handle, uint16_t end_handle) {
+    (void)conn_handle; (void)start_handle; (void)end_handle;
+    return MP_EOPNOTSUPP;
+}
+
+int mp_bluetooth_gattc_read(uint16_t conn_handle, uint16_t value_handle) {
+    (void)conn_handle; (void)value_handle;
+    return MP_EOPNOTSUPP;
+}
+
+int mp_bluetooth_gattc_write(uint16_t conn_handle, uint16_t value_handle, const uint8_t *value, size_t value_len, unsigned int mode) {
+    (void)conn_handle; (void)value_handle; (void)value; (void)value_len; (void)mode;
+    return MP_EOPNOTSUPP;
+}
+
+int mp_bluetooth_gattc_exchange_mtu(uint16_t conn_handle) {
+    (void)conn_handle;
+    return MP_EOPNOTSUPP;
+}
+
+// Pairing/Bonding stubs (Phase 1: No persistent storage)
+int mp_bluetooth_gap_pair(uint16_t conn_handle) {
+    (void)conn_handle;
+    return MP_EOPNOTSUPP; // Phase 1: No pairing support
+}
+
+int mp_bluetooth_gap_passkey(uint16_t conn_handle, uint8_t action, mp_int_t passkey) {
+    (void)conn_handle; (void)action; (void)passkey;
+    return MP_EOPNOTSUPP;
+}
+
+void mp_bluetooth_set_bonding(bool enabled) {
+    (void)enabled;
+    // Phase 1: No bonding (persistent storage) - no-op
+}
+
+void mp_bluetooth_set_le_secure(bool enabled) {
+    (void)enabled;
+    // Phase 1: No secure connections config - no-op
 }
 
 MP_REGISTER_ROOT_POINTER(struct _mp_bluetooth_zephyr_root_pointers_t *bluetooth_zephyr_root_pointers);

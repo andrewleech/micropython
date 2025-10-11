@@ -39,8 +39,8 @@
 
 // Provide default no-op implementations if port doesn't define them
 // This allows compilation to succeed, but is not safe for multi-core or IRQ contexts
+// Ports should define these in mpconfigport.h for proper critical section handling
 #ifndef MICROPY_PY_BLUETOOTH_ENTER
-#warning "MICROPY_PY_BLUETOOTH_ENTER not defined, using no-op (not IRQ-safe)"
 #define MICROPY_PY_BLUETOOTH_ENTER uint32_t atomic_state = 0; (void)atomic_state;
 #endif
 
@@ -73,29 +73,29 @@ static inline void k_spin_unlock(struct k_spinlock *lock, k_spinlock_key_t key) 
 
 // --- Atomic Operations ---
 
-// Atomic variable type
-typedef struct {
-    volatile int32_t val;
-} atomic_t;
-
-typedef struct {
-    volatile void *val;
-} atomic_ptr_t;
-
-// Atomic value type (like atomic_val_t in Zephyr)
-typedef int32_t atomic_val_t;
+// Atomic variable type - must be compatible with unsigned long for ATOMIC_DEFINE
+// In Zephyr, atomic_t is just unsigned long, not a struct
+typedef unsigned long atomic_t;
+typedef unsigned long atomic_val_t;
+typedef void * atomic_ptr_t;
 
 // Initialize atomic variable
 static inline void atomic_set(atomic_t *target, atomic_val_t value) {
     MICROPY_PY_BLUETOOTH_ENTER
-    target->val = value;
+    *target = value;
     MICROPY_PY_BLUETOOTH_EXIT
+}
+
+// Clear atomic variable (set to 0)
+// Returns: void
+static inline void atomic_clear(atomic_t *target) {
+    atomic_set(target, 0);
 }
 
 // Get atomic variable value
 static inline atomic_val_t atomic_get(const atomic_t *target) {
     MICROPY_PY_BLUETOOTH_ENTER
-    atomic_val_t ret = target->val;
+    atomic_val_t ret = *target;
     MICROPY_PY_BLUETOOTH_EXIT
     return ret;
 }
@@ -103,7 +103,7 @@ static inline atomic_val_t atomic_get(const atomic_t *target) {
 // Atomic increment and return new value
 static inline atomic_val_t atomic_inc(atomic_t *target) {
     MICROPY_PY_BLUETOOTH_ENTER
-    atomic_val_t ret = ++target->val;
+    atomic_val_t ret = ++(*target);
     MICROPY_PY_BLUETOOTH_EXIT
     return ret;
 }
@@ -111,7 +111,7 @@ static inline atomic_val_t atomic_inc(atomic_t *target) {
 // Atomic decrement and return new value
 static inline atomic_val_t atomic_dec(atomic_t *target) {
     MICROPY_PY_BLUETOOTH_ENTER
-    atomic_val_t ret = --target->val;
+    atomic_val_t ret = --(*target);
     MICROPY_PY_BLUETOOTH_EXIT
     return ret;
 }
@@ -119,8 +119,8 @@ static inline atomic_val_t atomic_dec(atomic_t *target) {
 // Atomic add and return new value
 static inline atomic_val_t atomic_add(atomic_t *target, atomic_val_t value) {
     MICROPY_PY_BLUETOOTH_ENTER
-    target->val += value;
-    atomic_val_t ret = target->val;
+    *target += value;
+    atomic_val_t ret = *target;
     MICROPY_PY_BLUETOOTH_EXIT
     return ret;
 }
@@ -128,8 +128,8 @@ static inline atomic_val_t atomic_add(atomic_t *target, atomic_val_t value) {
 // Atomic subtract and return new value
 static inline atomic_val_t atomic_sub(atomic_t *target, atomic_val_t value) {
     MICROPY_PY_BLUETOOTH_ENTER
-    target->val -= value;
-    atomic_val_t ret = target->val;
+    *target -= value;
+    atomic_val_t ret = *target;
     MICROPY_PY_BLUETOOTH_EXIT
     return ret;
 }
@@ -138,8 +138,8 @@ static inline atomic_val_t atomic_sub(atomic_t *target, atomic_val_t value) {
 static inline bool atomic_cas(atomic_t *target, atomic_val_t old_value, atomic_val_t new_value) {
     MICROPY_PY_BLUETOOTH_ENTER
     bool ret = false;
-    if (target->val == old_value) {
-        target->val = new_value;
+    if (*target == old_value) {
+        *target = new_value;
         ret = true;
     }
     MICROPY_PY_BLUETOOTH_EXIT
@@ -149,8 +149,8 @@ static inline bool atomic_cas(atomic_t *target, atomic_val_t old_value, atomic_v
 // Atomic bitwise OR
 static inline atomic_val_t atomic_or(atomic_t *target, atomic_val_t value) {
     MICROPY_PY_BLUETOOTH_ENTER
-    atomic_val_t ret = target->val;
-    target->val |= value;
+    atomic_val_t ret = *target;
+    *target |= value;
     MICROPY_PY_BLUETOOTH_EXIT
     return ret;
 }
@@ -158,8 +158,8 @@ static inline atomic_val_t atomic_or(atomic_t *target, atomic_val_t value) {
 // Atomic bitwise AND
 static inline atomic_val_t atomic_and(atomic_t *target, atomic_val_t value) {
     MICROPY_PY_BLUETOOTH_ENTER
-    atomic_val_t ret = target->val;
-    target->val &= value;
+    atomic_val_t ret = *target;
+    *target &= value;
     MICROPY_PY_BLUETOOTH_EXIT
     return ret;
 }
@@ -167,8 +167,8 @@ static inline atomic_val_t atomic_and(atomic_t *target, atomic_val_t value) {
 // Atomic test and set bit
 static inline bool atomic_test_and_set_bit(atomic_t *target, int bit) {
     MICROPY_PY_BLUETOOTH_ENTER
-    bool ret = (target->val & (1UL << bit)) != 0;
-    target->val |= (1UL << bit);
+    bool ret = (*target & (1UL << bit)) != 0;
+    *target |= (1UL << bit);
     MICROPY_PY_BLUETOOTH_EXIT
     return ret;
 }
@@ -176,8 +176,8 @@ static inline bool atomic_test_and_set_bit(atomic_t *target, int bit) {
 // Atomic test and clear bit
 static inline bool atomic_test_and_clear_bit(atomic_t *target, int bit) {
     MICROPY_PY_BLUETOOTH_ENTER
-    bool ret = (target->val & (1UL << bit)) != 0;
-    target->val &= ~(1UL << bit);
+    bool ret = (*target & (1UL << bit)) != 0;
+    *target &= ~(1UL << bit);
     MICROPY_PY_BLUETOOTH_EXIT
     return ret;
 }
@@ -185,7 +185,7 @@ static inline bool atomic_test_and_clear_bit(atomic_t *target, int bit) {
 // Atomic test bit
 static inline bool atomic_test_bit(const atomic_t *target, int bit) {
     MICROPY_PY_BLUETOOTH_ENTER
-    bool ret = (target->val & (1UL << bit)) != 0;
+    bool ret = (*target & (1UL << bit)) != 0;
     MICROPY_PY_BLUETOOTH_EXIT
     return ret;
 }
@@ -193,27 +193,46 @@ static inline bool atomic_test_bit(const atomic_t *target, int bit) {
 // Atomic set bit
 static inline void atomic_set_bit(atomic_t *target, int bit) {
     MICROPY_PY_BLUETOOTH_ENTER
-    target->val |= (1UL << bit);
+    *target |= (1UL << bit);
     MICROPY_PY_BLUETOOTH_EXIT
 }
 
 // Atomic clear bit
 static inline void atomic_clear_bit(atomic_t *target, int bit) {
     MICROPY_PY_BLUETOOTH_ENTER
-    target->val &= ~(1UL << bit);
+    *target &= ~(1UL << bit);
     MICROPY_PY_BLUETOOTH_EXIT
 }
 
+// Atomic set bit to specific value
+static inline void atomic_set_bit_to(atomic_t *target, int bit, bool val) {
+    if (val) {
+        atomic_set_bit(target, bit);
+    } else {
+        atomic_clear_bit(target, bit);
+    }
+}
+
 // Atomic pointer operations
+// Note: atomic_set_ptr returns old value (exchange operation)
+static inline void *atomic_ptr_set(atomic_ptr_t *target, void *value) {
+    MICROPY_PY_BLUETOOTH_ENTER
+    void *old_val = *target;
+    *target = value;
+    MICROPY_PY_BLUETOOTH_EXIT
+    return old_val;
+}
+
+// Non-returning version
 static inline void atomic_set_ptr(atomic_ptr_t *target, void *value) {
     MICROPY_PY_BLUETOOTH_ENTER
-    target->val = value;
+    *target = value;
     MICROPY_PY_BLUETOOTH_EXIT
 }
 
 static inline void *atomic_get_ptr(const atomic_ptr_t *target) {
     MICROPY_PY_BLUETOOTH_ENTER
-    void *ret = (void *)target->val;
+    void *ret = *target;
     MICROPY_PY_BLUETOOTH_EXIT
     return ret;
 }
@@ -221,12 +240,21 @@ static inline void *atomic_get_ptr(const atomic_ptr_t *target) {
 static inline bool atomic_cas_ptr(atomic_ptr_t *target, void *old_value, void *new_value) {
     MICROPY_PY_BLUETOOTH_ENTER
     bool ret = false;
-    if (target->val == old_value) {
-        target->val = new_value;
+    if (*target == old_value) {
+        *target = new_value;
         ret = true;
     }
     MICROPY_PY_BLUETOOTH_EXIT
     return ret;
+}
+
+// Atomic pointer clear (set to NULL) and return old value
+static inline void *atomic_ptr_clear(atomic_ptr_t *target) {
+    MICROPY_PY_BLUETOOTH_ENTER
+    void *old_val = *target;
+    *target = NULL;
+    MICROPY_PY_BLUETOOTH_EXIT
+    return old_val;
 }
 
 // --- IRQ Lock API (alternative to spinlocks) ---

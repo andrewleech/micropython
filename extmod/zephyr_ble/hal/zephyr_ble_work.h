@@ -32,6 +32,12 @@
 #include <stdbool.h>
 #include "zephyr_ble_timer.h"
 
+// CONTAINER_OF macro (also defined in kernel.h)
+#ifndef CONTAINER_OF
+#define CONTAINER_OF(ptr, type, field) \
+    ((type *)(((char *)(ptr)) - offsetof(type, field)))
+#endif
+
 // Zephyr k_work abstraction layer for MicroPython
 // Maps Zephyr work queue API to event queue processed by scheduler
 
@@ -57,6 +63,7 @@ struct k_work_q {
     struct k_work *head;
     struct k_work_q *nextq;
     const char *name;
+    void *thread;  // Placeholder for thread (always NULL in MicroPython)
 };
 
 // Delayable work (work + timer)
@@ -66,10 +73,7 @@ struct k_work_delayable {
     struct k_work_q *queue;
 };
 
-// Timeout types
-typedef struct {
-    uint32_t ticks;
-} k_timeout_t;
+// Note: k_timeout_t is defined in zephyr_ble_timer.h (included above)
 
 // Tick type (used for timing functions)
 typedef uint32_t k_ticks_t;
@@ -79,6 +83,31 @@ typedef uint32_t k_ticks_t;
 #define K_MSEC(ms) ((k_timeout_t) { .ticks = (ms) })
 #define K_SECONDS(s) K_MSEC((s) * 1000)
 
+// Static work initialization macro (without 'static' - caller adds it)
+#define K_WORK_DEFINE(name, work_handler) \
+    struct k_work name = { \
+        .handler = work_handler, \
+        .user_data = NULL, \
+        .pending = false, \
+        .next = NULL, \
+        .prev = NULL \
+    }
+
+// Internal work initializer (used by Zephyr code)
+#define Z_WORK_INITIALIZER(work_handler) { \
+        .handler = work_handler, \
+        .user_data = NULL, \
+        .pending = false, \
+        .next = NULL, \
+        .prev = NULL \
+    }
+
+// Work status flags (used with k_work_delayable_busy_get)
+#define K_WORK_QUEUED    BIT(0)
+#define K_WORK_DELAYED   BIT(1)
+#define K_WORK_RUNNING   BIT(2)
+#define K_WORK_CANCELING BIT(3)
+
 // Timeout conversion helper
 static inline uint32_t k_timeout_to_ms(k_timeout_t timeout) {
     return timeout.ticks;
@@ -87,6 +116,13 @@ static inline uint32_t k_timeout_to_ms(k_timeout_t timeout) {
 // Work queue configuration
 struct k_work_queue_config {
     const char *name;
+    bool no_yield;      // Don't yield after processing work items
+    bool essential;     // Essential work queue (higher priority)
+};
+
+// Work synchronization structure (used for k_work_cancel_sync)
+struct k_work_sync {
+    int dummy;  // Placeholder
 };
 
 // --- Work Queue API ---
@@ -142,9 +178,23 @@ int k_work_delayable_busy_get(const struct k_work_delayable *dwork);
 // Called by MicroPython scheduler to process all pending work
 void mp_bluetooth_zephyr_work_process(void);
 
-// Get work from delayable work (for internal use)
-static inline struct k_work *k_work_delayable_from_work(struct k_work *work) {
-    return work;
+// Get delayable work from work (for internal use)
+// work is embedded in the delayable work structure
+static inline struct k_work_delayable *k_work_delayable_from_work(struct k_work *work) {
+    return CONTAINER_OF(work, struct k_work_delayable, work);
+}
+
+// Get thread from work queue (returns NULL in MicroPython)
+static inline void *k_work_queue_thread_get(struct k_work_q *queue) {
+    (void)queue;
+    return NULL;
+}
+
+// Flush work (wait for completion) - no-op in MicroPython
+static inline int k_work_flush(struct k_work *work, void *sync) {
+    (void)work;
+    (void)sync;
+    return 0;
 }
 
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_WORK_H

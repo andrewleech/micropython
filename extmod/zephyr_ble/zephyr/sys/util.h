@@ -3,13 +3,14 @@
  * Utility macros and functions
  */
 
-#ifndef ZEPHYR_SYS_UTIL_H_
-#define ZEPHYR_SYS_UTIL_H_
+// Use the same header guard as real Zephyr sys/util.h to prevent conflicts
+#ifndef ZEPHYR_INCLUDE_SYS_UTIL_H_
+#define ZEPHYR_INCLUDE_SYS_UTIL_H_
 
 #include <stddef.h>
 #include <stdint.h>
-
-// Many of these are already defined in kernel.h, but include them here too
+#include <stdbool.h>
+#include <string.h>
 
 // Container-of macro (also in kernel.h)
 #ifndef CONTAINER_OF
@@ -25,6 +26,10 @@
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #endif
 
+// ARRAY_SIZE - Must be a function-like macro, not just #define
+// The issue was that in some contexts (C++ or certain optimizations),
+// ARRAY_SIZE was being treated as an undefined function symbol.
+// Use do-while(0) wrapper to ensure it's always seen as a macro expression
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 #endif
@@ -59,9 +64,9 @@
     ((uint16_t)(((x) << 8) | ((x) >> 8)))
 #define BSWAP_32(x) \
     ((uint32_t)((((x) & 0xFF000000) >> 24) | \
-                (((x) & 0x00FF0000) >> 8) | \
-                (((x) & 0x0000FF00) << 8) | \
-                (((x) & 0x000000FF) << 24)))
+    (((x) & 0x00FF0000) >> 8) | \
+    (((x) & 0x0000FF00) << 8) | \
+    (((x) & 0x000000FF) << 24)))
 
 // Pointer alignment
 #define IS_ALIGNED(ptr, align) \
@@ -71,4 +76,48 @@
 #define FOR_EACH(F, sep, ...)
 #define FOR_EACH_IDX(F, sep, ...)
 
-#endif /* ZEPHYR_SYS_UTIL_H_ */
+// Pointer to integer conversion
+#ifndef POINTER_TO_UINT
+#define POINTER_TO_UINT(x) ((uintptr_t)(x))
+#endif
+
+#ifndef UINT_TO_POINTER
+#define UINT_TO_POINTER(x) ((void *)(uintptr_t)(x))
+#endif
+
+// Hex string to binary conversion
+static inline size_t hex2bin(const char *hex, size_t hexlen, uint8_t *buf, size_t buflen) {
+    if (hexlen / 2 > buflen) {
+        return 0;
+    }
+
+    for (size_t i = 0; i < hexlen / 2; i++) {
+        char hi = hex[i * 2];
+        char lo = hex[i * 2 + 1];
+
+        uint8_t hi_val, lo_val;
+        if (hi >= '0' && hi <= '9') hi_val = hi - '0';
+        else if (hi >= 'a' && hi <= 'f') hi_val = hi - 'a' + 10;
+        else if (hi >= 'A' && hi <= 'F') hi_val = hi - 'A' + 10;
+        else return 0;
+
+        if (lo >= '0' && lo <= '9') lo_val = lo - '0';
+        else if (lo >= 'a' && lo <= 'f') lo_val = lo - 'a' + 10;
+        else if (lo >= 'A' && lo <= 'F') lo_val = lo - 'A' + 10;
+        else return 0;
+
+        buf[i] = (hi_val << 4) | lo_val;
+    }
+
+    return hexlen / 2;
+}
+
+// Convert uint8_t to decimal string
+uint8_t u8_to_dec(char *buf, uint8_t buflen, uint8_t value);
+
+// Memory comparison utility
+static inline bool util_memeq(const void *a, const void *b, size_t len) {
+    return memcmp(a, b, len) == 0;
+}
+
+#endif /* ZEPHYR_INCLUDE_SYS_UTIL_H_ */

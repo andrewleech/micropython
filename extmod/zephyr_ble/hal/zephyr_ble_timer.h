@@ -46,23 +46,25 @@ struct k_timer {
     struct k_timer *next;
 };
 
+// Forward declare k_timeout_t (defined in zephyr_ble_work.h)
+typedef struct {
+    uint32_t ticks;
+} k_timeout_t;
+
 // Zephyr timer API
 void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_expiry_t stop_fn);
-void k_timer_start(struct k_timer *timer, uint32_t duration_ms, uint32_t period_ms);
+void k_timer_start(struct k_timer *timer, k_timeout_t duration, k_timeout_t period);
 void k_timer_stop(struct k_timer *timer);
 
 // Note: K_MSEC, K_NO_WAIT, K_FOREVER are defined in zephyr_ble_work.h
-
-// k_yield() abstraction
-static inline void k_yield(void) {
-    // In MicroPython all BLE code runs in scheduler context,
-    // so yield is handled by MICROPY_EVENT_POLL_HOOK
-    #ifdef MICROPY_EVENT_POLL_HOOK
-    MICROPY_EVENT_POLL_HOOK
-    #endif
-}
+// Note: k_yield() is defined in zephyr_ble_kernel.h
 
 // Called by MicroPython scheduler to process timer callbacks
 void mp_bluetooth_zephyr_timer_process(void);
+
+// Check if two timeouts are equal
+static inline bool K_TIMEOUT_EQ(k_timeout_t a, k_timeout_t b) {
+    return a.ticks == b.ticks;
+}
 
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_TIMER_H

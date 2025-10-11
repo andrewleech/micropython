@@ -13,13 +13,8 @@ struct k_thread {
     int dummy;
 };
 
-// Thread ID type
-typedef struct k_thread *k_tid_t;
-
-// Get current thread (always returns NULL - no threads)
-static inline k_tid_t k_current_get(void) {
-    return NULL;
-}
+// Note: k_tid_t and k_current_get are defined in zephyr_ble_kernel.h
+// to avoid conflicts
 
 // Thread name functions (no-op)
 static inline const char *k_thread_name_get(k_tid_t thread) {
@@ -38,5 +33,26 @@ static inline const char *k_thread_state_str(k_tid_t thread) {
     (void)thread;
     return "running";
 }
+
+// Thread abort (no-op)
+static inline void k_thread_abort(k_tid_t thread) {
+    (void)thread;
+}
+
+// Thread stack definition (no-op in MicroPython)
+// Note: Caller adds 'static', so don't include it here
+#ifndef K_KERNEL_STACK_DEFINE
+#define K_KERNEL_STACK_DEFINE(name, size) \
+    uint8_t name[size]
+#endif
+
+// Thread priority macros (not used in MicroPython)
+#define K_PRIO_COOP(x) (x)
+#define K_PRIO_PREEMPT(x) (x)
+
+// Thread stack size query (always returns 1 in MicroPython)
+#ifndef K_THREAD_STACK_SIZEOF
+#define K_THREAD_STACK_SIZEOF(sym) 1
+#endif
 
 #endif /* ZEPHYR_KERNEL_THREAD_H_ */

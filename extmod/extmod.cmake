@@ -348,3 +348,15 @@ if(MICROPY_PY_LWIP)
 
     list(APPEND GIT_SUBMODULES lib/lwip)
 endif()
+
+# Library for Zephyr BLE stack
+
+if(MICROPY_BLUETOOTH_ZEPHYR)
+    include(${MICROPY_DIR}/extmod/zephyr_ble/zephyr_ble.cmake)
+
+    list(APPEND GIT_SUBMODULES lib/zephyr)
+
+    list(APPEND MICROPY_DEF_CORE
+        MICROPY_BLUETOOTH_ZEPHYR=1
+    )
+endif()

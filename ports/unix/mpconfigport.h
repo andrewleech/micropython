@@ -235,3 +235,11 @@ static inline unsigned long mp_random_seed_init(void) {
 #ifndef MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 #define MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS (MICROPY_BLUETOOTH_NIMBLE)
 #endif
+
+// Critical section macros for Zephyr BLE stack (no-op on unix - single threaded)
+#ifndef MICROPY_PY_BLUETOOTH_ENTER
+#define MICROPY_PY_BLUETOOTH_ENTER uint32_t atomic_state = 0; (void)atomic_state;
+#endif
+#ifndef MICROPY_PY_BLUETOOTH_EXIT
+#define MICROPY_PY_BLUETOOTH_EXIT (void)atomic_state;
+#endif

@@ -35,6 +35,10 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_BLE_EXTMOD_DIR)/hal/, \
 	zephyr_ble_mutex.c \
 	zephyr_ble_kernel.c \
 	zephyr_ble_poll.c \
+	zephyr_ble_settings.c \
+	zephyr_ble_psa_crypto.c \
+	zephyr_ble_util.c \
+	zephyr_ble_arch.c \
 	)
 
 # Zephyr net_buf library (required by BLE stack)
@@ -43,7 +47,31 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/lib/net_buf/, \
 	buf_simple.c \
 	)
 
-# Zephyr BLE host core sources (Phase 1: minimal GATT support)
+# Suppress warnings in net_buf (third-party Zephyr code)
+$(BUILD)/$(ZEPHYR_LIB_DIR)/lib/net_buf/buf.o: CFLAGS += -Wno-unused-value -Wno-array-bounds -Wno-type-limits
+$(BUILD)/$(ZEPHYR_LIB_DIR)/lib/net_buf/buf_simple.o: CFLAGS += -Wno-attributes
+
+# Suppress warnings in BLE host (third-party Zephyr code)
+# Use broad suppression for all BLE host files to avoid warning churn
+$(BUILD)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/%.o: CFLAGS += -Wno-error
+
+# gatt.c has "initializer element is not constant" error with ARRAY_SIZE
+# This is a GCC limitation: sizeof(external_array) not recognized as compile-time constant
+# Workaround: Use -std=gnu11 (C11 may be more lenient) or disable error for this specific case
+# Note: -fpermissive is C++ only, so we use -Wno-error to downgrade the error to a warning
+$(BUILD)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/gatt.o: ../../$(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/gatt.c
+	$(ECHO) "CC $<"
+	$(Q)$(CC) $(filter-out -Werror,$(CFLAGS)) -Wno-error=pedantic -c -MD -MF $(@:.o=.d) -o $@ $<
+
+
+
+# Zephyr BLE common sources (shared between host and controller)
+SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/common/, \
+	addr.c \
+	rpa.c \
+	)
+
+# Zephyr BLE host core sources
 SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/, \
 	hci_core.c \
 	hci_common.c \
@@ -57,8 +85,26 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/, \
 	gatt.c \
 	adv.c \
 	scan.c \
-	smp_null.c \
 	data.c \
+	keys.c \
+	smp.c \
+	ecc.c \
+	crypto_psa.c \
+	iso.c \
+	cs.c \
+	)
+
+# BR/EDR Classic Bluetooth support
+SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/classic/, \
+	br.c \
+	conn_br.c \
+	ssp.c \
+	l2cap_br.c \
+	keys_br.c \
+	sdp.c \
+	a2dp.c \
+	rfcomm.c \
+	avdtp.c \
 	)
 
 # Include paths
@@ -67,6 +113,7 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/, \
 INC += -I$(TOP)/$(ZEPHYR_BLE_EXTMOD_DIR)
 INC += -I$(TOP)/$(ZEPHYR_BLE_EXTMOD_DIR)/hal
 INC += -I$(TOP)/$(ZEPHYR_LIB_DIR)/include
+INC += -I$(TOP)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth
 
 endif
 

@@ -29,6 +29,8 @@
 
 #include "zephyr/kernel.h"
 #include <zephyr/net_buf.h>
+// Forward declare arch_esf to satisfy hci_vs.h inclusion
+struct arch_esf;
 #include <zephyr/drivers/bluetooth.h>
 #include <errno.h>
 

@@ -9,8 +9,13 @@
 #include <assert.h>
 
 // Zephyr assertion macros map to standard assert
+// Only define if not already defined by kernel.h
+#ifndef __ASSERT
 #define __ASSERT(test, fmt, ...) assert(test)
+#endif
+#ifndef __ASSERT_NO_MSG
 #define __ASSERT_NO_MSG(test) assert(test)
+#endif
 
 // Evaluation macro (executes expression even if asserts disabled)
 #define __ASSERT_EVAL(expr1, expr2, test, fmt, ...) \

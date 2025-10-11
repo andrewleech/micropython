@@ -11,27 +11,40 @@
 #define BIT(n) (1UL << (n))
 #endif
 
-// Conditional code based on config
-#define COND_CODE_1(flag, if_1_code, else_code) \
-    __COND_CODE(flag, if_1_code, else_code)
-#define COND_CODE_0(flag, if_0_code, else_code) \
-    __COND_CODE(flag, else_code, if_0_code)
-
-#define __COND_CODE(flag, true_code, false_code) \
-    __CONCAT(__COND_CODE_, flag)(true_code, false_code)
-#define __COND_CODE_0(t, f) f
-#define __COND_CODE_1(t, f) t
+// Note: COND_CODE_1, COND_CODE_0, __COND_CODE, __COND_CODE_0, __COND_CODE_1
+// are defined in zephyr_ble_config.h and should not be redefined here.
+// This prevents duplicate definitions and ensures consistent behavior.
 
 // IS_ENABLED macro for CONFIG checks
+// Maps config_macro=1 to 1, anything else (including undefined) to 0
 #define IS_ENABLED(config) __IS_ENABLED1(config)
 #define __IS_ENABLED1(x) __IS_ENABLED2(__XXXX_##x)
-#define __XXXX_0 0,
-#define __IS_ENABLED2(val) __IS_ENABLED3(val 1, 0)
-#define __IS_ENABLED3(_i, val, ...) val
+#define __XXXX_1 __YYYY_,
+#define __IS_ENABLED2(one_or_two_args) __IS_ENABLED3(one_or_two_args 1, 0)
+#define __IS_ENABLED3(ignore_this, val, ...) val
 
-// String concatenation
+// Token concatenation macros
+// Note: Multiple naming conventions exist because different Zephyr subsystems use different names:
+// - CONCAT/__CONCAT: Used by general Zephyr utilities
+// - _CONCAT/_DO_CONCAT: Used by Zephyr BLE host and toolchain headers
+// - UTIL_CAT: Used by device tree macros (see line 34)
+// All are functionally identical (two-level macro for proper token expansion).
+
+// General Zephyr concatenation
+#ifndef __CONCAT
 #define __CONCAT(a, b) a##b
+#endif
+#ifndef CONCAT
 #define CONCAT(a, b) __CONCAT(a, b)
+#endif
+
+// BLE host concatenation (required by BT_L2CAP_FIXED_CHANNEL_DEFINE and similar)
+#ifndef _DO_CONCAT
+#define _DO_CONCAT(x, y) x##y
+#endif
+#ifndef _CONCAT
+#define _CONCAT(x, y) _DO_CONCAT(x, y)
+#endif
 
 // String conversion 
 #define STRINGIFY(s) __STRINGIFY(s)
@@ -60,5 +73,11 @@
 #define DT_STRING_UPPER_TOKEN_BY_IDX(node, prop, idx) 0
 #define DT_FOREACH_PROP_ELEM_SEP(node, prop, fn, sep) 0
 #define UTIL_PRIMITIVE_CAT(a, b) a##b
+
+// Bit manipulation macros
+#ifndef WRITE_BIT
+#define WRITE_BIT(var, bit, set) \
+    ((var) = (set) ? ((var) | BIT(bit)) : ((var) & ~BIT(bit)))
+#endif
 
 #endif /* ZEPHYR_SYS_UTIL_MACRO_H_ */

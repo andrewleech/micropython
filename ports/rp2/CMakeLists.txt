@@ -389,6 +389,22 @@ if(MICROPY_BLUETOOTH_NIMBLE)
     list(APPEND MICROPY_INC_CORE ${NIMBLE_INCLUDE})
 endif()
 
+if(MICROPY_BLUETOOTH_ZEPHYR)
+    list(APPEND GIT_SUBMODULES lib/zephyr)
+    if(NOT UPDATE_SUBMODULES AND NOT EXISTS ${MICROPY_DIR}/lib/zephyr/subsys/bluetooth/host/hci_core.c)
+        message(FATAL_ERROR " zephyr not initialized.\n Run 'make BOARD=${MICROPY_BOARD} submodules'")
+    endif()
+
+    include(${MICROPY_DIR}/extmod/zephyr_ble/zephyr_ble.cmake)
+    target_link_libraries(${MICROPY_TARGET} micropy_extmod_zephyr_ble)
+    get_target_property(ZEPHYR_INCLUDE micropy_extmod_zephyr_ble INTERFACE_INCLUDE_DIRECTORIES)
+    list(APPEND MICROPY_INC_CORE ${ZEPHYR_INCLUDE})
+
+    # Add Zephyr BLE sources for QSTR/root pointer scanning
+    get_target_property(ZEPHYR_BLE_SOURCES micropy_extmod_zephyr_ble INTERFACE_SOURCES)
+    list(APPEND MICROPY_SOURCE_QSTR ${ZEPHYR_BLE_SOURCES})
+endif()
+
 # tinyusb helper
 target_include_directories(${MICROPY_TARGET} PRIVATE
     ${MICROPY_DIR}/shared/tinyusb/

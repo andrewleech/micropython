@@ -58,4 +58,14 @@ unsigned int k_sem_count_get(struct k_sem *sem);
 // Reset semaphore to initial count
 void k_sem_reset(struct k_sem *sem);
 
+// Semaphore maximum limit constant
+#define K_SEM_MAX_LIMIT UINT16_MAX
+
+// Static semaphore definition macro
+#define K_SEM_DEFINE(name, initial_count, max_limit) \
+    struct k_sem name = { \
+        .count = (initial_count), \
+        .limit = (max_limit) \
+    }
+
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_SEM_H
