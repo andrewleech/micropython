@@ -21,7 +21,14 @@ struct device {
 
 // Check if device is ready (always returns true in MicroPython)
 static inline bool device_is_ready(const struct device *dev) {
-    return dev != NULL;
+    bool ready = (dev != NULL && dev->api != NULL);
+    // Temporary debug output
+    #if 0
+    extern int mp_printf(const void *env, const char *fmt, ...);
+    extern const void *mp_plat_print;
+    mp_printf(&mp_plat_print, "=== HCI: device_is_ready(%p) = %d (api=%p)\n", dev, ready, dev ? dev->api : NULL);
+    #endif
+    return ready;
 }
 
 #endif /* ZEPHYR_DEVICE_H_ */

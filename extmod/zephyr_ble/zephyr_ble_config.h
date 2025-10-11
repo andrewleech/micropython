@@ -542,16 +542,11 @@ struct arch_esf;
 int lll_csrand_get(void *buf, size_t len);  // Controller crypto stub
 
 // =============================================================================
-// PART 4: Device Tree Stubs for HCI Device
+// PART 4: Device Tree and HCI Device
 // =============================================================================
 
-// Note: Device tree macros (DT_HAS_CHOSEN, DT_CHOSEN, DEVICE_DT_GET) are defined
-// in our zephyr/devicetree.h wrapper.
-
-// HCI device symbol that ports must define
-// The devicetree wrapper's DEVICE_DT_GET() macro returns &mp_bluetooth_zephyr_hci_dev
-struct device;  // Forward declaration
-extern const struct device mp_bluetooth_zephyr_hci_dev;
+// Note: Device tree macros (DT_HAS_CHOSEN, DT_CHOSEN, DEVICE_DT_GET) and
+// the mp_bluetooth_zephyr_hci_dev extern declaration are in zephyr/devicetree.h wrapper.
 
 // HCI bus types (from zephyr/drivers/bluetooth.h)
 #ifndef BT_HCI_BUS_UART

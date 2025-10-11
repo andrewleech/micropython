@@ -169,7 +169,7 @@ static void mp_zephyr_hci_poll_now(void) {
 // Zephyr HCI driver implementation
 
 static int hci_cyw43_open(const struct device *dev, bt_hci_recv_t recv) {
-    debug_printf("hci_cyw43_open\n");
+    mp_printf(&mp_plat_print, "=== HCI: hci_cyw43_open called, dev=%p recv=%p\n", dev, recv);
     hci_dev = dev;
     recv_cb = recv;
 

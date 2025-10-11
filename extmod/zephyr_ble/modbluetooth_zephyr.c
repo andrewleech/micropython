@@ -291,8 +291,16 @@ int mp_bluetooth_init(void) {
 
         bt_conn_cb_register(&mp_bt_zephyr_conn_callbacks);
 
+        // Debug: Check HCI device before calling bt_enable
+        extern struct bt_dev {
+            struct k_work init;
+            const struct device *hci;
+        } bt_dev;
+        mp_printf(&mp_plat_print, "=== BLE: About to call bt_enable, bt_dev.hci=%p\n", bt_dev.hci);
+
         // bt_enable can only be called once.
         int ret = bt_enable(NULL);
+        mp_printf(&mp_plat_print, "=== BLE: bt_enable returned %d\n", ret);
         if (ret) {
             return bt_err_to_errno(ret);
         }
