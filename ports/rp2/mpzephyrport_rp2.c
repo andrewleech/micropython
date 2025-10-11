@@ -51,6 +51,11 @@ extern const mp_obj_type_t machine_uart_type;
 #include <zephyr/net_buf.h>
 #include <zephyr/bluetooth/buf.h>
 
+// CYW43 driver for WiFi/BT chip
+#if MICROPY_PY_NETWORK_CYW43
+#include "lib/cyw43-driver/src/cyw43.h"
+#endif
+
 #define debug_printf(...) mp_printf(&mp_plat_print, "mpzephyrport_rp2: " __VA_ARGS__)
 #define error_printf(...) mp_printf(&mp_plat_print, "mpzephyrport_rp2 ERROR: " __VA_ARGS__)
 
@@ -174,6 +179,7 @@ static int hci_cyw43_open(const struct device *dev, bt_hci_recv_t recv) {
     recv_cb = recv;
 
     // Initialize UART for HCI
+    mp_printf(&mp_plat_print, "=== HCI: Initializing UART%d for HCI\n", MICROPY_HW_BLE_UART_ID);
     mp_obj_t args[] = {
         MP_OBJ_NEW_SMALL_INT(MICROPY_HW_BLE_UART_ID),
         MP_OBJ_NEW_QSTR(MP_QSTR_baudrate), MP_OBJ_NEW_SMALL_INT(115200),
@@ -183,12 +189,16 @@ static int hci_cyw43_open(const struct device *dev, bt_hci_recv_t recv) {
         MP_OBJ_NEW_QSTR(MP_QSTR_rxbuf), MP_OBJ_NEW_SMALL_INT(768),
     };
 
+    mp_printf(&mp_plat_print, "=== HCI: Creating UART object\n");
     mp_zephyr_uart = MP_OBJ_TYPE_GET_SLOT(&machine_uart_type, make_new)(
         (mp_obj_t)&machine_uart_type, 1, 5, args);
+    mp_printf(&mp_plat_print, "=== HCI: UART object created\n");
 
     // Start polling
+    mp_printf(&mp_plat_print, "=== HCI: Starting HCI polling\n");
     mp_zephyr_hci_poll_now();
 
+    mp_printf(&mp_plat_print, "=== HCI: hci_cyw43_open completed\n");
     return 0;
 }
 
@@ -290,17 +300,37 @@ void cyw43_hal_uart_set_baudrate(uint32_t baudrate) {
 
 // HCI transport setup (called by BLE host during initialization)
 int bt_hci_transport_setup(const struct device *dev) {
-    debug_printf("bt_hci_transport_setup\n");
+    mp_printf(&mp_plat_print, "=== HCI: bt_hci_transport_setup called\n");
     (void)dev;
 
+    #if MICROPY_PY_NETWORK_CYW43
+    // Check if CYW43 driver is initialized (WiFi side)
+    extern cyw43_t cyw43_state;
+    bool cyw43_init = cyw43_is_initialized(&cyw43_state);
+    mp_printf(&mp_plat_print, "=== HCI: CYW43 driver initialized: %d\n", cyw43_init);
+
+    if (!cyw43_init) {
+        mp_printf(&mp_plat_print, "=== HCI: Initializing CYW43 driver first\n");
+        extern int cyw43_arch_init(void);
+        int ret = cyw43_arch_init();
+        if (ret != 0) {
+            mp_printf(&mp_plat_print, "=== HCI ERROR: cyw43_arch_init failed: %d\n", ret);
+            return ret;
+        }
+        mp_printf(&mp_plat_print, "=== HCI: CYW43 driver initialized successfully\n");
+    }
+    #endif
+
     // Initialize CYW43 BT controller using cyw43_bthci_uart.c
+    mp_printf(&mp_plat_print, "=== HCI: Calling cyw43_bluetooth_controller_init\n");
     extern int cyw43_bluetooth_controller_init(void);
     int ret = cyw43_bluetooth_controller_init();
     if (ret != 0) {
-        error_printf("cyw43_bluetooth_controller_init failed: %d\n", ret);
+        mp_printf(&mp_plat_print, "=== HCI ERROR: cyw43_bluetooth_controller_init failed: %d\n", ret);
         return ret;
     }
 
+    mp_printf(&mp_plat_print, "=== HCI: bt_hci_transport_setup completed successfully\n");
     return 0;
 }
 
