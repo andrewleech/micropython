@@ -277,3 +277,29 @@ int mp_hal_is_pin_reserved(int n) {
     return false;
     #endif
 }
+
+#if MICROPY_PY_NETWORK_CYW43
+// Check if CYW43 poll is pending
+// This function is also defined as static inline in cyw43_configport.h,
+// but pico-SDK's library needs it as an actual function symbol.
+bool cyw43_poll_is_pending(void) {
+    return pendsv_is_pending(PENDSV_DISPATCH_CYW43);
+}
+
+// Wait with background processing
+// Required by pico-SDK's cyw43_driver_picow library.
+void cyw43_await_background_or_timeout_us(uint32_t timeout_us) {
+    mp_event_wait_ms(timeout_us / 1000);
+}
+
+// Bluetooth HCI process stub
+// Only needed for Zephyr BLE (BTstack provides its own in btstack_hci_transport_cyw43.c).
+// Only used if CYW43_ENABLE_BLUETOOTH is set (SPI/SDIO transport).
+// For UART transport (CYW43_ENABLE_BLUETOOTH_OVER_UART), this is not used.
+#if MICROPY_BLUETOOTH_ZEPHYR
+void cyw43_bluetooth_hci_process(void) {
+    // Not used with UART BT transport
+}
+#endif
+
+#endif // MICROPY_PY_NETWORK_CYW43

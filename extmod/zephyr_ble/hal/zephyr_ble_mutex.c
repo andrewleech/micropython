@@ -50,7 +50,7 @@ int k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout) {
     return 0;
 }
 
-void k_mutex_unlock(struct k_mutex *mutex) {
+int k_mutex_unlock(struct k_mutex *mutex) {
     DEBUG_MUTEX_printf("k_mutex_unlock(%p) -> no-op, locked count now %u\n",
         mutex, mutex->locked - 1);
 
@@ -61,9 +61,10 @@ void k_mutex_unlock(struct k_mutex *mutex) {
     if (mutex->locked == 0) {
         // In release builds, silently ignore
         DEBUG_MUTEX_printf("  WARNING: unlocking non-locked mutex\n");
-        return;
+        return 0;
     }
     #endif
 
     mutex->locked--;
+    return 0;
 }

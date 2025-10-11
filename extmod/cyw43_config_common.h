@@ -31,8 +31,10 @@
 #include "py/mperrno.h"
 #include "py/mphal.h"
 #include "py/runtime.h"
+#if MICROPY_PY_LWIP
 #include "extmod/modnetwork.h"
 #include "lwip/apps/mdns.h"
+#endif
 #include "pendsv.h"
 
 // This file is included at the top of port-specific cyw43_configport.h files,
@@ -40,8 +42,15 @@
 //
 // It's included into both MicroPython sources and the lib/cyw43-driver sources.
 
-#define CYW43_IOCTL_TIMEOUT_US          (1000000)
+#if MICROPY_PY_LWIP
+#define CYW43_LWIP                      (1)
 #define CYW43_NETUTILS                  (1)
+#else
+#define CYW43_LWIP                      (0)
+#define CYW43_NETUTILS                  (0)
+#endif
+
+#define CYW43_IOCTL_TIMEOUT_US          (1000000)
 #define CYW43_PRINTF(...)               mp_printf(MP_PYTHON_PRINTER, __VA_ARGS__)
 
 #define CYW43_EPERM                     MP_EPERM // Operation not permitted
@@ -49,11 +58,17 @@
 #define CYW43_EINVAL                    MP_EINVAL // Invalid argument
 #define CYW43_ETIMEDOUT                 MP_ETIMEDOUT // Connection timed out
 
+#if MICROPY_PY_LWIP
 #define CYW43_THREAD_ENTER              MICROPY_PY_LWIP_ENTER
 #define CYW43_THREAD_EXIT               MICROPY_PY_LWIP_EXIT
 #define CYW43_THREAD_LOCK_CHECK
-
 #define CYW43_HOST_NAME                 mod_network_hostname_data
+#else
+#define CYW43_THREAD_ENTER
+#define CYW43_THREAD_EXIT
+#define CYW43_THREAD_LOCK_CHECK
+#define CYW43_HOST_NAME                 "micropython"
+#endif
 
 #define CYW43_ARRAY_SIZE(a)             MP_ARRAY_SIZE(a)
 
@@ -107,7 +122,7 @@ static inline void cyw43_delay_ms(uint32_t ms) {
     }
 }
 
-#if LWIP_MDNS_RESPONDER == 1
+#if MICROPY_PY_LWIP && (LWIP_MDNS_RESPONDER == 1)
 
 // Hook for any additional TCP/IP initialization than needs to be done.
 // Called after the netif specified by `itf` has been set up.

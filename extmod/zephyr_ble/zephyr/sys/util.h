@@ -12,6 +12,9 @@
 #include <stdbool.h>
 #include <string.h>
 
+// Include MicroPython's utilities for MP_ARRAY_SIZE
+#include "py/misc.h"
+
 // Container-of macro (also in kernel.h)
 #ifndef CONTAINER_OF
 #define CONTAINER_OF(ptr, type, field) \
@@ -26,13 +29,14 @@
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #endif
 
-// ARRAY_SIZE - Must be a function-like macro, not just #define
-// The issue was that in some contexts (C++ or certain optimizations),
-// ARRAY_SIZE was being treated as an undefined function symbol.
-// Use do-while(0) wrapper to ensure it's always seen as a macro expression
+// ARRAY_SIZE - Use MicroPython's proven macro to avoid duplication
 #ifndef ARRAY_SIZE
-#define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
+#define ARRAY_SIZE MP_ARRAY_SIZE
 #endif
+
+// Note: ARRAY_SIZE stub function is provided in zephyr_ble_array_size_stub.c
+// but not forward-declared here to avoid macro expansion conflicts.
+// The linker will resolve it when needed (zero-sized array edge cases).
 
 #ifndef BIT
 #define BIT(n) (1UL << (n))
@@ -118,6 +122,16 @@ uint8_t u8_to_dec(char *buf, uint8_t buflen, uint8_t value);
 // Memory comparison utility
 static inline bool util_memeq(const void *a, const void *b, size_t len) {
     return memcmp(a, b, len) == 0;
+}
+
+// Byte swap utility - reverse byte order in place
+static inline void sys_mem_swap(void *buf, size_t length) {
+    uint8_t *p = (uint8_t *)buf;
+    for (size_t i = 0; i < length / 2; i++) {
+        uint8_t tmp = p[i];
+        p[i] = p[length - 1 - i];
+        p[length - 1 - i] = tmp;
+    }
 }
 
 #endif /* ZEPHYR_INCLUDE_SYS_UTIL_H_ */

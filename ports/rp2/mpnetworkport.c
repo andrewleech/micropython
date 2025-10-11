@@ -134,6 +134,19 @@ void lwip_lock_release(void) {
     pendsv_resume();
 }
 
+#if MICROPY_PY_NETWORK_CYW43
+// Provide cyw43_thread_enter/exit as actual functions for pico-SDK's cyw43_driver_picow
+// library, which was compiled expecting function calls instead of the CYW43_THREAD_ENTER/EXIT
+// macros defined in MicroPython's cyw43_configport.h
+void cyw43_thread_enter(void) {
+    lwip_lock_acquire();
+}
+
+void cyw43_thread_exit(void) {
+    lwip_lock_release();
+}
+#endif
+
 // This is called by soft_timer and executes at PendSV level.
 static void mp_network_soft_timer_callback(soft_timer_entry_t *self) {
     // Run the lwIP internal updates.

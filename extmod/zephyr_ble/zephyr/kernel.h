@@ -9,11 +9,17 @@
 // Include autoconf.h first to provide CONFIG_* defines
 #include "zephyr/autoconf.h"
 
+// Include MicroPython's utilities for MP_ARRAY_SIZE
+#include "py/misc.h"
+
 // Include our HAL implementation
 #include "../hal/zephyr_ble_hal.h"
 
 // Include sys/slist.h for sys_slist_t (needed by net_buf.h)
 #include "zephyr/sys/slist.h"
+
+// Include sys/util.h for ARRAY_SIZE and other utilities
+#include "zephyr/sys/util.h"
 
 // Include poll and thread headers
 #include "zephyr/kernel/poll.h"
@@ -35,7 +41,11 @@
 #endif
 
 // Zephyr common macros
-// Note: ARRAY_SIZE is defined in sys/util.h with type checking
+// Use MicroPython's proven array size macro to avoid duplication
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE MP_ARRAY_SIZE
+#endif
+
 #define CONTAINER_OF(ptr, type, field) \
     ((type *)(((char *)(ptr)) - offsetof(type, field)))
 
@@ -175,6 +185,11 @@ static inline bool k_lifo_is_empty(struct k_lifo *lifo) {
     return lifo->list.head == NULL;
 }
 
+// Internal helper for queue empty check (works with both k_fifo and k_lifo due to ABI compatibility)
+static inline bool __k_queue_is_empty_internal(const sys_slist_t *list) {
+    return list->head == NULL;
+}
+
 static inline void k_fifo_put(struct k_fifo *fifo, void *data) {
     sys_snode_t *node = (sys_snode_t *)data;
     node->next = NULL;
@@ -194,9 +209,9 @@ static inline void *k_fifo_get(struct k_fifo *fifo, k_timeout_t timeout) {
     return k_lifo_get((struct k_lifo *)fifo, timeout);
 }
 
-static inline bool k_fifo_is_empty(struct k_fifo *fifo) {
-    return fifo->list.head == NULL;
-}
+// k_fifo_is_empty macro - handles both k_fifo and k_lifo pointers via ABI compatibility
+// conn.c:924 passes k_lifo* to k_fifo_is_empty, relying on identical memory layout
+#define k_fifo_is_empty(ptr) __k_queue_is_empty_internal(&((ptr)->list))
 
 // Peek at head of FIFO without removing
 static inline void *k_fifo_peek_head(struct k_fifo *fifo) {
@@ -328,12 +343,17 @@ struct k_heap {
     void *unused;  // Placeholder
 };
 
-// Forward declare MicroPython memory functions (defined in py/gc.h or py/misc.h)
-// These will be linked when building with actual MicroPython
-// Note: m_free in MicroPython requires size parameter for GC tracking
-#ifndef m_malloc
-void *m_malloc(size_t bytes);
-void m_free(void *ptr, size_t num_bytes);
+// MicroPython memory functions are provided by py/misc.h (included at top of this file)
+// No need to redeclare them here - they're already available
+// Note: m_free signature varies by port (some take size parameter, some don't)
+//
+// Wrapper macro to handle both m_free signatures:
+// - MICROPY_MALLOC_USES_ALLOCATED_SIZE=1: m_free(ptr, size)
+// - MICROPY_MALLOC_USES_ALLOCATED_SIZE=0: m_free(ptr)
+#if MICROPY_MALLOC_USES_ALLOCATED_SIZE
+#define MP_FREE_WITH_SIZE(ptr, size) m_free(ptr, size)
+#else
+#define MP_FREE_WITH_SIZE(ptr, size) m_free(ptr)
 #endif
 
 static inline void *k_heap_alloc(struct k_heap *heap, size_t size, k_timeout_t timeout) {
@@ -351,8 +371,8 @@ static inline void *k_heap_aligned_alloc(struct k_heap *heap, size_t align, size
 
 static inline void k_heap_free(struct k_heap *heap, void *mem) {
     (void)heap;
-    // Pass 0 for size - GC can determine actual size from allocation metadata
-    m_free(mem, 0);
+    // Use wrapper macro to handle both m_free signatures
+    MP_FREE_WITH_SIZE(mem, 0);
 }
 
 // Scheduler locking (no-op in MicroPython's cooperative scheduler)
@@ -459,9 +479,9 @@ static inline int k_mem_slab_alloc(struct k_mem_slab *slab, void **mem, k_timeou
 }
 
 // Free block back to slab
-// Pass block_size to m_free for proper GC tracking
+// Use wrapper macro to handle both m_free signatures
 static inline void k_mem_slab_free(struct k_mem_slab *slab, void *mem) {
-    m_free(mem, slab->block_size);
+    MP_FREE_WITH_SIZE(mem, slab->block_size);
 }
 
 // Get number of free blocks in slab
@@ -490,6 +510,54 @@ static inline unsigned int k_mem_slab_max_used_get(struct k_mem_slab *slab) {
     (void)slab;
     return 0;
 }
+
+// =============================================================================
+// Condition Variable (k_condvar)
+// =============================================================================
+// Zephyr Semantic: Condition variable for thread synchronization
+// MicroPython Mapping: Stub implementation (cooperative scheduler)
+// Note: k_mutex is already defined in hal/zephyr_ble_mutex.h
+
+struct k_condvar {
+    void *unused;  // Placeholder
+};
+
+// Static initializer macros
+#define Z_MUTEX_INITIALIZER(obj) { .locked = 0 }
+#define Z_CONDVAR_INITIALIZER(obj) { .unused = NULL }
+
+// Condition variable operations (no-op in cooperative scheduler)
+static inline int k_condvar_init(struct k_condvar *condvar) {
+    (void)condvar;
+    return 0;
+}
+
+static inline int k_condvar_wait(struct k_condvar *condvar, struct k_mutex *mutex, k_timeout_t timeout) {
+    (void)condvar;
+    (void)mutex;
+    (void)timeout;
+    // In cooperative scheduler, waiting would deadlock
+    // Return timeout immediately
+    return -EAGAIN;
+}
+
+static inline int k_condvar_signal(struct k_condvar *condvar) {
+    (void)condvar;
+    return 0;
+}
+
+static inline int k_condvar_broadcast(struct k_condvar *condvar) {
+    (void)condvar;
+    return 0;
+}
+
+// =============================================================================
+// Atomic Bitmap Utilities
+// =============================================================================
+// Calculate number of atomic_t elements needed for a bitmap of N bits
+
+#define ATOMIC_BITMAP_SIZE(num_bits) \
+    (((num_bits) + (sizeof(atomic_t) * 8) - 1) / (sizeof(atomic_t) * 8))
 
 // System work queue stub (not used in MicroPython)
 // Forward declare to avoid circular dependency

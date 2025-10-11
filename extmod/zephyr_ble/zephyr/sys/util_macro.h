@@ -46,9 +46,11 @@
 #define _CONCAT(x, y) _DO_CONCAT(x, y)
 #endif
 
-// String conversion 
+// String conversion (guard against conflicts with system headers)
 #define STRINGIFY(s) __STRINGIFY(s)
+#ifndef __STRINGIFY
 #define __STRINGIFY(s) #s
+#endif
 
 // Macro utilities
 #define EMPTY

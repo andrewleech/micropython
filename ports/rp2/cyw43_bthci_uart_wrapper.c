@@ -24,30 +24,31 @@
  * THE SOFTWARE.
  */
 
-#ifndef MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_MUTEX_H
-#define MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_MUTEX_H
+// Wrapper to include cyw43_bthci_uart.c with proper CYW43 BT configuration
 
-#include <stdint.h>
-#include "zephyr_ble_work.h"
+// Include MicroPython HAL to get MP_HAL_MAC_BDADDR
+#include "py/mphal.h"
 
-// Zephyr k_mutex abstraction layer for MicroPython
-// No-op implementation: All Zephyr BLE code runs in scheduler context,
-// providing implicit mutual exclusion (like NimBLE's ble_npl_mutex)
+// Force-define CYW43 BT UART transport BEFORE any CYW43 includes
+#ifdef CYW43_ENABLE_BLUETOOTH_OVER_UART
+#undef CYW43_ENABLE_BLUETOOTH_OVER_UART
+#endif
+#define CYW43_ENABLE_BLUETOOTH_OVER_UART 1
 
-// Mutex structure
-struct k_mutex {
-    volatile uint8_t locked;
-};
+// Define BT-specific config that should come from cyw43_configport.h
+// but for some reason isn't being picked up
+#define CYW43_BT_FIRMWARE_INCLUDE_FILE      "firmware/cyw43_btfw_43439.h"
+#define CYW43_PIN_BT_REG_ON                 (0)
+#define CYW43_PIN_BT_CTS                    (2)
+#define CYW43_PIN_BT_HOST_WAKE              (3)
+#define CYW43_PIN_BT_DEV_WAKE               (4)
+#define CYW43_HAL_UART_READCHAR_BLOCKING_WAIT CYW43_EVENT_POLL_HOOK
 
-// --- Mutex API ---
+// Also need to ensure CYW43_HAL_MAC_BDADDR is defined
+// This should come from cyw43_config_common.h but define it here just in case
+#ifndef CYW43_HAL_MAC_BDADDR
+#define CYW43_HAL_MAC_BDADDR                MP_HAL_MAC_BDADDR
+#endif
 
-// Initialize mutex
-void k_mutex_init(struct k_mutex *mutex);
-
-// Lock mutex (always succeeds in scheduler context)
-int k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout);
-
-// Unlock mutex (returns 0 on success)
-int k_mutex_unlock(struct k_mutex *mutex);
-
-#endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_MUTEX_H
+// Include the actual implementation
+#include "../../lib/cyw43-driver/src/cyw43_bthci_uart.c"

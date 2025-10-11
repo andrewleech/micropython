@@ -44,7 +44,9 @@
 #include "uart.h"
 #include "modmachine.h"
 #include "modrp2.h"
+#if MICROPY_BLUETOOTH_BTSTACK || MICROPY_BLUETOOTH_NIMBLE
 #include "mpbthciport.h"
+#endif
 #include "mpnetworkport.h"
 #include "genhdr/mpversion.h"
 #include "mp_usbd.h"
@@ -156,7 +158,8 @@ int main(int argc, char **argv) {
     #endif
     #endif
 
-    #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_CYW43
+    // Initialize CYW43 WiFi hardware (not needed for Zephyr BLE - BT init handled separately)
+    #if MICROPY_PY_NETWORK_CYW43
     {
         cyw43_init(&cyw43_state);
         cyw43_irq_init();
@@ -195,7 +198,15 @@ int main(int argc, char **argv) {
         machine_i2s_init0();
 
         #if MICROPY_PY_BLUETOOTH
+        #if MICROPY_BLUETOOTH_ZEPHYR
+        // Initialize Zephyr BLE port (HCI polling/scheduling)
+        extern void mp_bluetooth_zephyr_port_init(void);
+        mp_bluetooth_zephyr_port_init();
+        // Initialize Zephyr BLE stack
+        mp_bluetooth_init();
+        #else
         mp_bluetooth_hci_init();
+        #endif
         #endif
         #if MICROPY_PY_NETWORK
         mod_network_init();

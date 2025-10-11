@@ -39,6 +39,10 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_BLE_EXTMOD_DIR)/hal/, \
 	zephyr_ble_psa_crypto.c \
 	zephyr_ble_util.c \
 	zephyr_ble_arch.c \
+	zephyr_ble_crypto_stubs.c \
+	zephyr_ble_monitor_stubs.c \
+	zephyr_ble_feature_stubs.c \
+	zephyr_ble_array_size_stub.c \
 	)
 
 # Zephyr net_buf library (required by BLE stack)

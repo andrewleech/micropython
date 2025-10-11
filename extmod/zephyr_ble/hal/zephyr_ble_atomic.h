@@ -78,6 +78,11 @@ static inline void k_spin_unlock(struct k_spinlock *lock, k_spinlock_key_t key) 
 typedef unsigned long atomic_t;
 typedef unsigned long atomic_val_t;
 typedef void * atomic_ptr_t;
+typedef void * atomic_ptr_val_t;  // Pointer value type (used by SMP)
+
+// Atomic pointer initializer macro
+// Since atomic_ptr_t is just void*, initialization is direct
+#define ATOMIC_PTR_INIT(val) (val)
 
 // Initialize atomic variable
 static inline void atomic_set(atomic_t *target, atomic_val_t value) {
@@ -237,6 +242,11 @@ static inline void *atomic_get_ptr(const atomic_ptr_t *target) {
     return ret;
 }
 
+// Alias for consistency with Zephyr naming (both forms used in BLE stack)
+static inline void *atomic_ptr_get(const atomic_ptr_t *target) {
+    return atomic_get_ptr(target);
+}
+
 static inline bool atomic_cas_ptr(atomic_ptr_t *target, void *old_value, void *new_value) {
     MICROPY_PY_BLUETOOTH_ENTER
     bool ret = false;
@@ -246,6 +256,11 @@ static inline bool atomic_cas_ptr(atomic_ptr_t *target, void *old_value, void *n
     }
     MICROPY_PY_BLUETOOTH_EXIT
     return ret;
+}
+
+// Alias for consistency with Zephyr naming (both forms used in BLE stack)
+static inline bool atomic_ptr_cas(atomic_ptr_t *target, void *old_value, void *new_value) {
+    return atomic_cas_ptr(target, old_value, new_value);
 }
 
 // Atomic pointer clear (set to NULL) and return old value

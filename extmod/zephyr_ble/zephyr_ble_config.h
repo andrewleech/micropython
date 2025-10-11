@@ -368,8 +368,9 @@ struct arch_esf;
 
 // --- Classic Bluetooth - Disable for Phase 1 ---
 // TODO: Enable after adding BR/EDR source files (br.c, conn_br.c, ssp.c, l2cap_br.c)
-#define CONFIG_BT_CLASSIC 0
-#define CONFIG_BT_BREDR 0
+// Note: Leave undefined (not 0) so #if defined() checks fail
+// #define CONFIG_BT_CLASSIC 1
+// #define CONFIG_BT_BREDR 1
 #define CONFIG_BT_MAX_BR_CONN 0
 #define CONFIG_BT_HFP_HF 0
 #define CONFIG_BT_HFP_AG 0
@@ -531,5 +532,9 @@ struct arch_esf;
 #define CONFIG_BT_CONN_TX_NOTIFY_WQ_PRIO 8
 #define CONFIG_BT_CONN_TX_NOTIFY_WQ_INIT_PRIORITY 99
 #define CONFIG_BT_CONN_TX_NOTIFY_WQ_STACK_SIZE 1024
+
+// Forward declarations for stub functions (defined in HAL layer)
+#include <stddef.h>
+int lll_csrand_get(void *buf, size_t len);  // Controller crypto stub
 
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_ZEPHYR_BLE_CONFIG_H

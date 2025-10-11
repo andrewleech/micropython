@@ -62,3 +62,50 @@ psa_status_t psa_mac_sign_setup(void *operation, psa_key_id_t key, uint32_t alg)
     // Phase 1: GATT caching disabled
     return PSA_SUCCESS;
 }
+
+// Stub: Initialize PSA crypto subsystem
+psa_status_t psa_crypto_init(void) {
+    // Phase 1: No actual crypto initialization
+    return PSA_SUCCESS;
+}
+
+// Stub: Generate random bytes
+psa_status_t psa_generate_random(uint8_t *output, size_t output_size) {
+    (void)output;
+    (void)output_size;
+    // Phase 1: No actual random number generation
+    // TODO: Implement using hardware RNG or MicroPython's random module
+    return PSA_SUCCESS;
+}
+
+// Stub: Encrypt data using cipher
+psa_status_t psa_cipher_encrypt(psa_key_id_t key, uint32_t alg,
+                                 const uint8_t *input, size_t input_length,
+                                 uint8_t *output, size_t output_size,
+                                 size_t *output_length) {
+    (void)key;
+    (void)alg;
+    (void)input;
+    (void)input_length;
+    (void)output;
+    (void)output_size;
+    (void)output_length;
+    // Phase 1: No actual encryption
+    return PSA_SUCCESS;
+}
+
+// Stub: Perform raw key agreement (for ECDH in SMP secure connections)
+psa_status_t psa_raw_key_agreement(uint32_t alg, psa_key_id_t private_key,
+                                    const uint8_t *peer_key, size_t peer_key_length,
+                                    uint8_t *output, size_t output_size,
+                                    size_t *output_length) {
+    (void)alg;
+    (void)private_key;
+    (void)peer_key;
+    (void)peer_key_length;
+    (void)output;
+    (void)output_size;
+    (void)output_length;
+    // Phase 1: No actual ECDH key agreement
+    return PSA_SUCCESS;
+}

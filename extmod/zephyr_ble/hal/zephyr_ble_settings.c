@@ -28,3 +28,11 @@ int bt_settings_store_hash(void) {
     // Phase 1: RAM-only, no persistent storage
     return 0;
 }
+
+// Stub: Store bonding keys to settings
+int bt_settings_store_keys(const bt_addr_le_t *peer, uint8_t id) {
+    (void)peer;
+    (void)id;
+    // Phase 1: RAM-only, no persistent key storage
+    return 0;
+}

@@ -327,7 +327,10 @@ if (MICROPY_PY_LWIP)
 endif()
 
 if(MICROPY_PY_BLUETOOTH)
-    list(APPEND MICROPY_SOURCE_PORT mpbthciport.c)
+    # Only add mpbthciport.c for BTstack/NimBLE (not Zephyr BLE)
+    if(MICROPY_BLUETOOTH_BTSTACK OR MICROPY_BLUETOOTH_NIMBLE)
+        list(APPEND MICROPY_SOURCE_PORT mpbthciport.c)
+    endif()
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
         MICROPY_PY_BLUETOOTH=1
         MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS=1
@@ -339,12 +342,30 @@ if (MICROPY_PY_BLUETOOTH_CYW43)
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
         CYW43_ENABLE_BLUETOOTH=1
         MICROPY_PY_BLUETOOTH_CYW43=1
+        CYW43_INCLUDE_LEGACY_F1_OVERFLOW_WORKAROUND_VARIABLES=1
+    )
+
+    # Enable CYW43 UART BT transport (for both BTstack and Zephyr BLE)
+    target_compile_definitions(${MICROPY_TARGET} PRIVATE
+        CYW43_ENABLE_BLUETOOTH_OVER_UART=1
+    )
+
+    # Add CYW43 external pin support (needed for LED and other CYW43 GPIO pins)
+    list(APPEND MICROPY_SOURCE_PORT
+        machine_pin_cyw43.c
     )
 
     if (MICROPY_BLUETOOTH_BTSTACK)
         target_link_libraries(${MICROPY_TARGET}
             pico_btstack_hci_transport_cyw43
         )
+    endif()
+
+    # For Zephyr BLE, add cyw43_bthci_uart.c for BT controller initialization
+    # HCI transport is provided by mpzephyrport_rp2.c
+    # We use a wrapper to ensure CYW43_ENABLE_BLUETOOTH_OVER_UART is defined
+    if (MICROPY_BLUETOOTH_ZEPHYR)
+        list(APPEND MICROPY_SOURCE_PORT cyw43_bthci_uart_wrapper.c)
     endif()
 endif()
 
@@ -395,6 +416,9 @@ if(MICROPY_BLUETOOTH_ZEPHYR)
         message(FATAL_ERROR " zephyr not initialized.\n Run 'make BOARD=${MICROPY_BOARD} submodules'")
     endif()
 
+    # Add RP2-specific Zephyr HCI port
+    list(APPEND MICROPY_SOURCE_PORT mpzephyrport_rp2.c)
+
     include(${MICROPY_DIR}/extmod/zephyr_ble/zephyr_ble.cmake)
     target_link_libraries(${MICROPY_TARGET} micropy_extmod_zephyr_ble)
     get_target_property(ZEPHYR_INCLUDE micropy_extmod_zephyr_ble INTERFACE_INCLUDE_DIRECTORIES)
@@ -403,6 +427,10 @@ if(MICROPY_BLUETOOTH_ZEPHYR)
     # Add Zephyr BLE sources for QSTR/root pointer scanning
     get_target_property(ZEPHYR_BLE_SOURCES micropy_extmod_zephyr_ble INTERFACE_SOURCES)
     list(APPEND MICROPY_SOURCE_QSTR ${ZEPHYR_BLE_SOURCES})
+
+    target_compile_definitions(${MICROPY_TARGET} PRIVATE
+        MICROPY_BLUETOOTH_ZEPHYR=1
+    )
 endif()
 
 # tinyusb helper
@@ -426,15 +454,14 @@ if (MICROPY_PY_NETWORK_CYW43)
     )
     endif()
 
-    list(APPEND MICROPY_SOURCE_PORT
-        machine_pin_cyw43.c
-    )
-
+    # Link CYW43 WiFi driver (for both BTstack and Zephyr BLE)
     target_link_libraries(${MICROPY_TARGET}
         cyw43_driver_picow
     )
+
     target_include_directories(${MICROPY_TARGET} PRIVATE
         ${MICROPY_DIR}/lib/cyw43-driver/
+        ${PICO_SDK_PATH}/src/rp2_common/pico_cyw43_driver/include
     )
 
 endif()

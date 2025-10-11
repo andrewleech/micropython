@@ -7,10 +7,19 @@
 #define MICROPY_PY_NETWORK_HOSTNAME_DEFAULT     "Pico2W"
 
 // CYW43 driver configuration.
+// Use #ifndef guards as pico-SDK also defines these
+#ifndef CYW43_USE_SPI
 #define CYW43_USE_SPI (1)
+#endif
+#ifndef CYW43_LWIP
 #define CYW43_LWIP (1)
+#endif
+#ifndef CYW43_GPIO
 #define CYW43_GPIO (1)
+#endif
+#ifndef CYW43_SPI_PIO
 #define CYW43_SPI_PIO (1)
+#endif
 
 // For debugging mbedtls - also set
 // Debug level (0-4) 1=warning, 2=info, 3=debug, 4=verbose

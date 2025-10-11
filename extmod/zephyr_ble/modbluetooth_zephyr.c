@@ -1043,6 +1043,18 @@ void mp_bluetooth_set_le_secure(bool enabled) {
     // Phase 1: No secure connections config - no-op
 }
 
+void mp_bluetooth_set_mitm_protection(bool enabled) {
+    (void)enabled;
+    // Phase 1: MITM protection config - no-op
+    // TODO: Configure bt_conn_auth_cb or SMP settings
+}
+
+void mp_bluetooth_set_io_capability(uint8_t capability) {
+    (void)capability;
+    // Phase 1: IO capability config - no-op
+    // TODO: Configure bt_conn_auth_cb io_capa field
+}
+
 MP_REGISTER_ROOT_POINTER(struct _mp_bluetooth_zephyr_root_pointers_t *bluetooth_zephyr_root_pointers);
 
 #endif // MICROPY_PY_BLUETOOTH
