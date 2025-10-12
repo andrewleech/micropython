@@ -30,7 +30,7 @@
 
 #if MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR
 
-#define DEBUG_printf(...) // mp_printf(&mp_plat_print, "mpzephyrport.c: " __VA_ARGS__)
+#define DEBUG_printf(...) mp_printf(&mp_plat_print, "mpzephyrport.c: " __VA_ARGS__)
 
 #include "extmod/modbluetooth.h"
 #include "extmod/mpbthci.h"
