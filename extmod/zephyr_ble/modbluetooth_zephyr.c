@@ -287,20 +287,25 @@ int mp_bluetooth_init(void) {
     bt_le_scan_cb_register(&mp_bluetooth_zephyr_gap_scan_cb_struct);
     #endif
 
+    // Only initialize the BLE stack if this is the first activation
     if (mp_bluetooth_zephyr_ble_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF) {
-
         bt_conn_cb_register(&mp_bt_zephyr_conn_callbacks);
 
-        // Debug: Check HCI device before calling bt_enable
-        extern struct bt_dev {
-            struct k_work init;
-            const struct device *hci;
-        } bt_dev;
-        mp_printf(&mp_plat_print, "=== BLE: About to call bt_enable, bt_dev.hci=%p\n", bt_dev.hci);
+        // Initialize HCI controller (CYW43 BT via WEAK override from pico-sdk)
+        // This must be called before bt_enable()
+        #if MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI
+        extern int mp_bluetooth_hci_controller_init(void);
+        int ctrl_ret = mp_bluetooth_hci_controller_init();
+        if (ctrl_ret != 0) {
+            DEBUG_printf("mp_bluetooth_hci_controller_init failed: %d\n", ctrl_ret);
+            return ctrl_ret;
+        }
+        #endif
 
-        // bt_enable can only be called once.
+        // Initialize Zephyr BLE host stack
+        // bt_enable can only be called once
         int ret = bt_enable(NULL);
-        mp_printf(&mp_plat_print, "=== BLE: bt_enable returned %d\n", ret);
+        DEBUG_printf("bt_enable returned %d\n", ret);
         if (ret) {
             return bt_err_to_errno(ret);
         }

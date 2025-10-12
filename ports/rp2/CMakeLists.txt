@@ -327,10 +327,10 @@ if (MICROPY_PY_LWIP)
 endif()
 
 if(MICROPY_PY_BLUETOOTH)
-    # Only add mpbthciport.c for BTstack/NimBLE (not Zephyr BLE)
-    if(MICROPY_BLUETOOTH_BTSTACK OR MICROPY_BLUETOOTH_NIMBLE)
-        list(APPEND MICROPY_SOURCE_PORT mpbthciport.c)
-    endif()
+    # Add shared HCI infrastructure for all BLE stacks (BTstack, NimBLE, Zephyr)
+    # Provides common polling, scheduling, and controller interface (WEAK overrides)
+    list(APPEND MICROPY_SOURCE_PORT mpbthciport.c)
+
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
         MICROPY_PY_BLUETOOTH=1
         MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS=1
@@ -410,8 +410,13 @@ if(MICROPY_BLUETOOTH_ZEPHYR)
         message(FATAL_ERROR " zephyr not initialized.\n Run 'make BOARD=${MICROPY_BOARD} submodules'")
     endif()
 
-    # Add RP2-specific Zephyr HCI port
-    list(APPEND MICROPY_SOURCE_PORT mpzephyrport_rp2.c)
+    # Add minimal Zephyr port (generic, platform-independent)
+    # Uses same pattern as NimBLE - mpbthciport.c (added above) provides shared infrastructure
+    # CYW43 controller functions provided by pico-sdk via WEAK overrides
+    list(APPEND MICROPY_SOURCE_PORT
+        mpzephyrport.c           # Generic Zephyr polling (platform-independent)
+        mpzephyrport_rp2_stub.c  # Minimal HCI device stub (required by Zephyr)
+    )
 
     include(${MICROPY_DIR}/extmod/zephyr_ble/zephyr_ble.cmake)
     target_link_libraries(${MICROPY_TARGET} micropy_extmod_zephyr_ble)
@@ -424,6 +429,7 @@ if(MICROPY_BLUETOOTH_ZEPHYR)
 
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
         MICROPY_BLUETOOTH_ZEPHYR=1
+        MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI=1
     )
 endif()
 

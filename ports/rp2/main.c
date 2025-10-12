@@ -198,15 +198,9 @@ int main(int argc, char **argv) {
         machine_i2s_init0();
 
         #if MICROPY_PY_BLUETOOTH
-        #if MICROPY_BLUETOOTH_ZEPHYR
-        // Initialize Zephyr BLE port (HCI polling/scheduling)
-        extern void mp_bluetooth_zephyr_port_init(void);
-        mp_bluetooth_zephyr_port_init();
-        // Initialize Zephyr BLE stack
-        mp_bluetooth_init();
-        #else
+        // Initialize shared HCI infrastructure (polling, scheduling)
+        // Stack initialization happens lazily when user calls ble.active(True)
         mp_bluetooth_hci_init();
-        #endif
         #endif
         #if MICROPY_PY_NETWORK
         mod_network_init();
