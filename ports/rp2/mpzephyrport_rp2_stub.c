@@ -256,4 +256,14 @@ void mp_bluetooth_zephyr_poll_uart(void) {
     }
 }
 
+// Stub implementations for port-specific functions (not used by stub)
+void mp_bluetooth_zephyr_port_init(void) {
+    // No-op: stub doesn't need port initialization
+}
+
+void mp_bluetooth_zephyr_port_poll_in_ms(uint32_t ms) {
+    (void)ms;
+    // No-op: stub doesn't use soft timers
+}
+
 #endif // MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR

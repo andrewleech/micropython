@@ -67,9 +67,9 @@
 static bt_hci_recv_t recv_cb = NULL;  // Returns int: 0 on success, negative on error
 static const struct device *hci_dev = NULL;
 
-// Soft timer for scheduling HCI poll
-static soft_timer_entry_t mp_zephyr_hci_soft_timer;
-static mp_sched_node_t mp_zephyr_hci_sched_node;
+// Soft timer for scheduling HCI poll (zero-initialized to prevent startup crashes)
+static soft_timer_entry_t mp_zephyr_hci_soft_timer = {0};
+static mp_sched_node_t mp_zephyr_hci_sched_node = {0};
 
 // Buffer for incoming HCI packets (4-byte CYW43 header + max HCI packet)
 #define CYW43_HCI_HEADER_SIZE 4
