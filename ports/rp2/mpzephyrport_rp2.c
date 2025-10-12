@@ -277,6 +277,12 @@ void mp_bluetooth_zephyr_port_poll_in_ms(uint32_t ms) {
     soft_timer_reinsert(&mp_zephyr_hci_soft_timer, ms);
 }
 
+// No-op for CYW43 (uses SPI via scheduled task, not UART polling)
+void mp_bluetooth_zephyr_poll_uart(void) {
+    // CYW43 uses SPI transport via run_zephyr_hci_task() scheduled by soft timer
+    // No UART polling needed
+}
+
 #else // !MICROPY_PY_NETWORK_CYW43
 
 // Stub implementations for ports without CYW43

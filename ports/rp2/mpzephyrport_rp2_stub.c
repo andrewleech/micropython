@@ -32,10 +32,24 @@
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/buf.h>
 #include <zephyr/drivers/bluetooth.h>
+#include <zephyr/sys/byteorder.h>
 #include "py/runtime.h"
 
 // HCI receive callback (set by Zephyr's bt_enable)
 static bt_hci_recv_t recv_cb = NULL;
+
+// H:4 packet parser state machine
+static struct {
+    struct net_buf *buf;           // Current packet buffer
+    uint16_t remaining;            // Bytes remaining to read
+    uint8_t type;                  // Current packet type (H:4)
+    bool have_hdr;                 // Have we read the header?
+    union {
+        struct bt_hci_evt_hdr evt;
+        struct bt_hci_acl_hdr acl;
+        struct bt_hci_iso_hdr iso;
+    } hdr;
+} h4_rx;
 
 // HCI open: Initialize transport and register receive callback
 static int hci_open(const struct device *dev, bt_hci_recv_t recv) {
@@ -97,6 +111,129 @@ const struct device mp_bluetooth_zephyr_hci_dev = {
     .api = &hci_driver_api,
 };
 
+// Reset H:4 parser state for next packet
+static void reset_rx(void) {
+    h4_rx.type = 0U;
+    h4_rx.remaining = 0U;
+    h4_rx.have_hdr = false;
+    h4_rx.buf = NULL;
+}
+
+// Process one byte of HCI data through H:4 state machine
+static void process_rx_byte(uint8_t byte) {
+    // Step 1: Read packet type if starting new packet
+    if (h4_rx.remaining == 0) {
+        h4_rx.type = byte;
+
+        switch (h4_rx.type) {
+            case BT_HCI_H4_EVT:
+                h4_rx.remaining = sizeof(struct bt_hci_evt_hdr);
+                break;
+            case BT_HCI_H4_ACL:
+                h4_rx.remaining = sizeof(struct bt_hci_acl_hdr);
+                break;
+            case BT_HCI_H4_ISO:
+                h4_rx.remaining = sizeof(struct bt_hci_iso_hdr);
+                break;
+            default:
+                mp_printf(&mp_plat_print, "HCI RX: Unknown packet type 0x%02x\n", h4_rx.type);
+                reset_rx();
+                return;
+        }
+
+        h4_rx.have_hdr = false;
+        return;
+    }
+
+    // Step 2: Read header bytes
+    if (!h4_rx.have_hdr) {
+        // Store byte in header union
+        uint8_t *hdr_ptr = (uint8_t *)&h4_rx.hdr;
+        size_t hdr_size = 0;
+
+        switch (h4_rx.type) {
+            case BT_HCI_H4_EVT:
+                hdr_size = sizeof(struct bt_hci_evt_hdr);
+                break;
+            case BT_HCI_H4_ACL:
+                hdr_size = sizeof(struct bt_hci_acl_hdr);
+                break;
+            case BT_HCI_H4_ISO:
+                hdr_size = sizeof(struct bt_hci_iso_hdr);
+                break;
+        }
+
+        size_t offset = hdr_size - h4_rx.remaining;
+        hdr_ptr[offset] = byte;
+        h4_rx.remaining--;
+
+        // Check if header is complete
+        if (h4_rx.remaining == 0) {
+            h4_rx.have_hdr = true;
+
+            // Parse header to get payload length
+            switch (h4_rx.type) {
+                case BT_HCI_H4_EVT:
+                    h4_rx.remaining = h4_rx.hdr.evt.len;
+                    break;
+                case BT_HCI_H4_ACL: {
+                    uint16_t len = sys_le16_to_cpu(h4_rx.hdr.acl.len);
+                    h4_rx.remaining = len;
+                    break;
+                }
+                case BT_HCI_H4_ISO: {
+                    uint16_t len = sys_le16_to_cpu(h4_rx.hdr.iso.len) & 0x3FFF;
+                    h4_rx.remaining = len;
+                    break;
+                }
+            }
+
+            // Allocate buffer based on packet type
+            switch (h4_rx.type) {
+                case BT_HCI_H4_EVT:
+                    h4_rx.buf = bt_buf_get_evt(h4_rx.hdr.evt.evt, false, K_NO_WAIT);
+                    break;
+                case BT_HCI_H4_ACL:
+                    h4_rx.buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_NO_WAIT);
+                    break;
+                case BT_HCI_H4_ISO:
+                    h4_rx.buf = bt_buf_get_rx(BT_BUF_ISO_IN, K_NO_WAIT);
+                    break;
+            }
+
+            if (!h4_rx.buf) {
+                mp_printf(&mp_plat_print, "HCI RX: Failed to allocate buffer\n");
+                reset_rx();
+                return;
+            }
+
+            // Add header to buffer (Zephyr expects buffer without H:4 type byte)
+            net_buf_add_mem(h4_rx.buf, &h4_rx.hdr, hdr_size);
+
+            // If no payload, deliver immediately
+            if (h4_rx.remaining == 0) {
+                struct net_buf *buf = h4_rx.buf;
+                reset_rx();
+                recv_cb(&mp_bluetooth_zephyr_hci_dev, buf);
+            }
+        }
+        return;
+    }
+
+    // Step 3: Read payload bytes
+    if (h4_rx.buf && h4_rx.remaining > 0) {
+        net_buf_add_u8(h4_rx.buf, byte);
+        h4_rx.remaining--;
+
+        // Check if packet is complete
+        if (h4_rx.remaining == 0) {
+            struct net_buf *buf = h4_rx.buf;
+            reset_rx();
+            recv_cb(&mp_bluetooth_zephyr_hci_dev, buf);
+        }
+    }
+}
+
 // Function to process incoming HCI data (called from mpzephyrport.c polling)
 // This reads from CYW43 via WEAK overrides and delivers to Zephyr
 void mp_bluetooth_zephyr_poll_uart(void) {
@@ -106,15 +243,17 @@ void mp_bluetooth_zephyr_poll_uart(void) {
 
     // Read HCI data from CYW43 via WEAK override
     extern int mp_bluetooth_hci_uart_readchar(void);
-    int byte = mp_bluetooth_hci_uart_readchar();
 
-    if (byte < 0) {
-        return;  // No data available
+    // Process all available bytes (drain UART FIFO)
+    while (true) {
+        int byte = mp_bluetooth_hci_uart_readchar();
+
+        if (byte < 0) {
+            break;  // No more data available
+        }
+
+        process_rx_byte((uint8_t)byte);
     }
-
-    // TODO: Implement full H:4 packet assembly and delivery to recv_cb
-    // For now, just indicate data is available
-    // This requires state machine to parse H:4 packets
 }
 
 #endif // MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR

@@ -280,16 +280,24 @@ int mp_bluetooth_init(void) {
     MP_STATE_PORT(bluetooth_zephyr_root_pointers)->objs_list = mp_obj_new_list(0, NULL);
 
     #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
+    // Zero the scan callback structure to ensure sys_snode_t is initialized
+    memset(&mp_bluetooth_zephyr_gap_scan_cb_struct, 0, sizeof(mp_bluetooth_zephyr_gap_scan_cb_struct));
     mp_bluetooth_zephyr_gap_scan_state = MP_BLUETOOTH_ZEPHYR_GAP_SCAN_STATE_INACTIVE;
     k_timer_init(&mp_bluetooth_zephyr_gap_scan_timer, gap_scan_cb_timeout, NULL);
     mp_bluetooth_zephyr_gap_scan_cb_struct.recv = gap_scan_cb_recv;
     mp_bluetooth_zephyr_gap_scan_cb_struct.timeout = NULL; // currently not implemented in Zephyr
-    bt_le_scan_cb_register(&mp_bluetooth_zephyr_gap_scan_cb_struct);
     #endif
 
     // Only initialize the BLE stack if this is the first activation
     if (mp_bluetooth_zephyr_ble_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF) {
         DEBUG_printf("Starting BLE initialization (state=OFF)\n");
+
+        // Initialize port-specific resources (soft timers, sched nodes, etc.)
+        #if MICROPY_PY_NETWORK_CYW43
+        extern void mp_bluetooth_zephyr_port_init(void);
+        mp_bluetooth_zephyr_port_init();
+        #endif
+
         bt_conn_cb_register(&mp_bt_zephyr_conn_callbacks);
 
         // Initialize HCI controller (CYW43 BT via WEAK override from pico-sdk)
@@ -315,6 +323,10 @@ int mp_bluetooth_init(void) {
             return bt_err_to_errno(ret);
         }
         DEBUG_printf("BLE initialization successful!\n");
+        
+        #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
+        bt_le_scan_cb_register(&mp_bluetooth_zephyr_gap_scan_cb_struct);
+        #endif
     } else {
         DEBUG_printf("BLE already initialized (state=%d)\n", mp_bluetooth_zephyr_ble_state);
     }

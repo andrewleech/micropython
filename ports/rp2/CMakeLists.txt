@@ -359,7 +359,7 @@ if (MICROPY_PY_BLUETOOTH_CYW43)
 
     if (MICROPY_BLUETOOTH_ZEPHYR)
         # Zephyr BLE uses CYW43 SPI btbus (same as BTstack)
-        # No additional source files needed - mpzephyrport_rp2.c handles HCI transport
+        # HCI transport files added in MICROPY_BLUETOOTH_ZEPHYR section above
     endif()
 endif()
 
@@ -415,8 +415,13 @@ if(MICROPY_BLUETOOTH_ZEPHYR)
     # CYW43 controller functions provided by pico-sdk via WEAK overrides
     list(APPEND MICROPY_SOURCE_PORT
         mpzephyrport.c           # Generic Zephyr polling (platform-independent)
-        mpzephyrport_rp2_stub.c  # Minimal HCI device stub (required by Zephyr)
     )
+
+    if (MICROPY_PY_NETWORK_CYW43)
+        list(APPEND MICROPY_SOURCE_PORT mpzephyrport_rp2.c)  # Full CYW43 HCI transport
+    else()
+        list(APPEND MICROPY_SOURCE_PORT mpzephyrport_rp2_stub.c)  # Minimal HCI stub
+    endif()
 
     include(${MICROPY_DIR}/extmod/zephyr_ble/zephyr_ble.cmake)
     target_link_libraries(${MICROPY_TARGET} micropy_extmod_zephyr_ble)

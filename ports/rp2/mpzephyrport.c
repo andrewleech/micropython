@@ -56,7 +56,7 @@ void mp_bluetooth_hci_poll(void) {
 
 // Wait-for-interrupt during Zephyr semaphore waits
 // This is called from k_sem_take busy-wait loops
-void mp_bluetooth_zephyr_hci_wfi(void) {
+void mp_bluetooth_zephyr_hci_uart_wfi(void) {
     #if defined(__WFE)
     // Use WFE (Wait For Event) for efficient sleeping on ARM
     // Timeout after 1ms to check for HCI data and other events
