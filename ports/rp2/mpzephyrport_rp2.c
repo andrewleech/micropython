@@ -41,10 +41,12 @@
 #include "shared/runtime/softtimer.h"
 #include "modmachine.h"
 
+#include <string.h>
+
 #if MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR
 
-// Forward declaration of machine UART type
-extern const mp_obj_type_t machine_uart_type;
+// CYW43 driver for BT/WiFi chip
+#include "lib/cyw43-driver/src/cyw43.h"
 
 #include "extmod/zephyr_ble/hal/zephyr_ble_hal.h"
 #include "zephyr/device.h"
@@ -59,16 +61,20 @@ extern const mp_obj_type_t machine_uart_type;
 #define debug_printf(...) mp_printf(&mp_plat_print, "mpzephyrport_rp2: " __VA_ARGS__)
 #define error_printf(...) mp_printf(&mp_plat_print, "mpzephyrport_rp2 ERROR: " __VA_ARGS__)
 
-// UART interface for CYW43 HCI transport
-#if defined(MICROPY_HW_BLE_UART_ID)
+// CYW43 SPI btbus HCI transport
+#if MICROPY_PY_NETWORK_CYW43
 
-mp_obj_t mp_zephyr_uart;
 static bt_hci_recv_t recv_cb = NULL;  // Returns int: 0 on success, negative on error
 static const struct device *hci_dev = NULL;
 
 // Soft timer for scheduling HCI poll
 static soft_timer_entry_t mp_zephyr_hci_soft_timer;
 static mp_sched_node_t mp_zephyr_hci_sched_node;
+
+// Buffer for incoming HCI packets (4-byte CYW43 header + max HCI packet)
+#define CYW43_HCI_HEADER_SIZE 4
+#define HCI_MAX_PACKET_SIZE 1024
+static uint8_t hci_rx_buffer[CYW43_HCI_HEADER_SIZE + HCI_MAX_PACKET_SIZE];
 
 // Forward declarations
 static void mp_zephyr_hci_poll_now(void);
@@ -78,63 +84,43 @@ static void mp_zephyr_hci_soft_timer_callback(soft_timer_entry_t *self) {
     mp_zephyr_hci_poll_now();
 }
 
-// HCI packet reception handler - called when data arrives from UART
+// HCI packet reception handler - called when data arrives from CYW43 SPI
 static void run_zephyr_hci_task(mp_sched_node_t *node) {
     (void)node;
 
     // Process Zephyr BLE work queues and semaphores
     mp_bluetooth_zephyr_poll();
 
-    // Check if UART has data available
     if (recv_cb == NULL) {
         return;
     }
 
-    const mp_stream_p_t *proto = (mp_stream_p_t *)MP_OBJ_TYPE_GET_SLOT(&machine_uart_type, protocol);
-    int errcode = 0;
-    mp_uint_t ret = proto->ioctl(mp_zephyr_uart, MP_STREAM_POLL, MP_STREAM_POLL_RD, &errcode);
+    // Read from CYW43 via shared SPI bus
+    extern int cyw43_bluetooth_hci_read(uint8_t *buf, uint32_t max_size, uint32_t *len);
+    uint32_t len = 0;
+    int ret = cyw43_bluetooth_hci_read(hci_rx_buffer, sizeof(hci_rx_buffer), &len);
 
-    if (!(ret & MP_STREAM_POLL_RD)) {
-        return; // No data available
+    if (ret != 0 || len <= CYW43_HCI_HEADER_SIZE) {
+        return; // No data or error
     }
 
-    // Read packet type
-    uint8_t pkt_type;
-    if (proto->read(mp_zephyr_uart, &pkt_type, 1, &errcode) < 1) {
-        return;
-    }
+    // Extract packet type from CYW43 header (byte 3)
+    uint8_t pkt_type = hci_rx_buffer[3];
+    uint8_t *pkt_data = &hci_rx_buffer[CYW43_HCI_HEADER_SIZE];
+    uint32_t pkt_len = len - CYW43_HCI_HEADER_SIZE;
 
-    // Allocate buffer based on packet type
+    // Allocate Zephyr net_buf based on packet type
     struct net_buf *buf = NULL;
-    uint16_t remaining = 0;
 
     switch (pkt_type) {
-        case BT_HCI_H4_EVT: {
-            // Read event header (2 bytes)
-            uint8_t hdr[2];
-            if (proto->read(mp_zephyr_uart, hdr, 2, &errcode) < 2) {
-                return;
-            }
-            remaining = hdr[1]; // param length
-            buf = bt_buf_get_evt(hdr[0], false, K_NO_WAIT);
-            if (buf) {
-                net_buf_add_mem(buf, hdr, 2);
+        case BT_HCI_H4_EVT:
+            if (pkt_len >= 2) {
+                buf = bt_buf_get_evt(pkt_data[0], false, K_NO_WAIT);
             }
             break;
-        }
-        case BT_HCI_H4_ACL: {
-            // Read ACL header (4 bytes)
-            uint8_t hdr[4];
-            if (proto->read(mp_zephyr_uart, hdr, 4, &errcode) < 4) {
-                return;
-            }
-            remaining = hdr[2] | (hdr[3] << 8); // data length
+        case BT_HCI_H4_ACL:
             buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_NO_WAIT);
-            if (buf) {
-                net_buf_add_mem(buf, hdr, 4);
-            }
             break;
-        }
         default:
             error_printf("Unknown HCI packet type: 0x%02x\n", pkt_type);
             return;
@@ -142,22 +128,11 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
 
     if (!buf) {
         error_printf("Failed to allocate buffer for HCI packet\n");
-        // Drain remaining bytes
-        uint8_t dummy;
-        for (uint16_t i = 0; i < remaining; i++) {
-            proto->read(mp_zephyr_uart, &dummy, 1, &errcode);
-        }
         return;
     }
 
-    // Read remaining packet data
-    if (remaining > 0) {
-        uint8_t *data = net_buf_add(buf, remaining);
-        if (proto->read(mp_zephyr_uart, data, remaining, &errcode) < remaining) {
-            net_buf_unref(buf);
-            return;
-        }
-    }
+    // Copy packet data to net_buf
+    net_buf_add_mem(buf, pkt_data, pkt_len);
 
     // Pass buffer to Zephyr BLE stack
     int recv_ret = recv_cb(hci_dev, buf);
@@ -178,21 +153,8 @@ static int hci_cyw43_open(const struct device *dev, bt_hci_recv_t recv) {
     hci_dev = dev;
     recv_cb = recv;
 
-    // Initialize UART for HCI
-    mp_printf(&mp_plat_print, "=== HCI: Initializing UART%d for HCI\n", MICROPY_HW_BLE_UART_ID);
-    mp_obj_t args[] = {
-        MP_OBJ_NEW_SMALL_INT(MICROPY_HW_BLE_UART_ID),
-        MP_OBJ_NEW_QSTR(MP_QSTR_baudrate), MP_OBJ_NEW_SMALL_INT(115200),
-        MP_OBJ_NEW_QSTR(MP_QSTR_flow), MP_OBJ_NEW_SMALL_INT((1 | 2)), // RTS|CTS
-        MP_OBJ_NEW_QSTR(MP_QSTR_timeout), MP_OBJ_NEW_SMALL_INT(1000),
-        MP_OBJ_NEW_QSTR(MP_QSTR_timeout_char), MP_OBJ_NEW_SMALL_INT(200),
-        MP_OBJ_NEW_QSTR(MP_QSTR_rxbuf), MP_OBJ_NEW_SMALL_INT(768),
-    };
-
-    mp_printf(&mp_plat_print, "=== HCI: Creating UART object\n");
-    mp_zephyr_uart = MP_OBJ_TYPE_GET_SLOT(&machine_uart_type, make_new)(
-        (mp_obj_t)&machine_uart_type, 1, 5, args);
-    mp_printf(&mp_plat_print, "=== HCI: UART object created\n");
+    // CYW43 BT is already initialized via cyw43_bluetooth_hci_init() in bt_hci_transport_setup()
+    // No additional setup needed - just start polling for incoming HCI packets
 
     // Start polling
     mp_printf(&mp_plat_print, "=== HCI: Starting HCI polling\n");
@@ -214,10 +176,7 @@ static int hci_cyw43_send(const struct device *dev, struct net_buf *buf) {
     (void)dev;
     debug_printf("hci_cyw43_send: type=%u len=%u\n", bt_buf_get_type(buf), buf->len);
 
-    const mp_stream_p_t *proto = (mp_stream_p_t *)MP_OBJ_TYPE_GET_SLOT(&machine_uart_type, protocol);
-    int errcode = 0;
-
-    // Write packet type indicator
+    // Map Zephyr buffer type to H:4 packet type
     uint8_t pkt_type;
     switch (bt_buf_get_type(buf)) {
         case BT_BUF_CMD:
@@ -232,20 +191,28 @@ static int hci_cyw43_send(const struct device *dev, struct net_buf *buf) {
             return -1;
     }
 
-    if (proto->write(mp_zephyr_uart, &pkt_type, 1, &errcode) < 1) {
-        error_printf("Failed to write HCI packet type\n");
-        net_buf_unref(buf);
-        return -1;
-    }
+    // CYW43 requires 4-byte header: [0,0,0,pkt_type] + packet_data
+    // Allocate temporary buffer for CYW43 packet format
+    size_t cyw43_pkt_size = CYW43_HCI_HEADER_SIZE + buf->len;
+    uint8_t *cyw43_pkt = m_new(uint8_t, cyw43_pkt_size);
 
-    // Write packet data
-    if (proto->write(mp_zephyr_uart, buf->data, buf->len, &errcode) < 0) {
-        error_printf("Failed to write HCI packet data\n");
-        net_buf_unref(buf);
-        return -1;
-    }
+    // Build CYW43 packet: 4-byte header + HCI data
+    memset(cyw43_pkt, 0, CYW43_HCI_HEADER_SIZE);
+    cyw43_pkt[3] = pkt_type;
+    memcpy(&cyw43_pkt[CYW43_HCI_HEADER_SIZE], buf->data, buf->len);
 
+    // Write to CYW43 via shared SPI bus
+    extern int cyw43_bluetooth_hci_write(uint8_t *buf, size_t len);
+    int ret = cyw43_bluetooth_hci_write(cyw43_pkt, cyw43_pkt_size);
+
+    m_del(uint8_t, cyw43_pkt, cyw43_pkt_size);
     net_buf_unref(buf);
+
+    if (ret != 0) {
+        error_printf("cyw43_bluetooth_hci_write failed: %d\n", ret);
+        return -1;
+    }
+
     return 0;
 }
 
@@ -263,52 +230,20 @@ const struct device mp_bluetooth_zephyr_hci_dev = {
     .data = NULL,
 };
 
-// UART HAL functions for cyw43_bthci_uart.c BT controller initialization
-// These bridge to machine.UART module
-
-int cyw43_hal_uart_readchar(void) {
-    if (mp_zephyr_uart == MP_OBJ_NULL) {
-        return -1;
-    }
-    const mp_stream_p_t *proto = (mp_stream_p_t *)MP_OBJ_TYPE_GET_SLOT(&machine_uart_type, protocol);
-    int errcode = 0;
-    mp_uint_t ret = proto->ioctl(mp_zephyr_uart, MP_STREAM_POLL, MP_STREAM_POLL_RD, &errcode);
-    if (!(ret & MP_STREAM_POLL_RD)) {
-        return -1;
-    }
-    uint8_t c;
-    if (proto->read(mp_zephyr_uart, &c, 1, &errcode) < 1) {
-        return -1;
-    }
-    return c;
-}
-
-void cyw43_hal_uart_write(const void *buf, size_t len) {
-    if (mp_zephyr_uart == MP_OBJ_NULL) {
-        return;
-    }
-    const mp_stream_p_t *proto = (mp_stream_p_t *)MP_OBJ_TYPE_GET_SLOT(&machine_uart_type, protocol);
-    int errcode = 0;
-    proto->write(mp_zephyr_uart, buf, len, &errcode);
-}
-
-void cyw43_hal_uart_set_baudrate(uint32_t baudrate) {
-    // Baudrate is set during UART initialization
-    // For now, we don't support changing it dynamically
-    (void)baudrate;
-}
+// CYW43 BT uses shared SPI bus (btbus), no UART HAL needed
 
 // HCI transport setup (called by BLE host during initialization)
 int bt_hci_transport_setup(const struct device *dev) {
     mp_printf(&mp_plat_print, "=== HCI: bt_hci_transport_setup called\n");
     (void)dev;
 
-    // Initialize CYW43 BT controller using cyw43_bthci_uart.c
-    mp_printf(&mp_plat_print, "=== HCI: Calling cyw43_bluetooth_controller_init\n");
-    extern int cyw43_bluetooth_controller_init(void);
-    int ret = cyw43_bluetooth_controller_init();
+    // Initialize CYW43 BT using shared SPI bus (same as BTstack)
+    // This ensures WiFi driver is up first, then loads BT firmware
+    mp_printf(&mp_plat_print, "=== HCI: Calling cyw43_bluetooth_hci_init\n");
+    extern int cyw43_bluetooth_hci_init(void);
+    int ret = cyw43_bluetooth_hci_init();
     if (ret != 0) {
-        mp_printf(&mp_plat_print, "=== HCI ERROR: cyw43_bluetooth_controller_init failed: %d\n", ret);
+        mp_printf(&mp_plat_print, "=== HCI ERROR: cyw43_bluetooth_hci_init failed: %d\n", ret);
         return ret;
     }
 
@@ -342,9 +277,9 @@ void mp_bluetooth_zephyr_port_poll_in_ms(uint32_t ms) {
     soft_timer_reinsert(&mp_zephyr_hci_soft_timer, ms);
 }
 
-#else // !defined(MICROPY_HW_BLE_UART_ID)
+#else // !MICROPY_PY_NETWORK_CYW43
 
-// Stub implementations for ports without UART HCI
+// Stub implementations for ports without CYW43
 void mp_bluetooth_zephyr_port_init(void) {
 }
 
@@ -352,6 +287,6 @@ void mp_bluetooth_zephyr_port_poll_in_ms(uint32_t ms) {
     (void)ms;
 }
 
-#endif // defined(MICROPY_HW_BLE_UART_ID)
+#endif // MICROPY_PY_NETWORK_CYW43
 
 #endif // MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR
