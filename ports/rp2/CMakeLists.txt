@@ -434,8 +434,16 @@ if(MICROPY_BLUETOOTH_ZEPHYR)
 
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
         MICROPY_BLUETOOTH_ZEPHYR=1
-        MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI=1
     )
+
+    # MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI calls mp_bluetooth_hci_controller_init()
+    # before bt_enable(). For CYW43, HCI transport is initialized via
+    # bt_hci_transport_setup() which is called by bt_enable().
+    if (NOT MICROPY_PY_NETWORK_CYW43)
+        target_compile_definitions(${MICROPY_TARGET} PRIVATE
+            MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI=1
+        )
+    endif()
 endif()
 
 # tinyusb helper
