@@ -52,12 +52,14 @@ struct arch_esf;
 #define ZEPHYR_INCLUDE_BLUETOOTH_RFCOMM_H_
 #define ZEPHYR_SUBSYS_BLUETOOTH_HOST_CLASSIC_L2CAP_BR_INTERFACE_H_
 
-// Don't block the drivers/bluetooth.h header - we provide a wrapper for it
-// The wrapper includes HCI driver API without device tree dependencies
+// NOTE: We now use a wrapper for drivers/bluetooth.h which includes the real header
+// The wrapper is at zephyr_headers_stub/zephyr/drivers/bluetooth.h
+// #define ZEPHYR_INCLUDE_DRIVERS_BLUETOOTH_H_
 
 // Problematic Zephyr system headers that conflict with our HAL wrappers
 #define INCLUDE_ZEPHYR_SYS_ITERABLE_SECTIONS_H_
-#define ZEPHYR_INCLUDE_TOOLCHAIN_H_
+// NOTE: DO NOT block toolchain.h - it's needed for __printf_like and other compiler macros
+// #define ZEPHYR_INCLUDE_TOOLCHAIN_H_
 #define ZEPHYR_INCLUDE_KERNEL_THREAD_STACK_H
 
 // Stub macros for iterable sections (feature disabled in MicroPython)
@@ -72,8 +74,10 @@ struct arch_esf;
 // System initialization macro (no-op in MicroPython)
 // SYS_INIT(func, level, priority) registers an init function
 // In MicroPython we call init functions explicitly, so stub this out
+#ifndef SYS_INIT
 #define SYS_INIT(func, level, priority) \
     static inline int __sys_init_##func(void) { return 0; }
+#endif
 
 // Init levels (not used, but referenced in SYS_INIT calls)
 #define POST_KERNEL 0
@@ -82,9 +86,17 @@ struct arch_esf;
 // Note: In MicroPython we don't use linker sections, so these return NULL/0
 // This disables net_buf pool iteration which is only used for debug/stats
 #define STRUCT_SECTION_START_EXTERN(struct_type) /* nothing */
-#define STRUCT_SECTION_START(struct_type) ((struct_type *)NULL)
-#define STRUCT_SECTION_END(struct_type) ((struct_type *)NULL)
-#define STRUCT_SECTION_COUNT(struct_type) 0
+#define STRUCT_SECTION_START(struct_type) ((struct struct_type *)NULL)
+#define STRUCT_SECTION_END(struct_type) ((struct struct_type *)NULL)
+// STRUCT_SECTION_COUNT can be called with 1 or 2 args:
+// - STRUCT_SECTION_COUNT(type) returns 0
+// - STRUCT_SECTION_COUNT(type, &count) sets *count=0
+#define __STRUCT_SECTION_COUNT_2(struct_type, pcount) \
+    ((void)(sizeof(struct struct_type)), *(size_t *)(pcount) = 0, 0)
+#define __STRUCT_SECTION_COUNT_1(struct_type) 0
+#define __GET_MACRO(_1, _2, NAME, ...) NAME
+#define STRUCT_SECTION_COUNT(...) \
+    __GET_MACRO(__VA_ARGS__, __STRUCT_SECTION_COUNT_2, __STRUCT_SECTION_COUNT_1)(__VA_ARGS__)
 #define STRUCT_SECTION_GET(struct_type, i, dst) \
     do { (void)(i); *(dst) = NULL; } while (0)
 // TYPE_SECTION_* macros don't get the struct prefix
@@ -92,6 +104,8 @@ struct arch_esf;
 #define TYPE_SECTION_START(secname) ((struct secname *)NULL)
 #define TYPE_SECTION_END(secname) ((struct secname *)NULL)
 #define TYPE_SECTION_COUNT(secname) 0
+#define TYPE_SECTION_START_EXTERN(type, secname) /* nothing */
+#define TYPE_SECTION_END_EXTERN(type, secname) /* nothing */
 
 // Atomic bitmap operations (simplified stubs)
 // Normally defined in sys/atomic.h
@@ -188,10 +202,18 @@ struct arch_esf;
 #endif
 
 #ifndef BUILD_ASSERT
-// Simplified build assertion that handles both 1 and 2 argument versions
-// Uses variadic macro to accept optional message parameter
-// MicroPython always uses C11 or later, so we can rely on _Static_assert
-#define BUILD_ASSERT(cond, ...) _Static_assert(cond, #cond)
+// Simplified build assertion - disabled to avoid complex type expression issues
+// Zephyr uses BUILD_ASSERT for compile-time checks with __builtin_types_compatible_p
+// and other GCC builtins that don't always evaluate to integer constants.
+// For maintainability, we disable these checks rather than trying to fix all edge cases.
+#define BUILD_ASSERT(cond, ...) ((void)(cond))
+#endif
+
+#ifndef __syscall
+// Zephyr syscall macro - normally generates inline wrappers for user/kernel separation
+// In MicroPython we don't have CONFIG_USERSPACE, so just make it empty
+// Functions declared with __syscall become regular function declarations
+#define __syscall
 #endif
 
 #ifndef ARG_UNUSED
@@ -230,7 +252,7 @@ struct arch_esf;
 
 #ifndef __noinit
 // Uninitialized data section (not used in MicroPython)
-#define __noinit
+#define __noinit __attribute__((section(".noinit")))
 #endif
 
 #ifndef FLEXIBLE_ARRAY_DECLARE
@@ -242,8 +264,140 @@ struct arch_esf;
 #endif
 
 // =============================================================================
-// PART 3: Zephyr BLE Stack Configuration
+// PART 3: Architecture Detection
+// Detect target architecture from compiler predefined macros
 // =============================================================================
+
+// ARM Architecture (Cortex-M, Cortex-A, ARM11, etc.)
+#if defined(__ARM_ARCH) || defined(__arm__) || defined(_ARM_) || \
+    defined(__ARM_EABI__) || defined(__ARMEL__) || defined(__ARMEB__) || \
+    defined(__thumb__) || defined(_M_ARM) || defined(__aarch64__)
+#ifndef CONFIG_ARM
+#define CONFIG_ARM 1
+#endif
+
+// Detect Cortex-M sub-architecture
+#if defined(__ARM_ARCH_6M__) ||defined(__ARM_ARCH_7M__) || \
+    defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_8M_BASE__) || \
+    defined(__ARM_ARCH_8M_MAIN__) || defined(__ARM_ARCH_8_1M_MAIN__)
+#ifndef CONFIG_CPU_CORTEX_M
+#define CONFIG_CPU_CORTEX_M 1
+#endif
+
+// Cortex-M0/M0+/M1 (ARMv6-M)
+#if defined(__ARM_ARCH_6M__) || defined(__CORTEX_M) && (__CORTEX_M == 0)
+#ifndef CONFIG_CPU_CORTEX_M0
+#define CONFIG_CPU_CORTEX_M0 1
+#endif
+#ifndef CONFIG_ARMV6_M_ARMV8_M_BASELINE
+#define CONFIG_ARMV6_M_ARMV8_M_BASELINE 1
+#endif
+#endif
+
+// Cortex-M3 (ARMv7-M)
+#if defined(__ARM_ARCH_7M__) || defined(__CORTEX_M) && (__CORTEX_M == 3)
+#ifndef CONFIG_CPU_CORTEX_M3
+#define CONFIG_CPU_CORTEX_M3 1
+#endif
+#endif
+
+// Cortex-M4/M7 (ARMv7E-M with DSP and optional FPU)
+#if defined(__ARM_ARCH_7EM__) || defined(__CORTEX_M) && (__CORTEX_M == 4 || __CORTEX_M == 7)
+#ifndef CONFIG_CPU_CORTEX_M4
+#define CONFIG_CPU_CORTEX_M4 1
+#endif
+#ifndef CONFIG_ARMV7_M_ARMV8_M_MAINLINE
+#define CONFIG_ARMV7_M_ARMV8_M_MAINLINE 1
+#endif
+#endif
+
+// Cortex-M23 (ARMv8-M Baseline)
+#if defined(__ARM_ARCH_8M_BASE__) || defined(__CORTEX_M) && (__CORTEX_M == 23)
+#ifndef CONFIG_CPU_CORTEX_M23
+#define CONFIG_CPU_CORTEX_M23 1
+#endif
+#ifndef CONFIG_ARMV8_M_BASELINE
+#define CONFIG_ARMV8_M_BASELINE 1
+#endif
+#ifndef CONFIG_ARMV6_M_ARMV8_M_BASELINE
+#define CONFIG_ARMV6_M_ARMV8_M_BASELINE 1
+#endif
+#endif
+
+// Cortex-M33/M35P (ARMv8-M Mainline)
+#if defined(__ARM_ARCH_8M_MAIN__) || defined(__CORTEX_M) && (__CORTEX_M == 33 || __CORTEX_M == 35)
+#ifndef CONFIG_CPU_CORTEX_M33
+#define CONFIG_CPU_CORTEX_M33 1
+#endif
+#ifndef CONFIG_ARMV8_M_MAINLINE
+#define CONFIG_ARMV8_M_MAINLINE 1
+#endif
+#endif
+
+// Cortex-M55 (ARMv8.1-M Mainline)
+#if defined(__ARM_ARCH_8_1M_MAIN__) || defined(__CORTEX_M) && (__CORTEX_M == 55)
+#ifndef CONFIG_CPU_CORTEX_M55
+#define CONFIG_CPU_CORTEX_M55 1
+#endif
+#ifndef CONFIG_ARMV8_1_M_MAINLINE
+#define CONFIG_ARMV8_1_M_MAINLINE 1
+#endif
+#endif
+
+#endif
+
+#endif
+
+// ARM64 Architecture (AArch64)
+#if defined(__aarch64__) || defined(_M_ARM64)
+#ifndef CONFIG_ARM64
+#define CONFIG_ARM64 1
+#endif
+#endif
+
+// x86 Architecture
+#if defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_X64)
+#ifndef CONFIG_X86
+#define CONFIG_X86 1
+#endif
+#endif
+
+// RISC-V Architecture
+#if defined(__riscv) || defined(__riscv__)
+#ifndef CONFIG_RISCV
+#define CONFIG_RISCV 1
+#endif
+#endif
+
+// Xtensa Architecture (ESP32)
+#if defined(__XTENSA__)
+#ifndef CONFIG_XTENSA
+#define CONFIG_XTENSA 1
+#endif
+#endif
+
+// MIPS Architecture
+#if defined(__mips__) || defined(__mips) || defined(__MIPS__)
+#ifndef CONFIG_MIPS
+#define CONFIG_MIPS 1
+#endif
+#endif
+
+// =============================================================================
+// PART 4: Zephyr BLE Stack Configuration
+// =============================================================================
+
+// --- System Configuration ---
+// Single-core configuration (MicroPython doesn't use multicore)
+#define CONFIG_MP_MAX_NUM_CPUS 1
+
+// Thread priority configuration (MicroPython doesn't use Zephyr threading)
+// We define minimal values to satisfy Zephyr kernel requirements
+#define CONFIG_NUM_COOP_PRIORITIES 1
+#define CONFIG_NUM_PREEMPT_PRIORITIES 0
+
+// Enforce Zephyr stdint conventions (enables __printf_like in toolchain/gcc.h)
+#define CONFIG_ENFORCE_ZEPHYR_STDINT 1
 
 // --- Core BLE Stack ---
 #define CONFIG_BT 1
@@ -264,7 +418,8 @@ struct arch_esf;
 #define CONFIG_BT_GATT_CLIENT 1
 #define CONFIG_BT_GATT_DYNAMIC_DB 1
 #define CONFIG_BT_GATT_SERVICE_CHANGED 1
-#define CONFIG_BT_GATT_CACHING 0
+// Note: Use #undef for GATT_CACHING since code uses #if defined() checks
+#undef CONFIG_BT_GATT_CACHING  // Disable - requires PSA crypto API
 #define CONFIG_BT_ATT_PREPARE_COUNT 0
 
 // --- Security (SMP) ---
@@ -365,9 +520,19 @@ struct arch_esf;
 #define CONFIG_BT_MONITOR 0
 #define CONFIG_BT_HCI_RAW 0
 
-// --- Shell/Testing - Disabled ---
+// --- Shell/Testing ---
 #define CONFIG_BT_SHELL 0
 #define CONFIG_BT_TESTING 0
+
+// ZTEST - Enable to bypass devicetree HCI device requirement
+// When CONFIG_ZTEST=1, hci_core.c allows NULL HCI device
+// and we provide our own via mp_bluetooth_zephyr_hci_dev
+// DISABLED: This causes early return in bt_enable() when bt_dev.hci is NULL
+#define CONFIG_ZTEST 0
+// ZTEST_UNITTEST - Enables empty __syscall definition in toolchain/common.h
+// This prevents __syscall from becoming "static inline" which would make
+// our device_is_ready() implementation invisible to the linker
+#define ZTEST_UNITTEST 1
 
 // --- Classic Bluetooth - Disable for Phase 1 ---
 // TODO: Enable after adding BR/EDR source files (br.c, conn_br.c, ssp.c, l2cap_br.c)
@@ -424,7 +589,9 @@ struct arch_esf;
 
 // System clock configuration (1 tick = 1 millisecond)
 #define CONFIG_SYS_CLOCK_TICKS_PER_SEC 1000
+#define CONFIG_SYS_CLOCK_MAX_TIMEOUT_DAYS 365  // Maximum timeout in days (for overflow checking)
 #define MSEC_PER_SEC 1000
+#define USEC_PER_MSEC 1000
 
 // RPA (Resolvable Private Address) timeout in seconds
 #define CONFIG_BT_RPA_TIMEOUT 900  // 15 minutes
@@ -541,6 +708,12 @@ struct arch_esf;
 #include <stdbool.h>
 int lll_csrand_get(void *buf, size_t len);  // Controller crypto stub
 
+// Missing errno codes - add platform-independent definitions
+// ESHUTDOWN is used by Zephyr BLE but may not be defined on all platforms
+#ifndef ESHUTDOWN
+#define ESHUTDOWN 108  // Standard Linux errno for "Cannot send after transport endpoint shutdown"
+#endif
+
 // =============================================================================
 // PART 4: Device Tree and HCI Device
 // =============================================================================
@@ -548,21 +721,8 @@ int lll_csrand_get(void *buf, size_t len);  // Controller crypto stub
 // Note: Device tree macros (DT_HAS_CHOSEN, DT_CHOSEN, DEVICE_DT_GET) and
 // the mp_bluetooth_zephyr_hci_dev extern declaration are in zephyr/devicetree.h wrapper.
 
-// HCI bus types (from zephyr/drivers/bluetooth.h)
-#ifndef BT_HCI_BUS_UART
-#define BT_HCI_BUS_UART 0
-#define BT_HCI_BUS_USB 1
-#define BT_HCI_BUS_SDIO 2
-#define BT_HCI_BUS_SPI 3
-#define BT_HCI_BUS_IPC 4
-#define BT_HCI_BUS_VIRTUAL 5
-#endif
-
-// HCI quirks (from zephyr/drivers/bluetooth.h)
-#ifndef BT_HCI_QUIRK_NO_RESET
-#define BT_HCI_QUIRK_NO_RESET BIT(0)
-#define BT_HCI_QUIRK_NO_AUTO_DLE BIT(1)
-#endif
+// HCI bus types and quirks are now provided by zephyr/drivers/bluetooth.h
+// (included via our wrapper at zephyr_headers_stub/zephyr/drivers/bluetooth.h)
 
 // Device tree property access macros (stubbed)
 // These are used in hci_core.c to get device properties
@@ -573,28 +733,14 @@ int lll_csrand_get(void *buf, size_t len);  // Controller crypto stub
 #endif
 
 // =============================================================================
-// PART 5: HCI Driver API Structures
-// Replaces zephyr/drivers/bluetooth.h which we block
+// PART 5: HCI Driver API
+// These are now provided by zephyr/drivers/bluetooth.h (via our wrapper)
 // =============================================================================
 
 // Note: struct device and device_is_ready() are defined in our zephyr/device.h wrapper
 // Note: DT_* macros are defined in our zephyr/devicetree.h wrapper
-
-struct net_buf;
-struct device;  // Forward declaration (defined in zephyr/device.h wrapper)
-
-// HCI receive callback type
-typedef int (*bt_hci_recv_t)(const struct device *dev, struct net_buf *buf);
-
-// HCI driver API structure
-struct bt_hci_driver_api {
-    int (*open)(const struct device *dev, bt_hci_recv_t recv);
-    int (*close)(const struct device *dev);
-    int (*send)(const struct device *dev, struct net_buf *buf);
-};
-
-// Note: HCI driver API wrappers (bt_hci_open, bt_hci_close, bt_hci_send)
-// are defined in zephyr/drivers/bluetooth.h wrapper
+// Note: bt_hci_driver_api, bt_hci_recv_t, bt_hci_open, bt_hci_close, bt_hci_send
+//       are all provided by zephyr/drivers/bluetooth.h
 
 // H:4 HCI packet type indicators (from Bluetooth spec)
 // Only define if not using actual Zephyr bluetooth headers

@@ -35,13 +35,14 @@
 #define CONTAINER_OF(ptr, type, field) \
     ((type *)(((char *)(ptr)) - offsetof(type, field)))
 
-#define DEBUG_WORK_printf(...) // printf(__VA_ARGS__)
+#define DEBUG_WORK_printf(...) // mp_printf(&mp_plat_print, __VA_ARGS__)
 
 // Global linked list of work queues (similar to NimBLE's global_eventq)
 static struct k_work_q *global_work_q = NULL;
 
-// Default system work queue (like Zephyr's k_sys_work_q)
-static struct k_work_q system_work_q;
+// Default system work queue (Zephyr's k_sys_work_q)
+// Must be non-static to be accessible from Zephyr BLE host code
+struct k_work_q k_sys_work_q = {0};
 
 // --- Work Queue Management ---
 
@@ -126,11 +127,11 @@ static int k_work_submit_internal(struct k_work_q *queue, struct k_work *work) {
 
 int k_work_submit(struct k_work *work) {
     // Submit to system work queue
-    if (!system_work_q.head && !system_work_q.nextq) {
-        k_work_queue_init(&system_work_q);
-        system_work_q.name = "SYS WQ";
+    if (!k_sys_work_q.head && !k_sys_work_q.nextq) {
+        k_work_queue_init(&k_sys_work_q);
+        k_sys_work_q.name = "SYS WQ";
     }
-    return k_work_submit_internal(&system_work_q, work);
+    return k_work_submit_internal(&k_sys_work_q, work);
 }
 
 int k_work_submit_to_queue(struct k_work_q *queue, struct k_work *work) {
@@ -228,11 +229,11 @@ int k_work_schedule_for_queue(struct k_work_q *queue, struct k_work_delayable *d
 }
 
 int k_work_schedule(struct k_work_delayable *dwork, k_timeout_t delay) {
-    if (!system_work_q.head && !system_work_q.nextq) {
-        k_work_queue_init(&system_work_q);
-        system_work_q.name = "SYS WQ";
+    if (!k_sys_work_q.head && !k_sys_work_q.nextq) {
+        k_work_queue_init(&k_sys_work_q);
+        k_sys_work_q.name = "SYS WQ";
     }
-    return k_work_schedule_for_queue(&system_work_q, dwork, delay);
+    return k_work_schedule_for_queue(&k_sys_work_q, dwork, delay);
 }
 
 int k_work_reschedule_for_queue(struct k_work_q *queue, struct k_work_delayable *dwork, k_timeout_t delay) {
@@ -243,11 +244,11 @@ int k_work_reschedule_for_queue(struct k_work_q *queue, struct k_work_delayable 
 }
 
 int k_work_reschedule(struct k_work_delayable *dwork, k_timeout_t delay) {
-    if (!system_work_q.head && !system_work_q.nextq) {
-        k_work_queue_init(&system_work_q);
-        system_work_q.name = "SYS WQ";
+    if (!k_sys_work_q.head && !k_sys_work_q.nextq) {
+        k_work_queue_init(&k_sys_work_q);
+        k_sys_work_q.name = "SYS WQ";
     }
-    return k_work_reschedule_for_queue(&system_work_q, dwork, delay);
+    return k_work_reschedule_for_queue(&k_sys_work_q, dwork, delay);
 }
 
 int k_work_cancel_delayable(struct k_work_delayable *dwork) {

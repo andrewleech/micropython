@@ -39,10 +39,11 @@
 void k_sleep(k_timeout_t timeout);
 
 // Yield CPU (allow other tasks to run)
+// Note: In MicroPython's cooperative scheduler, explicit yielding isn't needed
+// since the BLE stack runs in scheduled tasks that automatically yield when complete.
+// MICROPY_EVENT_POLL_HOOK can't be used here due to linkage issues with inline functions.
 static inline void k_yield(void) {
-    #ifdef MICROPY_EVENT_POLL_HOOK
-    MICROPY_EVENT_POLL_HOOK
-    #endif
+    // No-op in MicroPython scheduler
 }
 
 // Busy wait for short delays (microseconds)
@@ -81,9 +82,14 @@ static inline uint32_t k_cycle_get_32(void) {
 // Thread ID type
 typedef void *k_tid_t;
 
-// Get current thread ID (always returns NULL in MicroPython)
+// Get current thread ID (returns &k_sys_work_q.thread in MicroPython)
+// CRITICAL: Must return &k_sys_work_q.thread so that bt_hci_cmd_send_sync()
+// comparison at hci_core.c:478 succeeds and enters the synchronous command
+// processing path. Without this, commands are queued but never processed,
+// causing deadlock at k_sem_take().
 static inline k_tid_t k_current_get(void) {
-    return NULL;
+    extern struct k_work_q k_sys_work_q;
+    return (k_tid_t)&k_sys_work_q.thread;
 }
 
 // Check if in ISR context (always returns false in MicroPython scheduler)

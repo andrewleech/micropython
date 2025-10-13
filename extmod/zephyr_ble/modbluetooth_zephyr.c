@@ -37,6 +37,7 @@
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gatt.h>
+#include <zephyr/device.h>
 #include "extmod/modbluetooth.h"
 
 #define DEBUG_printf(...) mp_printf(&mp_plat_print, "BLE: " __VA_ARGS__)
@@ -293,7 +294,7 @@ int mp_bluetooth_init(void) {
         DEBUG_printf("Starting BLE initialization (state=OFF)\n");
 
         // Initialize port-specific resources (soft timers, sched nodes, etc.)
-        #if MICROPY_PY_NETWORK_CYW43
+        #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI
         extern void mp_bluetooth_zephyr_port_init(void);
         mp_bluetooth_zephyr_port_init();
         #endif
@@ -315,6 +316,24 @@ int mp_bluetooth_init(void) {
 
         // Initialize Zephyr BLE host stack
         // bt_enable can only be called once
+
+        // Enable FIFO debug output before bt_enable()
+        extern void mp_bluetooth_zephyr_fifo_enable_debug(void);
+        mp_bluetooth_zephyr_fifo_enable_debug();
+
+        // Debug: Check HCI device structure before calling bt_enable()
+        #include <zephyr/device.h>
+        extern const struct device *const mp_bluetooth_zephyr_hci_dev;
+        mp_printf(&mp_plat_print, "[DEBUG] mp_bluetooth_zephyr_hci_dev = %p\n", mp_bluetooth_zephyr_hci_dev);
+        if (mp_bluetooth_zephyr_hci_dev) {
+            mp_printf(&mp_plat_print, "[DEBUG]   name = %s\n", mp_bluetooth_zephyr_hci_dev->name);
+            mp_printf(&mp_plat_print, "[DEBUG]   state = %p\n", mp_bluetooth_zephyr_hci_dev->state);
+            if (mp_bluetooth_zephyr_hci_dev->state) {
+                mp_printf(&mp_plat_print, "[DEBUG]     initialized = %d\n", mp_bluetooth_zephyr_hci_dev->state->initialized);
+                mp_printf(&mp_plat_print, "[DEBUG]     init_res = %d\n", mp_bluetooth_zephyr_hci_dev->state->init_res);
+            }
+        }
+
         DEBUG_printf("Calling bt_enable()...\n");
         int ret = bt_enable(NULL);
         DEBUG_printf("bt_enable returned %d\n", ret);

@@ -26,6 +26,7 @@
 
 #include "zephyr_ble_kernel.h"
 #include "py/mphal.h"
+#include <zephyr/device.h>
 
 // --- Sleep ---
 
@@ -45,4 +46,27 @@ void k_sleep(k_timeout_t timeout) {
 
     // Sleep for specified milliseconds
     mp_hal_delay_ms(timeout.ticks);
+}
+
+// --- Scheduler Lock/Unlock ---
+
+void k_sched_lock(void) {
+    // No-op in cooperative scheduler
+    // All code runs in main context, no preemption
+}
+
+void k_sched_unlock(void) {
+    // No-op in cooperative scheduler
+    // All code runs in main context, no preemption
+}
+
+// --- Device Readiness Check ---
+
+// Note: device_is_ready() is declared with __syscall in <zephyr/device.h>
+// We define __syscall as empty in zephyr_ble_config.h, so this becomes a regular function
+bool device_is_ready(const struct device *dev) {
+    // In MicroPython, we don't have a device tree with runtime initialization
+    // All devices are statically configured and always ready
+    (void)dev;
+    return true;
 }

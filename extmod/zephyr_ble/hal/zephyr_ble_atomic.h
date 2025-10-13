@@ -30,6 +30,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// Include Zephyr's real atomic types
+// These define atomic_t, atomic_val_t from sys/atomic_types.h
+#include <zephyr/sys/atomic_types.h>
+
 // Zephyr atomic operations and spinlock abstraction for MicroPython
 // Maps to port-defined MICROPY_PY_BLUETOOTH_ENTER/EXIT macros
 
@@ -73,12 +77,14 @@ static inline void k_spin_unlock(struct k_spinlock *lock, k_spinlock_key_t key) 
 
 // --- Atomic Operations ---
 
-// Atomic variable type - must be compatible with unsigned long for ATOMIC_DEFINE
-// In Zephyr, atomic_t is just unsigned long, not a struct
-typedef unsigned long atomic_t;
-typedef unsigned long atomic_val_t;
-typedef void * atomic_ptr_t;
-typedef void * atomic_ptr_val_t;  // Pointer value type (used by SMP)
+// Atomic types are now provided by zephyr/sys/atomic_types.h:
+// - atomic_t (long int)
+// - atomic_val_t (atomic_t)
+// - atomic_ptr_t (void *)
+// - atomic_ptr_val_t (atomic_ptr_t)
+//
+// Note: We provide our own implementations of atomic functions below
+// to avoid pulling in Zephyr's atomic_builtin.h which conflicts.
 
 // Atomic pointer initializer macro
 // Since atomic_ptr_t is just void*, initialization is direct

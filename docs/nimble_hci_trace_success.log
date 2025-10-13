@@ -1,0 +1,92 @@
+BLE created
+rfcore: rfcore_ble_init
+rfcore: rfcore_ble_reset
+[   18179] <VEND_EVT(12:ff:03:00:92:00)
+[   18183] >HCI(:10:66:fc:24:00:00:00:00:00:00:00:00:00:00:00:00:00:00:01:01:00:79:00:00:00:00:00:00:ff:ff:ff:ff:48:01:01:01:00:00:00:00)
+[   18198] <VEND_RESP(11:0e:04:01:66:fc:00)
+[   18202] >HCI(:01:03:0c:00)
+[   18206] <HCI_EVT(04:0e:04:01:03:0c:00)
+[   18210] >HCI(:10:73:fc:01:00)
+[   18213] <VEND_RESP(11:0e:04:01:73:fc:00)
+rfcore: rfcore_ble_hci_cmd
+[   18220] >HCI_CMD(01:03:0c:00)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18227] <HCI_EVT(04:0e:04:01:03:0c:00) (reset)
+[   18232] >HCI(:01:0c:fc:08:00:06:d2:30:5d:13:09:02)
+[   18238] <HCI_EVT(04:0e:04:01:0c:fc:00)
+rfcore: rfcore_ble_hci_cmd
+[   18244] >HCI_CMD(01:01:10:00)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18250] <HCI_EVT(04:0e:0c:01:01:10:00:0c:7d:80:0c:30:00:7d:00)
+rfcore: rfcore_ble_hci_cmd
+[   18259] >HCI_CMD(01:03:10:00)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18266] <HCI_EVT(04:0e:0c:01:03:10:00:00:00:00:00:60:00:00:00)
+rfcore: rfcore_ble_hci_cmd
+[   18275] >HCI_CMD(01:01:0c:08:90:80:00:02:00:80:00:20)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18283] <HCI_EVT(04:0e:04:01:01:0c:00)
+rfcore: rfcore_ble_hci_cmd
+[   18290] >HCI_CMD(01:63:0c:08:00:00:80:00:00:00:00:00)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18298] <HCI_EVT(04:0f:04:01:01:63:0c) (mask2 fix 19)
+rfcore: rfcore_ble_hci_cmd
+[   18306] >HCI_CMD(01:01:20:08:7f:fe:0f:00:00:00:00:00)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18315] <HCI_EVT(04:0e:04:01:01:20:00)
+rfcore: rfcore_ble_hci_cmd
+[   18321] >HCI_CMD(01:02:20:00)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18328] <HCI_EVT(04:0e:07:01:02:20:00:fb:00:04)
+rfcore: rfcore_ble_hci_cmd
+[   18335] >HCI_CMD(01:03:20:00)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18341] <HCI_EVT(04:0e:0c:01:03:20:00:ed:01:00:08:00:00:00:00)
+rfcore: rfcore_ble_hci_cmd
+[   18350] >HCI_CMD(01:09:10:00)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18357] <HCI_EVT(04:0e:0a:01:09:10:00:d2:30:5d:13:09:02)
+rfcore: rfcore_ble_hci_cmd
+[   18365] >HCI_CMD(01:2d:20:01:00)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18372] <HCI_EVT(04:0e:04:01:2d:20:00)
+rfcore: rfcore_ble_hci_cmd
+[   18378] >HCI_CMD(01:29:20:00)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18384] <HCI_EVT(04:0e:04:01:29:20:00)
+rfcore: rfcore_ble_hci_cmd
+[   18391] >HCI_CMD(01:2d:20:01:01)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18398] <HCI_EVT(04:0e:04:01:2d:20:00)
+rfcore: rfcore_ble_hci_cmd
+[   18404] >HCI_CMD(01:0a:20:01:00)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18411] <HCI_EVT(04:0e:04:01:0a:20:00)
+rfcore: rfcore_ble_hci_cmd
+[   18417] >HCI_CMD(01:27:20:27:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:ef:8d:e2:16:4f:ec:43:0d:bf:5b:dd:34:c0:53:1e:b8)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18435] <HCI_EVT(04:0e:04:01:27:20:00)
+rfcore: rfcore_ble_hci_cmd
+[   18442] >HCI_CMD(01:4e:20:08:00:00:00:00:00:00:00:01)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18450] <HCI_EVT(04:0e:04:01:4e:20:00)
+rfcore: rfcore_ble_hci_cmd
+[   18457] >HCI_CMD(01:18:20:00)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18463] <HCI_EVT(04:0e:0c:01:18:20:00:ae:db:93:89:33:0d:ea:6d)
+rfcore: rfcore_ble_hci_cmd
+[   18472] >HCI_CMD(01:18:20:00)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18478] <HCI_EVT(04:0e:0c:01:18:20:00:72:06:ac:50:d7:7f:5c:fc)
+BLE activated
+(0, b'\x02\t\x13]0\xd2')
+rfcore: rfcore_ble_hci_cmd
+[   18492] >HCI_CMD(01:0a:20:01:00)
+rfcore: IPCC_C1_RX_IRQHandler
+[   18499] <HCI_EVT(04:0e:04:01:0a:20:00)
+rfcore: rfcore_ble_reset
+[   18505] >HCI(:10:66:fc:24:00:00:00:00:00:00:00:00:00:00:00:00:00:00:01:01:00:79:00:00:00:00:00:00:ff:ff:ff:ff:48:01:01:01:00:00:00:00)
+[   18520] <VEND_RESP(11:0e:04:01:66:fc:00)
+[   18524] >HCI(:01:03:0c:00)
+[   18528] <HCI_EVT(04:0e:04:01:03:0c:00)
+Done

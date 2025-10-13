@@ -6,7 +6,8 @@ EXTMOD_DIR = extmod
 ZEPHYR_BLE_EXTMOD_DIR = $(EXTMOD_DIR)/zephyr_ble
 
 SRC_EXTMOD_C += $(ZEPHYR_BLE_EXTMOD_DIR)/modbluetooth_zephyr.c
-SRC_EXTMOD_C += $(ZEPHYR_BLE_EXTMOD_DIR)/hci_driver_stub.c
+# hci_driver_stub.c not needed when port provides its own HCI driver (e.g., mpzephyrport.c)
+# SRC_EXTMOD_C += $(ZEPHYR_BLE_EXTMOD_DIR)/hci_driver_stub.c
 
 CFLAGS_EXTMOD += -DMICROPY_BLUETOOTH_ZEPHYR=1
 
@@ -25,6 +26,10 @@ CFLAGS_EXTMOD += -DMICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS=1
 # Enable pairing and bonding with synchronous events
 CFLAGS_EXTMOD += -DMICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING=1
 
+# Force inclusion of autoconf.h before any Zephyr headers
+# This ensures CONFIG_ARM and other architecture defines are available
+CFLAGS_EXTMOD += -include $(TOP)/$(ZEPHYR_BLE_EXTMOD_DIR)/zephyr_headers_stub/zephyr/autoconf.h
+
 ZEPHYR_LIB_DIR = lib/zephyr
 
 # HAL abstraction layer sources
@@ -33,6 +38,7 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_BLE_EXTMOD_DIR)/hal/, \
 	zephyr_ble_work.c \
 	zephyr_ble_sem.c \
 	zephyr_ble_mutex.c \
+	zephyr_ble_fifo.c \
 	zephyr_ble_kernel.c \
 	zephyr_ble_poll.c \
 	zephyr_ble_settings.c \
@@ -73,6 +79,7 @@ $(BUILD)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/gatt.o: ../../$(ZEPHYR_LIB_DIR)
 SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/common/, \
 	addr.c \
 	rpa.c \
+	bt_str.c \
 	)
 
 # Suppress warnings in common sources (third-party Zephyr code)
@@ -95,9 +102,13 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/, \
 	data.c \
 	keys.c \
 	smp.c \
-	ecc.c \
-	crypto_psa.c \
 	)
+
+# TODO Phase 1.5: Add PSA Crypto or TinyCrypt support
+# These files require PSA Crypto API headers which are not yet available
+# Temporarily excluded - secure pairing won't work without these
+# ecc.c
+# crypto_psa.c
 
 # TODO Phase 2: Add ISO audio support
 # iso.c
@@ -110,10 +121,15 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/, \
 # classic/keys_br.c classic/sdp.c classic/a2dp.c classic/rfcomm.c classic/avdtp.c
 
 # Include paths
-# Note: extmod/zephyr_ble/zephyr/ contains our wrapper headers (autoconf.h, kernel.h, etc.)
-# which will be found before lib/zephyr/include/zephyr/ due to include order
+# Order matters: stub headers shadow real Zephyr headers when needed
+# 1. zephyr_ble_extmod_dir - zephyr_ble_config.h and component headers
+# 2. hal - HAL abstraction layer headers
+# 3. zephyr_headers_stub - minimal stubs (autoconf.h, syscall_list.h, devicetree_generated.h)
+# 4. lib/zephyr/include - real Zephyr headers (used for most includes)
+# 5. subsys/bluetooth - Zephyr BLE host internal headers
 INC += -I$(TOP)/$(ZEPHYR_BLE_EXTMOD_DIR)
 INC += -I$(TOP)/$(ZEPHYR_BLE_EXTMOD_DIR)/hal
+INC += -I$(TOP)/$(ZEPHYR_BLE_EXTMOD_DIR)/zephyr_headers_stub
 INC += -I$(TOP)/$(ZEPHYR_LIB_DIR)/include
 INC += -I$(TOP)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth
 

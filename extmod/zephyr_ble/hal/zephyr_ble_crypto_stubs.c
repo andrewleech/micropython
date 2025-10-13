@@ -85,3 +85,59 @@ int lll_csrand_get(void *buf, size_t len) {
     // Return error - controller crypto not available
     return -1;
 }
+
+// Crypto module initialization
+// Called by bt_init() in hci_core.c
+int bt_crypto_init(void) {
+    // No-op in Phase 1 (crypto not available)
+    return 0;
+}
+
+// Random number generation
+// Used by BLE stack for generating keys, nonces, etc.
+// TODO: Implement using MicroPython's random module or hardware RNG
+int bt_rand(void *buf, size_t len) {
+    // For now, fill with zeros (INSECURE - only for build testing)
+    // Real implementation must use secure random source
+    memset(buf, 0, len);
+    return 0;
+}
+
+// LE encryption function (used for legacy pairing)
+// e(key, plaintext) -> returns ciphertext
+int bt_encrypt_le(const uint8_t key[16], const uint8_t plaintext[16],
+                  uint8_t enc_data[16]) {
+    (void)key;
+    (void)plaintext;
+    (void)enc_data;
+    // Return error - not implemented
+    return -1;
+}
+
+// ECC public key generation (used for LE Secure Connections)
+// Takes a callback that's called when key is ready
+typedef void (*bt_pub_key_cb_func_t)(const uint8_t *key);
+struct bt_pub_key_cb {
+    void *node;  // sys_snode_t
+    bt_pub_key_cb_func_t func;
+};
+int bt_pub_key_gen(struct bt_pub_key_cb *cb) {
+    // Call callback with NULL to indicate failure
+    if (cb && cb->func) {
+        cb->func(NULL);
+    }
+    return -1;
+}
+
+// ECC Diffie-Hellman key generation (used for LE Secure Connections)
+// remote_pk[64] = remote public key (X,Y coordinates)
+// cb = callback when DH key is ready
+typedef void (*bt_dh_key_cb_t)(const uint8_t *key);
+int bt_dh_key_gen(const uint8_t remote_pk[64], bt_dh_key_cb_t cb) {
+    (void)remote_pk;
+    // Call callback with NULL to indicate failure
+    if (cb) {
+        cb(NULL);
+    }
+    return -1;
+}

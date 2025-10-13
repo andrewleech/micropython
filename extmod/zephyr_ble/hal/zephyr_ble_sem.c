@@ -26,12 +26,14 @@
 
 #include "py/mphal.h"
 #include "py/runtime.h"
+#include "py/misc.h"
 #include "zephyr_ble_sem.h"
 #include "zephyr_ble_work.h"
 
 #include <stddef.h>
+#include <stdio.h>
 
-#define DEBUG_SEM_printf(...) // printf(__VA_ARGS__)
+#define DEBUG_SEM_printf(...) // mp_printf(&mp_plat_print, __VA_ARGS__)
 
 // Forward declaration of HCI UART processing function
 // This will be implemented when we integrate the HCI layer

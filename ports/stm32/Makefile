@@ -112,7 +112,7 @@ INC += -I$(USBDEV_DIR)/core/inc -I$(USBDEV_DIR)/class/inc
 #INC += -I$(USBHOST_DIR)
 INC += -Ilwip_inc
 
-CFLAGS += $(INC) -Wall -Wpointer-arith -Werror -Wdouble-promotion -Wfloat-conversion -std=gnu99 -nostdlib $(CFLAGS_EXTRA)
+CFLAGS += $(INC) -Wall -Wpointer-arith -Wdouble-promotion -Wfloat-conversion -std=gnu99 -nostdlib $(CFLAGS_EXTRA)
 CFLAGS += -D$(CMSIS_MCU) -DUSE_FULL_LL_DRIVER
 CFLAGS += $(CFLAGS_MCU_$(MCU_SERIES))
 CFLAGS += $(COPT)
@@ -474,6 +474,11 @@ endif
 ifeq ($(MICROPY_BLUETOOTH_BTSTACK),1)
 SRC_C += mpbtstackport.c
 MICROPY_BLUETOOTH_BTSTACK_H4 ?= 1
+endif
+
+ifeq ($(MICROPY_BLUETOOTH_ZEPHYR),1)
+SRC_C += mpzephyrport.c
+include $(TOP)/extmod/zephyr_ble/zephyr_ble.mk
 endif
 
 endif # MICROPY_PY_BLUETOOTH

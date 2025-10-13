@@ -1,0 +1,51 @@
+/*
+ * This file is part of the MicroPython project, http://micropython.org/
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Device tree wrapper for Zephyr BLE in MicroPython
+ *
+ * Provides device tree macros that redirect to our HCI device
+ */
+
+#ifndef MP_ZEPHYR_DEVICETREE_WRAPPER_H_
+#define MP_ZEPHYR_DEVICETREE_WRAPPER_H_
+
+// Forward declare the HCI device structure (defined in port's mpzephyrport.c)
+struct device;
+extern const struct device mp_bluetooth_zephyr_hci_dev;
+
+// Device tree node check - we always have our BT HCI device
+#define DT_HAS_CHOSEN(name) 1
+
+// Device tree chosen node - return a dummy node ID
+#define DT_CHOSEN(name) 0
+
+// Get device from device tree node - return our HCI device
+#define DEVICE_DT_GET(node_id) (&mp_bluetooth_zephyr_hci_dev)
+
+// Get device tree property (use reasonable defaults for ARM Cortex-M)
+#define DT_PROP(node_id, prop) (4)  // Default: 4 priority bits for Cortex-M4
+
+// Get device tree property with fallback
+#define DT_PROP_OR(node_id, prop, default_value) (default_value)
+
+// Get device tree enum index with fallback
+#define DT_ENUM_IDX_OR(node_id, prop, default_value) (default_value)
+
+// Get device tree instance node (return dummy node ID)
+#define DT_INST(inst, compat) 0
+
+// Check if device tree node has status okay
+#define DT_NODE_HAS_STATUS_OKAY(node_id) 0
+
+// Check if device tree node exists
+#define DT_NODE_EXISTS(node_id) 0
+
+// Device tree foreach - empty (we have no device tree nodes)
+#define DT_FOREACH_STATUS_OKAY_NODE(fn)
+
+// Prevent the real devicetree.h from being included
+#define ZEPHYR_INCLUDE_DEVICETREE_H_
+
+#endif /* MP_ZEPHYR_DEVICETREE_WRAPPER_H_ */

@@ -1,0 +1,167 @@
+/*
+ * This file is part of the MicroPython project, http://micropython.org/
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Minimal slist.h stub for Zephyr BLE
+ *
+ * Provides singly-linked list types for net_buf without full Zephyr list implementation.
+ */
+
+#ifndef MP_ZEPHYR_SYS_SLIST_WRAPPER_H_
+#define MP_ZEPHYR_SYS_SLIST_WRAPPER_H_
+
+#include <stddef.h>  // for offsetof
+
+// Define list node structure
+struct _snode {
+    struct _snode *next;
+};
+typedef struct _snode sys_snode_t;
+
+// Define list head structure
+struct _slist {
+    sys_snode_t *head;
+    sys_snode_t *tail;
+};
+typedef struct _slist sys_slist_t;
+
+// List initialization macros
+#define SYS_SLIST_STATIC_INIT(list_ptr) {NULL, NULL}
+
+// List access macros
+#define SYS_SLIST_PEEK_HEAD(list) ((list)->head)
+#define SYS_SLIST_PEEK_TAIL(list) ((list)->tail)
+
+// Container macros (get struct from member pointer)
+// Note: CONTAINER_OF is defined in sys/util.h - include it if not already included
+#include <zephyr/sys/util.h>
+
+// Peek head container (get first list item as struct)
+#define SYS_SLIST_PEEK_HEAD_CONTAINER(list, type, node_field) \
+    ((list)->head ? CONTAINER_OF((list)->head, type, node_field) : NULL)
+
+// Peek next container (get next list item as struct)
+#define SYS_SLIST_PEEK_NEXT_CONTAINER(obj, node_field) \
+    ((obj)->node_field.next ? CONTAINER_OF((obj)->node_field.next, __typeof__(*(obj)), node_field) : NULL)
+
+// List manipulation functions (minimal stubs)
+static inline void sys_slist_init(sys_slist_t *list) {
+    list->head = NULL;
+    list->tail = NULL;
+}
+
+static inline sys_snode_t *sys_slist_get(sys_slist_t *list) {
+    sys_snode_t *node = list->head;
+    if (node) {
+        list->head = node->next;
+        if (!list->head) {
+            list->tail = NULL;
+        }
+    }
+    return node;
+}
+
+static inline void sys_slist_append(sys_slist_t *list, sys_snode_t *node) {
+    node->next = NULL;
+    if (!list->head) {
+        list->head = node;
+        list->tail = node;
+    } else {
+        list->tail->next = node;
+        list->tail = node;
+    }
+}
+
+static inline void sys_slist_prepend(sys_slist_t *list, sys_snode_t *node) {
+    node->next = list->head;
+    list->head = node;
+    if (!list->tail) {
+        list->tail = node;
+    }
+}
+
+static inline bool sys_slist_is_empty(sys_slist_t *list) {
+    return list->head == NULL;
+}
+
+static inline sys_snode_t *sys_slist_peek_head(sys_slist_t *list) {
+    return list->head;
+}
+
+static inline sys_snode_t *sys_slist_peek_next(sys_snode_t *node) {
+    return node ? node->next : NULL;
+}
+
+static inline bool sys_slist_remove(sys_slist_t *list, sys_snode_t *prev_node, sys_snode_t *node) {
+    if (!node) {
+        return false;
+    }
+
+    if (prev_node) {
+        prev_node->next = node->next;
+        if (list->tail == node) {
+            list->tail = prev_node;
+        }
+    } else {
+        list->head = node->next;
+        if (!list->head) {
+            list->tail = NULL;
+        }
+    }
+    return true;
+}
+
+static inline sys_snode_t *sys_slist_find(sys_slist_t *list, sys_snode_t *node, sys_snode_t **prev) {
+    sys_snode_t *curr = list->head;
+    sys_snode_t *previous = NULL;
+
+    while (curr) {
+        if (curr == node) {
+            if (prev) {
+                *prev = previous;
+            }
+            return curr;
+        }
+        previous = curr;
+        curr = curr->next;
+    }
+
+    return NULL;
+}
+
+static inline bool sys_slist_find_and_remove(sys_slist_t *list, sys_snode_t *node) {
+    sys_snode_t *prev = NULL;
+    sys_snode_t *found = sys_slist_find(list, node, &prev);
+
+    if (found) {
+        return sys_slist_remove(list, prev, node);
+    }
+    return false;
+}
+
+static inline sys_snode_t *sys_slist_get_not_empty(sys_slist_t *list) {
+    return sys_slist_get(list);
+}
+
+// Iterator macros for node traversal
+#define SYS_SLIST_FOR_EACH_NODE(list, node) \
+    for (node = (list)->head; node != NULL; node = node->next)
+
+// Iterator macro for container traversal
+#define SYS_SLIST_FOR_EACH_CONTAINER(list, node, node_field) \
+    for (node = SYS_SLIST_PEEK_HEAD_CONTAINER(list, __typeof__(*node), node_field); \
+         node != NULL; \
+         node = SYS_SLIST_PEEK_NEXT_CONTAINER(node, node_field))
+
+// Iterator macro for safe traversal
+#define SYS_SLIST_FOR_EACH_CONTAINER_SAFE(list, node, tmp, node_field) \
+    for (node = SYS_SLIST_PEEK_HEAD_CONTAINER(list, __typeof__(*node), node_field), \
+         tmp = node ? SYS_SLIST_PEEK_NEXT_CONTAINER(node, node_field) : NULL; \
+         node != NULL; \
+         node = tmp, tmp = node ? SYS_SLIST_PEEK_NEXT_CONTAINER(node, node_field) : NULL)
+
+// Prevent real slist.h from being included
+#define ZEPHYR_INCLUDE_SYS_SLIST_H_
+
+#endif /* MP_ZEPHYR_SYS_SLIST_WRAPPER_H_ */

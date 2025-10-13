@@ -45,8 +45,8 @@
 #if MICROPY_BLUETOOTH_NIMBLE
 // For mp_bluetooth_nimble_hci_uart_wfi
 #include "nimble/nimble_npl.h"
-#else
-#error "STM32WB must use NimBLE."
+#elif !MICROPY_BLUETOOTH_ZEPHYR
+#error "STM32WB must use NimBLE or Zephyr BLE."
 #endif
 
 #if !MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS
@@ -55,10 +55,10 @@
 
 #endif
 
-#define DEBUG_printf(...) // printf("rfcore: " __VA_ARGS__)
+#define DEBUG_printf(...) printf("rfcore: " __VA_ARGS__)
 
 // Define to 1 to print traces of HCI packets
-#define HCI_TRACE (0)
+#define HCI_TRACE (1)
 
 #define IPCC_CH_BLE         (LL_IPCC_CHANNEL_1) // BLE HCI command and response
 #define IPCC_CH_SYS         (LL_IPCC_CHANNEL_2) // system HCI command and response
@@ -388,18 +388,18 @@ static size_t tl_parse_hci_msg(const uint8_t *buf, parse_hci_info_t *parse) {
     }
 
     #if HCI_TRACE
-    printf("[% 8d] <%s(%02x", mp_hal_ticks_ms(), info, buf[0]);
+    mp_printf(&mp_plat_print, "[% 8d] <%s(%02x", mp_hal_ticks_ms(), info, buf[0]);
     for (int i = 1; i < len; ++i) {
-        printf(":%02x", buf[i]);
+        mp_printf(&mp_plat_print, ":%02x", buf[i]);
     }
-    printf(")");
+    mp_printf(&mp_plat_print, ")");
     if (parse && parse->was_hci_reset_evt) {
-        printf(" (reset)");
+        mp_printf(&mp_plat_print, " (reset)");
     }
     if (applied_set_event_event_mask2_fix) {
-        printf(" (mask2 fix %d)", applied_set_event_event_mask2_fix);
+        mp_printf(&mp_plat_print, " (mask2 fix %d)", applied_set_event_event_mask2_fix);
     }
-    printf("\n");
+    mp_printf(&mp_plat_print, "\n");
 
     #else
     (void)info;
@@ -469,11 +469,11 @@ static void tl_hci_cmd(uint8_t *cmd, unsigned int ch, uint8_t hdr, uint16_t opco
     memcpy(&cmd[12], buf, len);
 
     #if HCI_TRACE
-    printf("[% 8d] >HCI(", mp_hal_ticks_ms());
+    mp_printf(&mp_plat_print, "[% 8d] >HCI(", mp_hal_ticks_ms());
     for (int i = 0; i < len + 4; ++i) {
-        printf(":%02x", cmd[i + 8]);
+        mp_printf(&mp_plat_print, ":%02x", cmd[i + 8]);
     }
-    printf(")\n");
+    mp_printf(&mp_plat_print, ")\n");
     #endif
 
     // Indicate that this channel is ready.
@@ -640,11 +640,11 @@ void rfcore_ble_hci_cmd(size_t len, const uint8_t *src) {
     DEBUG_printf("rfcore_ble_hci_cmd\n");
 
     #if HCI_TRACE
-    printf("[% 8d] >HCI_CMD(%02x", mp_hal_ticks_ms(), src[0]);
+    mp_printf(&mp_plat_print, "[% 8d] >HCI_CMD(%02x", mp_hal_ticks_ms(), src[0]);
     for (int i = 1; i < len; ++i) {
-        printf(":%02x", src[i]);
+        mp_printf(&mp_plat_print, ":%02x", src[i]);
     }
-    printf(")\n");
+    mp_printf(&mp_plat_print, ")\n");
     #endif
 
     tl_list_node_t *n;
