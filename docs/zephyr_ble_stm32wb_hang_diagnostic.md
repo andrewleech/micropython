@@ -118,3 +118,73 @@ pyb_hard_fault_debug = 1;
 - Debug Probe: ST-Link V2-1 (0483:374b)
 - Serial: /dev/ttyACM3 @ 115200 baud
 - Transport: IPCC (Inter-Processor Communication Controller to wireless coprocessor)
+
+## Update: Boot Crash Investigation (2025-10-14)
+
+### Issue: Firmware wouldn't boot via probe-rs
+After the HCI trace investigation, discovered the firmware was crashing during
+early boot (Reset_Handler) before reaching main().
+
+### Root Cause: Vector Table in RAM
+The NUCLEO_WB55 board config sets `MICROPY_HW_ENABLE_ISR_UART_FLASH_FUNCS_IN_RAM=1`
+which uses `boards/common_isr_ram/common_isr.ld` placing the vector table at
+RAM address 0x20000000 instead of flash address 0x08000000.
+
+**Why this fails:**
+- ARM Cortex-M4 reads vector table from **flash at 0x08000000** during reset
+- RAM variant requires debugger preload (works with OpenOCD, fails with probe-rs)
+- probe-rs directly resets CPU which reads garbage from flash, causing immediate crash
+
+**GDB Investigation:**
+- Used auto-stepping GDB script to trace execution
+- Found firmware stuck in infinite loop in Reset_Handler data copy (0x080004de-0x080004e8)
+- Stack pointer corruption observed (0x2002eff8 → 0x8d5acff6 garbage)
+- readelf showed .isr_vector at 0x20000000 (RAM) not 0x08000000 (flash)
+- 21 LOAD segments vs 7 in working NimBLE build (later confirmed as correct - .noinit sections)
+
+**Fix Applied:**
+```mk
+# ports/stm32/boards/NUCLEO_WB55/mpconfigvariant_zephyr.mk
+# Use ROM vector table for probe-rs compatibility
+MICROPY_HW_ENABLE_ISR_UART_FLASH_FUNCS_IN_RAM = 0
+```
+
+**Result:**
+- ✅ Firmware boots successfully via probe-rs
+- ✅ Reaches REPL without errors
+- ✅ Python execution works correctly
+- ✅ HCI transport functional (verified with trace output)
+- ❌ Still hangs in bt_enable() (same deadlock issue)
+
+### Current Status (2025-10-14)
+Both RP2 Pico 2 W and STM32WB55 now boot successfully but exhibit identical hang
+behavior during Zephyr BLE initialization:
+
+**Working:**
+- MicroPython boots to REPL
+- `bluetooth.BLE()` object creation succeeds
+- HCI transport layer functional
+- Controller communication working (HCI commands execute successfully)
+
+**Failing:**
+- `ble.active(True)` hangs indefinitely
+- Hang occurs in `bt_enable()` → `bt_init()`
+- Internal Zephyr host deadlock before any HCI commands sent
+- Eventually causes watchdog reset or hardfault (crash loop)
+
+**Latest HCI Trace Output (showing controller communication works):**
+```
+[ 1259359] <VEND_EVT(12:ff:03:00:92:00)
+[ 1259363] >HCI(:10:66:fc:24:00:00:00:00:00:00:00:00:00:00:00:00:00:00:01:01:00:79:00:00:00:00:00:00:ff:ff:ff:ff:48:01:01:01:00:00:00:00)
+[ 1259378] <VEND_RESP(11:0e:04:01:66:fc:00)
+[ 1259383] >HCI(:01:03:0c:00)
+[ 1259387] <HCI_EVT(04:0e:04:01:03:0c:00)
+[ 1259391] >HCI(:10:73:fc:01:00)
+[ 1259395] <VEND_RESP(11:0e:04:01:73:fc:00)
+[bt_enable] bt_hci_open OK, calling bt_monitor_send
+[bt_enable] No callback, calling bt_init
+[HANG OCCURS HERE - never returns from bt_init()]
+```
+
+The controller responds correctly to all commands, but the Zephyr host initialization
+never completes.
