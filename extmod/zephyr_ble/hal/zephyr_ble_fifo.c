@@ -176,10 +176,18 @@ void *k_queue_get(struct k_queue *queue, k_timeout_t timeout) {
         // Process pending work to allow items to be added
         mp_bluetooth_zephyr_work_process();
 
-        // Yield to prevent tight loop
-        #ifdef MICROPY_EVENT_POLL_HOOK
-        MICROPY_EVENT_POLL_HOOK
-        #endif
+        // Wait for events with proper background processing
+        // This allows IRQ handlers (UART, timers, etc) to run and add items to queue
+        if (timeout_ms == 0xFFFFFFFF) {
+            // K_FOREVER: wait indefinitely
+            mp_event_wait_indefinite();
+        } else {
+            // Timed wait: wait for remaining time or until interrupt
+            uint32_t remaining = timeout_ms - elapsed;
+            if (remaining > 0) {
+                mp_event_wait_ms(remaining);
+            }
+        }
 
         loop_count++;
         if (loop_count % 100 == 0) {

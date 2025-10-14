@@ -257,7 +257,8 @@ void gap_scan_cb_timeout(struct k_timer *timer_id) {
     // Cannot call bt_le_scan_stop from a timer callback because this callback may be
     // preempting the BT stack.  So schedule it to be called from the main thread.
     while (!mp_sched_schedule(MP_OBJ_FROM_PTR(&gap_scan_stop_obj), mp_const_none)) {
-        k_yield();
+        // Wait for scheduler queue to have space, allowing background processing
+        mp_event_wait_indefinite();
     }
     // Indicate scanning has stopped so that no more scan result events are generated
     // (they may still come in until bt_le_scan_stop is called by gap_scan_stop).

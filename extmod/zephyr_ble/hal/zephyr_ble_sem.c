@@ -75,7 +75,8 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
 
     DEBUG_SEM_printf("  --> waiting (timeout=%u ms)\n", timeout_ms);
 
-    // Busy-wait pattern (like NimBLE's ble_npl_sem_pend)
+    // Wait pattern following BTstack/NimBLE model:
+    // Use mp_event_wait to allow background processing (IRQ, UART, HCI, etc)
     while (sem->count == 0) {
         // Check timeout (handles wrap-around correctly using unsigned arithmetic)
         uint32_t elapsed = mp_hal_ticks_ms() - t0;
@@ -90,10 +91,18 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
         // Process HCI UART (if implemented)
         mp_bluetooth_zephyr_hci_uart_wfi();
 
-        // Yield to prevent tight loop
-        #ifdef MICROPY_EVENT_POLL_HOOK
-        MICROPY_EVENT_POLL_HOOK
-        #endif
+        // Wait for events with proper background processing
+        // This allows IRQ handlers (UART, timers, etc) to run and signal the semaphore
+        if (timeout_ms == 0xFFFFFFFF) {
+            // K_FOREVER: wait indefinitely
+            mp_event_wait_indefinite();
+        } else {
+            // Timed wait: wait for remaining time or until interrupt
+            uint32_t remaining = timeout_ms - elapsed;
+            if (remaining > 0) {
+                mp_event_wait_ms(remaining);
+            }
+        }
     }
 
     // Semaphore became available
