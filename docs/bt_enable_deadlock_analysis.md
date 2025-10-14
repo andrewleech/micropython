@@ -83,6 +83,46 @@ Zephyr's `bt_init()` likely has initialization code that:
 3. Our k_sem busy-waits but may not yield often enough
 4. bt_init() has complex initialization that likely uses work queues
 
+## What Has Been Tried (Milestone 6 - 2025-10-14)
+
+### Replace MICROPY_EVENT_POLL_HOOK with mp_event_wait Functions ⚠️ ATTEMPTED
+
+**Commit:** `ca7232715f` - "Replace MICROPY_EVENT_POLL_HOOK with mp_event_wait functions"
+
+**Hypothesis:**
+Following BTstack/NimBLE pattern, `mp_event_wait_indefinite()` and `mp_event_wait_ms()`
+provide proper background processing (IRQ handlers, UART, HCI traffic) while waiting,
+unlike `MICROPY_EVENT_POLL_HOOK` which only yields to the scheduler.
+
+**Changes Made:**
+
+1. **k_sem_take() (zephyr_ble_sem.c:55-113)**
+   - Replaced `MICROPY_EVENT_POLL_HOOK` with `mp_event_wait_indefinite()` for K_FOREVER waits
+   - Used `mp_event_wait_ms(remaining)` for timed waits
+   - Pattern matches BTstack's semaphore implementation
+
+2. **k_queue_get() (zephyr_ble_fifo.c:113-189)**
+   - Same pattern in FIFO busy-wait loop
+   - Allows IRQ handlers to add items to queue during wait
+
+3. **gap_scan_cb_timeout() (modbluetooth_zephyr.c:255-266)**
+   - Replaced `k_yield()` (no-op) with `mp_event_wait_indefinite()`
+   - Allows scheduler queue space to become available
+
+**Result:** ❌ **HANG PERSISTS**
+
+Initial testing shows `ble.active(True)` still hangs in `bt_init()` at the same location.
+This suggests:
+1. The hypothesis was partially correct (event waiting is necessary)
+2. BUT there are additional issues preventing bt_init() from completing
+3. Possible causes:
+   - bt_init() itself has internal wait loops that don't call our semaphore/FIFO APIs
+   - Zephyr BLE host expects threading primitives we haven't implemented
+   - There may be missing initialization or configuration
+
+**Next Investigation Priority:**
+Add debug traces to bt_init() path to identify exact hang location within Zephyr host code.
+
 ## What Hasn't Been Tried Yet
 
 ### 1. CRITICAL: Add Debug Traces to bt_init() Path ⚠️ HIGH PRIORITY
@@ -99,25 +139,13 @@ mp_printf(&mp_plat_print, "[bt_init] Step 1 complete\n");
 
 **Expected outcome:** Find which initialization step never completes
 
-### 2. CRITICAL: Force Work Queue Processing in Semaphore Wait ⚠️ HIGH PRIORITY
-**Goal:** Ensure work items can execute while waiting on semaphore
+### 2. Force Work Queue Processing in Semaphore Wait ✅ IMPLEMENTED (Milestone 6)
 
-**Current implementation (zephyr_ble_sem.c):**
-```c
-int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
-    // ... setup ...
-    while (sem->count == 0 && !timed_out) {
-        mp_bluetooth_zephyr_work_process();  // ← Processes work
-        mp_bluetooth_zephyr_hci_uart_process();  // ← Processes UART
-        MICROPY_EVENT_POLL_HOOK;  // ← Yields to scheduler
-        // ... timeout check ...
-    }
-}
-```
+**Status:** Implemented in commit `ca7232715f` but hang persists
 
-**Problem:** May not yield frequently enough, or work processing order wrong
+**Implementation:** Replaced MICROPY_EVENT_POLL_HOOK with mp_event_wait functions (see Milestone 6 above)
 
-**New approach to try:**
+**Alternative approach to try if issue persists:**
 ```c
 int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
     while (sem->count == 0 && !timed_out) {
