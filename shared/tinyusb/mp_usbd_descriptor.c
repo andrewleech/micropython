@@ -141,35 +141,41 @@ static const uint8_t *mp_usbd_generate_desc_cfg_unified(uint8_t flags, uint8_t *
     *desc++ = 0x80;                        // bmAttributes (bit 7 must be 1)
     *desc++ = USBD_MAX_POWER_MA / 2;       // bMaxPower (in 2mA units)
 
-    // Add enabled class descriptors
+    // Track current interface number for dynamic assignment
+    uint8_t itf_num = 0;
+
+    // Add enabled class descriptors with dynamically calculated interface numbers
     #if CFG_TUD_CDC
     if (flags & USB_BUILTIN_FLAG_CDC) {
         const uint8_t cdc_desc[] = {
-            TUD_CDC_DESCRIPTOR(USBD_ITF_CDC, USBD_STR_CDC, USBD_CDC_EP_CMD,
+            TUD_CDC_DESCRIPTOR(itf_num, USBD_STR_CDC, USBD_CDC_EP_CMD,
                 USBD_CDC_CMD_MAX_SIZE, USBD_CDC_EP_OUT, USBD_CDC_EP_IN, USBD_CDC_IN_OUT_MAX_SIZE)
         };
         memcpy(desc, cdc_desc, sizeof(cdc_desc));
         desc += sizeof(cdc_desc);
+        itf_num += 2;  // CDC uses 2 interfaces
     }
     #endif
 
     #if CFG_TUD_MSC
     if (flags & USB_BUILTIN_FLAG_MSC) {
         const uint8_t msc_desc[] = {
-            TUD_MSC_DESCRIPTOR(USBD_ITF_MSC, USBD_STR_MSC, USBD_MSC_EP_OUT, USBD_MSC_EP_IN, USBD_MSC_IN_OUT_MAX_SIZE)
+            TUD_MSC_DESCRIPTOR(itf_num, USBD_STR_MSC, USBD_MSC_EP_OUT, USBD_MSC_EP_IN, USBD_MSC_IN_OUT_MAX_SIZE)
         };
         memcpy(desc, msc_desc, sizeof(msc_desc));
         desc += sizeof(msc_desc);
+        itf_num += 1;  // MSC uses 1 interface
     }
     #endif
 
     #if CFG_TUD_NCM
     if (flags & USB_BUILTIN_FLAG_NCM) {
         const uint8_t ncm_desc[] = {
-            TUD_CDC_NCM_DESCRIPTOR(USBD_ITF_NET, USBD_STR_NET, USBD_STR_NET_MAC, USBD_NET_EP_CMD, 64, USBD_NET_EP_OUT, USBD_NET_EP_IN, USBD_NET_IN_OUT_MAX_SIZE, CFG_TUD_NET_MTU)
+            TUD_CDC_NCM_DESCRIPTOR(itf_num, USBD_STR_NET, USBD_STR_NET_MAC, USBD_NET_EP_CMD, 64, USBD_NET_EP_OUT, USBD_NET_EP_IN, USBD_NET_IN_OUT_MAX_SIZE, CFG_TUD_NET_MTU)
         };
         memcpy(desc, ncm_desc, sizeof(ncm_desc));
         desc += sizeof(ncm_desc);
+        itf_num += 2;  // NCM uses 2 interfaces (control + data)
     }
     #endif
 
