@@ -26,7 +26,9 @@
 #ifndef MICROPY_INCLUDED_STM32_USB_H
 #define MICROPY_INCLUDED_STM32_USB_H
 
+#if MICROPY_HW_STM_USB_STACK
 #include "usbd_cdc_msc_hid0.h"
+#endif
 
 #define PYB_USB_FLAG_USB_MODE_CALLED    (0x0002)
 
@@ -54,6 +56,7 @@ MP_DECLARE_CONST_FUN_OBJ_KW(pyb_usb_mode_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(pyb_have_cdc_obj); // deprecated
 MP_DECLARE_CONST_FUN_OBJ_1(pyb_hid_send_report_obj); // deprecated
 
+#if MICROPY_HW_STM_USB_STACK
 void pyb_usb_init0(void);
 int pyb_usb_dev_detect(void);
 bool pyb_usb_dev_init(int dev_id, uint16_t vid, uint16_t pid, uint8_t mode, size_t msc_n, const void *msc_unit, USBD_HID_ModeInfoTypeDef *hid_info);
@@ -66,5 +69,6 @@ void usb_vcp_attach_to_repl(const pyb_usb_vcp_obj_t *self, bool attached);
 void pyb_usb_host_init(void);
 void pyb_usb_host_process(void);
 uint pyb_usb_host_get_keyboard(void);
+#endif
 
 #endif // MICROPY_INCLUDED_STM32_USB_H
