@@ -138,7 +138,7 @@ typedef struct {
     uint32_t r0, r1, r2, r3, r12, lr, pc, xpsr;
 } ExceptionRegisters_t;
 
-int pyb_hard_fault_debug = 0;
+int pyb_hard_fault_debug = 1;
 
 void HardFault_C_Handler(ExceptionRegisters_t *regs) {
     if (!pyb_hard_fault_debug) {

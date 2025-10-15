@@ -65,12 +65,19 @@
 #define H4_EVT  0x04
 
 // Zephyr HCI driver callback and device
-static bt_hci_recv_t recv_cb = NULL;
 static const struct device *hci_dev = NULL;
+static bt_hci_recv_t recv_cb = NULL;
 
 // Soft timer for scheduling HCI poll (zero-initialized to prevent startup crashes)
 static soft_timer_entry_t mp_zephyr_hci_soft_timer = {0};
 static mp_sched_node_t mp_zephyr_hci_sched_node = {0};
+
+// Queue for completed HCI packets (received from interrupt context)
+// These are deferred for processing in scheduler context to avoid stack overflow
+#define RX_QUEUE_SIZE 8
+static struct net_buf *rx_queue[RX_QUEUE_SIZE];
+static volatile size_t rx_queue_head = 0;
+static volatile size_t rx_queue_tail = 0;
 
 // H:4 packet parser state
 typedef enum {
@@ -90,6 +97,39 @@ static size_t h4_payload_remaining;
 // Forward declarations
 static void mp_zephyr_hci_poll_now(void);
 void mp_bluetooth_zephyr_port_poll_in_ms(uint32_t ms);
+
+// RX queue helpers (can be called from IRQ context)
+static inline bool rx_queue_is_full(void) {
+    return ((rx_queue_head + 1) % RX_QUEUE_SIZE) == rx_queue_tail;
+}
+
+static inline bool rx_queue_is_empty(void) {
+    return rx_queue_head == rx_queue_tail;
+}
+
+static bool rx_queue_put(struct net_buf *buf) {
+    MICROPY_PY_BLUETOOTH_ENTER
+    if (rx_queue_is_full()) {
+        MICROPY_PY_BLUETOOTH_EXIT
+        return false;
+    }
+    rx_queue[rx_queue_head] = buf;
+    rx_queue_head = (rx_queue_head + 1) % RX_QUEUE_SIZE;
+    MICROPY_PY_BLUETOOTH_EXIT
+    return true;
+}
+
+static struct net_buf *rx_queue_get(void) {
+    MICROPY_PY_BLUETOOTH_ENTER
+    if (rx_queue_is_empty()) {
+        MICROPY_PY_BLUETOOTH_EXIT
+        return NULL;
+    }
+    struct net_buf *buf = rx_queue[rx_queue_tail];
+    rx_queue_tail = (rx_queue_tail + 1) % RX_QUEUE_SIZE;
+    MICROPY_PY_BLUETOOTH_EXIT
+    return buf;
+}
 
 // Reset H:4 parser state
 static void h4_parser_reset(void) {
@@ -204,17 +244,24 @@ static bool h4_parser_process_byte(uint8_t byte) {
 }
 
 // Callback for mp_bluetooth_hci_uart_readpacket() - called for each byte
+// IMPORTANT: This may be called from interrupt context (IPCC IRQ on STM32WB)
+// DO NOT call recv_cb() directly - queue the buffer for processing in scheduler context
 static void h4_uart_byte_callback(uint8_t byte) {
     if (h4_parser_process_byte(byte)) {
-        // Packet complete, deliver to Zephyr BLE stack
-        if (h4_buf && recv_cb) {
+        if (h4_buf) {
             struct net_buf *buf = h4_buf;
             h4_buf = NULL;  // Ownership transferred
 
-            int ret = recv_cb(hci_dev, buf);
-            if (ret < 0) {
-                error_printf("recv_cb failed: %d\n", ret);
+            // Queue the buffer for processing in scheduler context
+            // This avoids calling bt_hci_recv() from interrupt context
+            if (!rx_queue_put(buf)) {
+                error_printf("RX queue full\n");
                 net_buf_unref(buf);
+            } else {
+                // DO NOT add trace output here - this runs in interrupt context!
+                // Schedule task to process queued packets
+                // This is safe from IRQ context (same as NimBLE UART IRQ)
+                mp_zephyr_hci_poll_now();
             }
         }
     }
@@ -236,8 +283,20 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
         return;
     }
 
+    // Process any queued RX buffers (from interrupt context)
+    struct net_buf *buf;
+    while ((buf = rx_queue_get()) != NULL) {
+        int ret = recv_cb(hci_dev, buf);
+        if (ret < 0) {
+            error_printf("recv_cb failed: %d\n", ret);
+            net_buf_unref(buf);
+        }
+    }
+
     // Read HCI packets using port's transport abstraction
     // This works for both UART and IPCC (STM32WB)
+    // Note: On STM32WB, this is called from IPCC interrupt so packets
+    // are queued rather than processed immediately
     while (mp_bluetooth_hci_uart_readpacket(h4_uart_byte_callback) > 0) {
         // Keep reading while packets are available
     }
@@ -254,10 +313,22 @@ void mp_bluetooth_zephyr_hci_uart_wfi(void) {
         return;
     }
 
-    // Process any pending HCI packets synchronously
-    // This allows HCI command responses to be received while waiting on semaphores
-    while (mp_bluetooth_hci_uart_readpacket(h4_uart_byte_callback) > 0) {
-        // Keep reading while packets are available
+    // Process Zephyr work queues (for timers, delayed work, etc)
+    mp_bluetooth_zephyr_work_process();
+
+    // CRITICAL: Run any pending scheduled tasks (e.g., from IPCC interrupt)
+    // The IPCC interrupt calls mp_bluetooth_hci_poll_now() which schedules a task
+    // that reads the HCI response. We need to run that task!
+    // mp_event_wait_ms(0) runs scheduled tasks and returns immediately
+    mp_event_wait_ms(1);
+
+    // Check for HCI data that may have arrived already
+    mp_bluetooth_hci_uart_readpacket(h4_uart_byte_callback);
+
+    // Deliver any queued RX buffers
+    struct net_buf *buf;
+    while ((buf = rx_queue_get()) != NULL) {
+        recv_cb(hci_dev, buf);
     }
 }
 
@@ -326,7 +397,7 @@ static int hci_stm32_send(const struct device *dev, struct net_buf *buf) {
     memcpy(&h4_packet[1], buf->data, buf->len);
 
     // Trace HCI commands being sent
-    mp_printf(&mp_plat_print, "[SEND] HCI type=0x%02x len=%d\n", h4_type, total_len);
+    mp_printf(&mp_plat_print, "[S] HCI type=0x%02x len=%u\n", h4_type, (unsigned int)total_len);
 
     // Send via port's transport abstraction (UART or IPCC)
     int ret = mp_bluetooth_hci_uart_write(h4_packet, total_len);
@@ -375,16 +446,7 @@ const struct device *const mp_bluetooth_zephyr_hci_dev = &__device_dts_ord_0;
 __attribute__((used))
 int bt_hci_transport_setup(const struct device *dev) {
     (void)dev;
-    debug_printf("bt_hci_transport_setup: dev=%p, mp_bluetooth_zephyr_hci_dev=%p\n",
-        dev, mp_bluetooth_zephyr_hci_dev);
-    debug_printf("  device name=%s, state=%p\n",
-        mp_bluetooth_zephyr_hci_dev->name, mp_bluetooth_zephyr_hci_dev->state);
-    debug_printf("  state->initialized=%d, init_res=%d\n",
-        mp_bluetooth_zephyr_hci_dev->state->initialized,
-        mp_bluetooth_zephyr_hci_dev->state->init_res);
-
-    // Enable hard fault debug output for diagnostics
-    pyb_hard_fault_debug = 1;
+    debug_printf("bt_hci_transport_setup\n");
 
     #if defined(STM32WB)
     // STM32WB: IPCC transport, no external controller

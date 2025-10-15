@@ -58,7 +58,7 @@
 #define DEBUG_printf(...) printf("rfcore: " __VA_ARGS__)
 
 // Define to 1 to print traces of HCI packets
-#define HCI_TRACE (1)
+#define HCI_TRACE (0)
 
 #define IPCC_CH_BLE         (LL_IPCC_CHANNEL_1) // BLE HCI command and response
 #define IPCC_CH_SYS         (LL_IPCC_CHANNEL_2) // system HCI command and response
