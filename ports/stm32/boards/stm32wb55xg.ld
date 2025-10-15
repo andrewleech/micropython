@@ -29,7 +29,9 @@ _micropy_hw_internal_flash_storage_ram_cache_start = _micropy_hw_internal_flash_
 _estack = _micropy_hw_internal_flash_storage_ram_cache_start - _estack_reserve;
 _sstack = _estack - 16K;
 
-_heap_start = _ebss; /* heap starts just after statically allocated memory */
+/* NOTE: For Zephyr BLE integration, .noinit sections are placed by the linker */
+/* after .bss and must not be overlapped by the heap. We reserve 20KB for .noinit. */
+_heap_start = _ebss + 20K; /* heap starts after .noinit (Zephyr net_buf pools) */
 _heap_end = _sstack;
 
 _micropy_hw_internal_flash_storage_start = ORIGIN(FLASH_FS);
