@@ -50,15 +50,18 @@ struct k_lifo {
 static inline void k_fifo_init(struct k_fifo *fifo) {
     fifo->_queue.data_q.head = NULL;
     fifo->_queue.data_q.tail = NULL;
+    fifo->_queue.lock.unused = 0;
 }
 
 // LIFO operations
 static inline void k_lifo_init(struct k_lifo *lifo) {
     lifo->_queue.data_q.head = NULL;
     lifo->_queue.data_q.tail = NULL;
+    lifo->_queue.lock.unused = 0;
 }
 
 void k_lifo_put(struct k_lifo *lifo, void *data);
+void *k_lifo_get(struct k_lifo *lifo, k_timeout_t timeout);
 
 // Thread priority constants (used in work queue definitions)
 #define K_PRIO_COOP(x) (x)
@@ -71,32 +74,19 @@ void k_sched_unlock(void);
 
 // FIFO/LIFO definition macros (minimal stubs)
 #define K_FIFO_DEFINE(name) struct k_fifo name
-#define Z_LIFO_INITIALIZER(obj) {._queue = {.data_q = {NULL, NULL}}}
+#define Z_LIFO_INITIALIZER(obj) {._queue = {.data_q = {NULL, NULL}, .lock = {0}}}
 
-// k_lifo_get stub (returns NULL - buffers come from pool allocation)
-static inline void *k_lifo_get(struct k_lifo *lifo, k_timeout_t timeout) {
-    (void)lifo;
-    (void)timeout;
-    return NULL;
-}
+// k_fifo_put - implemented via k_queue_append
+// Declared here but implemented in zephyr_ble_fifo.c
+void k_fifo_put(struct k_fifo *fifo, void *data);
 
-// k_fifo_put stub
-static inline void k_fifo_put(struct k_fifo *fifo, void *data) {
-    (void)fifo;
-    (void)data;
-}
+// k_fifo_get - implemented via k_queue_get
+// Declared here but implemented in zephyr_ble_fifo.c
+void *k_fifo_get(struct k_fifo *fifo, k_timeout_t timeout);
 
-// k_fifo_get stub (returns NULL - buffers come from pool allocation)
-static inline void *k_fifo_get(struct k_fifo *fifo, k_timeout_t timeout) {
-    (void)fifo;
-    (void)timeout;
-    return NULL;
-}
-
-// k_fifo_peek_head stub
+// k_fifo_peek_head - returns head without removing
 static inline void *k_fifo_peek_head(struct k_fifo *fifo) {
-    (void)fifo;
-    return NULL;
+    return fifo->_queue.data_q.head;
 }
 
 // k_queue_prepend (operates on k_queue)
@@ -206,41 +196,44 @@ static inline void k_poll_signal_raise(struct k_poll_signal *sig, int result) {
     sig->result = result;
 }
 
-// Memory slab operations (stubs - net_buf uses pool allocation, not slabs)
+// Memory slab operations - implemented in zephyr_ble_mem_slab.c
 struct k_mem_slab {
     size_t block_size;
     uint32_t num_blocks;
     void *buffer;
+    void *free_list;       // Head of free block list
+    uint32_t num_used;     // Number of allocated blocks
 };
 
-static inline int k_mem_slab_alloc(struct k_mem_slab *slab, void **mem, k_timeout_t timeout) {
-    (void)slab;
-    (void)mem;
-    (void)timeout;
-    *mem = NULL;
-    return -ENOMEM;
-}
+// Initialize a memory slab
+void k_mem_slab_init(struct k_mem_slab *slab, void *buffer, size_t block_size, uint32_t num_blocks);
 
-static inline void k_mem_slab_free(struct k_mem_slab *slab, void *mem) {
-    (void)slab;
-    (void)mem;
-}
+// Allocate/free blocks - implemented in zephyr_ble_mem_slab.c
+int k_mem_slab_alloc(struct k_mem_slab *slab, void **mem, k_timeout_t timeout);
+void k_mem_slab_free(struct k_mem_slab *slab, void *mem);
 
 #define K_MEM_SLAB_DEFINE(name, slab_block_size, slab_num_blocks, slab_align) \
+    static uint8_t __aligned(slab_align) \
+        name##_buffer[slab_num_blocks * slab_block_size]; \
     struct k_mem_slab name = { \
         .block_size = slab_block_size, \
         .num_blocks = slab_num_blocks, \
-        .buffer = NULL \
+        .buffer = name##_buffer, \
+        .free_list = name##_buffer, \
+        .num_used = 0 \
     }
 
 // Static (file-scoped) memory slab definition
-// In MicroPython, memory slabs are not used (net_buf uses pool allocation)
-// This creates a static struct that satisfies compilation but returns NULL on alloc
+// Lazy initialization: free_list starts as buffer pointer, init on first alloc
 #define K_MEM_SLAB_DEFINE_STATIC(name, slab_block_size, slab_num_blocks, slab_align) \
+    static uint8_t __aligned(slab_align) \
+        name##_buffer[slab_num_blocks * slab_block_size]; \
     static struct k_mem_slab name = { \
         .block_size = slab_block_size, \
         .num_blocks = slab_num_blocks, \
-        .buffer = NULL \
+        .buffer = name##_buffer, \
+        .free_list = name##_buffer, \
+        .num_used = 0 \
     }
 
 // System work queue (defined in zephyr_ble_work.c)

@@ -588,7 +588,9 @@ struct arch_esf;
 #define CONFIG_BT_HCI_VS_EXT 0
 
 // System clock configuration (1 tick = 1 millisecond)
+#define CONFIG_SYS_CLOCK_EXISTS 1
 #define CONFIG_SYS_CLOCK_TICKS_PER_SEC 1000
+#define CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC 1000000  // 1MHz hardware timer (matches MicroPython's ms tick)
 #define CONFIG_SYS_CLOCK_MAX_TIMEOUT_DAYS 365  // Maximum timeout in days (for overflow checking)
 #define MSEC_PER_SEC 1000
 #define USEC_PER_MSEC 1000

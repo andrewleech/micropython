@@ -33,7 +33,7 @@
 #include <stddef.h>
 #include <stdio.h>
 
-#define DEBUG_SEM_printf(...) // mp_printf(&mp_plat_print, __VA_ARGS__)
+#define DEBUG_SEM_printf(...) do {} while (0)
 
 // Forward declaration of HCI UART processing function
 // This will be implemented when we integrate the HCI layer

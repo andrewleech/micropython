@@ -29,6 +29,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <zephyr/kernel.h>  // For k_queue, k_fifo, k_lifo definitions
 #include "zephyr_ble_timer.h"
 
 // Zephyr k_fifo abstraction for MicroPython
@@ -36,80 +37,29 @@
 
 // --- k_queue API (underlying implementation) ---
 
-// Queue structure (simple linked list)
-// Must be defined before k_fifo since k_fifo contains it
-struct k_queue {
-    void *head;
-    void *tail;
-};
+// k_queue, k_fifo, k_lifo structures are defined in kernel.h
+// All structures have sys_slist_t data_q member
+//
+// kernel.h provides:
+//   - k_fifo_init(), k_fifo_get(), k_fifo_put(), k_fifo_is_empty() etc.
+//   - k_lifo_init()
+//   - k_queue_prepend()
+//
+// We implement the following helper functions:
 
-// FIFO queue structure (must match Zephyr's structure layout)
-// Zephyr's k_fifo wraps k_queue, and k_fifo_init is a macro
-// that calls k_queue_init(&fifo->_queue)
-struct k_fifo {
-    struct k_queue _queue;  // Zephyr expects this member
-};
+// --- k_queue API (internal helpers) ---
 
-// LIFO queue structure (must match Zephyr's structure layout)
-// Zephyr's k_lifo wraps k_queue just like k_fifo
-// LIFO = Last In First Out (stack behavior)
-struct k_lifo {
-    struct k_queue _queue;  // Zephyr expects this member
-};
-
-// Initialize queue
 void k_queue_init(struct k_queue *queue);
-
-// Append item to queue
 void k_queue_append(struct k_queue *queue, void *data);
-
-// Get item from queue with timeout
 void *k_queue_get(struct k_queue *queue, k_timeout_t timeout);
 
-// Check if queue is empty
-static inline bool k_queue_is_empty(struct k_queue *queue) {
-    return queue->head == NULL;
-}
+// --- LIFO API ---
 
-// --- FIFO API ---
+// Put item into LIFO (head)
+void k_lifo_put(struct k_lifo *lifo, void *data);
 
-// Note: k_fifo_init is a macro in Zephyr that calls k_queue_init(&fifo->_queue)
-// We provide the k_queue_init implementation above
-
-// Initialize FIFO queue (wrapper for compatibility)
-static inline void k_fifo_init_impl(struct k_fifo *fifo) {
-    k_queue_init(&fifo->_queue);
-}
-
-// Put item into FIFO (tail) - wrapper for k_queue_append
-static inline void k_fifo_put(struct k_fifo *fifo, void *data) {
-    k_queue_append(&fifo->_queue, data);
-}
-
-// Get item from FIFO (head), wait with timeout - wrapper for k_queue_get
-static inline void *k_fifo_get(struct k_fifo *fifo, k_timeout_t timeout) {
-    return k_queue_get(&fifo->_queue, timeout);
-}
-
-// Check if FIFO is empty - wrapper for k_queue_is_empty
-static inline bool k_fifo_is_empty(struct k_fifo *fifo) {
-    return k_queue_is_empty(&fifo->_queue);
-}
-
-// Peek at head of FIFO without removing
-static inline void *k_fifo_peek_head(struct k_fifo *fifo) {
-    return fifo->_queue.head;
-}
-
-// Peek at tail of FIFO without removing
-static inline void *k_fifo_peek_tail(struct k_fifo *fifo) {
-    return fifo->_queue.tail;
-}
-
-// Cancel waiting on FIFO (no-op in MicroPython)
-static inline void k_fifo_cancel_wait(struct k_fifo *fifo) {
-    (void)fifo;
-}
+// Get item from LIFO (head) with timeout
+void *k_lifo_get(struct k_lifo *lifo, k_timeout_t timeout);
 
 // --- Debug Support ---
 

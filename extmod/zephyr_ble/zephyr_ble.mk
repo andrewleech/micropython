@@ -6,6 +6,7 @@ EXTMOD_DIR = extmod
 ZEPHYR_BLE_EXTMOD_DIR = $(EXTMOD_DIR)/zephyr_ble
 
 SRC_EXTMOD_C += $(ZEPHYR_BLE_EXTMOD_DIR)/modbluetooth_zephyr.c
+SRC_EXTMOD_C += $(ZEPHYR_BLE_EXTMOD_DIR)/net_buf_pool_registry.c
 # hci_driver_stub.c not needed when port provides its own HCI driver (e.g., mpzephyrport.c)
 # SRC_EXTMOD_C += $(ZEPHYR_BLE_EXTMOD_DIR)/hci_driver_stub.c
 
@@ -39,6 +40,7 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_BLE_EXTMOD_DIR)/hal/, \
 	zephyr_ble_sem.c \
 	zephyr_ble_mutex.c \
 	zephyr_ble_fifo.c \
+	zephyr_ble_mem_slab.c \
 	zephyr_ble_kernel.c \
 	zephyr_ble_poll.c \
 	zephyr_ble_settings.c \
