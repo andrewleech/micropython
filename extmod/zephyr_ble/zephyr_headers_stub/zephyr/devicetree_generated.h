@@ -27,6 +27,9 @@
 // Chosen node for zephyr,bt-hci points to our BT HCI node
 #define DT_CHOSEN_zephyr_bt_hci DT_N_S_soc_S_bluetooth_hci_0
 
+// Indicate that the chosen node exists (required by DT_HAS_CHOSEN macro)
+#define DT_CHOSEN_zephyr_bt_hci_EXISTS 1
+
 // Define dependency ordinal macro (required by Zephyr devicetree system)
 // This macro is normally generated in devicetree_generated.h
 // Need double expansion for token concatenation to work with macro arguments

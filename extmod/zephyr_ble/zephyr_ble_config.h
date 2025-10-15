@@ -37,6 +37,14 @@
 // arch_esf is the architecture exception stack frame (used in hci_vs.h)
 struct arch_esf;
 
+// Forward declare struct device (needed for __device_dts_ord_0 declaration below)
+struct device;
+
+// Forward declare the HCI device structure
+// This is defined in the port-specific code (e.g., mpzephyrport.c)
+// and is referenced by DEVICE_DT_GET macro expansions in static initializers
+extern const struct device __device_dts_ord_0;
+
 // =============================================================================
 // PART 1: Header Guard Pre-definitions
 // Pre-define header guards for Zephyr headers we want to skip
