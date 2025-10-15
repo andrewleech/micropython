@@ -335,8 +335,6 @@ void mp_bluetooth_zephyr_hci_uart_wfi(void) {
 // Zephyr HCI driver implementation
 
 static int hci_stm32_open(const struct device *dev, bt_hci_recv_t recv) {
-    debug_printf("hci_stm32_open\n");
-
     hci_dev = dev;
     recv_cb = recv;
 
@@ -446,7 +444,6 @@ const struct device *const mp_bluetooth_zephyr_hci_dev = &__device_dts_ord_0;
 __attribute__((used))
 int bt_hci_transport_setup(const struct device *dev) {
     (void)dev;
-    debug_printf("bt_hci_transport_setup\n");
 
     #if defined(STM32WB)
     // STM32WB: IPCC transport, no external controller
@@ -492,8 +489,6 @@ void mp_bluetooth_hci_poll(void) {
 
 // Initialize Zephyr port (called early in initialization)
 void mp_bluetooth_zephyr_port_init(void) {
-    debug_printf("mp_bluetooth_zephyr_port_init: ENTER\n");
-
     // Force linker to keep __device_dts_ord_0 by referencing it
     // This prevents garbage collection with --gc-sections
     // Use volatile to prevent compiler from optimizing away the reference
@@ -501,15 +496,12 @@ void mp_bluetooth_zephyr_port_init(void) {
     volatile const void *keep_device = &__device_dts_ord_0;
     (void)keep_device;
 
-    debug_printf("mp_bluetooth_zephyr_port_init: Initializing soft timer\n");
     soft_timer_static_init(
         &mp_zephyr_hci_soft_timer,
         SOFT_TIMER_MODE_ONE_SHOT,
         0,
         mp_zephyr_hci_soft_timer_callback
         );
-
-    debug_printf("mp_bluetooth_zephyr_port_init: EXIT\n");
 }
 
 // Schedule HCI poll in N milliseconds
