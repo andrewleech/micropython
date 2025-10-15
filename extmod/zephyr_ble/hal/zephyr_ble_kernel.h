@@ -114,4 +114,14 @@ static inline bool k_is_pre_kernel(void) {
     return false;
 }
 
+// --- Fatal Error Handlers ---
+
+// Fatal error handler - triggers a panic/abort
+// Used by BT_ASSERT when CONFIG_BT_ASSERT_PANIC is enabled
+NORETURN void k_panic(void);
+
+// Recoverable error handler - logs error but continues
+// Used by BT_ASSERT when CONFIG_BT_ASSERT_PANIC is disabled
+void k_oops(void);
+
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_KERNEL_H

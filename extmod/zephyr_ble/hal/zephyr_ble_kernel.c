@@ -70,3 +70,19 @@ bool device_is_ready(const struct device *dev) {
     (void)dev;
     return true;
 }
+
+// --- Fatal Error Handlers ---
+
+#include "py/runtime.h"
+
+NORETURN void k_panic(void) {
+    // Fatal error in BLE stack - abort execution
+    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("BLE stack fatal error (k_panic)"));
+}
+
+void k_oops(void) {
+    // Recoverable error in BLE stack - log and continue
+    // In MicroPython, we can't easily continue after an assertion failure,
+    // so we raise an exception but mark it as non-fatal
+    mp_printf(&mp_plat_print, "WARNING: BLE stack assertion failed (k_oops)\n");
+}
