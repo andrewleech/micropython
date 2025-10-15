@@ -343,13 +343,14 @@ int mp_bluetooth_init(void) {
             return bt_err_to_errno(ret);
         }
         DEBUG_printf("BLE initialization successful!\n");
-        
-        #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
-        bt_le_scan_cb_register(&mp_bluetooth_zephyr_gap_scan_cb_struct);
-        #endif
     } else {
         DEBUG_printf("BLE already initialized (state=%d)\n", mp_bluetooth_zephyr_ble_state);
     }
+
+    #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
+    // Register scan callback every time we activate (it was unregistered during deinit)
+    bt_le_scan_cb_register(&mp_bluetooth_zephyr_gap_scan_cb_struct);
+    #endif
 
     mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE;
 
