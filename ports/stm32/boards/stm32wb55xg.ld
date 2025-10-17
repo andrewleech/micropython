@@ -29,30 +29,8 @@ _micropy_hw_internal_flash_storage_ram_cache_start = _micropy_hw_internal_flash_
 _estack = _micropy_hw_internal_flash_storage_ram_cache_start - _estack_reserve;
 _sstack = _estack - 16K;
 
-/* NOTE: For Zephyr BLE integration, .noinit sections are placed by the linker */
-/* after .bss and must not be overlapped by the heap. We reserve 20KB for .noinit. */
-_heap_start = _ebss + 20K; /* heap starts after .noinit (Zephyr net_buf pools) */
+/* heap_end is defined here, heap_start is defined after .bss in common_bss_heap_stack.ld */
 _heap_end = _sstack;
 
 _micropy_hw_internal_flash_storage_start = ORIGIN(FLASH_FS);
 _micropy_hw_internal_flash_storage_end   = ORIGIN(FLASH_FS) + LENGTH(FLASH_FS);
-
-SECTIONS
-{
-    /* Put all IPCC tables into SRAM2A. */
-    .ram2a_bss :
-    {
-        . = ALIGN(4);
-        . = . + 64; /* Leave room for the mb_ref_table_t (assuming IPCCDBA==0). */
-        *rfcore.o(.bss.ipcc_mem_*)
-        . = ALIGN(4);
-    } >RAM2A
-
-    /* Put all IPCC buffers into SRAM2B. */
-    .ram2b_bss :
-    {
-        . = ALIGN(4);
-        *rfcore.o(.bss.ipcc_membuf_*)
-        . = ALIGN(4);
-    } >RAM2B
-}
