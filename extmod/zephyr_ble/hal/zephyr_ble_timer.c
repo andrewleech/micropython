@@ -28,7 +28,11 @@
 #include "py/runtime.h"
 #include "zephyr_ble_timer.h"
 
-#define DEBUG_TIMER_printf(...) // printf(__VA_ARGS__)
+#if ZEPHYR_BLE_DEBUG
+#define DEBUG_TIMER_printf(...) mp_printf(&mp_plat_print, "TIMER: " __VA_ARGS__)
+#else
+#define DEBUG_TIMER_printf(...) do {} while (0)
+#endif
 
 // Global linked list of timers (similar to NimBLE callouts)
 static struct k_timer *global_timer = NULL;

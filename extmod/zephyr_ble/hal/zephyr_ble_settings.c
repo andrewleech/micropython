@@ -36,3 +36,33 @@ int bt_settings_store_keys(const bt_addr_le_t *peer, uint8_t id) {
     // Phase 1: RAM-only, no persistent key storage
     return 0;
 }
+
+// Stub: Decode settings key
+int bt_settings_decode_key(const char *key, bt_addr_le_t *addr) {
+    (void)key;
+    (void)addr;
+    // Phase 1: No settings support
+    return -1;  // Error - key not found
+}
+
+// Stub: Get next component of settings name
+int settings_name_next(const char *name, const char **next) {
+    (void)name;
+    (void)next;
+    // Phase 1: No settings support
+    return 0;  // No more components
+}
+
+// Stub: Delete CCC settings
+int bt_settings_delete_ccc(uint8_t id, const bt_addr_le_t *addr) {
+    (void)id;
+    (void)addr;
+    return 0;
+}
+
+// Stub: Delete CF settings
+int bt_settings_delete_cf(uint8_t id, const bt_addr_le_t *addr) {
+    (void)id;
+    (void)addr;
+    return 0;
+}

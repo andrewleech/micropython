@@ -31,11 +31,23 @@
 
 #include <stddef.h>
 
+// Forward declare bt_dev to detect initialization work
+// bt_dev is defined in Zephyr's hci_core.c
+struct bt_dev {
+    struct k_work init;
+    // ... other fields not relevant for detection
+};
+extern struct bt_dev bt_dev;
+
 // CONTAINER_OF macro (standard container_of pattern)
 #define CONTAINER_OF(ptr, type, field) \
     ((type *)(((char *)(ptr)) - offsetof(type, field)))
 
-#define DEBUG_WORK_printf(...) // mp_printf(&mp_plat_print, __VA_ARGS__)
+#if ZEPHYR_BLE_DEBUG
+#define DEBUG_WORK_printf(...) mp_printf(&mp_plat_print, "WORK: " __VA_ARGS__)
+#else
+#define DEBUG_WORK_printf(...) do {} while (0)
+#endif
 
 // Global linked list of work queues (similar to NimBLE's global_eventq)
 static struct k_work_q *global_work_q = NULL;
@@ -43,6 +55,10 @@ static struct k_work_q *global_work_q = NULL;
 // Default system work queue (Zephyr's k_sys_work_q)
 // Must be non-static to be accessible from Zephyr BLE host code
 struct k_work_q k_sys_work_q = {0};
+
+// Initialization work queue (for bt_dev.init work only)
+// Processed synchronously from mp_bluetooth_init() wait loop
+static struct k_work_q k_init_work_q = {0};
 
 // --- Work Queue Management ---
 
@@ -126,7 +142,17 @@ static int k_work_submit_internal(struct k_work_q *queue, struct k_work *work) {
 }
 
 int k_work_submit(struct k_work *work) {
-    // Submit to system work queue
+    // Route bt_dev.init to initialization queue
+    // This allows synchronous processing from mp_bluetooth_init() wait loop
+    if (work == &bt_dev.init) {
+        if (!k_init_work_q.head && !k_init_work_q.nextq) {
+            k_work_queue_init(&k_init_work_q);
+            k_init_work_q.name = "INIT WQ";
+        }
+        return k_work_submit_internal(&k_init_work_q, work);
+    }
+
+    // All other work goes to system work queue
     if (!k_sys_work_q.head && !k_sys_work_q.nextq) {
         k_work_queue_init(&k_sys_work_q);
         k_sys_work_q.name = "SYS WQ";
@@ -290,10 +316,28 @@ int k_work_delayable_busy_get(const struct k_work_delayable *dwork) {
 
 // --- MicroPython Integration ---
 
-// Called by mp_bluetooth_hci_poll() to process all pending work
+// Recursion guards for work processing
+static volatile bool regular_work_processor_running = false;
+static volatile bool init_work_processor_running = false;
+
+// Called by mp_bluetooth_hci_poll() to process all pending work (regular work queues only)
 void mp_bluetooth_zephyr_work_process(void) {
-    // Process all work queues (similar to NimBLE's eventq_run_all)
+    // Prevent recursion: If we're called from within a work handler (via k_sem_take → wfi),
+    // skip processing to avoid deadlock
+    if (regular_work_processor_running) {
+        DEBUG_WORK_printf("work_process: already running, skipping (recursion prevention)\n");
+        return;
+    }
+
+    regular_work_processor_running = true;
+
+    // Process all work queues EXCEPT k_init_work_q (similar to NimBLE's eventq_run_all)
     for (struct k_work_q *q = global_work_q; q != NULL; q = q->nextq) {
+        // Skip initialization work queue (processed separately by mp_bluetooth_zephyr_work_process_init)
+        if (q == &k_init_work_q) {
+            continue;
+        }
+
         while (q->head != NULL) {
             // Dequeue work item
             struct k_work *work = q->head;
@@ -321,4 +365,89 @@ void mp_bluetooth_zephyr_work_process(void) {
             }
         }
     }
+
+    regular_work_processor_running = false;
+}
+
+// Called by mp_bluetooth_init() wait loop to process initialization work synchronously
+void mp_bluetooth_zephyr_work_process_init(void) {
+    // Prevent recursion (though unlikely since init work should be synchronous)
+    if (init_work_processor_running) {
+        DEBUG_WORK_printf("init_work_process: already running, skipping\n");
+        return;
+    }
+
+    init_work_processor_running = true;
+
+    // Process ONLY the initialization work queue
+    struct k_work_q *q = &k_init_work_q;
+
+    while (q->head != NULL) {
+        // Dequeue work item
+        struct k_work *work = q->head;
+        q->head = work->next;
+
+        if (q->head) {
+            q->head->prev = NULL;
+        }
+
+        work->next = NULL;
+        work->prev = NULL;
+        work->pending = false;
+
+        // Execute work handler
+        DEBUG_WORK_printf("init_work_execute(%p, handler=%p)\n", work, work->handler);
+        if (work->handler) {
+            work->handler(work);
+        }
+        DEBUG_WORK_printf("init_work_execute(%p) done\n", work);
+
+        // Check if work was re-enqueued during execution
+        if (work->pending) {
+            DEBUG_WORK_printf("  --> init work re-enqueued, stopping queue processing\n");
+            break;
+        }
+    }
+
+    init_work_processor_running = false;
+}
+
+// --- Init Work Helper Functions ---
+
+// Check if initialization work is pending in the init work queue
+// Called from mp_bluetooth_init() wait loop to check if init work is available
+bool mp_bluetooth_zephyr_init_work_pending(void) {
+    MICROPY_PY_BLUETOOTH_ENTER
+    bool pending = (k_init_work_q.head != NULL);
+    MICROPY_PY_BLUETOOTH_EXIT
+    return pending;
+}
+
+// Get and dequeue init work without executing it
+// Returns NULL if no work available
+// Caller must execute work->handler(work) in main loop context
+// This allows the handler to yield via k_sem_take() → mp_event_wait_*()
+struct k_work *mp_bluetooth_zephyr_init_work_get(void) {
+    MICROPY_PY_BLUETOOTH_ENTER
+
+    struct k_work *work = k_init_work_q.head;
+    if (work == NULL) {
+        MICROPY_PY_BLUETOOTH_EXIT
+        return NULL;
+    }
+
+    // Dequeue work item (remove from queue, mark as not pending)
+    k_init_work_q.head = work->next;
+    if (k_init_work_q.head) {
+        k_init_work_q.head->prev = NULL;
+    }
+
+    work->next = NULL;
+    work->prev = NULL;
+    work->pending = false;
+
+    DEBUG_WORK_printf("init_work_get: dequeued work=%p, handler=%p\n", work, work->handler);
+
+    MICROPY_PY_BLUETOOTH_EXIT
+    return work;
 }

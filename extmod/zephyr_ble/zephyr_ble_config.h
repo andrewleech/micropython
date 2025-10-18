@@ -65,19 +65,13 @@ extern const struct device __device_dts_ord_0;
 // #define ZEPHYR_INCLUDE_DRIVERS_BLUETOOTH_H_
 
 // Problematic Zephyr system headers that conflict with our HAL wrappers
-#define INCLUDE_ZEPHYR_SYS_ITERABLE_SECTIONS_H_
+// NOTE: ITERABLE_SECTIONS_H is NOT blocked - net_buf pools require this feature
 // NOTE: DO NOT block toolchain.h - it's needed for __printf_like and other compiler macros
 // #define ZEPHYR_INCLUDE_TOOLCHAIN_H_
 #define ZEPHYR_INCLUDE_KERNEL_THREAD_STACK_H
 
-// Stub macros for iterable sections (feature disabled in MicroPython)
-// These macros are normally defined in sys/iterable_sections.h
-#define STRUCT_SECTION_ITERABLE(struct_type, varname) struct struct_type varname
-
-// STRUCT_SECTION_FOREACH iterates over linker sections (disabled in MicroPython)
-// This is used for callback registration - stub to empty loop that never executes
-#define STRUCT_SECTION_FOREACH(struct_type, varname) \
-    for (struct struct_type *varname = NULL; varname != NULL; varname = NULL)
+// Block printk.h to avoid conflicts with our stub
+#define ZEPHYR_INCLUDE_SYS_PRINTK_H_
 
 // System initialization macro (no-op in MicroPython)
 // SYS_INIT(func, level, priority) registers an init function
@@ -89,31 +83,6 @@ extern const struct device __device_dts_ord_0;
 
 // Init levels (not used, but referenced in SYS_INIT calls)
 #define POST_KERNEL 0
-
-// Additional iterable section macros used by net_buf
-// Note: In MicroPython we don't use linker sections, so these return NULL/0
-// This disables net_buf pool iteration which is only used for debug/stats
-#define STRUCT_SECTION_START_EXTERN(struct_type) /* nothing */
-#define STRUCT_SECTION_START(struct_type) ((struct struct_type *)NULL)
-#define STRUCT_SECTION_END(struct_type) ((struct struct_type *)NULL)
-// STRUCT_SECTION_COUNT can be called with 1 or 2 args:
-// - STRUCT_SECTION_COUNT(type) returns 0
-// - STRUCT_SECTION_COUNT(type, &count) sets *count=0
-#define __STRUCT_SECTION_COUNT_2(struct_type, pcount) \
-    ((void)(sizeof(struct struct_type)), *(size_t *)(pcount) = 0, 0)
-#define __STRUCT_SECTION_COUNT_1(struct_type) 0
-#define __GET_MACRO(_1, _2, NAME, ...) NAME
-#define STRUCT_SECTION_COUNT(...) \
-    __GET_MACRO(__VA_ARGS__, __STRUCT_SECTION_COUNT_2, __STRUCT_SECTION_COUNT_1)(__VA_ARGS__)
-#define STRUCT_SECTION_GET(struct_type, i, dst) \
-    do { (void)(i); *(dst) = NULL; } while (0)
-// TYPE_SECTION_* macros don't get the struct prefix
-// These are used for pointer arithmetic in pool_id(), so cast to struct pointer
-#define TYPE_SECTION_START(secname) ((struct secname *)NULL)
-#define TYPE_SECTION_END(secname) ((struct secname *)NULL)
-#define TYPE_SECTION_COUNT(secname) 0
-#define TYPE_SECTION_START_EXTERN(type, secname) /* nothing */
-#define TYPE_SECTION_END_EXTERN(type, secname) /* nothing */
 
 // Atomic bitmap operations (simplified stubs)
 // Normally defined in sys/atomic.h
@@ -485,8 +454,9 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_BUF_CMD_TX_COUNT 4
 #define CONFIG_BT_BUF_CMD_TX_SIZE 68
 
-// Flow control (disabled for simplicity in MicroPython)
-#define CONFIG_BT_HCI_ACL_FLOW_CONTROL 0
+// Flow control (disabled - STM32WB controller doesn't support HOST_BUFFER_SIZE command)
+// Note: Must use #undef, not define to 0, because Zephyr uses #if defined() checks
+#undef CONFIG_BT_HCI_ACL_FLOW_CONTROL
 
 // --- Advanced Features - Disable for Phase 1 ---
 // TODO: Enable after adding iso.c and cs.c
@@ -716,7 +686,18 @@ extern const struct device __device_dts_ord_0;
 // Forward declarations for stub functions (defined in HAL layer)
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdio.h>  // For snprintf
 int lll_csrand_get(void *buf, size_t len);  // Controller crypto stub
+
+// Stub out printk and snprintk to prevent them from hanging during BLE initialization
+// printk may try to use UART or other console mechanisms that aren't ready
+// or require scheduler activity. Instead, use mp_printf or disable entirely.
+#ifndef printk
+#define printk(...) do { } while (0)
+#endif
+#ifndef snprintk
+#define snprintk snprintf
+#endif
 
 // Missing errno codes - add platform-independent definitions
 // ESHUTDOWN is used by Zephyr BLE but may not be defined on all platforms

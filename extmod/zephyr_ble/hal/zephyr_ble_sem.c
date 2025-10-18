@@ -33,7 +33,11 @@
 #include <stddef.h>
 #include <stdio.h>
 
+#if ZEPHYR_BLE_DEBUG
+#define DEBUG_SEM_printf(...) mp_printf(&mp_plat_print, "SEM: " __VA_ARGS__)
+#else
 #define DEBUG_SEM_printf(...) do {} while (0)
+#endif
 
 // Forward declaration of HCI UART processing function
 // This will be implemented when we integrate the HCI layer
@@ -75,8 +79,8 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
 
     DEBUG_SEM_printf("  --> waiting (timeout=%u ms)\n", timeout_ms);
 
-    // Wait pattern following BTstack/NimBLE model:
-    // Use mp_event_wait to allow background processing (IRQ, UART, HCI, etc)
+    // Wait pattern: Process HCI responses while waiting for semaphore
+    // This prevents deadlock when work queue handler blocks waiting for HCI command response
     while (sem->count == 0) {
         // Check timeout (handles wrap-around correctly using unsigned arithmetic)
         uint32_t elapsed = mp_hal_ticks_ms() - t0;
@@ -85,22 +89,18 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
             return -EAGAIN;
         }
 
-        // Process pending work (keeps BLE stack responsive)
-        mp_bluetooth_zephyr_work_process();
-
-        // Process HCI UART (if implemented)
+        // Process HCI packets and work queues while waiting
+        // mp_bluetooth_zephyr_hci_uart_wfi() will process HCI responses if BLE is initialized
         mp_bluetooth_zephyr_hci_uart_wfi();
 
-        // Wait for events with proper background processing
-        // This allows IRQ handlers (UART, timers, etc) to run and signal the semaphore
+        // Always yield to prevent busy-waiting
+        // This allows scheduled tasks to run and prevents locking up the system
         if (timeout_ms == 0xFFFFFFFF) {
-            // K_FOREVER: wait indefinitely
             mp_event_wait_indefinite();
         } else {
-            // Timed wait: wait for remaining time or until interrupt
-            uint32_t remaining = timeout_ms - elapsed;
+            uint32_t remaining = timeout_ms - (mp_hal_ticks_ms() - t0);
             if (remaining > 0) {
-                mp_event_wait_ms(remaining);
+                mp_event_wait_ms(MIN(remaining, 10));  // Yield for up to 10ms
             }
         }
     }

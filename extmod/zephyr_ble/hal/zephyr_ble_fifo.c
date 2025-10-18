@@ -31,7 +31,7 @@
 #include "zephyr_ble_atomic.h"
 
 // Debug flag (enabled after first successful print to avoid boot issues)
-static volatile int debug_enabled = 0;
+static volatile int debug_enabled = 1;  // Enable debug immediately
 
 #define DEBUG_FIFO(fmt, ...) \
     do { \

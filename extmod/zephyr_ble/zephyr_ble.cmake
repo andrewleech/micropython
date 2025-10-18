@@ -62,10 +62,17 @@ target_sources(micropy_extmod_zephyr_ble INTERFACE
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/crypto_psa.c
 )
 
+# Debug output for Zephyr BLE (enabled by default for development)
+# Set ZEPHYR_BLE_DEBUG=0 in CMake command to disable debug output
+if(NOT DEFINED ZEPHYR_BLE_DEBUG)
+    set(ZEPHYR_BLE_DEBUG 1)
+endif()
+
 target_compile_definitions(micropy_extmod_zephyr_ble INTERFACE
     MICROPY_BLUETOOTH_ZEPHYR=1
     MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS=1
     MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING=1
+    ZEPHYR_BLE_DEBUG=${ZEPHYR_BLE_DEBUG}
 )
 
 # Force-include config header before any other includes (C files only, not ASM) to:

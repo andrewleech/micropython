@@ -5,6 +5,11 @@ ifeq ($(MICROPY_BLUETOOTH_ZEPHYR),1)
 EXTMOD_DIR = extmod
 ZEPHYR_BLE_EXTMOD_DIR = $(EXTMOD_DIR)/zephyr_ble
 
+# Debug output for Zephyr BLE (enabled by default for development)
+# Set ZEPHYR_BLE_DEBUG=0 on make command line to disable debug output
+ZEPHYR_BLE_DEBUG ?= 1
+CFLAGS_EXTMOD += -DZEPHYR_BLE_DEBUG=$(ZEPHYR_BLE_DEBUG)
+
 SRC_EXTMOD_C += $(ZEPHYR_BLE_EXTMOD_DIR)/modbluetooth_zephyr.c
 SRC_EXTMOD_C += $(ZEPHYR_BLE_EXTMOD_DIR)/net_buf_pool_registry.c
 # hci_driver_stub.c not needed when port provides its own HCI driver (e.g., mpzephyrport.c)

@@ -27,8 +27,13 @@
 #include "zephyr_ble_mutex.h"
 
 #include <assert.h>
+#include "py/runtime.h"
 
-#define DEBUG_MUTEX_printf(...) // printf(__VA_ARGS__)
+#if ZEPHYR_BLE_DEBUG
+#define DEBUG_MUTEX_printf(...) mp_printf(&mp_plat_print, "MUTEX: " __VA_ARGS__)
+#else
+#define DEBUG_MUTEX_printf(...) do {} while (0)
+#endif
 
 // --- Mutex API ---
 

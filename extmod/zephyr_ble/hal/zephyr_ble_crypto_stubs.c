@@ -141,3 +141,51 @@ int bt_dh_key_gen(const uint8_t remote_pk[64], bt_dh_key_cb_t cb) {
     }
     return -1;
 }
+
+// g2 function for LE Secure Connections numeric comparison
+int bt_crypto_g2(const uint8_t u[32], const uint8_t v[32],
+                 const uint8_t x[16], const uint8_t y[16], uint32_t *passkey) {
+    (void)u;
+    (void)v;
+    (void)x;
+    (void)y;
+    (void)passkey;
+    // Return error - not implemented
+    return -1;
+}
+
+// Standard C library function strtoul
+// Convert string to unsigned long
+// This is needed by settings code but not available in all embedded libcs
+unsigned long strtoul(const char *nptr, char **endptr, int base) {
+    unsigned long result = 0;
+    int digit;
+
+    (void)base;  // Simple implementation ignores base
+
+    if (!nptr) {
+        if (endptr) *endptr = (char*)nptr;
+        return 0;
+    }
+
+    // Skip whitespace
+    while (*nptr == ' ' || *nptr == '\t') nptr++;
+
+    // Parse digits
+    while (*nptr) {
+        if (*nptr >= '0' && *nptr <= '9') {
+            digit = *nptr - '0';
+        } else if (*nptr >= 'a' && *nptr <= 'f') {
+            digit = *nptr - 'a' + 10;
+        } else if (*nptr >= 'A' && *nptr <= 'F') {
+            digit = *nptr - 'A' + 10;
+        } else {
+            break;
+        }
+        result = result * 16 + digit;  // Assuming hex
+        nptr++;
+    }
+
+    if (endptr) *endptr = (char*)nptr;
+    return result;
+}

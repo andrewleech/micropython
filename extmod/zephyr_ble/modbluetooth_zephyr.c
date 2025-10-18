@@ -40,7 +40,25 @@
 #include <zephyr/device.h>
 #include "extmod/modbluetooth.h"
 
+#if ZEPHYR_BLE_DEBUG
 #define DEBUG_printf(...) mp_printf(&mp_plat_print, "BLE: " __VA_ARGS__)
+static int debug_seq = 0;
+#define DEBUG_SEQ_printf(...) mp_printf(&mp_plat_print, "[%04d] " __VA_ARGS__, ++debug_seq)
+static int call_depth = 0;
+#define DEBUG_ENTER(name) do { \
+    mp_printf(&mp_plat_print, "%*s--> %s\n", call_depth*2, "", name); \
+    call_depth++; \
+} while(0)
+#define DEBUG_EXIT(name) do { \
+    call_depth--; \
+    mp_printf(&mp_plat_print, "%*s<-- %s\n", call_depth*2, "", name); \
+} while(0)
+#else
+#define DEBUG_printf(...) do {} while (0)
+#define DEBUG_SEQ_printf(...) do {} while (0)
+#define DEBUG_ENTER(name) do {} while (0)
+#define DEBUG_EXIT(name) do {} while (0)
+#endif
 
 #define BLE_HCI_SCAN_ITVL_MIN 0x10
 #define BLE_HCI_SCAN_ITVL_MAX 0xffff
@@ -117,6 +135,12 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
 } mp_bluetooth_zephyr_root_pointers_t;
 
 static int mp_bluetooth_zephyr_ble_state;
+
+// BLE initialization completion tracking (-1 = pending, 0 = success, >0 = error code)
+static volatile int mp_bluetooth_zephyr_bt_enable_result = -1;
+
+// Timeout for BLE initialization (milliseconds)
+#define ZEPHYR_BLE_STARTUP_TIMEOUT 5000
 
 #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
 static int mp_bluetooth_zephyr_gap_scan_state;
@@ -228,6 +252,12 @@ static void reverse_addr_byte_order(uint8_t *addr_out, const bt_addr_le_t *addr_
     }
 }
 
+// Callback for bt_enable() completion
+static void mp_bluetooth_zephyr_bt_ready_cb(int err) {
+    DEBUG_printf("bt_ready_cb: err=%d\n", err);
+    mp_bluetooth_zephyr_bt_enable_result = err;
+}
+
 #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
 void gap_scan_cb_recv(const struct bt_le_scan_recv_info *info, struct net_buf_simple *buf) {
     DEBUG_printf("gap_scan_cb_recv: adv_type=%d\n", info->adv_type);
@@ -267,6 +297,9 @@ void gap_scan_cb_timeout(struct k_timer *timer_id) {
 #endif
 
 int mp_bluetooth_init(void) {
+    // Firmware version marker for debugging
+    mp_printf(&mp_plat_print, "\n=== FIRMWARE VERSION: DEBUG_PTR_v2 ===\n\n");
+
     DEBUG_printf("mp_bluetooth_init\n");
 
     // Clean up if necessary.
@@ -318,30 +351,79 @@ int mp_bluetooth_init(void) {
         // Initialize Zephyr BLE host stack
         // bt_enable can only be called once
 
-        // Enable FIFO debug output before bt_enable()
-        extern void mp_bluetooth_zephyr_fifo_enable_debug(void);
-        mp_bluetooth_zephyr_fifo_enable_debug();
+        // Reset completion flag
+        mp_bluetooth_zephyr_bt_enable_result = -1;
 
-        // Debug: Check HCI device structure before calling bt_enable()
-        #include <zephyr/device.h>
-        extern const struct device *const mp_bluetooth_zephyr_hci_dev;
-        mp_printf(&mp_plat_print, "[DEBUG] mp_bluetooth_zephyr_hci_dev = %p\n", mp_bluetooth_zephyr_hci_dev);
-        if (mp_bluetooth_zephyr_hci_dev) {
-            mp_printf(&mp_plat_print, "[DEBUG]   name = %s\n", mp_bluetooth_zephyr_hci_dev->name);
-            mp_printf(&mp_plat_print, "[DEBUG]   state = %p\n", mp_bluetooth_zephyr_hci_dev->state);
-            if (mp_bluetooth_zephyr_hci_dev->state) {
-                mp_printf(&mp_plat_print, "[DEBUG]     initialized = %d\n", mp_bluetooth_zephyr_hci_dev->state->initialized);
-                mp_printf(&mp_plat_print, "[DEBUG]     init_res = %d\n", mp_bluetooth_zephyr_hci_dev->state->init_res);
-            }
-        }
-
+        // Call bt_enable() with ready callback
         DEBUG_printf("Calling bt_enable()...\n");
-        int ret = bt_enable(NULL);
+        int ret = bt_enable(mp_bluetooth_zephyr_bt_ready_cb);
         DEBUG_printf("bt_enable returned %d\n", ret);
         if (ret) {
             mp_printf(&mp_plat_print, "ERROR: bt_enable failed with code %d\n", ret);
             return bt_err_to_errno(ret);
         }
+
+        // Wait synchronously until initialization completes (same pattern as NimBLE)
+        // Get init work once and execute it in main loop context, allowing it to yield
+        DEBUG_printf("Waiting for BLE initialization to complete...\n");
+        DEBUG_SEQ_printf("Starting wait loop\n");
+        mp_uint_t timeout_start_ticks_ms = mp_hal_ticks_ms();
+
+        // Declare init work pointer (dequeued once, executed until complete)
+        extern struct k_work *mp_bluetooth_zephyr_init_work_get(void);
+        struct k_work *init_work = NULL;
+
+        while (mp_bluetooth_zephyr_bt_enable_result < 0) {  // -1 = pending
+            uint32_t elapsed = mp_hal_ticks_ms() - timeout_start_ticks_ms;
+            if (elapsed > ZEPHYR_BLE_STARTUP_TIMEOUT) {
+                DEBUG_printf("BLE initialization timeout after %u ms\n", elapsed);
+                DEBUG_SEQ_printf("Timeout reached\n");
+                break;
+            }
+
+            // Get and execute init work once (bt_dev.init work item)
+            // The handler (bt_init) will block internally in k_sem_take() loops,
+            // but those loops yield via mp_event_wait_ms(), allowing scheduler to run
+            if (init_work == NULL) {
+                DEBUG_SEQ_printf("Attempting to get init work\n");
+                init_work = mp_bluetooth_zephyr_init_work_get();
+                if (init_work != NULL && init_work->handler != NULL) {
+                    DEBUG_printf("Got init work=%p, handler=%p\n", init_work, init_work->handler);
+                    DEBUG_SEQ_printf("Executing init work handler\n");
+                    DEBUG_ENTER("init_work->handler");
+                    init_work->handler(init_work);
+                    DEBUG_EXIT("init_work->handler");
+                    DEBUG_printf("Init work handler completed\n");
+                    DEBUG_SEQ_printf("Init work handler done\n");
+                    // Handler has completed (bt_init ran to completion)
+                    // bt_ready_cb should have been called and set result flag
+                } else {
+                    DEBUG_printf("No init work available (work=%p)\n", init_work);
+                    DEBUG_SEQ_printf("No init work found\n");
+                }
+            }
+
+            // Yield and run scheduler to process HCI responses
+            // This delivers HCI responses that signal semaphores in init work
+            DEBUG_SEQ_printf("Wait loop: elapsed=%u ms, result=%d\n", elapsed, mp_bluetooth_zephyr_bt_enable_result);
+            mp_event_wait_ms(1);
+        }
+
+        // Check result
+        if (mp_bluetooth_zephyr_bt_enable_result != 0) {
+            int err = mp_bluetooth_zephyr_bt_enable_result;
+            mp_bluetooth_deinit();
+            if (err < 0) {
+                // Timeout
+                DEBUG_printf("BLE initialization failed: timeout\n");
+                return MP_ETIMEDOUT;
+            } else {
+                // Zephyr error code
+                DEBUG_printf("BLE initialization failed: error=%d\n", err);
+                return bt_err_to_errno(err);
+            }
+        }
+
         DEBUG_printf("BLE initialization successful!\n");
     } else {
         DEBUG_printf("BLE already initialized (state=%d)\n", mp_bluetooth_zephyr_ble_state);

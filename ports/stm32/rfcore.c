@@ -58,7 +58,7 @@
 #define DEBUG_printf(...) printf("rfcore: " __VA_ARGS__)
 
 // Define to 1 to print traces of HCI packets
-#define HCI_TRACE (0)
+#define HCI_TRACE (1)
 
 #define IPCC_CH_BLE         (LL_IPCC_CHANNEL_1) // BLE HCI command and response
 #define IPCC_CH_SYS         (LL_IPCC_CHANNEL_2) // system HCI command and response
@@ -504,6 +504,7 @@ static ssize_t tl_sys_hci_cmd_resp(uint16_t opcode, const uint8_t *buf, size_t l
 }
 
 static int tl_ble_wait_resp(void) {
+    DEBUG_printf("tl_ble_wait_resp: waiting for response\n");
     uint32_t t0 = mp_hal_ticks_ms();
     while (!LL_C2_IPCC_IsActiveFlag_CHx(IPCC, IPCC_CH_BLE)) {
         if (mp_hal_ticks_ms() - t0 > BLE_ACK_TIMEOUT_MS) {
@@ -512,17 +513,21 @@ static int tl_ble_wait_resp(void) {
         }
     }
 
+    DEBUG_printf("tl_ble_wait_resp: response received, processing\n");
     // C2 set IPCC flag -- process the data, clear the flag, and re-enable IRQs.
     tl_check_msg(&ipcc_mem_ble_evt_queue, IPCC_CH_BLE, NULL);
+    DEBUG_printf("tl_ble_wait_resp: done\n");
     return 0;
 }
 
 // Synchronously send a BLE command.
 static void tl_ble_hci_cmd_resp(uint16_t opcode, const uint8_t *buf, size_t len) {
+    DEBUG_printf("tl_ble_hci_cmd_resp: opcode=0x%04x, len=%u\n", opcode, (unsigned)len);
     // Poll for completion rather than wait for IRQ->scheduler.
     LL_C1_IPCC_DisableReceiveChannel(IPCC, IPCC_CH_BLE);
     tl_hci_cmd(ipcc_membuf_ble_cmd_buf, IPCC_CH_BLE, HCI_KIND_BT_CMD, opcode, buf, len);
     tl_ble_wait_resp();
+    DEBUG_printf("tl_ble_hci_cmd_resp: complete\n");
 }
 
 /******************************************************************************/
@@ -624,15 +629,20 @@ bool rfcore_ble_reset(void) {
     DEBUG_printf("rfcore_ble_reset\n");
 
     // Clear any outstanding messages from ipcc_init.
+    DEBUG_printf("rfcore_ble_reset: clearing messages\n");
     tl_check_msg(&ipcc_mem_sys_queue, IPCC_CH_SYS, NULL);
 
     // Configure and reset the BLE controller.
+    DEBUG_printf("rfcore_ble_reset: sending BLE_INIT\n");
     int ret = tl_sys_hci_cmd_resp(HCI_OPCODE(OGF_VENDOR, OCF_BLE_INIT), (const uint8_t *)&ble_init_params, sizeof(ble_init_params), 500);
+    DEBUG_printf("rfcore_ble_reset: BLE_INIT returned %d\n", ret);
 
     if (ret == -MP_ETIMEDOUT) {
         return false;
     }
+    DEBUG_printf("rfcore_ble_reset: sending HCI_RESET\n");
     tl_ble_hci_cmd_resp(HCI_OPCODE(0x03, 0x0003), NULL, 0);
+    DEBUG_printf("rfcore_ble_reset: HCI_RESET completed\n");
     return true;
 }
 

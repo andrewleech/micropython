@@ -55,8 +55,15 @@
 #include <zephyr/bluetooth/buf.h>
 #pragma GCC diagnostic pop
 
-#define debug_printf(...) mp_printf(&mp_plat_print, "mpzephyrport: " __VA_ARGS__)
-#define error_printf(...) mp_printf(&mp_plat_print, "mpzephyrport ERROR: " __VA_ARGS__)
+// Debug macros - conditional based on ZEPHYR_BLE_DEBUG
+#if ZEPHYR_BLE_DEBUG
+#define DEBUG_HCI_printf(...) mp_printf(&mp_plat_print, "HCI: " __VA_ARGS__)
+#else
+#define DEBUG_HCI_printf(...) do {} while (0)
+#endif
+
+// Error messages are always printed
+#define error_printf(...) mp_printf(&mp_plat_print, "HCI ERROR: " __VA_ARGS__)
 
 // H:4 packet types
 #define H4_CMD  0x01
@@ -269,12 +276,40 @@ static void h4_uart_byte_callback(uint8_t byte) {
 
 // This is called by soft_timer and executes at PendSV/scheduler level
 static void mp_zephyr_hci_soft_timer_callback(soft_timer_entry_t *self) {
+    #if ZEPHYR_BLE_DEBUG
+    static int timer_fire_count = 0;
+    timer_fire_count++;
+
+    if (timer_fire_count <= 5) {
+        DEBUG_HCI_printf("[TIMER FIRE #%d]\n", timer_fire_count);
+    }
+    #endif
+
+    // CRITICAL: Reschedule the timer IMMEDIATELY before scheduling the task
+    // This ensures the timer is always active for the next cycle
+    soft_timer_reinsert(&mp_zephyr_hci_soft_timer, 128);
+
+    #if ZEPHYR_BLE_DEBUG
+    if (timer_fire_count <= 5) {
+        DEBUG_HCI_printf("[TIMER FIRE #%d] Rescheduled for 128ms\n", timer_fire_count);
+    }
+    #endif
+
     mp_zephyr_hci_poll_now();
 }
 
 // HCI packet reception handler - called when data arrives
 static void run_zephyr_hci_task(mp_sched_node_t *node) {
     (void)node;
+    #if ZEPHYR_BLE_DEBUG
+    static int call_count = 0;
+    call_count++;
+
+    // Trace first 5 calls
+    if (call_count <= 5) {
+        DEBUG_HCI_printf("[HCI_TASK #%d]\n", call_count);
+    }
+    #endif
 
     // Process Zephyr BLE work queues and semaphores
     mp_bluetooth_zephyr_poll();
@@ -300,6 +335,12 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
     while (mp_bluetooth_hci_uart_readpacket(h4_uart_byte_callback) > 0) {
         // Keep reading while packets are available
     }
+
+    #if ZEPHYR_BLE_DEBUG
+    if (call_count <= 5) {
+        DEBUG_HCI_printf("[HCI_TASK #%d] Done\n", call_count);
+    }
+    #endif
 }
 
 static void mp_zephyr_hci_poll_now(void) {
@@ -313,28 +354,38 @@ void mp_bluetooth_zephyr_hci_uart_wfi(void) {
         return;
     }
 
-    // Process Zephyr work queues (for timers, delayed work, etc)
-    mp_bluetooth_zephyr_work_process();
+    // NOTE: Do NOT call mp_bluetooth_zephyr_work_process() here!
+    // We may already be INSIDE work_process() executing init_work,
+    // and the recursion guard will skip processing anyway.
+    // Instead, directly process HCI packets and scheduled tasks.
 
     // CRITICAL: Run any pending scheduled tasks (e.g., from IPCC interrupt)
     // The IPCC interrupt calls mp_bluetooth_hci_poll_now() which schedules a task
     // that reads the HCI response. We need to run that task!
-    // mp_event_wait_ms(0) runs scheduled tasks and returns immediately
     mp_event_wait_ms(1);
 
     // Check for HCI data that may have arrived already
     mp_bluetooth_hci_uart_readpacket(h4_uart_byte_callback);
 
-    // Deliver any queued RX buffers
+    // Deliver any queued RX buffers directly to BLE stack
     struct net_buf *buf;
     while ((buf = rx_queue_get()) != NULL) {
         recv_cb(hci_dev, buf);
     }
 }
 
+// Stack monitoring helper
+static inline uint32_t get_msp(void) {
+    uint32_t result;
+    __asm volatile ("MRS %0, msp" : "=r" (result));
+    return result;
+}
+
 // Zephyr HCI driver implementation
 
 static int hci_stm32_open(const struct device *dev, bt_hci_recv_t recv) {
+    DEBUG_HCI_printf("hci_stm32_open\n");
+
     hci_dev = dev;
     recv_cb = recv;
 
@@ -348,15 +399,15 @@ static int hci_stm32_open(const struct device *dev, bt_hci_recv_t recv) {
         return ret;
     }
 
-    // Start polling for incoming HCI packets immediately
-    // This is needed for HCI command responses during bt_enable()
-    mp_zephyr_hci_poll_now();
+    // Start the soft timer to begin periodic work queue processing
+    // This starts the timer which will fire and process work queues + HCI packets
+    mp_bluetooth_zephyr_port_poll_in_ms(128);  // Start timer with 128ms delay
 
     return 0;
 }
 
 static int hci_stm32_close(const struct device *dev) {
-    debug_printf("hci_stm32_close\n");
+    DEBUG_HCI_printf("hci_stm32_close\n");
 
     recv_cb = NULL;
     h4_parser_reset();
@@ -395,7 +446,7 @@ static int hci_stm32_send(const struct device *dev, struct net_buf *buf) {
     memcpy(&h4_packet[1], buf->data, buf->len);
 
     // Trace HCI commands being sent
-    mp_printf(&mp_plat_print, "[S] HCI type=0x%02x len=%u\n", h4_type, (unsigned int)total_len);
+    DEBUG_HCI_printf("[SEND] type=0x%02x len=%u\n", h4_type, (unsigned int)total_len);
 
     // Send via port's transport abstraction (UART or IPCC)
     int ret = mp_bluetooth_hci_uart_write(h4_packet, total_len);
@@ -468,7 +519,7 @@ int bt_hci_transport_setup(const struct device *dev) {
 __attribute__((used))
 int bt_hci_transport_teardown(const struct device *dev) {
     (void)dev;
-    debug_printf("bt_hci_transport_teardown\n");
+    DEBUG_HCI_printf("bt_hci_transport_teardown\n");
 
     #if !defined(STM32WB)
     mp_bluetooth_hci_controller_deinit();
@@ -489,6 +540,8 @@ void mp_bluetooth_hci_poll(void) {
 
 // Initialize Zephyr port (called early in initialization)
 void mp_bluetooth_zephyr_port_init(void) {
+    DEBUG_HCI_printf("[INIT] mp_bluetooth_zephyr_port_init CALLED\n");
+
     // Force linker to keep __device_dts_ord_0 by referencing it
     // This prevents garbage collection with --gc-sections
     // Use volatile to prevent compiler from optimizing away the reference
@@ -496,31 +549,46 @@ void mp_bluetooth_zephyr_port_init(void) {
     volatile const void *keep_device = &__device_dts_ord_0;
     (void)keep_device;
 
+    DEBUG_HCI_printf("[INIT] Calling soft_timer_static_init...\n");
     soft_timer_static_init(
         &mp_zephyr_hci_soft_timer,
         SOFT_TIMER_MODE_ONE_SHOT,
         0,
         mp_zephyr_hci_soft_timer_callback
         );
+    DEBUG_HCI_printf("[INIT] soft_timer_static_init completed\n");
 }
 
 // Schedule HCI poll in N milliseconds
 void mp_bluetooth_zephyr_port_poll_in_ms(uint32_t ms) {
+    #if ZEPHYR_BLE_DEBUG
+    static int resched_count = 0;
+    resched_count++;
+
+    if (resched_count <= 5) {
+        DEBUG_HCI_printf("[RESCHEDULE #%d for %ums]\n", resched_count, (unsigned)ms);
+    }
+    #endif
+
     soft_timer_reinsert(&mp_zephyr_hci_soft_timer, ms);
 }
 
 // Debug wrapper for hci_core.c to print device info
 // This avoids including MicroPython headers in Zephyr source files
 void mp_bluetooth_zephyr_debug_device(const struct device *dev) {
-    mp_printf(&mp_plat_print, "[DEBUG hci_core.c] bt_dev.hci = %p\n", dev);
+    #if ZEPHYR_BLE_DEBUG
+    DEBUG_HCI_printf("[DEBUG hci_core.c] bt_dev.hci = %p\n", dev);
     if (dev) {
-        mp_printf(&mp_plat_print, "[DEBUG hci_core.c]   name = %s\n", dev->name);
-        mp_printf(&mp_plat_print, "[DEBUG hci_core.c]   state = %p\n", dev->state);
+        DEBUG_HCI_printf("[DEBUG hci_core.c]   name = %s\n", dev->name);
+        DEBUG_HCI_printf("[DEBUG hci_core.c]   state = %p\n", dev->state);
         if (dev->state) {
-            mp_printf(&mp_plat_print, "[DEBUG hci_core.c]     initialized = %d\n", dev->state->initialized);
-            mp_printf(&mp_plat_print, "[DEBUG hci_core.c]     init_res = %d\n", dev->state->init_res);
+            DEBUG_HCI_printf("[DEBUG hci_core.c]     initialized = %d\n", dev->state->initialized);
+            DEBUG_HCI_printf("[DEBUG hci_core.c]     init_res = %d\n", dev->state->init_res);
         }
     }
+    #else
+    (void)dev;
+    #endif
 }
 
 #endif // MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR

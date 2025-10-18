@@ -175,8 +175,21 @@ int k_work_delayable_busy_get(const struct k_work_delayable *dwork);
 
 // --- MicroPython-specific functions ---
 
-// Called by MicroPython scheduler to process all pending work
+// Called by MicroPython scheduler to process all pending work (regular work queues only)
 void mp_bluetooth_zephyr_work_process(void);
+
+// Called by mp_bluetooth_init() wait loop to process initialization work synchronously
+// This processes only the init work queue and has a separate recursion guard
+void mp_bluetooth_zephyr_work_process_init(void);
+
+// Check if initialization work is pending
+// Returns true if init work is available in the init work queue
+bool mp_bluetooth_zephyr_init_work_pending(void);
+
+// Get and dequeue init work without executing it
+// Returns NULL if no work available
+// Caller must execute work->handler(work) in main loop context to allow yielding
+struct k_work *mp_bluetooth_zephyr_init_work_get(void);
 
 // Get delayable work from work (for internal use)
 // work is embedded in the delayable work structure
