@@ -468,7 +468,8 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_ISO_PERIPHERAL 0
 #define CONFIG_BT_DF 0
 #define CONFIG_BT_CHANNEL_SOUNDING 0
-#define CONFIG_BT_EXT_ADV 0
+#undef CONFIG_BT_EXT_ADV
+#define CONFIG_BT_EXT_ADV_LEGACY_SUPPORT 1
 
 // --- Host Features ---
 #define CONFIG_BT_FILTER_ACCEPT_LIST 1
@@ -653,8 +654,8 @@ extern const struct device __device_dts_ord_0;
 // Periodic advertising sync - disabled
 #define CONFIG_BT_PER_ADV_SYNC_MAX 0
 
-// Extended advertising - disabled
-#define CONFIG_BT_EXT_ADV_MAX_ADV_SET 0
+// Extended advertising - enabled with 1 advertising set
+#define CONFIG_BT_EXT_ADV_MAX_ADV_SET 1
 
 // Device appearance (Generic Computer)
 #define CONFIG_BT_DEVICE_APPEARANCE 0
