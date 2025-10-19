@@ -21,6 +21,7 @@ typedef unsigned int mp_uint_t;     // must be pointer size
 #define MICROPY_HW_ENABLE_ADC       (1)
 #define MICROPY_HW_ENABLE_DAC       (1)
 #define MICROPY_HW_ENABLE_USB       (1)
+#define MICROPY_HW_TINYUSB_STACK    (1)
 #define MICROPY_HW_HAS_SWITCH       (1)
 #define MICROPY_HW_HAS_FLASH        (1)
 #define MICROPY_HW_ENABLE_SERVO     (1)
@@ -88,7 +89,7 @@ void DISCO_board_low_power(int mode);
 // Peripheral clock sources
 #define MICROPY_HW_RCC_HSI48_STATE      (RCC_HSI48_ON)
 #define MICROPY_HW_RCC_USB_CLKSOURCE    (RCC_USBCLKSOURCE_PLL3)
-#define MICROPY_HW_RCC_RTC_CLKSOURCE    (RCC_RTCCLKSOURCE_LSE)
+#define MICROPY_HW_RCC_RTC_CLKSOURCE    (RCC_RTCCLKSOURCE_LSI)
 #define MICROPY_HW_RCC_FMC_CLKSOURCE    (RCC_FMCCLKSOURCE_PLL2)
 #define MICROPY_HW_RCC_RNG_CLKSOURCE    (RCC_RNGCLKSOURCE_HSI48)
 #define MICROPY_HW_RCC_ADC_CLKSOURCE    (RCC_ADCCLKSOURCE_PLL3)
@@ -105,8 +106,9 @@ void DISCO_board_low_power(int mode);
 #define MICROPY_HW_ANALOG_SWITCH_PC2    (SYSCFG_SWITCH_PC2_OPEN)
 #define MICROPY_HW_ANALOG_SWITCH_PC3    (SYSCFG_SWITCH_PC3_OPEN)
 
-// Using LSE for RTC (32.768kHz crystal on PC14/PC15)
-#define MICROPY_HW_RTC_USE_LSE      (1)
+// Using LSI for RTC (LSE may not be populated or starting)
+// LSI is approximately 32kHz but varies, so use default prediv values
+#define MICROPY_HW_RTC_USE_LSE      (0)
 #define MICROPY_HW_RTC_USE_US       (1)
 #define MICROPY_HW_RTC_USE_CALOUT   (1)
 
@@ -302,3 +304,25 @@ extern struct _spi_bdev_t spi_bdev;
 #define MICROPY_HW_FMC_D29          (pin_I7)
 #define MICROPY_HW_FMC_D30          (pin_I9)
 #define MICROPY_HW_FMC_D31          (pin_I10)
+
+#define MICROPY_HW_USB_VID                      0x0483
+#define MICROPY_HW_USB_PID                      0x5740
+#define MICROPY_HW_USB_PID_CDC_MSC              (MICROPY_HW_USB_PID)
+#define MICROPY_HW_USB_PID_CDC_HID              (MICROPY_HW_USB_PID)
+#define MICROPY_HW_USB_PID_CDC                  (MICROPY_HW_USB_PID)
+#define MICROPY_HW_USB_PID_MSC                  (MICROPY_HW_USB_PID)
+#define MICROPY_HW_USB_PID_CDC2_MSC             (MICROPY_HW_USB_PID)
+#define MICROPY_HW_USB_PID_CDC2                 (MICROPY_HW_USB_PID)
+#define MICROPY_HW_USB_PID_CDC3                 (MICROPY_HW_USB_PID)
+#define MICROPY_HW_USB_PID_CDC3_MSC             (MICROPY_HW_USB_PID)
+#define MICROPY_HW_USB_PID_CDC_MSC_HID          (MICROPY_HW_USB_PID)
+#define MICROPY_HW_USB_PID_CDC2_MSC_HID         (MICROPY_HW_USB_PID)
+#define MICROPY_HW_USB_PID_CDC3_MSC_HID         (MICROPY_HW_USB_PID)
+#define MICROPY_HW_USB_LANGID_STRING            0x409
+#define MICROPY_HW_USB_MANUFACTURER_STRING      "STMicroelectronics"
+#define MICROPY_HW_USB_PRODUCT_FS_STRING        "STM32H747I-DISCO"
+#define MICROPY_HW_USB_PRODUCT_HS_STRING        "STM32H747I-DISCO"
+#define MICROPY_HW_USB_INTERFACE_FS_STRING      "STM32H747I-DISCO"
+#define MICROPY_HW_USB_INTERFACE_HS_STRING      "STM32H747I-DISCO"
+#define MICROPY_HW_USB_CONFIGURATION_FS_STRING  "STM32H747I-DISCO Config"
+#define MICROPY_HW_USB_CONFIGURATION_HS_STRING  "STM32H747I-DISCO Config"

@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2025 Andrew Leech
+ * Copyright (c) 2025
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,9 +28,18 @@
 #include "py/mphal.h"
 #include "storage.h"
 #include "sdram.h"
+#include "qspi.h"
 
 void DISCO_board_early_init(void) {
     HAL_InitTick(0);
+
+    // SDRAM initialization is handled by main.c
+    // sdram_init();
+
+    #if MICROPY_HW_ENABLE_INTERNAL_FLASH_STORAGE == 0
+    // QSPI initialization might fail - comment out for now
+    // qspi_memory_map();
+    #endif
 }
 
 void DISCO_board_low_power(int mode) {

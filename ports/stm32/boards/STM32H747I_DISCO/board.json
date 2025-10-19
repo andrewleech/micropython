@@ -4,17 +4,13 @@
     ],
     "docs": "",
     "features": [
-        "DAC",
         "Dual-core",
         "Ethernet",
         "External Flash",
         "External RAM",
-        "microSD",
         "USB"
     ],
-    "images": [
-        "stm32h747i_disco.jpg"
-    ],
+    "images": [],
     "mcu": "stm32h7",
     "product": "Discovery Kit H747I",
     "thumbnail": "",
