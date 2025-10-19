@@ -297,9 +297,6 @@ void gap_scan_cb_timeout(struct k_timer *timer_id) {
 #endif
 
 int mp_bluetooth_init(void) {
-    // Firmware version marker for debugging
-    mp_printf(&mp_plat_print, "\n=== FIRMWARE VERSION: DEBUG_PTR_v2 ===\n\n");
-
     DEBUG_printf("mp_bluetooth_init\n");
 
     // Clean up if necessary.
