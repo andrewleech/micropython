@@ -135,7 +135,8 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_NET_BUF_ALIGNMENT 0
 #define CONFIG_NET_BUF_WARN_ALLOC_INTERVAL 0
 #define CONFIG_NET_BUF_LOG_LEVEL 0
-#define CONFIG_NET_BUF_POOL_USAGE 0
+// CONFIG_NET_BUF_POOL_USAGE must be undefined, not 0, because Zephyr checks with #if defined()
+#undef CONFIG_NET_BUF_POOL_USAGE
 
 // =============================================================================
 // PART 2: Macro Conflict Prevention
@@ -413,9 +414,10 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_PASSKEY_MAX 999999
 #define CONFIG_BT_SMP_MIN_ENC_KEY_SIZE 7  // Minimum encryption key size (7-16 bytes)
 #define BT_SMP_MIN_ENC_KEY_SIZE CONFIG_BT_SMP_MIN_ENC_KEY_SIZE
-#define CONFIG_BT_PRIVACY 1
-#define CONFIG_BT_RPA 1
+#define CONFIG_BT_PRIVACY 0  // Disabled to fix scanning EPERM error
+#define CONFIG_BT_RPA 0  // Disabled to fix scanning EPERM error
 #define CONFIG_BT_CTLR_PRIVACY 0  // No controller privacy (host-only)
+#define CONFIG_BT_SCAN_WITH_IDENTITY 1  // Use identity address for scanning instead of random address
 
 // --- L2CAP ---
 #define CONFIG_BT_L2CAP_TX_BUF_COUNT 4
@@ -532,8 +534,9 @@ extern const struct device __device_dts_ord_0;
 
 // --- RX Work Queue Configuration ---
 // Use system work queue for receiving BLE events
+// CONFIG_BT_RECV_WORKQ_BT must be undefined, not 0, because Zephyr checks with #if defined()
 #define CONFIG_BT_RECV_WORKQ_SYS 1
-#define CONFIG_BT_RECV_WORKQ_BT 0
+#undef CONFIG_BT_RECV_WORKQ_BT
 
 // RX thread configuration (not used in MicroPython, but needed for compilation)
 #define CONFIG_BT_RX_STACK_SIZE 1024
@@ -581,16 +584,17 @@ extern const struct device __device_dts_ord_0;
 #ifdef NDEBUG
 #define CONFIG_ASSERT 0
 #else
-#define CONFIG_ASSERT 1
+#define CONFIG_ASSERT 1  // Re-enable to capture assertion location
 #endif
+#define CONFIG_ASSERT_LEVEL 2  // Maximum verbosity
 
 // Bluetooth-specific assert macros (from subsys/bluetooth/common/assert.h)
-// These are defined here to ensure they're always available when BLE code is compiled
-#define CONFIG_BT_ASSERT 0  // Use simple __ASSERT fallback, not verbose BT_ASSERT
-#define CONFIG_BT_ASSERT_VERBOSE 0
-#define CONFIG_BT_ASSERT_PANIC 0
+// These must be undefined (not 0) because Zephyr checks with #if defined()
+#undef CONFIG_BT_ASSERT  // Use simple __ASSERT fallback, not verbose BT_ASSERT
+#undef CONFIG_BT_ASSERT_VERBOSE
+#undef CONFIG_BT_ASSERT_PANIC
 
-// When CONFIG_BT_ASSERT=0, BT_ASSERT falls back to __ASSERT macros (defined in kernel.h)
+// When CONFIG_BT_ASSERT is undefined, BT_ASSERT falls back to __ASSERT macros (defined in kernel.h)
 #ifndef BT_ASSERT
 #define BT_ASSERT(cond) __ASSERT_NO_MSG(cond)
 #endif
@@ -747,5 +751,44 @@ int lll_csrand_get(void *buf, size_t len);  // Controller crypto stub
 // Note: Buffer types (enum bt_buf_type) and buffer allocation functions
 // (bt_buf_get_evt, bt_buf_get_rx, bt_buf_get_tx, bt_buf_get_type) are defined
 // in zephyr/bluetooth/buf.h. Include that header in files that need them.
+
+// ===== Endian Conversion Macros =====
+// Required for HCI parameter encoding in scan.c and other Zephyr BLE host code
+#include <stdint.h>
+
+// Byte swap functions
+static inline uint16_t __bswap_16(uint16_t x) {
+    return (uint16_t)((x << 8) | (x >> 8));
+}
+
+static inline uint32_t __bswap_32(uint32_t x) {
+    return ((x << 24) & 0xFF000000) |
+           ((x << 8)  & 0x00FF0000) |
+           ((x >> 8)  & 0x0000FF00) |
+           ((x >> 24) & 0x000000FF);
+}
+
+// ARM Cortex-M is little-endian, so CPU-to-LE is a no-op
+#define __LITTLE_ENDIAN__
+
+#ifdef __LITTLE_ENDIAN__
+#define sys_cpu_to_le16(x) (x)
+#define sys_cpu_to_le32(x) (x)
+#define sys_le16_to_cpu(x) (x)
+#define sys_le32_to_cpu(x) (x)
+#define sys_cpu_to_be16(x) __bswap_16(x)
+#define sys_cpu_to_be32(x) __bswap_32(x)
+#define sys_be16_to_cpu(x) __bswap_16(x)
+#define sys_be32_to_cpu(x) __bswap_32(x)
+#else
+#define sys_cpu_to_le16(x) __bswap_16(x)
+#define sys_cpu_to_le32(x) __bswap_32(x)
+#define sys_le16_to_cpu(x) __bswap_16(x)
+#define sys_le32_to_cpu(x) __bswap_32(x)
+#define sys_cpu_to_be16(x) (x)
+#define sys_cpu_to_be32(x) (x)
+#define sys_be16_to_cpu(x) (x)
+#define sys_be32_to_cpu(x) (x)
+#endif
 
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_ZEPHYR_BLE_CONFIG_H

@@ -36,7 +36,11 @@
 #if ZEPHYR_BLE_DEBUG
 #define DEBUG_SEM_printf(...) mp_printf(&mp_plat_print, "SEM: " __VA_ARGS__)
 #else
-#define DEBUG_SEM_printf(...) do {} while (0)
+// CRITICAL: Keep SEM debug printfs enabled even when ZEPHYR_BLE_DEBUG=0.
+// These printfs provide necessary timing delays for the IPCC hardware and scheduler
+// to complete HCI response processing. Without these delays, k_sem_take() times out
+// before HCI responses are fully processed and delivered to waiting semaphores.
+#define DEBUG_SEM_printf(...) mp_printf(&mp_plat_print, "SEM: " __VA_ARGS__)
 #endif
 
 // Forward declaration of HCI UART processing function
@@ -81,27 +85,28 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
 
     // Wait pattern: Process HCI responses while waiting for semaphore
     // This prevents deadlock when work queue handler blocks waiting for HCI command response
+    // See docs/BLE_TIMING_ARCHITECTURE.md for detailed analysis
     while (sem->count == 0) {
-        // Check timeout (handles wrap-around correctly using unsigned arithmetic)
+        // SOLUTION 4 (Enhanced):
+        // Process HCI packets FIRST, before checking timeout
+        // This ensures any pending responses are processed immediately
+        // mp_bluetooth_zephyr_hci_uart_wfi() now directly calls run_zephyr_hci_task()
+        mp_bluetooth_zephyr_hci_uart_wfi();
+
+        // Check timeout AFTER processing HCI packets
         uint32_t elapsed = mp_hal_ticks_ms() - t0;
         if (timeout_ms != 0xFFFFFFFF && elapsed >= timeout_ms) {
             DEBUG_SEM_printf("  --> timeout after %u ms\n", elapsed);
             return -EAGAIN;
         }
 
-        // Process HCI packets and work queues while waiting
-        // mp_bluetooth_zephyr_hci_uart_wfi() will process HCI responses if BLE is initialized
-        mp_bluetooth_zephyr_hci_uart_wfi();
-
-        // Always yield to prevent busy-waiting
-        // This allows scheduled tasks to run and prevents locking up the system
+        // Minimal yield to prevent busy-waiting while allowing rapid HCI processing
+        // No delay needed since HCI processing already includes 100μs delay
         if (timeout_ms == 0xFFFFFFFF) {
             mp_event_wait_indefinite();
         } else {
-            uint32_t remaining = timeout_ms - (mp_hal_ticks_ms() - t0);
-            if (remaining > 0) {
-                mp_event_wait_ms(MIN(remaining, 10));  // Yield for up to 10ms
-            }
+            // Just yield without delay for maximum responsiveness
+            mp_event_wait_ms(0);
         }
     }
 

@@ -75,8 +75,24 @@ bool device_is_ready(const struct device *dev) {
 
 #include "py/runtime.h"
 
+// For debugging, we'll track the panic location
+static const char *panic_file = NULL;
+static unsigned int panic_line = 0;
+
+// Called by __ASSERT_POST_ACTION from Zephyr assert macros
+NORETURN void assert_post_action(const char *file, unsigned int line) {
+    panic_file = file;
+    panic_line = line;
+    k_panic();
+}
+
 NORETURN void k_panic(void) {
-    // Fatal error in BLE stack - abort execution
+    // Fatal error in BLE stack - report location if available
+    if (panic_file) {
+        mp_printf(&mp_plat_print, "ASSERT FAILED at %s:%d\n", panic_file, panic_line);
+    } else {
+        mp_printf(&mp_plat_print, "BLE k_panic (location unknown)\n");
+    }
     mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("BLE stack fatal error (k_panic)"));
 }
 

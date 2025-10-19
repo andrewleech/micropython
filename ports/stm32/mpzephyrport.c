@@ -349,29 +349,26 @@ static void mp_zephyr_hci_poll_now(void) {
 
 // Called by k_sem_take() to process HCI packets while waiting
 // This is critical for preventing deadlocks when waiting for HCI command responses
+// See docs/BLE_TIMING_ARCHITECTURE.md for detailed timing analysis
 void mp_bluetooth_zephyr_hci_uart_wfi(void) {
     if (recv_cb == NULL) {
         return;
     }
 
-    // NOTE: Do NOT call mp_bluetooth_zephyr_work_process() here!
-    // We may already be INSIDE work_process() executing init_work,
-    // and the recursion guard will skip processing anyway.
-    // Instead, directly process HCI packets and scheduled tasks.
-
-    // CRITICAL: Run any pending scheduled tasks (e.g., from IPCC interrupt)
-    // The IPCC interrupt calls mp_bluetooth_hci_poll_now() which schedules a task
-    // that reads the HCI response. We need to run that task!
-    mp_event_wait_ms(1);
-
-    // Check for HCI data that may have arrived already
-    mp_bluetooth_hci_uart_readpacket(h4_uart_byte_callback);
+    // SOLUTION 4 (Hybrid Approach):
+    // Directly process any pending HCI packets instead of relying on scheduler.
+    // This eliminates scheduler dependency and ensures timely HCI response processing.
+    run_zephyr_hci_task(NULL);
 
     // Deliver any queued RX buffers directly to BLE stack
     struct net_buf *buf;
     while ((buf = rx_queue_get()) != NULL) {
         recv_cb(hci_dev, buf);
     }
+
+    // Give IPCC hardware minimal time to complete any ongoing transfers
+    // 100μs is sufficient for hardware without introducing significant latency
+    mp_hal_delay_us(100);
 }
 
 // Stack monitoring helper

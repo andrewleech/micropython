@@ -287,8 +287,10 @@ void gap_scan_cb_timeout(struct k_timer *timer_id) {
     // Cannot call bt_le_scan_stop from a timer callback because this callback may be
     // preempting the BT stack.  So schedule it to be called from the main thread.
     while (!mp_sched_schedule(MP_OBJ_FROM_PTR(&gap_scan_stop_obj), mp_const_none)) {
-        // Wait for scheduler queue to have space, allowing background processing
-        mp_event_wait_indefinite();
+        // FIXED: Don't call mp_event_wait_indefinite() - we're already in scheduler!
+        // Instead, directly process work queue to make space
+        extern void mp_bluetooth_zephyr_poll(void);
+        mp_bluetooth_zephyr_poll();
     }
     // Indicate scanning has stopped so that no more scan result events are generated
     // (they may still come in until bt_le_scan_stop is called by gap_scan_stop).
