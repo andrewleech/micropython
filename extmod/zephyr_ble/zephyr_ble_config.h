@@ -400,7 +400,7 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_ATT_PREPARE_COUNT 0
 
 // --- Security (SMP) ---
-#define CONFIG_BT_SMP 1
+#define CONFIG_BT_SMP 0  // Disabled: STM32WB55 controller doesn't send Enhanced Connection Complete events
 #define CONFIG_BT_SIGNING 0
 #define CONFIG_BT_SMP_SC_PAIR_ONLY 0
 #define CONFIG_BT_SMP_SC_ONLY 0
