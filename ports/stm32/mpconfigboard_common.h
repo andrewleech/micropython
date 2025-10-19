@@ -801,3 +801,94 @@
 #ifndef MICROPY_HW_ETH_DMA_ATTRIBUTE
 #define MICROPY_HW_ETH_DMA_ATTRIBUTE __attribute__((aligned(16384)));
 #endif
+
+// --------------------------------------------------------------------+
+// TinyUSB USB PHY Configuration
+// --------------------------------------------------------------------+
+
+#if MICROPY_HW_TINYUSB_STACK
+
+// Include TinyUSB option constants when TinyUSB stack is enabled
+#include "lib/tinyusb/src/tusb_option.h"
+
+// Map MICROPY_HW_USB_MAIN_DEV to TinyUSB RHPORT and mode configuration
+// Note: USB_PHY_*_ID constants are defined in usb.h as enum values 0 and 1
+#if defined(MICROPY_HW_USB_MAIN_DEV)
+  #if MICROPY_HW_USB_MAIN_DEV == (1)
+// Full Speed PHY selected
+    #ifndef MICROPY_HW_TINYUSB_RHPORT
+      #define MICROPY_HW_TINYUSB_RHPORT (0)
+    #endif
+    #ifndef MICROPY_HW_TINYUSB_RHPORT0_MODE
+      #define MICROPY_HW_TINYUSB_RHPORT0_MODE (OPT_MODE_DEVICE | OPT_MODE_FULL_SPEED)
+    #endif
+  #elif MICROPY_HW_USB_MAIN_DEV == (USB_PHY_HS_ID)
+// High Speed PHY selected
+    #if defined(STM32F4) || defined(STM32F7) || defined(STM32H7)
+// These families have separate HS and FS controllers
+      #ifndef MICROPY_HW_TINYUSB_RHPORT
+        #define MICROPY_HW_TINYUSB_RHPORT (1)
+      #endif
+// Default to HS-in-FS mode (Full Speed on HS controller)
+// TinyUSB will automatically use true HS if external ULPI PHY is detected
+      #ifndef MICROPY_HW_TINYUSB_RHPORT1_MODE
+        #ifndef MICROPY_HW_USB_HS_ULPI
+          #define MICROPY_HW_TINYUSB_RHPORT1_MODE (OPT_MODE_DEVICE | OPT_MODE_FULL_SPEED)
+        #else
+          #define MICROPY_HW_TINYUSB_RHPORT1_MODE (OPT_MODE_DEVICE | OPT_MODE_HIGH_SPEED)
+        #endif
+      #endif
+    #else
+// Other families: HS PHY on same controller as FS
+      #ifndef MICROPY_HW_TINYUSB_RHPORT
+        #define MICROPY_HW_TINYUSB_RHPORT (0)
+      #endif
+      #ifndef MICROPY_HW_TINYUSB_RHPORT0_MODE
+        #define MICROPY_HW_TINYUSB_RHPORT0_MODE (OPT_MODE_DEVICE | OPT_MODE_FULL_SPEED)
+      #endif
+    #endif
+  #else
+    #error "Unknown MICROPY_HW_USB_MAIN_DEV value"
+  #endif
+#else
+// Auto-detection fallback: prefer HS if available, otherwise FS
+  #if defined(MICROPY_HW_USB_HS)
+    #if defined(STM32F4) || defined(STM32F7) || defined(STM32H7)
+      #ifndef MICROPY_HW_TINYUSB_RHPORT
+        #define MICROPY_HW_TINYUSB_RHPORT (1)
+      #endif
+// Default to HS-in-FS mode unless board explicitly defines ULPI PHY
+      #ifndef MICROPY_HW_TINYUSB_RHPORT1_MODE
+        #ifndef MICROPY_HW_USB_HS_ULPI
+          #define MICROPY_HW_TINYUSB_RHPORT1_MODE (OPT_MODE_DEVICE | OPT_MODE_FULL_SPEED)
+        #else
+          #define MICROPY_HW_TINYUSB_RHPORT1_MODE (OPT_MODE_DEVICE | OPT_MODE_HIGH_SPEED)
+        #endif
+      #endif
+    #else
+      #ifndef MICROPY_HW_TINYUSB_RHPORT
+        #define MICROPY_HW_TINYUSB_RHPORT (0)
+      #endif
+      #ifndef MICROPY_HW_TINYUSB_RHPORT0_MODE
+        #define MICROPY_HW_TINYUSB_RHPORT0_MODE (OPT_MODE_DEVICE | OPT_MODE_FULL_SPEED)
+      #endif
+    #endif
+  #elif defined(MICROPY_HW_USB_FS)
+    #ifndef MICROPY_HW_TINYUSB_RHPORT
+      #define MICROPY_HW_TINYUSB_RHPORT (0)
+    #endif
+    #ifndef MICROPY_HW_TINYUSB_RHPORT0_MODE
+      #define MICROPY_HW_TINYUSB_RHPORT0_MODE (OPT_MODE_DEVICE | OPT_MODE_FULL_SPEED)
+    #endif
+  #else
+// Default configuration for boards without explicit USB PHY definitions
+    #ifndef MICROPY_HW_TINYUSB_RHPORT
+      #define MICROPY_HW_TINYUSB_RHPORT (0)
+    #endif
+    #ifndef MICROPY_HW_TINYUSB_RHPORT0_MODE
+      #define MICROPY_HW_TINYUSB_RHPORT0_MODE (OPT_MODE_DEVICE)
+    #endif
+  #endif
+#endif
+
+#endif // MICROPY_HW_TINYUSB_STACK

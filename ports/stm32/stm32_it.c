@@ -372,7 +372,7 @@ void OTG_FS_IRQHandler(void) {
 void USB1_OTG_HS_IRQHandler(void) {
     IRQ_ENTER(USB1_OTG_HS_IRQn);
     #if MICROPY_HW_TINYUSB_STACK
-    tud_int_handler(0);
+    tud_int_handler(1);  // RHPORT 1 for HS controller
     #else
     HAL_PCD_IRQHandler(&pcd_hs_handle);
     #endif
@@ -382,7 +382,7 @@ void USB1_OTG_HS_IRQHandler(void) {
 void OTG_HS_IRQHandler(void) {
     IRQ_ENTER(OTG_HS_IRQn);
     #if MICROPY_HW_TINYUSB_STACK
-    tud_int_handler(0);
+    tud_int_handler(1);  // RHPORT 1 for HS controller
     #else
     HAL_PCD_IRQHandler(&pcd_hs_handle);
     #endif
