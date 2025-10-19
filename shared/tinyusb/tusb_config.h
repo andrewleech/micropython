@@ -59,22 +59,46 @@
 #define MICROPY_HW_USB_MSC_INQUIRY_REVISION_STRING "1.00"
 #endif
 
-// #define CFG_TUSB_RHPORT0_MODE (OPT_MODE_NONE)
-// #define CFG_TUSB_RHPORT1_MODE (OPT_MODE_DEVICE)
+// Configure RHPORT modes based on board USB configuration
+// Note: MICROPY_HW_TINYUSB_RHPORTx_MODE from mpconfigboard_common.h is NOT available here
+// because tusb_config.h is included by TinyUSB's build before mpconfigport.h.
+// So we replicate the RHPORT selection logic using the board USB macros that ARE available.
 
 #ifndef CFG_TUSB_RHPORT0_MODE
-#ifdef MICROPY_HW_TINYUSB_RHPORT0_MODE
-#define CFG_TUSB_RHPORT0_MODE MICROPY_HW_TINYUSB_RHPORT0_MODE
+#if defined(MICROPY_HW_USB_MAIN_DEV) && (MICROPY_HW_USB_MAIN_DEV == USB_PHY_HS_ID)
+// High-Speed controller selected - disable RHPORT0 (FS controller)
+  #if defined(STM32F4) || defined(STM32F7) || defined(STM32H7)
+// These families have separate HS and FS controllers
+    #define CFG_TUSB_RHPORT0_MODE   (OPT_MODE_NONE)
+  #else
+// Other families: HS PHY on same controller as FS
+    #define CFG_TUSB_RHPORT0_MODE   (OPT_MODE_DEVICE | OPT_MODE_FULL_SPEED)
+  #endif
 #else
-#define CFG_TUSB_RHPORT0_MODE   (OPT_MODE_DEVICE)
+// Full-Speed controller selected (or auto-detect) - enable RHPORT0
+  #define CFG_TUSB_RHPORT0_MODE   (OPT_MODE_DEVICE | OPT_MODE_FULL_SPEED)
 #endif
 #endif
 
 #ifndef CFG_TUSB_RHPORT1_MODE
-#ifdef MICROPY_HW_TINYUSB_RHPORT1_MODE
-#define CFG_TUSB_RHPORT1_MODE MICROPY_HW_TINYUSB_RHPORT1_MODE
+#if defined(MICROPY_HW_USB_MAIN_DEV) && (MICROPY_HW_USB_MAIN_DEV == USB_PHY_HS_ID)
+// High-Speed controller selected - configure RHPORT1 mode
+  #if defined(STM32F4) || defined(STM32F7) || defined(STM32H7)
+// These families have separate HS and FS controllers
+    #if defined(MICROPY_HW_USB_HS_ULPI)
+// External ULPI PHY - use High-Speed
+      #define CFG_TUSB_RHPORT1_MODE   (OPT_MODE_DEVICE | OPT_MODE_HIGH_SPEED)
+    #else
+// Internal PHY or HS-in-FS mode - use Full-Speed
+      #define CFG_TUSB_RHPORT1_MODE   (OPT_MODE_DEVICE | OPT_MODE_FULL_SPEED)
+    #endif
+  #else
+// Other families: HS PHY on same controller as FS - disable RHPORT1
+    #define CFG_TUSB_RHPORT1_MODE   (OPT_MODE_NONE)
+  #endif
 #else
-#define CFG_TUSB_RHPORT1_MODE   (OPT_MODE_NONE)
+// Full-Speed controller selected (or auto-detect) - disable RHPORT1
+  #define CFG_TUSB_RHPORT1_MODE   (OPT_MODE_NONE)
 #endif
 #endif
 
