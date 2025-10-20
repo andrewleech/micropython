@@ -216,10 +216,13 @@ static void mp_bt_zephyr_remove_connection(uint8_t conn_handle) {
 }
 
 static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
+    // CRITICAL: This printf MUST appear if callback is being called by Zephyr
+    mp_printf(&mp_plat_print, ">>> mp_bt_zephyr_connected CALLED: conn=%p err=%u\n", conn, err);
+
     // Safety check: only process if BLE is fully active and initialized
     if (mp_bluetooth_zephyr_ble_state != MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE
         || MP_STATE_PORT(bluetooth_zephyr_root_pointers) == NULL) {
-        DEBUG_printf("Connection callback ignored - BLE not active (state=%d)\n", mp_bluetooth_zephyr_ble_state);
+        mp_printf(&mp_plat_print, ">>> Connection callback ignored - BLE not active (state=%d)\n", mp_bluetooth_zephyr_ble_state);
         return;
     }
 
@@ -242,10 +245,13 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
 }
 
 static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
+    // CRITICAL: This printf MUST appear if callback is being called by Zephyr
+    mp_printf(&mp_plat_print, ">>> mp_bt_zephyr_disconnected CALLED: conn=%p reason=%u\n", conn, reason);
+
     // Safety check: only process if BLE is fully active and initialized
     if (mp_bluetooth_zephyr_ble_state != MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE
         || MP_STATE_PORT(bluetooth_zephyr_root_pointers) == NULL) {
-        DEBUG_printf("Disconnect callback ignored - BLE not active (state=%d)\n", mp_bluetooth_zephyr_ble_state);
+        mp_printf(&mp_plat_print, ">>> Disconnect callback ignored - BLE not active (state=%d)\n", mp_bluetooth_zephyr_ble_state);
         return;
     }
 
@@ -367,6 +373,8 @@ int mp_bluetooth_init(void) {
         #endif
 
         bt_conn_cb_register(&mp_bt_zephyr_conn_callbacks);
+        mp_printf(&mp_plat_print, ">>> Registered connection callbacks: connected=%p disconnected=%p\n",
+                  mp_bt_zephyr_conn_callbacks.connected, mp_bt_zephyr_conn_callbacks.disconnected);
 
         // Initialize HCI controller (CYW43 BT via WEAK override from pico-sdk)
         // This must be called before bt_enable()
