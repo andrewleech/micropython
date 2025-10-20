@@ -948,6 +948,16 @@ static const mp_rom_map_elem_t bluetooth_ble_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_active), MP_ROM_PTR(&bluetooth_ble_active_obj) },
     { MP_ROM_QSTR(MP_QSTR_config), MP_ROM_PTR(&bluetooth_ble_config_obj) },
     { MP_ROM_QSTR(MP_QSTR_irq), MP_ROM_PTR(&bluetooth_ble_irq_obj) },
+    // Stack identification
+    #if MICROPY_BLUETOOTH_ZEPHYR
+    { MP_ROM_QSTR(MP_QSTR_stack), MP_ROM_QSTR(MP_QSTR_zephyr) },
+    #elif MICROPY_BLUETOOTH_NIMBLE
+    { MP_ROM_QSTR(MP_QSTR_stack), MP_ROM_QSTR(MP_QSTR_nimble) },
+    #elif MICROPY_BLUETOOTH_BTSTACK
+    { MP_ROM_QSTR(MP_QSTR_stack), MP_ROM_QSTR(MP_QSTR_btstack) },
+    #else
+    { MP_ROM_QSTR(MP_QSTR_stack), MP_ROM_QSTR(MP_QSTR_unknown) },
+    #endif
     // GAP
     { MP_ROM_QSTR(MP_QSTR_gap_advertise), MP_ROM_PTR(&bluetooth_ble_gap_advertise_obj) },
     #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
