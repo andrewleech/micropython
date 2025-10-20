@@ -442,14 +442,15 @@ extern const struct device __device_dts_ord_0;
 // ACL buffers
 #define CONFIG_BT_BUF_ACL_TX_COUNT 8
 #define CONFIG_BT_BUF_ACL_TX_SIZE 27
-#define CONFIG_BT_BUF_ACL_RX_COUNT 8
+#define CONFIG_BT_BUF_ACL_RX_COUNT 16  // Increased from 8 to 16 for scanning
 #define CONFIG_BT_BUF_ACL_RX_SIZE 27
 #define CONFIG_BT_BUF_ACL_RX_COUNT_EXTRA CONFIG_BT_MAX_CONN
 
-// Event buffers
-#define CONFIG_BT_BUF_EVT_RX_COUNT 16
+// Event buffers - Increased for scanning workload
+// Advertising reports are event packets, need larger pool to handle bursts
+#define CONFIG_BT_BUF_EVT_RX_COUNT 32  // Increased from 16 to 32 for scanning
 #define CONFIG_BT_BUF_EVT_RX_SIZE 68
-#define CONFIG_BT_BUF_EVT_DISCARDABLE_COUNT 3
+#define CONFIG_BT_BUF_EVT_DISCARDABLE_COUNT 8  // Increased from 3 to 8 for ad reports
 #define CONFIG_BT_BUF_EVT_DISCARDABLE_SIZE 43
 
 // Command buffers

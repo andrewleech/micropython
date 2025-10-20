@@ -6,20 +6,61 @@ Add Zephyr BLE stack as an alternative to NimBLE/BTstack for all MicroPython por
 ## Current Status
 - OS abstraction layer implemented (k_work, k_sem, k_mutex, atomic ops)
 - Build system integration complete
-- **STM32WB55: BLE connections now working!**
+- **STM32WB55 NimBLE: Fully working!**
+  - BLE activation works ✓
+  - BLE advertising works ✓
+  - BLE scanning works (227 devices found in 5s test) ✓
+  - BLE connections work ✓
+  - All IRQ events delivered correctly ✓
+  - Fix #4: Restored IPCC memory sections in linker script (critical fix for BLE activation)
+- **STM32WB55 Zephyr BLE: Mostly working!**
   - bt_enable() completes successfully ✓
   - BLE advertising works (legacy mode) ✓
   - BLE connections work (peripheral and central roles) ✓
   - Connection IRQ events delivered correctly ✓
-- All HCI initialization commands complete (HCI_RESET, READ_LOCAL_FEATURES, READ_SUPPORTED_COMMANDS, LE commands)
-- Fix #1: Disabled CONFIG_BT_HCI_ACL_FLOW_CONTROL (STM32WB controller doesn't support HOST_BUFFER_SIZE command)
-- Fix #2: Enabled CONFIG_BT_SCAN_WITH_IDENTITY to fix scanning EPERM error
-- Fix #3: Disabled CONFIG_BT_SMP (STM32WB controller sends legacy connection events, not enhanced)
+  - **Scan now receiving advertising reports ✓** (40+ devices detected before buffer exhaustion)
+  - Buffer exhaustion after ~40 advertising reports (needs fix) ✗
+  - Fix #1: Disabled CONFIG_BT_HCI_ACL_FLOW_CONTROL (STM32WB controller doesn't support HOST_BUFFER_SIZE command)
+  - Fix #2: Enabled CONFIG_BT_SCAN_WITH_IDENTITY to fix scanning EPERM error
+  - Fix #3: Disabled CONFIG_BT_SMP (STM32WB controller sends legacy connection events, not enhanced)
+  - Fix #4: Restored IPCC memory sections (CRITICAL - fixed advertising report reception for both stacks)
 - RP2 Pico 2 W: Not yet tested with these fixes
 
 ## Test Hardware
 - **RP2**: Raspberry Pi Pico 2 W (RP2350) with CYW43 BT controller via SPI
 - **STM32**: NUCLEO_WB55 (STM32WB55RGVx) with internal BT controller via IPCC
+
+## Board Variants
+
+### STM32 NUCLEO_WB55 Board Variants
+
+The STM32 NUCLEO_WB55 board supports two BLE stack variants:
+
+**Default (NimBLE)**: Production-ready BLE stack
+```bash
+cd ports/stm32
+make BOARD=NUCLEO_WB55
+# Firmware: build-NUCLEO_WB55/firmware.elf
+```
+
+**Zephyr Variant**: Experimental Zephyr BLE stack (under development)
+```bash
+cd ports/stm32
+make BOARD=NUCLEO_WB55 BOARD_VARIANT=zephyr ZEPHYR_BLE_DEBUG=1
+# Firmware: build-NUCLEO_WB55-zephyr/firmware.elf
+```
+
+**Latest Endian Fix Commit**: 6a310aa1e623ee0ee73ba4aa663c73217d5ca690
+**Documentation**: `docs/20251020_ZEPHYR_BLE_SCAN_PARAMETER_FIX.md`
+
+**Status**:
+- NimBLE (default): ✓ Full BLE functionality working (advertising, scanning, connections)
+- Zephyr variant: ⚠ **NOW RECEIVING ADVERTISING REPORTS!** (40+ devices detected before buffer exhaustion)
+
+**HCI Traces**:
+- NimBLE full scan: `nimble_scan_hci_trace.txt` (541 lines, 227 devices, complete scan)
+- NimBLE baseline: `nimble_scan_trace.txt` (partial trace from earlier testing)
+- Zephyr variant: Buffer exhaustion after ~40 devices (needs investigation)
 
 ---
 
@@ -77,14 +118,14 @@ continue
 # Device appears as /dev/ttyACM* after flashing
 screen /dev/ttyACM2 115200
 # Or
-mpremote connect /dev/ttyACM2 resume repl
+mpremote connect /dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_066AFF505655806687082951-if02 resume repl --inject-code 'from bluetooth import BLE; ble=BLE()\nble.active()\n'
 ```
 
 ### Test BLE Initialization
 ```python
 import bluetooth
 ble = bluetooth.BLE()
-ble.active(True)  # Currently hangs here - use GDB to debug
+ble.active(True)
 ```
 
 ---
@@ -111,7 +152,13 @@ make BOARD=NUCLEO_WB55 MICROPY_BLUETOOTH_ZEPHYR=1 MICROPY_BLUETOOTH_NIMBLE=0 dep
 ### Hardware Reset
 For a complete hardware reset (useful when device is hung/crashed):
 ```bash
-# Explicit reset with connect-under-reset (most reliable)
+# Standard reset (works for most cases)
+probe-rs reset --chip STM32WB55RGVx --probe 0483:374b --connect-under-reset
+
+# Recovery sequence for severely hung device (run all three commands in sequence)
+# This is needed when device is completely unresponsive (e.g., stuck in k_panic loop)
+probe-rs reset --chip STM32WB55RGVx --probe 0483:374b --connect-under-reset
+probe-rs reset --chip STM32WB55RGVx --probe 0483:374b
 probe-rs reset --chip STM32WB55RGVx --probe 0483:374b --connect-under-reset
 ```
 
@@ -161,11 +208,12 @@ ble.gap_scan(5000)  # ⚠ Partially works:
 ```
 
 ### STM32WB-Specific Notes
-- Memory: Linker script reserves 20KB after .bss for Zephyr .noinit section
+- Memory: Linker script defines IPCC buffer sections in RAM2A and RAM2B (critical for BLE functionality)
 - HCI Transport: Uses IPCC (Inter-Processor Communication Controller)
 - Important files:
-  - `ports/stm32/mpzephyrport.c` - HCI driver implementation
-  - `ports/stm32/rfcore.c` - Wireless coprocessor interface
+  - `ports/stm32/boards/stm32wb55xg.ld` - Linker script with IPCC memory sections
+  - `ports/stm32/mpzephyrport.c` - HCI driver implementation (Zephyr BLE)
+  - `ports/stm32/rfcore.c` - Wireless coprocessor interface (both stacks)
 
 ---
 
@@ -335,11 +383,162 @@ arm-none-eabi-objdump -d build-*/firmware.elf > firmware.dis
 
 **Note**: Disabling CONFIG_BT_SMP also disables Security Manager Protocol features (pairing, bonding, encryption). This is acceptable for initial bring-up and basic connection testing. Future work may need to support enhanced connection events or implement SMP differently.
 
+### Issue #4: BLE Activation Regression - IPCC Memory Sections (FIXED)
+**Problem**: BLE activation (`ble.active(True)`) failed with ETIMEDOUT on both NimBLE and Zephyr BLE stacks in current builds, but worked correctly in official v1.26.1 release.
+
+**Root Cause**:
+- Linker script `ports/stm32/boards/stm32wb55xg.ld` had IPCC SECTIONS removed in commit 5d69f18330
+- STM32WB55 RF coprocessor (Cortex-M0+) communicates with main CPU (Cortex-M4) via IPCC using shared memory buffers
+- These buffers MUST be located in specific RAM regions:
+  - RAM2A (0x20030000): IPCC tables and metadata
+  - RAM2B (0x20038000): IPCC data buffers
+- Without linker script sections, buffers ended up in wrong RAM locations (main RAM at 0x20000000+)
+- RF core could not access buffers, causing initialization to fail
+
+**Investigation Method**:
+1. Tested official v1.26.1 release - BLE worked ✓
+2. Tested current build - BLE failed ✗
+3. Initially suspected debug output (DEBUG_printf, HCI_TRACE) - disabled, still failed
+4. Initially suspected stack attribute addition - removed, still failed
+5. Git bisection: commit acad33dc66 (pre-Zephyr) works, commit 5d69f18330 (Zephyr integration) fails
+6. Binary analysis: `_ram_start` symbol missing, BSS size 4 bytes smaller
+7. Examined linker script: IPCC SECTIONS were removed
+
+**Solution**: Restored IPCC SECTIONS to `ports/stm32/boards/stm32wb55xg.ld`:
+```ld
+SECTIONS
+{
+    /* Put all IPCC tables into SRAM2A. */
+    .ram2a_bss :
+    {
+        . = ALIGN(4);
+        . = . + 64; /* Leave room for the mb_ref_table_t (assuming IPCCDBA==0). */
+        *rfcore.o(.bss.ipcc_mem_*)
+        . = ALIGN(4);
+    } >RAM2A
+
+    /* Put all IPCC buffers into SRAM2B. */
+    .ram2b_bss :
+    {
+        . = ALIGN(4);
+        *rfcore.o(.bss.ipcc_membuf_*)
+        . = ALIGN(4);
+    } >RAM2B
+}
+```
+
+**Result**: BLE activation now works correctly on both NimBLE and Zephyr BLE stacks!
+- ✓ NimBLE: Full functionality (activation, advertising, scanning, connections)
+- ✓ Zephyr BLE: Initialization and connections work
+- Binary size matches pre-regression (BSS: 42528 bytes with IPCC sections)
+
+**Files Modified**:
+- `ports/stm32/boards/stm32wb55xg.ld` - Restored IPCC SECTIONS
+
+**HCI Trace**:
+- Full NimBLE scan trace captured in `nimble_scan_hci_trace.txt` (541 lines, 227 devices)
+
+**Commits**:
+- 7f8ea29497: "ports/stm32: Restore IPCC memory sections for STM32WB55."
+- 6f57743847: "extmod/modbluetooth: Add stack attribute to BLE object."
+- f1ad0ce1c5: "extmod/zephyr_ble: Disable debug output by default."
+- 4550b9489f: "ports/stm32: Disable debug output in rfcore."
+
+### Issue #5: Semaphore Timeout Without Debug Logging (PARTIAL FIX - Zephyr BLE only)
+**Problem**: With ZEPHYR_BLE_DEBUG=0, firmware crashed with assertion at hci_core.c:504 during BLE initialization. Semaphore `k_sem_take(&sync_sem, HCI_CMD_TIMEOUT)` returned -EAGAIN (timeout) instead of 0 (success).
+
+**Root Cause**:
+- Debug printf statements in semaphore code provided cumulative ~50-75ms timing delays per `k_sem_take()` operation
+- These delays allowed IPCC hardware and MicroPython scheduler to complete HCI response processing before timeout
+- Without debug printfs, HCI responses weren't delivered to waiting semaphores in time
+
+**Investigation Method**:
+1. Fixed multiple CONFIG preprocessor bugs (CONFIG_NET_BUF_POOL_USAGE, CONFIG_BT_ASSERT, CONFIG_BT_RECV_WORKQ_BT)
+2. Systematically tested various timing approaches (1ms, 10ms, 50ms yields, direct HCI task calls)
+3. Following user guidance, selectively enabled different debug categories
+4. Discovered that only SEM debug printfs were necessary for initialization to work
+
+**Solution (Partial)**: Keep SEM debug printfs always enabled in `extmod/zephyr_ble/hal/zephyr_ble_sem.c`
+```c
+// Lines 39-43: CRITICAL - these printfs provide necessary timing
+#define DEBUG_SEM_printf(...) mp_printf(&mp_plat_print, "SEM: " __VA_ARGS__)
+```
+
+**Test Results**:
+- ✓ BLE Initialization: `ble.active(True)` completes successfully
+- ✓ Scan Start: `ble.gap_scan(5000)` sends HCI commands successfully
+- ✗ Scan Stop: HCI command 0x200c (SET_SCAN_ENABLE=0x00) times out, causes assertion failure
+- Device hangs and requires hardware reset
+
+**Limitation**: This solution only fixes initialization. Other BLE operations (scan stop, deactivation) still experience semaphore timeouts. The SEM printf timing is insufficient for all HCI command types.
+
+**Files Modified**:
+- `extmod/zephyr_ble/zephyr_ble_config.h` - Fixed CONFIG preprocessor defines
+- `extmod/zephyr_ble/hal/zephyr_ble_sem.c` - Keep DEBUG_SEM_printf enabled always
+- `extmod/zephyr_ble/hal/zephyr_ble_kernel.c` - Added assertion location tracking
+
+## Current Status Summary
+
+### STM32WB55 NimBLE (Default Variant)
+**Fully Working:**
+- ✓ BLE activation (`ble.active(True)`)
+- ✓ BLE advertising
+- ✓ BLE scanning (227 devices in 5s test)
+- ✓ BLE connections (peripheral and central roles)
+- ✓ All IRQ events delivered correctly
+- ✓ No debug output required
+
+**HCI Trace**: `nimble_scan_hci_trace.txt` (541 lines, complete scan operation)
+
+### STM32WB55 Zephyr BLE (Zephyr Variant)
+**Working:**
+- ✓ BLE initialization (`ble.active(True)`)
+- ✓ BLE advertising (legacy mode)
+- ✓ BLE connections (peripheral and central roles)
+- ✓ Connection IRQ events
+- ✓ **BLE scanning - advertising reports now received!** (40+ devices detected)
+
+**Partially Working:**
+- ⚠ BLE scanning - buffer exhaustion after ~40 advertising reports
+  - "Failed to allocate event buffer" errors
+  - "Unknown H:4 packet type" errors after buffer exhaustion
+  - Suggests buffer leak or insufficient buffer pool size
+
+**Known Issues:**
+- Buffer pool exhaustion during scanning (CONFIG_BT_BUF_EVT_RX_COUNT may need increase)
+- Requires hardware reset after scan operations
+- Debug logging partially enabled (SEM/FIFO printfs for timing)
+
+**Test Output**: `/tmp/zephyr_scan_test_output.txt` (40 devices detected before buffer exhaustion)
+
+## Architecture Documentation
+
+**IMPORTANT**: See `docs/BLE_TIMING_ARCHITECTURE.md` for detailed analysis of:
+- System architecture and execution contexts
+- Timing flow diagrams for HCI command/response
+- Root cause analysis of semaphore timeout issues
+- Proposed solutions with pros/cons
+
+**This document must be reviewed and updated whenever changes are made to:**
+- `ports/stm32/mpzephyrport.c` (HCI integration layer)
+- `extmod/zephyr_ble/hal/zephyr_ble_sem.c` (semaphore implementation)
+- `extmod/zephyr_ble/hal/zephyr_ble_work.c` (work queue implementation)
+- Any code affecting HCI packet flow or scheduler interaction
+
 ## Next Steps
 
-1. Disable debug logging and verify multi-tests pass cleanly
-2. Test additional BLE functionality (GATT, notifications, etc.)
-3. Test on RP2 Pico 2 W with all three fixes applied
-4. Consider long-term solution for SMP support with enhanced connection events
+1. ✓ Created detailed timing architecture document
+2. ✓ Fixed critical IPCC linker script regression (Issue #4)
+3. ✓ Verified NimBLE fully working on STM32WB55
+4. ✓ Captured complete HCI trace of NimBLE scan operation
+5. ✓ **BREAKTHROUGH: Zephyr BLE now receiving advertising reports!**
+6. **Fix buffer exhaustion issue** (current priority):
+   - Investigate buffer leak in advertising report handling
+   - Check CONFIG_BT_BUF_EVT_RX_COUNT and CONFIG_BT_BUF_ACL_RX_COUNT settings
+   - Verify net_buf_unref() calls are balanced
+   - Compare buffer management between NimBLE and Zephyr BLE
+7. Implement Solution 4 (Hybrid approach with direct HCI processing) to remove timing dependency
+8. Test on RP2 Pico 2 W with all fixes applied
+9. Consider long-term solution for SMP support with enhanced connection events
 
 Use arm-none-eabi-gdb proactively to diagnose issues. The probe-rs agent or `~/.claude/agents/probe-rs-flash.md` has specific usage details.

@@ -81,7 +81,8 @@ static mp_sched_node_t mp_zephyr_hci_sched_node = {0};
 
 // Queue for completed HCI packets (received from interrupt context)
 // These are deferred for processing in scheduler context to avoid stack overflow
-#define RX_QUEUE_SIZE 8
+// Increased from 8 to 32 to handle burst of advertising reports during scanning
+#define RX_QUEUE_SIZE 32
 static struct net_buf *rx_queue[RX_QUEUE_SIZE];
 static volatile size_t rx_queue_head = 0;
 static volatile size_t rx_queue_tail = 0;
