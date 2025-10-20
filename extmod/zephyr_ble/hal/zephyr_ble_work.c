@@ -320,8 +320,14 @@ int k_work_delayable_busy_get(const struct k_work_delayable *dwork) {
 static volatile bool regular_work_processor_running = false;
 static volatile bool init_work_processor_running = false;
 
+// Debug counters for work processing investigation
+static int work_process_call_count = 0;
+static int work_items_processed = 0;
+
 // Called by mp_bluetooth_hci_poll() to process all pending work (regular work queues only)
 void mp_bluetooth_zephyr_work_process(void) {
+    work_process_call_count++;
+
     // Prevent recursion: If we're called from within a work handler (via k_sem_take → wfi),
     // skip processing to avoid deadlock
     if (regular_work_processor_running) {
@@ -352,7 +358,8 @@ void mp_bluetooth_zephyr_work_process(void) {
             work->pending = false;
 
             // Execute work handler
-            DEBUG_WORK_printf("work_execute(%p, handler=%p)\n", work, work->handler);
+            work_items_processed++;
+            DEBUG_WORK_printf("work_execute(%p, handler=%p) [total: %d]\n", work, work->handler, work_items_processed);
             if (work->handler) {
                 work->handler(work);
             }
@@ -450,4 +457,10 @@ struct k_work *mp_bluetooth_zephyr_init_work_get(void) {
 
     MICROPY_PY_BLUETOOTH_EXIT
     return work;
+}
+
+// Debug function to report work processing statistics
+void mp_bluetooth_zephyr_work_debug_stats(void) {
+    mp_printf(&mp_plat_print, "WORK STATS: process() called %d times, %d items processed\n",
+        work_process_call_count, work_items_processed);
 }

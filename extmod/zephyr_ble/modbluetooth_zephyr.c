@@ -259,20 +259,27 @@ static void mp_bluetooth_zephyr_bt_ready_cb(int err) {
 }
 
 #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
+// Debug counter for advertising report investigation
+static int scan_cb_recv_count = 0;
+
 void gap_scan_cb_recv(const struct bt_le_scan_recv_info *info, struct net_buf_simple *buf) {
-    DEBUG_printf("gap_scan_cb_recv: adv_type=%d\n", info->adv_type);
+    scan_cb_recv_count++;
+    DEBUG_printf("gap_scan_cb_recv: adv_type=%d [count=%d]\n", info->adv_type, scan_cb_recv_count);
 
     if (!mp_bluetooth_is_active()) {
+        DEBUG_printf("  --> BLE not active, skipping\n");
         return;
     }
 
     if (mp_bluetooth_zephyr_gap_scan_state != MP_BLUETOOTH_ZEPHYR_GAP_SCAN_STATE_ACTIVE) {
+        DEBUG_printf("  --> scan state not active (%d), skipping\n", mp_bluetooth_zephyr_gap_scan_state);
         return;
     }
 
     uint8_t addr[6];
     reverse_addr_byte_order(addr, info->addr);
     mp_bluetooth_gap_on_scan_result(info->addr->type, addr, info->adv_type, info->rssi, buf->data, buf->len);
+    DEBUG_printf("  --> delivered to Python IRQ handler\n");
 }
 
 static mp_obj_t gap_scan_stop(mp_obj_t unused) {

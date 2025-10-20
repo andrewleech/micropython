@@ -191,6 +191,9 @@ bool mp_bluetooth_zephyr_init_work_pending(void);
 // Caller must execute work->handler(work) in main loop context to allow yielding
 struct k_work *mp_bluetooth_zephyr_init_work_get(void);
 
+// Debug function to report work processing statistics
+void mp_bluetooth_zephyr_work_debug_stats(void);
+
 // Get delayable work from work (for internal use)
 // work is embedded in the delayable work structure
 static inline struct k_work_delayable *k_work_delayable_from_work(struct k_work *work) {
