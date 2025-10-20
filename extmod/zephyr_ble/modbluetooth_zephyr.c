@@ -217,12 +217,14 @@ static void mp_bt_zephyr_remove_connection(uint8_t conn_handle) {
 
 static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
     // CRITICAL: This printf MUST appear if callback is being called by Zephyr
-    mp_printf(&mp_plat_print, ">>> mp_bt_zephyr_connected CALLED: conn=%p err=%u\n", conn, err);
+    mp_printf(&mp_plat_print, ">>> mp_bt_zephyr_connected CALLED: conn=%p err=%u state=%d\n",
+              conn, err, mp_bluetooth_zephyr_ble_state);
 
     // Safety check: only process if BLE is fully active and initialized
     if (mp_bluetooth_zephyr_ble_state != MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE
         || MP_STATE_PORT(bluetooth_zephyr_root_pointers) == NULL) {
-        mp_printf(&mp_plat_print, ">>> Connection callback ignored - BLE not active (state=%d)\n", mp_bluetooth_zephyr_ble_state);
+        mp_printf(&mp_plat_print, ">>> Connection callback ignored - BLE not active (state=%d)\n",
+                  mp_bluetooth_zephyr_ble_state);
         return;
     }
 
@@ -246,12 +248,15 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
 
 static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
     // CRITICAL: This printf MUST appear if callback is being called by Zephyr
-    mp_printf(&mp_plat_print, ">>> mp_bt_zephyr_disconnected CALLED: conn=%p reason=%u\n", conn, reason);
+    mp_printf(&mp_plat_print, ">>> mp_bt_zephyr_disconnected CALLED: conn=%p reason=%u state=%d\n",
+              conn, reason, mp_bluetooth_zephyr_ble_state);
 
     // Safety check: only process if BLE is fully active and initialized
+    // Ignore callbacks during deinit (SUSPENDED state) to prevent double-unref race
     if (mp_bluetooth_zephyr_ble_state != MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE
         || MP_STATE_PORT(bluetooth_zephyr_root_pointers) == NULL) {
-        mp_printf(&mp_plat_print, ">>> Disconnect callback ignored - BLE not active (state=%d)\n", mp_bluetooth_zephyr_ble_state);
+        mp_printf(&mp_plat_print, ">>> Disconnect callback ignored - BLE not active (state=%d)\n",
+                  mp_bluetooth_zephyr_ble_state);
         return;
     }
 
@@ -489,56 +494,65 @@ int mp_bluetooth_deinit(void) {
         return 0;
     }
 
+    // Stop advertising before unregistering callbacks
+    // This cleans up any advertising connections (BT_CONN_ADV_CONNECTABLE state)
+    mp_printf(&mp_plat_print, ">>> Deinit: stopping advertising\n");
     mp_bluetooth_gap_advertise_stop();
+    mp_printf(&mp_plat_print, ">>> Deinit: advertising stopped\n");
 
     #if CONFIG_BT_GATT_DYNAMIC_DB
+    mp_printf(&mp_plat_print, ">>> Deinit: unregistering GATT services\n");
     for (size_t i = 0; i < MP_STATE_PORT(bluetooth_zephyr_root_pointers)->n_services; ++i) {
         bt_gatt_service_unregister(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->services[i]);
         MP_STATE_PORT(bluetooth_zephyr_root_pointers)->services[i] = NULL;
     }
+    mp_printf(&mp_plat_print, ">>> Deinit: GATT services unregistered\n");
     #endif
 
     #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
+    mp_printf(&mp_plat_print, ">>> Deinit: stopping scan\n");
     mp_bluetooth_gap_scan_stop();
     bt_le_scan_cb_unregister(&mp_bluetooth_zephyr_gap_scan_cb_struct);
+    mp_printf(&mp_plat_print, ">>> Deinit: scan stopped\n");
     #endif
 
-    // Disconnect ALL Zephyr connections (not just our tracked ones)
-    // This is critical because Zephyr might have internal connections we don't track
-    void disconnect_all_cb(struct bt_conn *conn, void *data) {
-        (void)data;
-        struct bt_conn_info info;
-        if (bt_conn_get_info(conn, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED) {
-            DEBUG_printf("Deinit: forcibly disconnecting connection %p\n", conn);
-            bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
-        }
-    }
-    bt_conn_foreach(BT_CONN_TYPE_LE, disconnect_all_cb, NULL);
+    // CRITICAL: Unregister connection callbacks before bt_disable()
+    // bt_disable() does NOT clear callbacks - they persist and cause double-registration
+    // on subsequent bt_enable() cycles, leading to crashes
+    mp_printf(&mp_plat_print, ">>> Deinit: unregistering connection callbacks\n");
+    bt_conn_cb_unregister(&mp_bt_zephyr_conn_callbacks);
+    mp_printf(&mp_plat_print, ">>> Deinit: connection callbacks unregistered\n");
 
-    // Clean up any existing connections in our tracking list
-    // We need to unref our stored connection pointers to avoid leaking references
+    // Use Zephyr's official bt_disable() API to shut down the BLE stack
+    // This automatically:
+    // - Disconnects all connections via bt_conn_cleanup_all()
+    // - Unrefs all connections properly (avoiding double-unref bugs)
+    // - Sends HCI RESET to controller
+    // - Closes HCI resources
+    // - Clears identity and keys
+    mp_printf(&mp_plat_print, ">>> Deinit: calling bt_disable()\n");
+    int err = bt_disable();
+    mp_printf(&mp_plat_print, ">>> Deinit: bt_disable() returned %d\n", err);
+    if (err != 0) {
+        mp_printf(&mp_plat_print, ">>> Deinit: bt_disable() FAILED with error %d\n", err);
+        // Don't fail deinit - just log and continue with cleanup
+    }
+
+    // Clean up our connection tracking list
+    // The Zephyr connections themselves are already cleaned up by bt_disable()
+    // We just need to clear our tracking structures
     if (MP_STATE_PORT(bluetooth_zephyr_root_pointers) != NULL) {
         mp_bt_zephyr_conn_t *conn = MP_STATE_PORT(bluetooth_zephyr_root_pointers)->connections;
         while (conn != NULL) {
             mp_bt_zephyr_conn_t *next = conn->next;
-            if (conn->conn) {
-                DEBUG_printf("Deinit: unreffing stored connection %p\n", conn->conn);
-                bt_conn_unref(conn->conn);
-                conn->conn = NULL;
-            }
+            // conn->conn pointers are now invalid after bt_disable()
+            // Do NOT unref them - Zephyr already did that
+            conn->conn = NULL;
             conn = next;
         }
     }
 
-    // CRITICAL: Unregister connection callbacks before suspending
-    // This prevents Zephyr from calling our callbacks after we've cleared state
-    // Callbacks will be re-registered in mp_bluetooth_init()
-    bt_conn_cb_unregister(&mp_bt_zephyr_conn_callbacks);
-    DEBUG_printf("Deinit: unregistered connection callbacks\n");
-
-    // There is no way to turn off the BT stack in Zephyr, so just set the
-    // state as suspended so it can be correctly reactivated later.
-    mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_SUSPENDED;
+    mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF;
 
     MP_STATE_PORT(bluetooth_zephyr_root_pointers) = NULL;
     mp_bt_zephyr_next_conn = NULL;
