@@ -28,6 +28,10 @@ Add Zephyr BLE stack as an alternative to NimBLE/BTstack for all MicroPython por
   - **Known limitation**: Detects ~30% of devices compared to NimBLE (69 vs 227 in same test)
     - See `docs/BUFFER_FIX_VERIFICATION.md` for analysis
     - Future optimization opportunity (work queue processing)
+  - **Investigation**: Event mask ordering and vendor commands (see VENDOR_COMMAND_INVESTIGATION.md)
+    - Both hypotheses disproven - Zephyr sends identical init sequence to NimBLE
+    - Event mask ordering does NOT affect LE Meta Event delivery
+    - All Zephyr submodule changes reverted (lib/zephyr clean)
 - RP2 Pico 2 W: Not yet tested with these fixes
 
 ## Test Hardware
@@ -66,8 +70,13 @@ make BOARD=NUCLEO_WB55 BOARD_VARIANT=zephyr ZEPHYR_BLE_DEBUG=1
 - Verification results: `docs/BUFFER_FIX_VERIFICATION.md`
 
 **Status**:
-- NimBLE (default): ✓ Full BLE functionality working (advertising, scanning, connections)
-- Zephyr variant: ✓ **WORKING!** All core BLE features functional
+- NimBLE (default): ✓ Full BLE functionality working (advertising, scanning, connections, central+peripheral roles)
+- Zephyr variant: ✓ **WORKING!** Peripheral role and GATT Server functional (Phase 1: Server-only)
+  - ✓ Peripheral role (advertising, accepting connections from central devices)
+  - ✓ GATT Server (providing services/characteristics)
+  - ✓ Scanning (passive/active scan, advertising report reception)
+  - ✗ Central role (gap_connect) - NOT IMPLEMENTED (returns EOPNOTSUPP)
+  - ✗ GATT Client (service discovery, read/write) - NOT IMPLEMENTED
 
 **Performance Comparison (5-second scan)**:
 | Stack | Devices Detected | Errors | Status |
