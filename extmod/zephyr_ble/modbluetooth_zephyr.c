@@ -231,18 +231,46 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
     struct bt_conn_info info;
     bt_conn_get_info(conn, &info);
 
+    // Determine correct IRQ event based on connection role:
+    // - BT_HCI_ROLE_CENTRAL (0x00): Local initiated connection → PERIPHERAL_CONNECT/DISCONNECT
+    // - BT_HCI_ROLE_PERIPHERAL (0x01): Remote initiated connection → CENTRAL_CONNECT/DISCONNECT
+    uint16_t connect_event = (info.role == BT_HCI_ROLE_CENTRAL)
+        ? MP_BLUETOOTH_IRQ_PERIPHERAL_CONNECT
+        : MP_BLUETOOTH_IRQ_CENTRAL_CONNECT;
+    uint16_t disconnect_event = (info.role == BT_HCI_ROLE_CENTRAL)
+        ? MP_BLUETOOTH_IRQ_PERIPHERAL_DISCONNECT
+        : MP_BLUETOOTH_IRQ_CENTRAL_DISCONNECT;
+
     if (err) {
         uint8_t addr[6] = {0};
-        DEBUG_printf("Connection from central failed (err %u)\n", err);
-        mp_bluetooth_gap_on_connected_disconnected(MP_BLUETOOTH_IRQ_CENTRAL_DISCONNECT, info.id, 0xff, addr);
+        DEBUG_printf("Connection failed (err %u role %d)\n", err, info.role);
+        // For outgoing connections, clean up stored conn reference
+        if (mp_bt_zephyr_next_conn->conn != NULL) {
+            DEBUG_printf("  Unref'ing failed outgoing connection %p\n", mp_bt_zephyr_next_conn->conn);
+            bt_conn_unref(mp_bt_zephyr_next_conn->conn);
+            mp_bt_zephyr_next_conn->conn = NULL;
+        }
+        // Don't free mp_bt_zephyr_next_conn here - it's registered with GC list
+        // Reset pointer so next connection allocates fresh structure
+        mp_bt_zephyr_next_conn = NULL;
+        mp_bluetooth_gap_on_connected_disconnected(disconnect_event, info.id, 0xff, addr);
     } else {
-        DEBUG_printf("Central connected with id %d\n", info.id);
+        DEBUG_printf("Connected with id %d role %d\n", info.id, info.role);
         // Take a reference to the connection for storage
-        // Callback parameter is a borrowed reference - we need our own
-        mp_bt_zephyr_next_conn->conn = bt_conn_ref(conn);
-        DEBUG_printf("  Stored connection %p (ref'd), calling IRQ handler\n", mp_bt_zephyr_next_conn->conn);
-        mp_bluetooth_gap_on_connected_disconnected(MP_BLUETOOTH_IRQ_CENTRAL_CONNECT, info.id, info.le.dst->type, info.le.dst->a.val);
+        // For incoming connections (peripheral role), conn is NULL - take new ref
+        // For outgoing connections (central role), conn already stored - use existing ref
+        if (mp_bt_zephyr_next_conn->conn == NULL) {
+            // Incoming connection: callback parameter is borrowed, need our own ref
+            mp_bt_zephyr_next_conn->conn = bt_conn_ref(conn);
+            DEBUG_printf("  Stored NEW connection ref %p\n", mp_bt_zephyr_next_conn->conn);
+        } else {
+            // Outgoing connection: already have ref from bt_conn_le_create()
+            DEBUG_printf("  Using EXISTING connection ref %p\n", mp_bt_zephyr_next_conn->conn);
+        }
+        mp_bluetooth_gap_on_connected_disconnected(connect_event, info.id, info.le.dst->type, info.le.dst->a.val);
         mp_bt_zephyr_insert_connection(mp_bt_zephyr_next_conn);
+        // Reset pointer so next connection allocates fresh structure
+        mp_bt_zephyr_next_conn = NULL;
     }
 }
 
@@ -262,7 +290,15 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
 
     struct bt_conn_info info;
     bt_conn_get_info(conn, &info);
-    DEBUG_printf("Central disconnected (id %d reason %u)\n", info.id, reason);
+
+    // Determine correct IRQ event based on connection role:
+    // - BT_HCI_ROLE_CENTRAL (0x00): Local initiated connection → PERIPHERAL_DISCONNECT
+    // - BT_HCI_ROLE_PERIPHERAL (0x01): Remote initiated connection → CENTRAL_DISCONNECT
+    uint16_t disconnect_event = (info.role == BT_HCI_ROLE_CENTRAL)
+        ? MP_BLUETOOTH_IRQ_PERIPHERAL_DISCONNECT
+        : MP_BLUETOOTH_IRQ_CENTRAL_DISCONNECT;
+
+    DEBUG_printf("Disconnected (id %d reason %u role %d)\n", info.id, reason, info.role);
 
     // Find our stored connection and unref it
     // Note: 'conn' parameter is a borrowed reference from Zephyr callback - don't unref it
@@ -275,7 +311,7 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
     }
 
     mp_bt_zephyr_remove_connection(info.id);
-    mp_bluetooth_gap_on_connected_disconnected(MP_BLUETOOTH_IRQ_CENTRAL_DISCONNECT, info.id, info.le.dst->type, info.le.dst->a.val);
+    mp_bluetooth_gap_on_connected_disconnected(disconnect_event, info.id, info.le.dst->type, info.le.dst->a.val);
 }
 
 static int bt_err_to_errno(int err) {
@@ -642,6 +678,11 @@ int mp_bluetooth_gap_advertise_start(bool connectable, int32_t interval_us, cons
     };
 
     // pre-allocate a new connection structure as we cannot allocate this inside the connection callback
+    if (mp_bt_zephyr_next_conn != NULL) {
+        // This shouldn't happen - indicates previous connection didn't properly clean up
+        DEBUG_printf("WARNING: mp_bt_zephyr_next_conn not NULL, resetting before allocation\n");
+        mp_bt_zephyr_next_conn = NULL;
+    }
     mp_bt_zephyr_next_conn = m_new0(mp_bt_zephyr_conn_t, 1);
     mp_obj_list_append(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->objs_list, MP_OBJ_FROM_PTR(mp_bt_zephyr_next_conn));
 
@@ -1071,11 +1112,75 @@ int mp_bluetooth_gap_scan_stop(void) {
 }
 
 int mp_bluetooth_gap_peripheral_connect(uint8_t addr_type, const uint8_t *addr, int32_t duration_ms, int32_t min_conn_interval_us, int32_t max_conn_interval_us) {
-    DEBUG_printf("mp_bluetooth_gap_peripheral_connect\n");
+    DEBUG_printf("mp_bluetooth_gap_peripheral_connect: addr_type=%u duration_ms=%d\n", addr_type, (int)duration_ms);
     if (!mp_bluetooth_is_active()) {
         return ERRNO_BLUETOOTH_NOT_ACTIVE;
     }
-    return MP_EOPNOTSUPP;
+
+    // Stop scanning if active (can't scan and initiate connection simultaneously)
+    if (mp_bluetooth_zephyr_gap_scan_state != MP_BLUETOOTH_ZEPHYR_GAP_SCAN_STATE_INACTIVE) {
+        mp_bluetooth_gap_scan_stop();
+    }
+
+    // Convert MicroPython address (BE byte order) to Zephyr address (LE byte order)
+    bt_addr_le_t peer_addr;
+    peer_addr.type = addr_type;
+    for (int i = 0; i < 6; ++i) {
+        peer_addr.a.val[i] = addr[5 - i];  // Reverse byte order: BE -> LE
+    }
+
+    // Create connection parameters for scanning during connection establishment
+    struct bt_conn_le_create_param create_param = {
+        .options = 0,
+        .interval = BT_GAP_SCAN_FAST_INTERVAL,     // 0x0060 = 60ms in 0.625ms units
+        .window = BT_GAP_SCAN_FAST_INTERVAL,       // Same = continuous scanning
+        .interval_coded = 0,
+        .window_coded = 0,
+        .timeout = duration_ms > 0 ? (duration_ms / 10) : (CONFIG_BT_CREATE_CONN_TIMEOUT / 10), // Convert ms to 10ms units
+    };
+
+    // Create connection interval parameters
+    uint16_t interval_min = min_conn_interval_us > 0
+        ? BT_GAP_US_TO_CONN_INTERVAL(min_conn_interval_us)
+        : BT_GAP_INIT_CONN_INT_MIN;  // 0x0018 = 30ms in 1.25ms units
+    uint16_t interval_max = max_conn_interval_us > 0
+        ? BT_GAP_US_TO_CONN_INTERVAL(max_conn_interval_us)
+        : BT_GAP_INIT_CONN_INT_MAX;  // 0x0028 = 50ms in 1.25ms units
+
+    struct bt_le_conn_param conn_param = {
+        .interval_min = interval_min,
+        .interval_max = interval_max,
+        .latency = 0,
+        .timeout = BT_GAP_MS_TO_CONN_TIMEOUT(4000),  // 4 seconds in 10ms units
+    };
+
+    // Pre-allocate connection tracking structure
+    if (mp_bt_zephyr_next_conn != NULL) {
+        // This shouldn't happen - indicates previous connection didn't properly clean up
+        DEBUG_printf("WARNING: mp_bt_zephyr_next_conn not NULL, resetting before allocation\n");
+        mp_bt_zephyr_next_conn = NULL;
+    }
+    mp_bt_zephyr_next_conn = m_new0(mp_bt_zephyr_conn_t, 1);
+    mp_obj_list_append(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->objs_list, MP_OBJ_FROM_PTR(mp_bt_zephyr_next_conn));
+
+    // Initiate connection
+    struct bt_conn *conn;
+    int err = bt_conn_le_create(&peer_addr, &create_param, &conn_param, &conn);
+
+    if (err != 0) {
+        // Connection initiation failed - structure registered with GC, just reset pointer
+        DEBUG_printf("  bt_conn_le_create failed: err=%d\n", err);
+        mp_bt_zephyr_next_conn = NULL;
+        return bt_err_to_errno(err);
+    }
+
+    // Store conn handle for cancellation support
+    // bt_conn_le_create() returns with a reference - we keep it for cancellation
+    // In mp_bt_zephyr_connected callback, we take ANOTHER reference for storage
+    DEBUG_printf("  bt_conn_le_create succeeded, conn=%p\n", conn);
+    mp_bt_zephyr_next_conn->conn = conn;
+
+    return 0;
 }
 
 int mp_bluetooth_gap_peripheral_connect_cancel(void) {
@@ -1083,7 +1188,20 @@ int mp_bluetooth_gap_peripheral_connect_cancel(void) {
     if (!mp_bluetooth_is_active()) {
         return ERRNO_BLUETOOTH_NOT_ACTIVE;
     }
-    return MP_EOPNOTSUPP;
+
+    // Check if there's a pending outgoing connection
+    if (mp_bt_zephyr_next_conn == NULL || mp_bt_zephyr_next_conn->conn == NULL) {
+        DEBUG_printf("  No pending connection to cancel\n");
+        return MP_EINVAL;  // No connection in progress
+    }
+
+    // Disconnect the pending connection
+    // This will trigger the connected callback with BT_HCI_ERR_UNKNOWN_CONN_ID error
+    DEBUG_printf("  Cancelling connection %p\n", mp_bt_zephyr_next_conn->conn);
+    int err = bt_conn_disconnect(mp_bt_zephyr_next_conn->conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+
+    // Note: Don't unref here - the connected callback will handle cleanup on failure
+    return bt_err_to_errno(err);
 }
 
 #endif // MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
