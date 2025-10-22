@@ -1,0 +1,843 @@
+multi_bluetooth/ble_gap_connect.py on usb-MicroPython_Pyboard_Virtual_Comm_Port_in_FS_Mode_3254335D3037-if00|usb-STMicroelectronics_STM32_STLink_066AFF505655806687082951-if02: FAIL
+### TEST ###
+--- instance0 ---
+gap_advertise
+_IRQ_CENTRAL_CONNECT
+
+Traceback (most recent call last):
+  File "<stdin>", line 146, in <module>
+  File "<stdin>", line 50, in instance0
+  File "<stdin>", line 38, in wait_for_event
+ValueError: Timeout waiting for 2
+
+--- instance1 ---
+SEM: k_sem_init(200001f8, count=1, limit=1)
+SEM: k_sem_init(2002ed74, count=0, limit=1)
+[FIFO] k_fifo_put(20000208, 20003758)
+[FIFO] k_queue_append(20000208, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+SEM: k_sem_take(200001f8, timeout=10000)
+SEM:   --> fast path, count now 0
+[FIFO] k_fifo_get(20000208, timeout=0)
+[FIFO] k_queue_get(20000208, timeout=0)
+[FIFO]   -> fast path: return 20003758
+SEM: k_sem_take(2002ed74, timeout=10000)
+SEM:   --> waiting (timeout=10000 ms)
+SEM: k_sem_give(2002ed74)
+SEM:   --> count now 1
+SEM: k_sem_give(200001f8)
+SEM:   --> count now 1
+[FIFO] k_lifo_put(200004f4, 2000493c)
+[FIFO] k_queue_prepend(200004f4, 2000493c)
+[FIFO]   -> empty queue, set head=tail=2000493c
+SEM:   --> acquired after 26 ms, count now 0
+[FIFO] k_lifo_put(200004b4, 20003758)
+[FIFO] k_queue_prepend(200004b4, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+[FIFO] k_lifo_get(200004b4, timeout=0)
+[FIFO]   -> fast path: got 20003758
+SEM: k_sem_init(2002ed74, count=0, limit=1)
+[FIFO] k_fifo_put(20000208, 20003758)
+[FIFO] k_queue_append(20000208, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+SEM: k_sem_take(200001f8, timeout=10000)
+SEM:   --> fast path, count now 0
+[FIFO] k_fifo_get(20000208, timeout=0)
+[FIFO] k_queue_get(20000208, timeout=0)
+[FIFO]   -> fast path: return 20003758
+SEM: k_sem_take(2002ed74, timeout=10000)
+SEM:   --> waiting (timeout=10000 ms)
+[FIFO] k_lifo_get(200004f4, timeout=0)
+[FIFO]   -> fast path: got 2000493c
+SEM: k_sem_give(2002ed74)
+SEM:   --> count now 1
+SEM: k_sem_give(200001f8)
+SEM:   --> count now 1
+[FIFO] k_lifo_put(200004f4, 2000493c)
+[FIFO] k_queue_prepend(200004f4, 2000493c)
+[FIFO]   -> empty queue, set head=tail=2000493c
+SEM:   --> acquired after 33 ms, count now 0
+[FIFO] k_lifo_put(200004b4, 20003758)
+[FIFO] k_queue_prepend(200004b4, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+[FIFO] k_lifo_get(200004b4, timeout=0)
+[FIFO]   -> fast path: got 20003758
+SEM: k_sem_init(2002ed74, count=0, limit=1)
+[FIFO] k_fifo_put(20000208, 20003758)
+[FIFO] k_queue_append(20000208, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+SEM: k_sem_take(200001f8, timeout=10000)
+SEM:   --> fast path, count now 0
+[FIFO] k_fifo_get(20000208, timeout=0)
+[FIFO] k_queue_get(20000208, timeout=0)
+[FIFO]   -> fast path: return 20003758
+SEM: k_sem_take(2002ed74, timeout=10000)
+SEM:   --> waiting (timeout=10000 ms)
+[FIFO] k_lifo_get(200004f4, timeout=0)
+[FIFO]   -> fast path: got 2000493c
+SEM: k_sem_give(2002ed74)
+SEM:   --> count now 1
+SEM: k_sem_give(200001f8)
+SEM:   --> count now 1
+[FIFO] k_lifo_put(200004f4, 2000493c)
+[FIFO] k_queue_prepend(200004f4, 2000493c)
+[FIFO]   -> empty queue, set head=tail=2000493c
+SEM:   --> acquired after 33 ms, count now 0
+[FIFO] k_lifo_put(200004b4, 20003758)
+[FIFO] k_queue_prepend(200004b4, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+[FIFO] k_lifo_get(200004b4, timeout=0)
+[FIFO]   -> fast path: got 20003758
+SEM: k_sem_init(2002ed74, count=0, limit=1)
+[FIFO] k_fifo_put(20000208, 20003758)
+[FIFO] k_queue_append(20000208, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+SEM: k_sem_take(200001f8, timeout=10000)
+SEM:   --> fast path, count now 0
+[FIFO] k_fifo_get(20000208, timeout=0)
+[FIFO] k_queue_get(20000208, timeout=0)
+[FIFO]   -> fast path: return 20003758
+SEM: k_sem_take(2002ed74, timeout=10000)
+SEM:   --> waiting (timeout=10000 ms)
+[FIFO] k_lifo_get(200004f4, timeout=0)
+[FIFO]   -> fast path: got 2000493c
+SEM: k_sem_give(2002ed74)
+SEM:   --> count now 1
+SEM: k_sem_give(200001f8)
+SEM:   --> count now 1
+[FIFO] k_lifo_put(200004f4, 2000493c)
+[FIFO] k_queue_prepend(200004f4, 2000493c)
+[FIFO]   -> empty queue, set head=tail=2000493c
+SEM:   --> acquired after 33 ms, count now 0
+[FIFO] k_lifo_put(200004b4, 20003758)
+[FIFO] k_queue_prepend(200004b4, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+[FIFO] k_lifo_get(200004b4, timeout=0)
+[FIFO]   -> fast path: got 20003758
+SEM: k_sem_init(2002ed74, count=0, limit=1)
+[FIFO] k_fifo_put(20000208, 20003758)
+[FIFO] k_queue_append(20000208, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+SEM: k_sem_take(200001f8, timeout=10000)
+SEM:   --> fast path, count now 0
+[FIFO] k_fifo_get(20000208, timeout=0)
+[FIFO] k_queue_get(20000208, timeout=0)
+[FIFO]   -> fast path: return 20003758
+SEM: k_sem_take(2002ed74, timeout=10000)
+SEM:   --> waiting (timeout=10000 ms)
+[FIFO] k_lifo_get(200004f4, timeout=0)
+[FIFO]   -> fast path: got 2000493c
+SEM: k_sem_give(2002ed74)
+SEM:   --> count now 1
+SEM: k_sem_give(200001f8)
+SEM:   --> count now 1
+[FIFO] k_lifo_put(200004f4, 2000493c)
+[FIFO] k_queue_prepend(200004f4, 2000493c)
+[FIFO]   -> empty queue, set head=tail=2000493c
+SEM:   --> acquired after 33 ms, count now 0
+[FIFO] k_lifo_put(200004b4, 20003758)
+[FIFO] k_queue_prepend(200004b4, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+[FIFO] k_lifo_get(200004b4, timeout=0)
+[FIFO]   -> fast path: got 20003758
+SEM: k_sem_init(2002ed74, count=0, limit=1)
+[FIFO] k_fifo_put(20000208, 20003758)
+[FIFO] k_queue_append(20000208, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+SEM: k_sem_take(200001f8, timeout=10000)
+SEM:   --> fast path, count now 0
+[FIFO] k_fifo_get(20000208, timeout=0)
+[FIFO] k_queue_get(20000208, timeout=0)
+[FIFO]   -> fast path: return 20003758
+SEM: k_sem_take(2002ed74, timeout=10000)
+SEM:   --> waiting (timeout=10000 ms)
+[FIFO] k_lifo_get(200004f4, timeout=0)
+[FIFO]   -> fast path: got 2000493c
+SEM: k_sem_give(2002ed74)
+SEM:   --> count now 1
+SEM: k_sem_give(200001f8)
+SEM:   --> count now 1
+[FIFO] k_lifo_put(200004f4, 2000493c)
+[FIFO] k_queue_prepend(200004f4, 2000493c)
+[FIFO]   -> empty queue, set head=tail=2000493c
+SEM:   --> acquired after 33 ms, count now 0
+SEM: k_sem_init(200001e0, count=4, limit=4)
+[FIFO] k_lifo_put(200004b4, 20003758)
+[FIFO] k_queue_prepend(200004b4, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+[FIFO] k_lifo_get(200004b4, timeout=0)
+[FIFO]   -> fast path: got 20003758
+SEM: k_sem_init(2002ed74, count=0, limit=1)
+[FIFO] k_fifo_put(20000208, 20003758)
+[FIFO] k_queue_append(20000208, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+SEM: k_sem_take(200001f8, timeout=10000)
+SEM:   --> fast path, count now 0
+[FIFO] k_fifo_get(20000208, timeout=0)
+[FIFO] k_queue_get(20000208, timeout=0)
+[FIFO]   -> fast path: return 20003758
+SEM: k_sem_take(2002ed74, timeout=10000)
+SEM:   --> waiting (timeout=10000 ms)
+[FIFO] k_lifo_get(200004f4, timeout=0)
+[FIFO]   -> fast path: got 2000493c
+SEM: k_sem_give(2002ed74)
+SEM:   --> count now 1
+SEM: k_sem_give(200001f8)
+SEM:   --> count now 1
+[FIFO] k_lifo_put(200004f4, 2000493c)
+[FIFO] k_queue_prepend(200004f4, 2000493c)
+[FIFO]   -> empty queue, set head=tail=2000493c
+SEM:   --> acquired after 33 ms, count now 0
+[FIFO] k_lifo_put(200004b4, 20003758)
+[FIFO] k_queue_prepend(200004b4, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+[FIFO] k_lifo_get(200004b4, timeout=0)
+[FIFO]   -> fast path: got 20003758
+SEM: k_sem_init(2002ed74, count=0, limit=1)
+[FIFO] k_fifo_put(20000208, 20003758)
+[FIFO] k_queue_append(20000208, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+SEM: k_sem_take(200001f8, timeout=10000)
+SEM:   --> fast path, count now 0
+[FIFO] k_fifo_get(20000208, timeout=0)
+[FIFO] k_queue_get(20000208, timeout=0)
+[FIFO]   -> fast path: return 20003758
+SEM: k_sem_take(2002ed74, timeout=10000)
+SEM:   --> waiting (timeout=10000 ms)
+[FIFO] k_lifo_get(200004f4, timeout=0)
+[FIFO]   -> fast path: got 2000493c
+SEM: k_sem_give(2002ed74)
+SEM:   --> count now 1
+SEM: k_sem_give(200001f8)
+SEM:   --> count now 1
+[FIFO] k_lifo_put(200004f4, 2000493c)
+[FIFO] k_queue_prepend(200004f4, 2000493c)
+[FIFO]   -> empty queue, set head=tail=2000493c
+SEM:   --> acquired after 33 ms, count now 0
+[FIFO] k_lifo_put(200004b4, 20003758)
+[FIFO] k_queue_prepend(200004b4, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+[FIFO] k_lifo_get(200004b4, timeout=0)
+[FIFO]   -> fast path: got 20003758
+SEM: k_sem_init(2002ed74, count=0, limit=1)
+[FIFO] k_fifo_put(20000208, 20003758)
+[FIFO] k_queue_append(20000208, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+SEM: k_sem_take(200001f8, timeout=10000)
+SEM:   --> fast path, count now 0
+[FIFO] k_fifo_get(20000208, timeout=0)
+[FIFO] k_queue_get(20000208, timeout=0)
+[FIFO]   -> fast path: return 20003758
+SEM: k_sem_take(2002ed74, timeout=10000)
+SEM:   --> waiting (timeout=10000 ms)
+[FIFO] k_lifo_get(200004f4, timeout=0)
+[FIFO]   -> fast path: got 2000493c
+SEM: k_sem_give(2002ed74)
+SEM:   --> count now 1
+SEM: k_sem_give(200001f8)
+SEM:   --> count now 1
+[FIFO] k_lifo_put(200004f4, 2000493c)
+[FIFO] k_queue_prepend(200004f4, 2000493c)
+[FIFO]   -> empty queue, set head=tail=2000493c
+SEM:   --> acquired after 33 ms, count now 0
+[FIFO] k_lifo_put(200004b4, 20003758)
+[FIFO] k_queue_prepend(200004b4, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+[FIFO] k_lifo_get(200004b4, timeout=0)
+[FIFO]   -> fast path: got 20003758
+SEM: k_sem_init(2002ed74, count=0, limit=1)
+[FIFO] k_fifo_put(20000208, 20003758)
+[FIFO] k_queue_append(20000208, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+SEM: k_sem_take(200001f8, timeout=10000)
+SEM:   --> fast path, count now 0
+[FIFO] k_fifo_get(20000208, timeout=0)
+[FIFO] k_queue_get(20000208, timeout=0)
+[FIFO]   -> fast path: return 20003758
+SEM: k_sem_take(2002ed74, timeout=10000)
+SEM:   --> waiting (timeout=10000 ms)
+[FIFO] k_lifo_get(200004f4, timeout=0)
+[FIFO]   -> fast path: got 2000493c
+SEM: k_sem_give(2002ed74)
+SEM:   --> count now 1
+SEM: k_sem_give(200001f8)
+SEM:   --> count now 1
+[FIFO] k_lifo_put(200004f4, 2000493c)
+[FIFO] k_queue_prepend(200004f4, 2000493c)
+[FIFO]   -> empty queue, set head=tail=2000493c
+SEM:   --> acquired after 33 ms, count now 0
+[FIFO] k_lifo_put(200004b4, 20003758)
+[FIFO] k_queue_prepend(200004b4, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+[FIFO] k_lifo_get(200004b4, timeout=0)
+[FIFO]   -> fast path: got 20003758
+SEM: k_sem_init(2002ed74, count=0, limit=1)
+[FIFO] k_fifo_put(20000208, 20003758)
+[FIFO] k_queue_append(20000208, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+SEM: k_sem_take(200001f8, timeout=10000)
+SEM:   --> fast path, count now 0
+[FIFO] k_fifo_get(20000208, timeout=0)
+[FIFO] k_queue_get(20000208, timeout=0)
+[FIFO]   -> fast path: return 20003758
+SEM: k_sem_take(2002ed74, timeout=10000)
+SEM:   --> waiting (timeout=10000 ms)
+[FIFO] k_lifo_get(200004f4, timeout=0)
+[FIFO]   -> fast path: got 2000493c
+SEM: k_sem_give(2002ed74)
+SEM:   --> count now 1
+SEM: k_sem_give(200001f8)
+SEM:   --> count now 1
+[FIFO] k_lifo_put(200004f4, 2000493c)
+[FIFO] k_queue_prepend(200004f4, 2000493c)
+[FIFO]   -> empty queue, set head=tail=2000493c
+SEM:   --> acquired after 33 ms, count now 0
+[FIFO] k_lifo_put(200004b4, 20003758)
+[FIFO] k_queue_prepend(200004b4, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+[FIFO] k_lifo_get(200004b4, timeout=0)
+[FIFO]   -> fast path: got 20003758
+SEM: k_sem_init(2002ed74, count=0, limit=1)
+[FIFO] k_fifo_put(20000208, 20003758)
+[FIFO] k_queue_append(20000208, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+SEM: k_sem_take(200001f8, timeout=10000)
+SEM:   --> fast path, count now 0
+[FIFO] k_fifo_get(20000208, timeout=0)
+[FIFO] k_queue_get(20000208, timeout=0)
+[FIFO]   -> fast path: return 20003758
+SEM: k_sem_take(2002ed74, timeout=10000)
+SEM:   --> waiting (timeout=10000 ms)
+[FIFO] k_lifo_get(200004f4, timeout=0)
+[FIFO]   -> fast path: got 2000493c
+SEM: k_sem_give(2002ed74)
+SEM:   --> count now 1
+SEM: k_sem_give(200001f8)
+SEM:   --> count now 1
+[FIFO] k_lifo_put(200004f4, 2000493c)
+[FIFO] k_queue_prepend(200004f4, 2000493c)
+[FIFO]   -> empty queue, set head=tail=2000493c
+SEM:   --> acquired after 33 ms, count now 0
+[FIFO] k_lifo_put(200004b4, 20003758)
+[FIFO] k_queue_prepend(200004b4, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+[FIFO] k_lifo_get(200004b4, timeout=0)
+[FIFO]   -> fast path: got 20003758
+SEM: k_sem_init(2002ed0c, count=0, limit=1)
+[FIFO] k_fifo_put(20000208, 20003758)
+[FIFO] k_queue_append(20000208, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+SEM: k_sem_take(200001f8, timeout=10000)
+SEM:   --> fast path, count now 0
+[FIFO] k_fifo_get(20000208, timeout=0)
+[FIFO] k_queue_get(20000208, timeout=0)
+[FIFO]   -> fast path: return 20003758
+SEM: k_sem_take(2002ed0c, timeout=10000)
+SEM:   --> waiting (timeout=10000 ms)
+[FIFO] k_lifo_get(200004f4, timeout=0)
+[FIFO]   -> fast path: got 2000493c
+SEM: k_sem_give(2002ed0c)
+SEM:   --> count now 1
+SEM: k_sem_give(200001f8)
+SEM:   --> count now 1
+[FIFO] k_lifo_put(200004f4, 2000493c)
+[FIFO] k_queue_prepend(200004f4, 2000493c)
+[FIFO]   -> empty queue, set head=tail=2000493c
+SEM:   --> acquired after 33 ms, count now 0
+[FIFO] k_lifo_put(200004b4, 20003758)
+[FIFO] k_queue_prepend(200004b4, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+[FIFO] k_fifo_put(20000ef4, 20000ac0)
+[FIFO] k_queue_append(20000ef4, 20000ac0)
+[FIFO]   -> empty queue, set head=tail=20000ac0
+[FIFO] k_fifo_put(20000ef4, 20000acc)
+[FIFO] k_queue_append(20000ef4, 20000acc)
+[FIFO]   -> append to tail, new tail=20000acc
+[FIFO] k_fifo_put(20000ef4, 20000ad8)
+[FIFO] k_queue_append(20000ef4, 20000ad8)
+[FIFO]   -> append to tail, new tail=20000ad8
+[FIFO] k_fifo_put(20000ef4, 20000ae4)
+[FIFO] k_queue_append(20000ef4, 20000ae4)
+[FIFO]   -> append to tail, new tail=20000ae4
+[FIFO] k_fifo_put(20000ef4, 20000af0)
+[FIFO] k_queue_append(20000ef4, 20000af0)
+[FIFO]   -> append to tail, new tail=20000af0
+[FIFO] k_fifo_put(20000ef4, 20000afc)
+[FIFO] k_queue_append(20000ef4, 20000afc)
+[FIFO]   -> append to tail, new tail=20000afc
+[FIFO] k_fifo_put(20000ef4, 20000b08)
+[FIFO] k_queue_append(20000ef4, 20000b08)
+[FIFO]   -> append to tail, new tail=20000b08
+[FIFO] k_fifo_put(20000ef4, 20000b14)
+[FIFO] k_queue_append(20000ef4, 20000b14)
+[FIFO]   -> append to tail, new tail=20000b14
+gap_connect
+[FIFO] k_lifo_get(200004b4, timeout=0)
+[FIFO]   -> fast path: got 20003758
+SEM: k_sem_init(2002ec4c, count=0, limit=1)
+[FIFO] k_fifo_put(20000208, 20003758)
+[FIFO] k_queue_append(20000208, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+SEM: k_sem_take(200001f8, timeout=10000)
+SEM:   --> fast path, count now 0
+[FIFO] k_fifo_get(20000208, timeout=0)
+[FIFO] k_queue_get(20000208, timeout=0)
+[FIFO]   -> fast path: return 20003758
+SEM: k_sem_take(2002ec4c, timeout=10000)
+SEM:   --> waiting (timeout=10000 ms)
+[FIFO] k_lifo_get(200004f4, timeout=0)
+[FIFO]   -> fast path: got 2000493c
+SEM: k_sem_give(2002ec4c)
+SEM:   --> count now 1
+SEM: k_sem_give(200001f8)
+SEM:   --> count now 1
+[FIFO] k_lifo_put(200004f4, 2000493c)
+[FIFO] k_queue_prepend(200004f4, 2000493c)
+[FIFO]   -> empty queue, set head=tail=2000493c
+[HCI_TIMING] IPCC_IRQ: LE Connection Complete enqueued at T+1316ms
+SEM:   --> acquired after 38 ms, count now 0
+[FIFO] k_lifo_put(200004b4, 20003758)
+[FIFO] k_queue_prepend(200004b4, 20003758)
+[FIFO]   -> empty queue, set head=tail=20003758
+[HCI_TIMING] RX_QUEUE: Dequeued LE Connection Complete at T+1316ms (queue_latency=22258us, depth=1)
+[HCI_TIMING] BT_RECV: Passing LE Connection Complete to Zephyr at T+1347ms
+[HCI_TIMING] BT_RECV: Zephyr processing complete at T+1354ms (took 6723us)
+SEM: k_sem_give(200002bc)
+--- /tmp/tmp6qqtvk9p	2025-10-22 23:00:43.241120372 +1100
++++ /tmp/tmpdgbnhai1	2025-10-22 23:00:43.241120372 +1100
+@@ -1,16 +1,403 @@
+ --- instance0 ---
+ gap_advertise
+ _IRQ_CENTRAL_CONNECT
+-_IRQ_CENTRAL_DISCONNECT
+-gap_advertise
+-_IRQ_CENTRAL_CONNECT
+-gap_disconnect: True
+-_IRQ_CENTRAL_DISCONNECT
++
++Traceback (most recent call last):
++  File "<stdin>", line 146, in <module>
++  File "<stdin>", line 50, in instance0
++  File "<stdin>", line 38, in wait_for_event
++ValueError: Timeout waiting for 2
++
+ --- instance1 ---
++SEM: k_sem_init(200001f8, count=1, limit=1)
++SEM: k_sem_init(2002ed74, count=0, limit=1)
++[FIFO] k_fifo_put(20000208, 20003758)
++[FIFO] k_queue_append(20000208, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++SEM: k_sem_take(200001f8, timeout=10000)
++SEM:   --> fast path, count now 0
++[FIFO] k_fifo_get(20000208, timeout=0)
++[FIFO] k_queue_get(20000208, timeout=0)
++[FIFO]   -> fast path: return 20003758
++SEM: k_sem_take(2002ed74, timeout=10000)
++SEM:   --> waiting (timeout=10000 ms)
++SEM: k_sem_give(2002ed74)
++SEM:   --> count now 1
++SEM: k_sem_give(200001f8)
++SEM:   --> count now 1
++[FIFO] k_lifo_put(200004f4, 2000493c)
++[FIFO] k_queue_prepend(200004f4, 2000493c)
++[FIFO]   -> empty queue, set head=tail=2000493c
++SEM:   --> acquired after 26 ms, count now 0
++[FIFO] k_lifo_put(200004b4, 20003758)
++[FIFO] k_queue_prepend(200004b4, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++[FIFO] k_lifo_get(200004b4, timeout=0)
++[FIFO]   -> fast path: got 20003758
++SEM: k_sem_init(2002ed74, count=0, limit=1)
++[FIFO] k_fifo_put(20000208, 20003758)
++[FIFO] k_queue_append(20000208, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++SEM: k_sem_take(200001f8, timeout=10000)
++SEM:   --> fast path, count now 0
++[FIFO] k_fifo_get(20000208, timeout=0)
++[FIFO] k_queue_get(20000208, timeout=0)
++[FIFO]   -> fast path: return 20003758
++SEM: k_sem_take(2002ed74, timeout=10000)
++SEM:   --> waiting (timeout=10000 ms)
++[FIFO] k_lifo_get(200004f4, timeout=0)
++[FIFO]   -> fast path: got 2000493c
++SEM: k_sem_give(2002ed74)
++SEM:   --> count now 1
++SEM: k_sem_give(200001f8)
++SEM:   --> count now 1
++[FIFO] k_lifo_put(200004f4, 2000493c)
++[FIFO] k_queue_prepend(200004f4, 2000493c)
++[FIFO]   -> empty queue, set head=tail=2000493c
++SEM:   --> acquired after 33 ms, count now 0
++[FIFO] k_lifo_put(200004b4, 20003758)
++[FIFO] k_queue_prepend(200004b4, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++[FIFO] k_lifo_get(200004b4, timeout=0)
++[FIFO]   -> fast path: got 20003758
++SEM: k_sem_init(2002ed74, count=0, limit=1)
++[FIFO] k_fifo_put(20000208, 20003758)
++[FIFO] k_queue_append(20000208, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++SEM: k_sem_take(200001f8, timeout=10000)
++SEM:   --> fast path, count now 0
++[FIFO] k_fifo_get(20000208, timeout=0)
++[FIFO] k_queue_get(20000208, timeout=0)
++[FIFO]   -> fast path: return 20003758
++SEM: k_sem_take(2002ed74, timeout=10000)
++SEM:   --> waiting (timeout=10000 ms)
++[FIFO] k_lifo_get(200004f4, timeout=0)
++[FIFO]   -> fast path: got 2000493c
++SEM: k_sem_give(2002ed74)
++SEM:   --> count now 1
++SEM: k_sem_give(200001f8)
++SEM:   --> count now 1
++[FIFO] k_lifo_put(200004f4, 2000493c)
++[FIFO] k_queue_prepend(200004f4, 2000493c)
++[FIFO]   -> empty queue, set head=tail=2000493c
++SEM:   --> acquired after 33 ms, count now 0
++[FIFO] k_lifo_put(200004b4, 20003758)
++[FIFO] k_queue_prepend(200004b4, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++[FIFO] k_lifo_get(200004b4, timeout=0)
++[FIFO]   -> fast path: got 20003758
++SEM: k_sem_init(2002ed74, count=0, limit=1)
++[FIFO] k_fifo_put(20000208, 20003758)
++[FIFO] k_queue_append(20000208, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++SEM: k_sem_take(200001f8, timeout=10000)
++SEM:   --> fast path, count now 0
++[FIFO] k_fifo_get(20000208, timeout=0)
++[FIFO] k_queue_get(20000208, timeout=0)
++[FIFO]   -> fast path: return 20003758
++SEM: k_sem_take(2002ed74, timeout=10000)
++SEM:   --> waiting (timeout=10000 ms)
++[FIFO] k_lifo_get(200004f4, timeout=0)
++[FIFO]   -> fast path: got 2000493c
++SEM: k_sem_give(2002ed74)
++SEM:   --> count now 1
++SEM: k_sem_give(200001f8)
++SEM:   --> count now 1
++[FIFO] k_lifo_put(200004f4, 2000493c)
++[FIFO] k_queue_prepend(200004f4, 2000493c)
++[FIFO]   -> empty queue, set head=tail=2000493c
++SEM:   --> acquired after 33 ms, count now 0
++[FIFO] k_lifo_put(200004b4, 20003758)
++[FIFO] k_queue_prepend(200004b4, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++[FIFO] k_lifo_get(200004b4, timeout=0)
++[FIFO]   -> fast path: got 20003758
++SEM: k_sem_init(2002ed74, count=0, limit=1)
++[FIFO] k_fifo_put(20000208, 20003758)
++[FIFO] k_queue_append(20000208, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++SEM: k_sem_take(200001f8, timeout=10000)
++SEM:   --> fast path, count now 0
++[FIFO] k_fifo_get(20000208, timeout=0)
++[FIFO] k_queue_get(20000208, timeout=0)
++[FIFO]   -> fast path: return 20003758
++SEM: k_sem_take(2002ed74, timeout=10000)
++SEM:   --> waiting (timeout=10000 ms)
++[FIFO] k_lifo_get(200004f4, timeout=0)
++[FIFO]   -> fast path: got 2000493c
++SEM: k_sem_give(2002ed74)
++SEM:   --> count now 1
++SEM: k_sem_give(200001f8)
++SEM:   --> count now 1
++[FIFO] k_lifo_put(200004f4, 2000493c)
++[FIFO] k_queue_prepend(200004f4, 2000493c)
++[FIFO]   -> empty queue, set head=tail=2000493c
++SEM:   --> acquired after 33 ms, count now 0
++[FIFO] k_lifo_put(200004b4, 20003758)
++[FIFO] k_queue_prepend(200004b4, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++[FIFO] k_lifo_get(200004b4, timeout=0)
++[FIFO]   -> fast path: got 20003758
++SEM: k_sem_init(2002ed74, count=0, limit=1)
++[FIFO] k_fifo_put(20000208, 20003758)
++[FIFO] k_queue_append(20000208, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++SEM: k_sem_take(200001f8, timeout=10000)
++SEM:   --> fast path, count now 0
++[FIFO] k_fifo_get(20000208, timeout=0)
++[FIFO] k_queue_get(20000208, timeout=0)
++[FIFO]   -> fast path: return 20003758
++SEM: k_sem_take(2002ed74, timeout=10000)
++SEM:   --> waiting (timeout=10000 ms)
++[FIFO] k_lifo_get(200004f4, timeout=0)
++[FIFO]   -> fast path: got 2000493c
++SEM: k_sem_give(2002ed74)
++SEM:   --> count now 1
++SEM: k_sem_give(200001f8)
++SEM:   --> count now 1
++[FIFO] k_lifo_put(200004f4, 2000493c)
++[FIFO] k_queue_prepend(200004f4, 2000493c)
++[FIFO]   -> empty queue, set head=tail=2000493c
++SEM:   --> acquired after 33 ms, count now 0
++SEM: k_sem_init(200001e0, count=4, limit=4)
++[FIFO] k_lifo_put(200004b4, 20003758)
++[FIFO] k_queue_prepend(200004b4, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++[FIFO] k_lifo_get(200004b4, timeout=0)
++[FIFO]   -> fast path: got 20003758
++SEM: k_sem_init(2002ed74, count=0, limit=1)
++[FIFO] k_fifo_put(20000208, 20003758)
++[FIFO] k_queue_append(20000208, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++SEM: k_sem_take(200001f8, timeout=10000)
++SEM:   --> fast path, count now 0
++[FIFO] k_fifo_get(20000208, timeout=0)
++[FIFO] k_queue_get(20000208, timeout=0)
++[FIFO]   -> fast path: return 20003758
++SEM: k_sem_take(2002ed74, timeout=10000)
++SEM:   --> waiting (timeout=10000 ms)
++[FIFO] k_lifo_get(200004f4, timeout=0)
++[FIFO]   -> fast path: got 2000493c
++SEM: k_sem_give(2002ed74)
++SEM:   --> count now 1
++SEM: k_sem_give(200001f8)
++SEM:   --> count now 1
++[FIFO] k_lifo_put(200004f4, 2000493c)
++[FIFO] k_queue_prepend(200004f4, 2000493c)
++[FIFO]   -> empty queue, set head=tail=2000493c
++SEM:   --> acquired after 33 ms, count now 0
++[FIFO] k_lifo_put(200004b4, 20003758)
++[FIFO] k_queue_prepend(200004b4, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++[FIFO] k_lifo_get(200004b4, timeout=0)
++[FIFO]   -> fast path: got 20003758
++SEM: k_sem_init(2002ed74, count=0, limit=1)
++[FIFO] k_fifo_put(20000208, 20003758)
++[FIFO] k_queue_append(20000208, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++SEM: k_sem_take(200001f8, timeout=10000)
++SEM:   --> fast path, count now 0
++[FIFO] k_fifo_get(20000208, timeout=0)
++[FIFO] k_queue_get(20000208, timeout=0)
++[FIFO]   -> fast path: return 20003758
++SEM: k_sem_take(2002ed74, timeout=10000)
++SEM:   --> waiting (timeout=10000 ms)
++[FIFO] k_lifo_get(200004f4, timeout=0)
++[FIFO]   -> fast path: got 2000493c
++SEM: k_sem_give(2002ed74)
++SEM:   --> count now 1
++SEM: k_sem_give(200001f8)
++SEM:   --> count now 1
++[FIFO] k_lifo_put(200004f4, 2000493c)
++[FIFO] k_queue_prepend(200004f4, 2000493c)
++[FIFO]   -> empty queue, set head=tail=2000493c
++SEM:   --> acquired after 33 ms, count now 0
++[FIFO] k_lifo_put(200004b4, 20003758)
++[FIFO] k_queue_prepend(200004b4, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++[FIFO] k_lifo_get(200004b4, timeout=0)
++[FIFO]   -> fast path: got 20003758
++SEM: k_sem_init(2002ed74, count=0, limit=1)
++[FIFO] k_fifo_put(20000208, 20003758)
++[FIFO] k_queue_append(20000208, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++SEM: k_sem_take(200001f8, timeout=10000)
++SEM:   --> fast path, count now 0
++[FIFO] k_fifo_get(20000208, timeout=0)
++[FIFO] k_queue_get(20000208, timeout=0)
++[FIFO]   -> fast path: return 20003758
++SEM: k_sem_take(2002ed74, timeout=10000)
++SEM:   --> waiting (timeout=10000 ms)
++[FIFO] k_lifo_get(200004f4, timeout=0)
++[FIFO]   -> fast path: got 2000493c
++SEM: k_sem_give(2002ed74)
++SEM:   --> count now 1
++SEM: k_sem_give(200001f8)
++SEM:   --> count now 1
++[FIFO] k_lifo_put(200004f4, 2000493c)
++[FIFO] k_queue_prepend(200004f4, 2000493c)
++[FIFO]   -> empty queue, set head=tail=2000493c
++SEM:   --> acquired after 33 ms, count now 0
++[FIFO] k_lifo_put(200004b4, 20003758)
++[FIFO] k_queue_prepend(200004b4, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++[FIFO] k_lifo_get(200004b4, timeout=0)
++[FIFO]   -> fast path: got 20003758
++SEM: k_sem_init(2002ed74, count=0, limit=1)
++[FIFO] k_fifo_put(20000208, 20003758)
++[FIFO] k_queue_append(20000208, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++SEM: k_sem_take(200001f8, timeout=10000)
++SEM:   --> fast path, count now 0
++[FIFO] k_fifo_get(20000208, timeout=0)
++[FIFO] k_queue_get(20000208, timeout=0)
++[FIFO]   -> fast path: return 20003758
++SEM: k_sem_take(2002ed74, timeout=10000)
++SEM:   --> waiting (timeout=10000 ms)
++[FIFO] k_lifo_get(200004f4, timeout=0)
++[FIFO]   -> fast path: got 2000493c
++SEM: k_sem_give(2002ed74)
++SEM:   --> count now 1
++SEM: k_sem_give(200001f8)
++SEM:   --> count now 1
++[FIFO] k_lifo_put(200004f4, 2000493c)
++[FIFO] k_queue_prepend(200004f4, 2000493c)
++[FIFO]   -> empty queue, set head=tail=2000493c
++SEM:   --> acquired after 33 ms, count now 0
++[FIFO] k_lifo_put(200004b4, 20003758)
++[FIFO] k_queue_prepend(200004b4, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++[FIFO] k_lifo_get(200004b4, timeout=0)
++[FIFO]   -> fast path: got 20003758
++SEM: k_sem_init(2002ed74, count=0, limit=1)
++[FIFO] k_fifo_put(20000208, 20003758)
++[FIFO] k_queue_append(20000208, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++SEM: k_sem_take(200001f8, timeout=10000)
++SEM:   --> fast path, count now 0
++[FIFO] k_fifo_get(20000208, timeout=0)
++[FIFO] k_queue_get(20000208, timeout=0)
++[FIFO]   -> fast path: return 20003758
++SEM: k_sem_take(2002ed74, timeout=10000)
++SEM:   --> waiting (timeout=10000 ms)
++[FIFO] k_lifo_get(200004f4, timeout=0)
++[FIFO]   -> fast path: got 2000493c
++SEM: k_sem_give(2002ed74)
++SEM:   --> count now 1
++SEM: k_sem_give(200001f8)
++SEM:   --> count now 1
++[FIFO] k_lifo_put(200004f4, 2000493c)
++[FIFO] k_queue_prepend(200004f4, 2000493c)
++[FIFO]   -> empty queue, set head=tail=2000493c
++SEM:   --> acquired after 33 ms, count now 0
++[FIFO] k_lifo_put(200004b4, 20003758)
++[FIFO] k_queue_prepend(200004b4, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++[FIFO] k_lifo_get(200004b4, timeout=0)
++[FIFO]   -> fast path: got 20003758
++SEM: k_sem_init(2002ed74, count=0, limit=1)
++[FIFO] k_fifo_put(20000208, 20003758)
++[FIFO] k_queue_append(20000208, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++SEM: k_sem_take(200001f8, timeout=10000)
++SEM:   --> fast path, count now 0
++[FIFO] k_fifo_get(20000208, timeout=0)
++[FIFO] k_queue_get(20000208, timeout=0)
++[FIFO]   -> fast path: return 20003758
++SEM: k_sem_take(2002ed74, timeout=10000)
++SEM:   --> waiting (timeout=10000 ms)
++[FIFO] k_lifo_get(200004f4, timeout=0)
++[FIFO]   -> fast path: got 2000493c
++SEM: k_sem_give(2002ed74)
++SEM:   --> count now 1
++SEM: k_sem_give(200001f8)
++SEM:   --> count now 1
++[FIFO] k_lifo_put(200004f4, 2000493c)
++[FIFO] k_queue_prepend(200004f4, 2000493c)
++[FIFO]   -> empty queue, set head=tail=2000493c
++SEM:   --> acquired after 33 ms, count now 0
++[FIFO] k_lifo_put(200004b4, 20003758)
++[FIFO] k_queue_prepend(200004b4, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++[FIFO] k_lifo_get(200004b4, timeout=0)
++[FIFO]   -> fast path: got 20003758
++SEM: k_sem_init(2002ed0c, count=0, limit=1)
++[FIFO] k_fifo_put(20000208, 20003758)
++[FIFO] k_queue_append(20000208, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++SEM: k_sem_take(200001f8, timeout=10000)
++SEM:   --> fast path, count now 0
++[FIFO] k_fifo_get(20000208, timeout=0)
++[FIFO] k_queue_get(20000208, timeout=0)
++[FIFO]   -> fast path: return 20003758
++SEM: k_sem_take(2002ed0c, timeout=10000)
++SEM:   --> waiting (timeout=10000 ms)
++[FIFO] k_lifo_get(200004f4, timeout=0)
++[FIFO]   -> fast path: got 2000493c
++SEM: k_sem_give(2002ed0c)
++SEM:   --> count now 1
++SEM: k_sem_give(200001f8)
++SEM:   --> count now 1
++[FIFO] k_lifo_put(200004f4, 2000493c)
++[FIFO] k_queue_prepend(200004f4, 2000493c)
++[FIFO]   -> empty queue, set head=tail=2000493c
++SEM:   --> acquired after 33 ms, count now 0
++[FIFO] k_lifo_put(200004b4, 20003758)
++[FIFO] k_queue_prepend(200004b4, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++[FIFO] k_fifo_put(20000ef4, 20000ac0)
++[FIFO] k_queue_append(20000ef4, 20000ac0)
++[FIFO]   -> empty queue, set head=tail=20000ac0
++[FIFO] k_fifo_put(20000ef4, 20000acc)
++[FIFO] k_queue_append(20000ef4, 20000acc)
++[FIFO]   -> append to tail, new tail=20000acc
++[FIFO] k_fifo_put(20000ef4, 20000ad8)
++[FIFO] k_queue_append(20000ef4, 20000ad8)
++[FIFO]   -> append to tail, new tail=20000ad8
++[FIFO] k_fifo_put(20000ef4, 20000ae4)
++[FIFO] k_queue_append(20000ef4, 20000ae4)
++[FIFO]   -> append to tail, new tail=20000ae4
++[FIFO] k_fifo_put(20000ef4, 20000af0)
++[FIFO] k_queue_append(20000ef4, 20000af0)
++[FIFO]   -> append to tail, new tail=20000af0
++[FIFO] k_fifo_put(20000ef4, 20000afc)
++[FIFO] k_queue_append(20000ef4, 20000afc)
++[FIFO]   -> append to tail, new tail=20000afc
++[FIFO] k_fifo_put(20000ef4, 20000b08)
++[FIFO] k_queue_append(20000ef4, 20000b08)
++[FIFO]   -> append to tail, new tail=20000b08
++[FIFO] k_fifo_put(20000ef4, 20000b14)
++[FIFO] k_queue_append(20000ef4, 20000b14)
++[FIFO]   -> append to tail, new tail=20000b14
+ gap_connect
+-_IRQ_PERIPHERAL_CONNECT
+-gap_disconnect: True
+-_IRQ_PERIPHERAL_DISCONNECT
+-gap_connect
+-_IRQ_PERIPHERAL_CONNECT
+-_IRQ_PERIPHERAL_DISCONNECT
++[FIFO] k_lifo_get(200004b4, timeout=0)
++[FIFO]   -> fast path: got 20003758
++SEM: k_sem_init(2002ec4c, count=0, limit=1)
++[FIFO] k_fifo_put(20000208, 20003758)
++[FIFO] k_queue_append(20000208, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++SEM: k_sem_take(200001f8, timeout=10000)
++SEM:   --> fast path, count now 0
++[FIFO] k_fifo_get(20000208, timeout=0)
++[FIFO] k_queue_get(20000208, timeout=0)
++[FIFO]   -> fast path: return 20003758
++SEM: k_sem_take(2002ec4c, timeout=10000)
++SEM:   --> waiting (timeout=10000 ms)
++[FIFO] k_lifo_get(200004f4, timeout=0)
++[FIFO]   -> fast path: got 2000493c
++SEM: k_sem_give(2002ec4c)
++SEM:   --> count now 1
++SEM: k_sem_give(200001f8)
++SEM:   --> count now 1
++[FIFO] k_lifo_put(200004f4, 2000493c)
++[FIFO] k_queue_prepend(200004f4, 2000493c)
++[FIFO]   -> empty queue, set head=tail=2000493c
++[HCI_TIMING] IPCC_IRQ: LE Connection Complete enqueued at T+1316ms
++SEM:   --> acquired after 38 ms, count now 0
++[FIFO] k_lifo_put(200004b4, 20003758)
++[FIFO] k_queue_prepend(200004b4, 20003758)
++[FIFO]   -> empty queue, set head=tail=20003758
++[HCI_TIMING] RX_QUEUE: Dequeued LE Connection Complete at T+1316ms (queue_latency=22258us, depth=1)
++[HCI_TIMING] BT_RECV: Passing LE Connection Complete to Zephyr at T+1347ms
++[HCI_TIMING] BT_RECV: Zephyr processing complete at T+1354ms (took 6723us)
++SEM: k_sem_give(200002bc)
+### TRUTH ###
+--- instance0 ---
+gap_advertise
+_IRQ_CENTRAL_CONNECT
+_IRQ_CENTRAL_DISCONNECT
+gap_advertise
+_IRQ_CENTRAL_CONNECT
+gap_disconnect: True
+_IRQ_CENTRAL_DISCONNECT
+--- instance1 ---
+gap_connect
+_IRQ_PERIPHERAL_CONNECT
+gap_disconnect: True
+_IRQ_PERIPHERAL_DISCONNECT
+gap_connect
+_IRQ_PERIPHERAL_CONNECT
+_IRQ_PERIPHERAL_DISCONNECT
+### DIFF ###
+1 tests performed
+0 tests passed
+1 tests failed: multi_bluetooth/ble_gap_connect.py

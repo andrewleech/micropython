@@ -74,7 +74,7 @@ make BOARD=NUCLEO_WB55 BOARD_VARIANT=zephyr ZEPHYR_BLE_DEBUG=1
 
 **Status**:
 - NimBLE (default): ✓ Full BLE functionality working (advertising, scanning, connections, central+peripheral roles)
-- Zephyr variant: ⚠ **Phase 2B: Architectural fix complete, NEEDS VERIFICATION TESTING**
+- Zephyr variant: ⚠ **Phase 2B: Fix #7 VERIFIED WORKING, Issue #6 CONFIRMED PERSISTS**
   - ✓ Peripheral role (advertising, accepting connections from central devices)
   - ✓ GATT Server (providing services/characteristics)
   - ✓ Scanning (passive/active scan, advertising report reception)
@@ -83,23 +83,31 @@ make BOARD=NUCLEO_WB55 BOARD_VARIANT=zephyr ZEPHYR_BLE_DEBUG=1
     - Fixed H4 buffer format (removed duplicate packet type byte)
     - Added work processing to WFI function
     - HCI command/response flow now working
-  - ⚠ **Issue #6: Connection callbacks not firing** - NEEDS INVESTIGATION
-    - **Symptom 1**: `gap_connect()` (central role) fails with EINVAL
-    - **Symptom 2**: Peripheral role callbacks not invoked when accepting connections
-    - `mp_bluetooth_gap_peripheral_connect()` implemented using `bt_conn_le_create()`
-    - `mp_bluetooth_gap_peripheral_connect_cancel()` implemented
-    - Connection role detection fixed (BT_HCI_ROLE_CENTRAL vs PERIPHERAL)
-    - Callbacks registered but `mp_bt_zephyr_connected()` never called by Zephyr
-    - Multi-test `ble_gap_connect.py` untested with Fix #7
-    - Documented in: `ISSUE_6_FINAL_ANALYSIS.md`, `ISSUE_6_ROOT_CAUSE_SUMMARY.md`
+    - **VERIFIED**: Multi-test with commit ea56a42996 shows semaphores work (26-38ms acquisition)
+    - **VERIFIED**: No HCI command timeouts, work queue processing functional
+  - ✗ **Issue #6: Connection callbacks not firing** - VERIFIED PERSISTS (2025-10-22)
+    - **Test**: `multi_bluetooth/ble_gap_connect.py` with PYBD (NimBLE) + STM32WB55 (Zephyr)
+    - **Firmware**: STM32WB55 commit ea56a42996 (includes Fix #7), PYBD v1.27.0-preview.325
+    - **Result**: Connection succeeded at HCI level, but Python callbacks never fired
+    - **Evidence**:
+      - ✓ HCI LE Connection Complete received and enqueued (T+1316ms)
+      - ✓ Event dequeued from RX queue (queue_latency=22258us)
+      - ✓ Passed to Zephyr stack (T+1347ms)
+      - ✓ Zephyr processed event (took 6723us, completed T+1354ms)
+      - ✗ `mp_bt_zephyr_connected()` callback NEVER invoked
+      - ✗ No Python `_IRQ_CENTRAL_CONNECT` event delivered to peripheral
+      - ✓ PYBD (central) received `_IRQ_CENTRAL_CONNECT` (connection worked)
+      - ✗ PYBD (central) never received `_IRQ_CENTRAL_DISCONNECT` (peripheral couldn't disconnect)
+    - **Root Cause**: Zephyr processes HCI connection events but doesn't invoke registered callbacks
+    - **Test Output**: `multitest_fix7_verification.txt`
+    - **Documented in**: `ISSUE_6_FINAL_ANALYSIS.md`, `ISSUE_6_ROOT_CAUSE_SUMMARY.md`
   - ✗ GATT Client (service discovery, read/write) - NOT IMPLEMENTED
 
 **Next Steps**:
-1. Flash firmware with Fix #7 (recursion deadlock fix)
-2. Re-run `multi_bluetooth/ble_gap_connect.py` test
-3. Verify if Issue #6 persists or was resolved by Fix #7
-4. If Issue #6 persists, investigate gap_connect() EINVAL error
-5. Document actual test results
+1. Investigate why Zephyr doesn't invoke registered connection callbacks
+2. Compare Zephyr callback registration with NimBLE implementation
+3. Check if additional Zephyr initialization is required for callback dispatch
+4. Test on RP2 Pico 2 W with all fixes applied
 
 **Performance Comparison (5-second scan)**:
 | Stack | Devices Detected | Errors | Status |
