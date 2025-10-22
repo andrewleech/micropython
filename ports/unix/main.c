@@ -483,30 +483,15 @@ int main(int argc, char **argv) {
     stack_size *= 2;
     #endif
 
-    #if MICROPY_PY_THREAD && MICROPY_ZEPHYR_THREADING
-    // Zephyr threading: Initialize kernel first, then start MicroPython in a Zephyr thread
-    char stack_dummy;
-    extern void mp_zephyr_kernel_init(void *main_stack, uint32_t main_stack_len);
-    mp_zephyr_kernel_init(&stack_dummy, stack_size);
-
-    extern void mp_zephyr_start(int argc, char **argv);
-    mp_zephyr_start(argc, argv);
-
-    return 0;  // Never reached
-    #else
-    // Standard pthread threading or no threading
-    #if MICROPY_PY_THREAD
-    mp_thread_init();
-    #endif
-
     // We should capture stack top ASAP after start, and it should be
     // captured guaranteedly before any other stack variables are allocated.
     // For this, actual main (renamed real_main) should not be inlined into
     // this function. real_main() itself may have other functions inlined (with
     // their own stack variables), that's why we need this main/real_main split.
+    #if !MICROPY_ZEPHYR_THREADING
     mp_cstack_init_with_sp_here(stack_size);
-    return real_main(argc, argv);
     #endif
+    return real_main(argc, argv);
 }
 
 MP_NOINLINE int real_main(int argc, char **argv) {
