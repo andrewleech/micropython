@@ -87,6 +87,10 @@ static struct net_buf *rx_queue[RX_QUEUE_SIZE];
 static volatile size_t rx_queue_head = 0;
 static volatile size_t rx_queue_tail = 0;
 
+// Timing instrumentation: Track packet arrival timestamps (microseconds)
+static uint32_t rx_queue_timestamps[RX_QUEUE_SIZE];
+uint32_t timing_baseline_us = 0;  // First packet arrival time (exported for callbacks)
+
 // H:4 packet parser state
 typedef enum {
     H4_STATE_TYPE,      // Waiting for packet type byte
@@ -121,7 +125,12 @@ static bool rx_queue_put(struct net_buf *buf) {
         MICROPY_PY_BLUETOOTH_EXIT
         return false;
     }
+    uint32_t now_us = mp_hal_ticks_us();
+    if (timing_baseline_us == 0) {
+        timing_baseline_us = now_us;  // Initialize baseline on first packet
+    }
     rx_queue[rx_queue_head] = buf;
+    rx_queue_timestamps[rx_queue_head] = now_us;
     rx_queue_head = (rx_queue_head + 1) % RX_QUEUE_SIZE;
     MICROPY_PY_BLUETOOTH_EXIT
     return true;
@@ -134,7 +143,24 @@ static struct net_buf *rx_queue_get(void) {
         return NULL;
     }
     struct net_buf *buf = rx_queue[rx_queue_tail];
+    uint32_t enqueue_timestamp_us = rx_queue_timestamps[rx_queue_tail];
+    size_t queue_depth = (rx_queue_head - rx_queue_tail + RX_QUEUE_SIZE) % RX_QUEUE_SIZE;
     rx_queue_tail = (rx_queue_tail + 1) % RX_QUEUE_SIZE;
+
+    // Calculate and report timing
+    uint32_t now_us = mp_hal_ticks_us();
+    uint32_t queue_latency_us = now_us - enqueue_timestamp_us;
+    uint32_t relative_time_ms = (enqueue_timestamp_us - timing_baseline_us) / 1000;
+
+    // Only report timing for connection-related events to reduce noise
+    // NOTE: buf->data[0] now contains H4 packet type, buf->data[1] is event code
+    const uint8_t *data = buf->data;
+    if (buf->len >= 4 && data[0] == H4_EVT && data[1] == 0x3E && data[3] == 0x01) {
+        // LE Connection Complete event
+        mp_printf(&mp_plat_print, "[HCI_TIMING] RX_QUEUE: Dequeued LE Connection Complete at T+%ums (queue_latency=%uus, depth=%u)\n",
+            relative_time_ms, queue_latency_us, queue_depth);
+    }
+
     MICROPY_PY_BLUETOOTH_EXIT
     return buf;
 }
@@ -194,7 +220,8 @@ static bool h4_parser_process_byte(uint8_t byte) {
                             return false;
                         }
 
-                        // Add header to buffer
+                        // bt_buf_get_evt() -> bt_buf_get_rx() already added H4 type byte
+                        // Just add header to buffer (event code + length)
                         net_buf_add_mem(h4_buf, h4_header_buf, h4_header_len);
                         break;
 
@@ -209,7 +236,8 @@ static bool h4_parser_process_byte(uint8_t byte) {
                             return false;
                         }
 
-                        // Add header to buffer
+                        // bt_buf_get_rx(BT_BUF_ACL_IN, ...) already added H4 type byte
+                        // Just add header to buffer
                         net_buf_add_mem(h4_buf, h4_header_buf, h4_header_len);
                         break;
 
@@ -266,7 +294,16 @@ static void h4_uart_byte_callback(uint8_t byte) {
                 error_printf("RX queue full\n");
                 net_buf_unref(buf);
             } else {
-                // DO NOT add trace output here - this runs in interrupt context!
+                // Timing instrumentation: Log packet enqueue (only for connection events)
+                // NOTE: buf->data[0] now contains H4 packet type, buf->data[1] is event code
+                const uint8_t *data = buf->data;
+                if (buf->len >= 4 && data[0] == H4_EVT && data[1] == 0x3E && data[3] == 0x01) {
+                    // LE Connection Complete event
+                    uint32_t relative_time_ms = (mp_hal_ticks_us() - timing_baseline_us) / 1000;
+                    mp_printf(&mp_plat_print, "[HCI_TIMING] IPCC_IRQ: LE Connection Complete enqueued at T+%ums\n",
+                        relative_time_ms);
+                }
+
                 // Schedule task to process queued packets
                 // This is safe from IRQ context (same as NimBLE UART IRQ)
                 mp_zephyr_hci_poll_now();
@@ -322,7 +359,39 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
     // Process any queued RX buffers (from interrupt context)
     struct net_buf *buf;
     while ((buf = rx_queue_get()) != NULL) {
+        // Timing instrumentation: Measure Zephyr BLE host processing time
+        // NOTE: buf->data[0] now contains H4 packet type, buf->data[1] is event code
+        bool is_conn_event = false;
+        if (buf->len >= 4) {
+            const uint8_t *data = buf->data;
+            if (data[0] == H4_EVT && data[1] == 0x3E && data[3] == 0x01) {
+                // LE Connection Complete event
+                is_conn_event = true;
+            }
+        }
+
+        uint32_t before_us = 0;
+        if (is_conn_event) {
+            before_us = mp_hal_ticks_us();
+            uint32_t relative_time_ms = (before_us - timing_baseline_us) / 1000;
+            mp_printf(&mp_plat_print, "[HCI_TIMING] BT_RECV: Passing LE Connection Complete to Zephyr at T+%ums\n",
+                relative_time_ms);
+        }
+
+        // DO NOT strip H4 packet type byte - Zephyr expects it!
+        // bt_hci_recv() -> bt_recv_unsafe() pulls the type byte itself.
+        // See comment at hci_core.c:4474-4477
+
         int ret = recv_cb(hci_dev, buf);
+
+        if (is_conn_event && before_us > 0) {
+            uint32_t after_us = mp_hal_ticks_us();
+            uint32_t processing_time_us = after_us - before_us;
+            uint32_t relative_time_ms = (after_us - timing_baseline_us) / 1000;
+            mp_printf(&mp_plat_print, "[HCI_TIMING] BT_RECV: Zephyr processing complete at T+%ums (took %uus)\n",
+                relative_time_ms, processing_time_us);
+        }
+
         if (ret < 0) {
             error_printf("recv_cb failed: %d\n", ret);
             net_buf_unref(buf);
@@ -356,16 +425,30 @@ void mp_bluetooth_zephyr_hci_uart_wfi(void) {
         return;
     }
 
-    // SOLUTION 4 (Hybrid Approach):
-    // Directly process any pending HCI packets instead of relying on scheduler.
-    // This eliminates scheduler dependency and ensures timely HCI response processing.
-    run_zephyr_hci_task(NULL);
+    // ARCHITECTURAL FIX for Issue #6:
+    // When called from within a wait loop (k_sem_take), we need to:
+    // 1. Process HCI packets directly (to get responses)
+    // 2. Process work queue (because soft timers can't fire while blocked)
+    //
+    // The in_wait_loop flag allows work processing to bypass recursion prevention.
 
-    // Deliver any queued RX buffers directly to BLE stack
+    // Read any new HCI packets from hardware (IPCC on STM32WB)
+    while (mp_bluetooth_hci_uart_readpacket(h4_uart_byte_callback) > 0) {
+        // Keep reading while packets are available
+    }
+
+    // Process any queued RX buffers directly
+    // DO NOT strip H4 packet type byte - Zephyr expects it!
+    // bt_hci_recv() -> bt_recv_unsafe() pulls the type byte itself.
+    // See comment at hci_core.c:4474-4477
     struct net_buf *buf;
     while ((buf = rx_queue_get()) != NULL) {
         recv_cb(hci_dev, buf);
     }
+
+    // Process work queue (allowed via in_wait_loop flag)
+    // This is essential because soft timers can't fire while blocked in k_sem_take()
+    mp_bluetooth_zephyr_work_process();
 
     // Give IPCC hardware minimal time to complete any ongoing transfers
     // 100μs is sufficient for hardware without introducing significant latency
@@ -444,7 +527,13 @@ static int hci_stm32_send(const struct device *dev, struct net_buf *buf) {
     memcpy(&h4_packet[1], buf->data, buf->len);
 
     // Trace HCI commands being sent
-    DEBUG_HCI_printf("[SEND] type=0x%02x len=%u\n", h4_type, (unsigned int)total_len);
+    if (h4_type == 0x01 && buf->len >= 3) {  // HCI Command
+        uint16_t opcode = buf->data[0] | (buf->data[1] << 8);
+        uint8_t param_len = buf->data[2];
+        DEBUG_HCI_printf("[SEND] HCI Command: opcode=0x%04x param_len=%u\n", opcode, param_len);
+    } else {
+        DEBUG_HCI_printf("[SEND] type=0x%02x len=%u\n", h4_type, (unsigned int)total_len);
+    }
 
     // Send via port's transport abstraction (UART or IPCC)
     int ret = mp_bluetooth_hci_uart_write(h4_packet, total_len);
