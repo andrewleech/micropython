@@ -216,15 +216,13 @@ static void mp_bt_zephyr_remove_connection(uint8_t conn_handle) {
 }
 
 static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
-    // CRITICAL: This printf MUST appear if callback is being called by Zephyr
-    mp_printf(&mp_plat_print, ">>> mp_bt_zephyr_connected CALLED: conn=%p err=%u state=%d\n",
-              conn, err, mp_bluetooth_zephyr_ble_state);
+    DEBUG_printf("mp_bt_zephyr_connected: conn=%p err=%u state=%d\n", conn, err, mp_bluetooth_zephyr_ble_state);
 
     // Safety check: only process if BLE is fully active and initialized
     if (mp_bluetooth_zephyr_ble_state != MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE
         || MP_STATE_PORT(bluetooth_zephyr_root_pointers) == NULL) {
-        mp_printf(&mp_plat_print, ">>> Connection callback ignored - BLE not active (state=%d)\n",
-                  mp_bluetooth_zephyr_ble_state);
+        DEBUG_printf("  Connection callback ignored - BLE not active (state=%d)\n",
+                     mp_bluetooth_zephyr_ble_state);
         return;
     }
 
@@ -275,16 +273,14 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
 }
 
 static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
-    // CRITICAL: This printf MUST appear if callback is being called by Zephyr
-    mp_printf(&mp_plat_print, ">>> mp_bt_zephyr_disconnected CALLED: conn=%p reason=%u state=%d\n",
-              conn, reason, mp_bluetooth_zephyr_ble_state);
+    DEBUG_printf("mp_bt_zephyr_disconnected: conn=%p reason=%u state=%d\n", conn, reason, mp_bluetooth_zephyr_ble_state);
 
     // Safety check: only process if BLE is fully active and initialized
     // Ignore callbacks during deinit (SUSPENDED state) to prevent double-unref race
     if (mp_bluetooth_zephyr_ble_state != MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE
         || MP_STATE_PORT(bluetooth_zephyr_root_pointers) == NULL) {
-        mp_printf(&mp_plat_print, ">>> Disconnect callback ignored - BLE not active (state=%d)\n",
-                  mp_bluetooth_zephyr_ble_state);
+        DEBUG_printf("  Disconnect callback ignored - BLE not active (state=%d)\n",
+                     mp_bluetooth_zephyr_ble_state);
         return;
     }
 
@@ -333,12 +329,9 @@ static void mp_bluetooth_zephyr_bt_ready_cb(int err) {
 }
 
 #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
-// Debug counter for advertising report investigation
-static int scan_cb_recv_count = 0;
 
 void gap_scan_cb_recv(const struct bt_le_scan_recv_info *info, struct net_buf_simple *buf) {
-    scan_cb_recv_count++;
-    DEBUG_printf("gap_scan_cb_recv: adv_type=%d [count=%d]\n", info->adv_type, scan_cb_recv_count);
+    DEBUG_printf("gap_scan_cb_recv: adv_type=%d\n", info->adv_type);
 
     if (!mp_bluetooth_is_active()) {
         DEBUG_printf("  --> BLE not active, skipping\n");
@@ -414,8 +407,8 @@ int mp_bluetooth_init(void) {
         #endif
 
         bt_conn_cb_register(&mp_bt_zephyr_conn_callbacks);
-        mp_printf(&mp_plat_print, ">>> Registered connection callbacks: connected=%p disconnected=%p\n",
-                  mp_bt_zephyr_conn_callbacks.connected, mp_bt_zephyr_conn_callbacks.disconnected);
+        DEBUG_printf("Registered connection callbacks: connected=%p disconnected=%p\n",
+                     mp_bt_zephyr_conn_callbacks.connected, mp_bt_zephyr_conn_callbacks.disconnected);
 
         // Initialize HCI controller (CYW43 BT via WEAK override from pico-sdk)
         // This must be called before bt_enable()
@@ -532,32 +525,28 @@ int mp_bluetooth_deinit(void) {
 
     // Stop advertising before unregistering callbacks
     // This cleans up any advertising connections (BT_CONN_ADV_CONNECTABLE state)
-    mp_printf(&mp_plat_print, ">>> Deinit: stopping advertising\n");
+    DEBUG_printf("Stopping advertising\n");
     mp_bluetooth_gap_advertise_stop();
-    mp_printf(&mp_plat_print, ">>> Deinit: advertising stopped\n");
 
     #if CONFIG_BT_GATT_DYNAMIC_DB
-    mp_printf(&mp_plat_print, ">>> Deinit: unregistering GATT services\n");
+    DEBUG_printf("Unregistering GATT services\n");
     for (size_t i = 0; i < MP_STATE_PORT(bluetooth_zephyr_root_pointers)->n_services; ++i) {
         bt_gatt_service_unregister(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->services[i]);
         MP_STATE_PORT(bluetooth_zephyr_root_pointers)->services[i] = NULL;
     }
-    mp_printf(&mp_plat_print, ">>> Deinit: GATT services unregistered\n");
     #endif
 
     #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
-    mp_printf(&mp_plat_print, ">>> Deinit: stopping scan\n");
+    DEBUG_printf("Stopping scan\n");
     mp_bluetooth_gap_scan_stop();
     bt_le_scan_cb_unregister(&mp_bluetooth_zephyr_gap_scan_cb_struct);
-    mp_printf(&mp_plat_print, ">>> Deinit: scan stopped\n");
     #endif
 
     // CRITICAL: Unregister connection callbacks before bt_disable()
     // bt_disable() does NOT clear callbacks - they persist and cause double-registration
     // on subsequent bt_enable() cycles, leading to crashes
-    mp_printf(&mp_plat_print, ">>> Deinit: unregistering connection callbacks\n");
+    DEBUG_printf("Unregistering connection callbacks\n");
     bt_conn_cb_unregister(&mp_bt_zephyr_conn_callbacks);
-    mp_printf(&mp_plat_print, ">>> Deinit: connection callbacks unregistered\n");
 
     // Use Zephyr's official bt_disable() API to shut down the BLE stack
     // This automatically:
@@ -566,11 +555,10 @@ int mp_bluetooth_deinit(void) {
     // - Sends HCI RESET to controller
     // - Closes HCI resources
     // - Clears identity and keys
-    mp_printf(&mp_plat_print, ">>> Deinit: calling bt_disable()\n");
+    DEBUG_printf("Calling bt_disable()\n");
     int err = bt_disable();
-    mp_printf(&mp_plat_print, ">>> Deinit: bt_disable() returned %d\n", err);
     if (err != 0) {
-        mp_printf(&mp_plat_print, ">>> Deinit: bt_disable() FAILED with error %d\n", err);
+        DEBUG_printf("bt_disable() failed with error %d\n", err);
         // Don't fail deinit - just log and continue with cleanup
     }
 
@@ -686,7 +674,11 @@ int mp_bluetooth_gap_advertise_start(bool connectable, int32_t interval_us, cons
     mp_bt_zephyr_next_conn = m_new0(mp_bt_zephyr_conn_t, 1);
     mp_obj_list_append(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->objs_list, MP_OBJ_FROM_PTR(mp_bt_zephyr_next_conn));
 
-    return bt_err_to_errno(bt_le_adv_start(&param, bt_ad_data, bt_ad_len, bt_sd_data, bt_sd_len));
+    DEBUG_printf("Starting advertising: connectable=%d options=0x%x\n", connectable, param.options);
+    int ret = bt_le_adv_start(&param, bt_ad_data, bt_ad_len, bt_sd_data, bt_sd_len);
+    DEBUG_printf("bt_le_adv_start returned: %d\n", ret);
+
+    return bt_err_to_errno(ret);
 }
 
 void mp_bluetooth_gap_advertise_stop(void) {
