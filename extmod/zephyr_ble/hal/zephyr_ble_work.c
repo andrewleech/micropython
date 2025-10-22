@@ -157,7 +157,17 @@ int k_work_submit(struct k_work *work) {
         k_work_queue_init(&k_sys_work_q);
         k_sys_work_q.name = "SYS WQ";
     }
-    return k_work_submit_internal(&k_sys_work_q, work);
+    int ret = k_work_submit_internal(&k_sys_work_q, work);
+
+    // ARCHITECTURAL FIX: Trigger work processing immediately after submission
+    // In a real Zephyr system with threads, the worker thread would wake up.
+    // In our system, we need to schedule run_zephyr_hci_task() to process the work.
+    if (ret > 0) {
+        extern void mp_bluetooth_zephyr_port_poll_in_ms(uint32_t ms);
+        mp_bluetooth_zephyr_port_poll_in_ms(0);  // Schedule immediate processing
+    }
+
+    return ret;
 }
 
 int k_work_submit_to_queue(struct k_work_q *queue, struct k_work *work) {
@@ -320,6 +330,11 @@ int k_work_delayable_busy_get(const struct k_work_delayable *dwork) {
 static volatile bool regular_work_processor_running = false;
 static volatile bool init_work_processor_running = false;
 
+// Waiting flag: When true, allows work processing from within wait loops
+// This prevents deadlock when waiting for HCI responses that arrive via work queue
+// Set by k_sem_take() during its wait loop (exported in zephyr_ble_work.h)
+volatile bool mp_bluetooth_zephyr_in_wait_loop = false;
+
 // Debug counters for work processing investigation
 static int work_process_call_count = 0;
 static int work_items_processed = 0;
@@ -328,11 +343,18 @@ static int work_items_processed = 0;
 void mp_bluetooth_zephyr_work_process(void) {
     work_process_call_count++;
 
-    // Prevent recursion: If we're called from within a work handler (via k_sem_take → wfi),
-    // skip processing to avoid deadlock
-    if (regular_work_processor_running) {
+    // ARCHITECTURAL FIX for Issue #6 recursion deadlock:
+    // Prevent recursion UNLESS we're explicitly in a wait loop.
+    // When mp_bluetooth_zephyr_in_wait_loop is true, we MUST allow work processing
+    // because k_sem_take() is waiting for an HCI response that will arrive via work queue.
+    // Without this exception, the recursion prevention creates a deadlock.
+    if (regular_work_processor_running && !mp_bluetooth_zephyr_in_wait_loop) {
         DEBUG_WORK_printf("work_process: already running, skipping (recursion prevention)\n");
         return;
+    }
+
+    if (regular_work_processor_running && mp_bluetooth_zephyr_in_wait_loop) {
+        DEBUG_WORK_printf("work_process: allowing re-entry due to wait loop context\n");
     }
 
     regular_work_processor_running = true;

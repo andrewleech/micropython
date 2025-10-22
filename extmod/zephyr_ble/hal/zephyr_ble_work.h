@@ -175,6 +175,11 @@ int k_work_delayable_busy_get(const struct k_work_delayable *dwork);
 
 // --- MicroPython-specific functions ---
 
+// Waiting flag: When true, allows work processing from within wait loops
+// This prevents deadlock when waiting for HCI responses that arrive via work queue
+// Set by k_sem_take() during its wait loop
+extern volatile bool mp_bluetooth_zephyr_in_wait_loop;
+
 // Called by MicroPython scheduler to process all pending work (regular work queues only)
 void mp_bluetooth_zephyr_work_process(void);
 

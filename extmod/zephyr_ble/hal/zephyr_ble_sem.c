@@ -83,20 +83,25 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
 
     DEBUG_SEM_printf("  --> waiting (timeout=%u ms)\n", timeout_ms);
 
-    // Wait pattern: Process HCI responses while waiting for semaphore
-    // This prevents deadlock when work queue handler blocks waiting for HCI command response
-    // See docs/BLE_TIMING_ARCHITECTURE.md for detailed analysis
+    // ARCHITECTURAL FIX for Issue #6 recursion deadlock:
+    // Set the wait loop flag to allow work processing from within this wait context.
+    // This prevents deadlock when work queue handler blocks waiting for HCI command response.
+    // See docs/BLE_TIMING_ARCHITECTURE.md for detailed analysis.
+    extern volatile bool mp_bluetooth_zephyr_in_wait_loop;
+    mp_bluetooth_zephyr_in_wait_loop = true;
+
     while (sem->count == 0) {
-        // SOLUTION 4 (Enhanced):
         // Process HCI packets FIRST, before checking timeout
         // This ensures any pending responses are processed immediately
-        // mp_bluetooth_zephyr_hci_uart_wfi() now directly calls run_zephyr_hci_task()
+        // mp_bluetooth_zephyr_hci_uart_wfi() now directly processes HCI packets
+        // and allows work queue processing via the in_wait_loop flag
         mp_bluetooth_zephyr_hci_uart_wfi();
 
         // Check timeout AFTER processing HCI packets
         uint32_t elapsed = mp_hal_ticks_ms() - t0;
         if (timeout_ms != 0xFFFFFFFF && elapsed >= timeout_ms) {
             DEBUG_SEM_printf("  --> timeout after %u ms\n", elapsed);
+            mp_bluetooth_zephyr_in_wait_loop = false;
             return -EAGAIN;
         }
 
@@ -109,6 +114,9 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
             mp_event_wait_ms(0);
         }
     }
+
+    // Clear the wait loop flag before returning
+    mp_bluetooth_zephyr_in_wait_loop = false;
 
     // Semaphore became available
     sem->count--;
