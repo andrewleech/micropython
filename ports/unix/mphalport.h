@@ -32,6 +32,8 @@
 
 // If threading is enabled, configure the atomic section.
 #if MICROPY_PY_THREAD
+void mp_thread_unix_begin_atomic_section(void);
+void mp_thread_unix_end_atomic_section(void);
 #define MICROPY_BEGIN_ATOMIC_SECTION() (mp_thread_unix_begin_atomic_section(), 0xffffffff)
 #define MICROPY_END_ATOMIC_SECTION(x) (void)x; mp_thread_unix_end_atomic_section()
 #endif

@@ -140,6 +140,21 @@ endif
 ifeq ($(MICROPY_PY_THREAD),1)
 CFLAGS += -DMICROPY_PY_THREAD=1 -DMICROPY_PY_THREAD_GIL=0
 LDFLAGS += $(LIBPTHREAD)
+
+# Optional: Use Zephyr kernel for threading (experimental POC)
+ifeq ($(MICROPY_ZEPHYR_THREADING),1)
+CFLAGS += -DMICROPY_ZEPHYR_THREADING=1
+# Use centralized Zephyr kernel integration
+ZEPHYR_ARCH := posix
+include $(TOP)/extmod/zephyr_kernel/zephyr_kernel.mk
+# Apply Zephyr includes and flags
+INC += $(ZEPHYR_INC)
+CFLAGS += $(ZEPHYR_CFLAGS)
+# Combine all Zephyr sources
+ZEPHYR_KERNEL_SRC_C := $(ZEPHYR_KERNEL_SRC_C) $(ZEPHYR_ARCH_SRC_C) $(ZEPHYR_MP_SRC_C)
+# Add Unix-specific architecture bridge
+ZEPHYR_KERNEL_SRC_C += zephyr_arch_unix.c
+endif
 endif
 
 ifeq ($(MICROPY_PY_SSL),1)
@@ -202,7 +217,6 @@ SRC_C += \
 	main.c \
 	gccollect.c \
 	unix_mphal.c \
-	mpthreadport.c \
 	input.c \
 	alloc.c \
 	fatfs_port.c \
@@ -216,6 +230,18 @@ SRC_C += \
 	modffi.c \
 	modjni.c \
 	$(wildcard $(VARIANT_DIR)/*.c)
+
+# Threading implementation: either pthread or Zephyr
+ifeq ($(MICROPY_ZEPHYR_THREADING),1)
+# Use Zephyr threading
+SRC_C += zephyr_start.c
+SRC_C += $(ZEPHYR_KERNEL_SRC_C)
+# Ensure Zephyr objects depend on generated headers
+$(addprefix $(BUILD)/, $(ZEPHYR_KERNEL_SRC_C:.c=.o)): $(ZEPHYR_GEN_HEADERS)
+else
+# Use standard pthread threading
+SRC_C += mpthreadport.c
+endif
 
 SHARED_SRC_C += $(addprefix shared/,\
 	runtime/gchelper_generic.c \

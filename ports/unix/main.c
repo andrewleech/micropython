@@ -37,6 +37,7 @@
 #include <sys/types.h>
 #include <errno.h>
 #include <signal.h>
+#include <pthread.h>
 
 #include "py/compile.h"
 #include "py/runtime.h"
@@ -48,6 +49,7 @@
 #include "py/mperrno.h"
 #include "py/mphal.h"
 #include "py/mpthread.h"
+#include "py/stackctrl.h"
 #include "extmod/misc.h"
 #include "extmod/modplatform.h"
 #include "extmod/vfs.h"
@@ -471,13 +473,9 @@ static void sys_set_excecutable(char *argv0) {
 #define PATHLIST_SEP_CHAR ':'
 #endif
 
-MP_NOINLINE int main_(int argc, char **argv);
+MP_NOINLINE int real_main(int argc, char **argv);
 
 int main(int argc, char **argv) {
-    #if MICROPY_PY_THREAD
-    mp_thread_init();
-    #endif
-
     // Define a reasonable stack limit to detect stack overflow.
     mp_uint_t stack_size = 40000 * (sizeof(void *) / 4);
     #if defined(__arm__) && !defined(__thumb2__)
@@ -485,16 +483,67 @@ int main(int argc, char **argv) {
     stack_size *= 2;
     #endif
 
+    #if MICROPY_PY_THREAD && MICROPY_ZEPHYR_THREADING
+    // Zephyr threading: Initialize kernel first, then start MicroPython in a Zephyr thread
+    char stack_dummy;
+    extern void mp_zephyr_kernel_init(void *main_stack, uint32_t main_stack_len);
+    mp_zephyr_kernel_init(&stack_dummy, stack_size);
+
+    extern void mp_zephyr_start(int argc, char **argv);
+    mp_zephyr_start(argc, argv);
+
+    return 0;  // Never reached
+    #else
+    // Standard pthread threading or no threading
+    #if MICROPY_PY_THREAD
+    mp_thread_init();
+    #endif
+
     // We should capture stack top ASAP after start, and it should be
     // captured guaranteedly before any other stack variables are allocated.
-    // For this, actual main (renamed main_) should not be inlined into
-    // this function. main_() itself may have other functions inlined (with
-    // their own stack variables), that's why we need this main/main_ split.
+    // For this, actual main (renamed real_main) should not be inlined into
+    // this function. real_main() itself may have other functions inlined (with
+    // their own stack variables), that's why we need this main/real_main split.
     mp_cstack_init_with_sp_here(stack_size);
-    return main_(argc, argv);
+    return real_main(argc, argv);
+    #endif
 }
 
-MP_NOINLINE int main_(int argc, char **argv) {
+MP_NOINLINE int real_main(int argc, char **argv) {
+    fprintf(stderr, "[5] real_main\n");
+    volatile int stack_dummy = 0;
+
+    #if MICROPY_PY_THREAD && MICROPY_ZEPHYR_THREADING
+    // Kernel already initialized in main(). Now initialize threading subsystem.
+    // POSIX arch doesn't populate stack_info, so query pthread stack directly.
+    fprintf(stderr, "[6] querying pthread stack\n");
+    pthread_attr_t attr;
+    size_t stack_size;
+    pthread_attr_init(&attr);
+    pthread_attr_getstacksize(&attr, &stack_size);
+    pthread_attr_destroy(&attr);
+
+    fprintf(stderr, "[7] pthread stack size: %zu bytes\n", stack_size);
+
+    // Initialize threading with actual pthread stack bounds
+    fprintf(stderr, "[8] calling mp_thread_init\n");
+    mp_thread_init((void *)&stack_dummy, stack_size / sizeof(uintptr_t));
+    fprintf(stderr, "[9] threading initialized\n");
+    #endif
+
+    // Follow Zephyr port pattern for stack initialization
+    fprintf(stderr, "[10] setting stack top and limit\n");
+    mp_stack_set_top((void *)&stack_dummy);
+
+    #if MICROPY_PY_THREAD && MICROPY_ZEPHYR_THREADING
+    // Use actual pthread stack size minus guard
+    size_t stack_limit = stack_size - 4096;
+    #else
+    size_t stack_limit = 40000;  // Default for non-Zephyr threading
+    #endif
+    mp_stack_set_limit(stack_limit);
+    fprintf(stderr, "[11] stack configured\n");
+
     #ifdef SIGPIPE
     // Do not raise SIGPIPE, instead return EPIPE. Otherwise, e.g. writing
     // to peer-closed socket will lead to sudden termination of MicroPython
@@ -509,12 +558,19 @@ MP_NOINLINE int main_(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
     #endif
 
+    fprintf(stderr, "[12] calling pre_process_options\n");
     pre_process_options(argc, argv);
+    fprintf(stderr, "[13] calling gc_init\n");
 
     #if MICROPY_ENABLE_GC
     #if !MICROPY_GC_SPLIT_HEAP
     char *heap = malloc(heap_size);
+    if (heap == NULL) {
+        fprintf(stderr, "Failed to allocate %ld bytes for heap\n", (long)heap_size);
+        exit(1);
+    }
     gc_init(heap, heap + heap_size);
+    fprintf(stderr, "[14] gc_init done\n");
     #else
     assert(MICROPY_GC_SPLIT_HEAP_N_HEAPS > 0);
     char *heaps[MICROPY_GC_SPLIT_HEAP_N_HEAPS];
@@ -535,7 +591,9 @@ MP_NOINLINE int main_(int argc, char **argv) {
     mp_pystack_init(pystack, &pystack[MP_ARRAY_SIZE(pystack)]);
     #endif
 
+    fprintf(stderr, "[15] calling mp_init\n");
     mp_init();
+    fprintf(stderr, "[16] mp_init done\n");
 
     #if MICROPY_EMIT_NATIVE
     // Set default emitter options
@@ -544,6 +602,7 @@ MP_NOINLINE int main_(int argc, char **argv) {
     (void)emit_opt;
     #endif
 
+    fprintf(stderr, "[17] mounting VFS\n");
     #if MICROPY_VFS_POSIX
     {
         // Mount the host FS at the root of our internal VFS
@@ -552,6 +611,7 @@ MP_NOINLINE int main_(int argc, char **argv) {
             MP_OBJ_NEW_QSTR(MP_QSTR__slash_),
         };
         mp_vfs_mount(2, args, (mp_map_t *)&mp_const_empty_map);
+        fprintf(stderr, "[18] VFS mounted\n");
 
         // Make sure the root that was just mounted is the current VFS (it's always at
         // the end of the linked list).  Can't use chdir('/') because that will change

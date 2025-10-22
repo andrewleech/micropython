@@ -24,6 +24,28 @@
  * THE SOFTWARE.
  */
 
+#if MICROPY_ZEPHYR_THREADING
+
+// Use Zephyr kernel threading
+#include <zephyr/kernel.h>
+
+// Both mutex types use k_mutex (which is recursive by default in Zephyr)
+typedef struct _mp_thread_mutex_t {
+    struct k_mutex handle;
+} mp_thread_mutex_t;
+
+// Recursive mutex is the same structure (k_mutex is already recursive)
+typedef struct _mp_thread_recursive_mutex_t {
+    struct k_mutex handle;
+} mp_thread_recursive_mutex_t;
+
+void mp_thread_init(void *stack, uint32_t stack_len);
+void mp_thread_deinit(void);
+void mp_thread_gc_others(void);
+
+#else
+
+// Use standard pthread threading
 #include <pthread.h>
 #include <stdbool.h>
 
@@ -44,3 +66,5 @@ void mp_thread_unix_end_atomic_section(void);
 extern bool mp_thread_is_realtime_enabled;
 void mp_thread_set_realtime(void);
 #endif
+
+#endif // MICROPY_ZEPHYR_THREADING

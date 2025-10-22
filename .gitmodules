@@ -77,3 +77,6 @@
 [submodule "lib/lvgl"]
 	path = lib/lvgl
 	url = https://github.com/lvgl/lv_binding_micropython.git
+[submodule "lib/zephyr"]
+	path = lib/zephyr
+	url = https://github.com/zephyrproject-rtos/zephyr
