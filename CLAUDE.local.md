@@ -59,6 +59,8 @@ make BOARD=NUCLEO_WB55 BOARD_VARIANT=zephyr ZEPHYR_BLE_DEBUG=1
 ```
 
 **Latest Commits**:
+- Fix #7: Recursion deadlock: 639d7ddcb3, 6bdcbeb9ef, 7f1f4503d2 (architectural fix for HCI command completion)
+- Central role: 193658620a (gap_peripheral_connect + connection mgmt fixes)
 - Endian fix: 6a310aa1e623ee0ee73ba4aa663c73217d5ca690
 - Buffer fixes: 6d8e3370a9 (buffer pools + RX_QUEUE_SIZE increase)
 - Instrumentation: 5bd77486cd (debug counters for future diagnostics)
@@ -68,15 +70,36 @@ make BOARD=NUCLEO_WB55 BOARD_VARIANT=zephyr ZEPHYR_BLE_DEBUG=1
 - Endian fix: `docs/20251020_ZEPHYR_BLE_SCAN_PARAMETER_FIX.md`
 - Buffer investigation: `docs/BUFFER_INVESTIGATION_RESULTS.md`
 - Verification results: `docs/BUFFER_FIX_VERIFICATION.md`
+- Issue #6 analysis: `ISSUE_6_FINAL_ANALYSIS.md`, `ISSUE_6_ROOT_CAUSE_SUMMARY.md`
 
 **Status**:
 - NimBLE (default): ✓ Full BLE functionality working (advertising, scanning, connections, central+peripheral roles)
-- Zephyr variant: ✓ **WORKING!** Peripheral role and GATT Server functional (Phase 1: Server-only)
+- Zephyr variant: ⚠ **Phase 2B: Architectural fix complete, NEEDS VERIFICATION TESTING**
   - ✓ Peripheral role (advertising, accepting connections from central devices)
   - ✓ GATT Server (providing services/characteristics)
   - ✓ Scanning (passive/active scan, advertising report reception)
-  - ✗ Central role (gap_connect) - NOT IMPLEMENTED (returns EOPNOTSUPP)
+  - ✓ **Fix #7**: Recursion prevention deadlock resolved (commits 639d7ddcb3, 6bdcbeb9ef, 7f1f4503d2)
+    - Added `in_wait_loop` flag to allow work processing during semaphore waits
+    - Fixed H4 buffer format (removed duplicate packet type byte)
+    - Added work processing to WFI function
+    - HCI command/response flow now working
+  - ⚠ **Issue #6: Connection callbacks not firing** - NEEDS INVESTIGATION
+    - **Symptom 1**: `gap_connect()` (central role) fails with EINVAL
+    - **Symptom 2**: Peripheral role callbacks not invoked when accepting connections
+    - `mp_bluetooth_gap_peripheral_connect()` implemented using `bt_conn_le_create()`
+    - `mp_bluetooth_gap_peripheral_connect_cancel()` implemented
+    - Connection role detection fixed (BT_HCI_ROLE_CENTRAL vs PERIPHERAL)
+    - Callbacks registered but `mp_bt_zephyr_connected()` never called by Zephyr
+    - Multi-test `ble_gap_connect.py` untested with Fix #7
+    - Documented in: `ISSUE_6_FINAL_ANALYSIS.md`, `ISSUE_6_ROOT_CAUSE_SUMMARY.md`
   - ✗ GATT Client (service discovery, read/write) - NOT IMPLEMENTED
+
+**Next Steps**:
+1. Flash firmware with Fix #7 (recursion deadlock fix)
+2. Re-run `multi_bluetooth/ble_gap_connect.py` test
+3. Verify if Issue #6 persists or was resolved by Fix #7
+4. If Issue #6 persists, investigate gap_connect() EINVAL error
+5. Document actual test results
 
 **Performance Comparison (5-second scan)**:
 | Stack | Devices Detected | Errors | Status |
@@ -506,6 +529,43 @@ SECTIONS
 - `extmod/zephyr_ble/hal/zephyr_ble_sem.c` - Keep DEBUG_SEM_printf enabled always
 - `extmod/zephyr_ble/hal/zephyr_ble_kernel.c` - Added assertion location tracking
 
+### Issue #6: Connection Callbacks Not Invoked (INVESTIGATING - commit 193658620a)
+**Problem**: After implementing central role (gap_peripheral_connect), connection callbacks are never invoked by Zephyr when device is acting as peripheral (advertising).
+
+**Symptoms**:
+- PYBD (NimBLE central) successfully connects to WB55 (Zephyr peripheral)
+- WB55's `mp_bt_zephyr_connected()` callback is NEVER called by Zephyr
+- No ">>> mp_bt_zephyr_connected CALLED" debug message appears
+- WB55 never receives `_IRQ_CENTRAL_CONNECT` event
+- First connection from central works, but WB55 never knows about it
+- Reconnections fail because WB55 can't track connection state
+
+**Evidence**:
+- BLE initialization completes successfully ✓
+- Advertising starts correctly ✓
+- Callbacks registered via `bt_conn_cb_register(&mp_bt_zephyr_conn_callbacks)` ✓
+- Registration confirmed: ">>> Registered connection callbacks: connected=8025a7d disconnected=8025999" ✓
+- CONFIG_BT_CONN_DYNAMIC_CALLBACKS = 1 ✓
+- PYBD gets `_IRQ_PERIPHERAL_CONNECT` (proving connection succeeded) ✓
+- WB55 gets NOTHING (callback never invoked) ✗
+
+**Multi-test Results**:
+- Test: `multi_bluetooth/ble_gap_connect.py`
+- First connection cycle: Central connects successfully, but peripheral gets no callback
+- Second connection cycle: PYBD times out waiting for connection (can't reconnect)
+- Test fails: "Timeout waiting for 7" (_IRQ_PERIPHERAL_CONNECT)
+
+**Investigation Status**: ACTIVE
+- Need to create minimal test case
+- Need to compare with NimBLE callback mechanism
+- Need to check Zephyr documentation for callback requirements
+- Possibly missing Zephyr initialization step or configuration
+
+**Files Involved**:
+- `extmod/zephyr_ble/modbluetooth_zephyr.c:416` - Callback registration
+- `extmod/zephyr_ble/modbluetooth_zephyr.c:218-275` - Callback implementations
+- `extmod/zephyr_ble/zephyr_ble_config.h:640` - CONFIG_BT_CONN_DYNAMIC_CALLBACKS
+
 ## Current Status Summary
 
 ### STM32WB55 NimBLE (Default Variant)
@@ -523,9 +583,15 @@ SECTIONS
 **Working:**
 - ✓ BLE initialization (`ble.active(True)`)
 - ✓ BLE advertising (legacy mode)
-- ✓ BLE connections (peripheral and central roles)
-- ✓ Connection IRQ events
 - ✓ **BLE scanning - fully functional!** (69 devices in 5s test, no errors, clean deactivation)
+- ✓ Central role implementation (gap_peripheral_connect)
+
+**Broken (Issue #6):**
+- ✗ **Connection callbacks when acting as peripheral**
+  - Callbacks registered but never invoked by Zephyr
+  - Prevents tracking of incoming connections
+  - Multi-test `ble_gap_connect.py` fails
+  - Commit 193658620a
 
 **Performance Note:**
 - ⚠ Detects ~30% of devices compared to NimBLE (69 vs 227 in same test)
@@ -533,14 +599,14 @@ SECTIONS
   - Status: Acceptable for most use cases, optimization opportunity for future
   - See `docs/BUFFER_FIX_VERIFICATION.md` for detailed analysis
 
-**Known Issues (RESOLVED):**
+**Resolved Issues:**
 - ✓ Buffer exhaustion during scanning (FIXED in commit 6d8e3370a9)
 - ✓ RX queue bottleneck (FIXED - increased RX_QUEUE_SIZE from 8 to 32)
 - ✓ Clean deactivation now working (no crashes or hangs)
 
 **Test Results**:
-- Before fixes: 40 devices → buffer exhaustion → crash
-- After fixes: 69 devices, no errors, clean deactivation
+- Scanning: 69 devices, no errors, clean deactivation
+- Central role: Implementation complete, untested due to Issue #6
 - Memory cost: +2KB BSS
 
 ## Architecture Documentation
@@ -568,8 +634,17 @@ SECTIONS
    - Root cause: RX_QUEUE_SIZE bottleneck (not Zephyr buffer pools)
    - Solution: Increased RX_QUEUE_SIZE from 8 to 32
    - Result: 69 devices detected, no errors, clean deactivation
-7. **Test on RP2 Pico 2 W with all fixes applied** (next priority)
-8. **Future optimization opportunity** (non-critical):
+7. ✓ **Implemented central role** (commit 193658620a):
+   - gap_peripheral_connect() and gap_peripheral_connect_cancel()
+   - Connection role detection fixed
+   - Connection structure management fixed
+8. **CRITICAL: Fix connection callback issue (Issue #6)** - IN PROGRESS
+   - Create minimal test case to isolate callback issue
+   - Compare with NimBLE callback registration mechanism
+   - Check Zephyr documentation for callback requirements
+   - Investigate missing Zephyr initialization steps
+9. **Test on RP2 Pico 2 W with all fixes applied** (after Issue #6 resolved)
+10. **Future optimization opportunity** (non-critical):
    - Investigate why Zephyr detects ~30% of devices vs NimBLE (69 vs 227)
    - Likely work queue processing throughput limitation
    - See `docs/BUFFER_FIX_VERIFICATION.md` for analysis
