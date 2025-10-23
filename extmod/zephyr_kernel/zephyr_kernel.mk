@@ -140,8 +140,9 @@ ZEPHYR_ARCH_SRC_C += \
 	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/cpu_idle.c \
 	$(ZEPHYR_BASE)/arch/arm/core/fatal.c
 
-# ARM assembly files need to be handled by the port's Makefile
-# Typically: swap_helper.S, reset.S, vector_table.S
+# ARM Cortex-M assembly files (critical for context switching)
+ZEPHYR_ARCH_SRC_S := \
+	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/swap_helper.S
 
 # Add ARM Cortex-M include paths
 ZEPHYR_INC += -I$(ZEPHYR_KERNEL)/generated/zephyr/arch/arm
@@ -161,4 +162,5 @@ export ZEPHYR_CFLAGS
 export ZEPHYR_GEN_HEADERS
 export ZEPHYR_KERNEL_SRC_C
 export ZEPHYR_ARCH_SRC_C
+export ZEPHYR_ARCH_SRC_S
 export ZEPHYR_MP_SRC_C

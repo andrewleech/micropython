@@ -177,8 +177,11 @@ ZEPHYR_KERNEL_SRC_C := $(ZEPHYR_KERNEL_SRC_C) $(ZEPHYR_ARCH_SRC_C) $(ZEPHYR_MP_S
 SRC_C += zephyr_arch_cortex_m.c
 # Add Zephyr kernel to source list
 SRC_C += $(ZEPHYR_KERNEL_SRC_C)
+# Add Zephyr assembly files (context switching, etc.)
+SRC_S += $(ZEPHYR_ARCH_SRC_S)
 # Ensure Zephyr objects depend on generated headers
 $(addprefix $(BUILD)/, $(ZEPHYR_KERNEL_SRC_C:.c=.o)): $(ZEPHYR_GEN_HEADERS)
+$(addprefix $(BUILD)/, $(ZEPHYR_ARCH_SRC_S:.S=.o)): $(ZEPHYR_GEN_HEADERS)
 else
 $(error MICROPY_ZEPHYR_THREADING=1 only supported for QEMU_ARCH=arm (Cortex-M))
 endif

@@ -14,8 +14,8 @@
 #ifndef MICROPY_INCLUDED_EXTMOD_ZEPHYR_KERNEL_H
 #define MICROPY_INCLUDED_EXTMOD_ZEPHYR_KERNEL_H
 
-// Include our fixed configuration first
-#include "zephyr_config.h"
+// Zephyr configuration is included via command-line -include flag
+// (either zephyr_config.h for POSIX or zephyr_config_cortex_m.h for ARM)
 
 // Include Zephyr kernel headers
 #include <zephyr/kernel.h>

@@ -90,4 +90,5 @@ typedef long mp_off_t;
 #define MICROPY_PY_THREAD 1
 #define MICROPY_PY_THREAD_GIL 1
 #define MICROPY_PY_THREAD_GIL_VM_DIVISOR 32
+#define MICROPY_ENABLE_FINALISER 1  // Enable __del__ method for GC
 #endif

@@ -20,6 +20,7 @@
 #if MICROPY_ZEPHYR_THREADING
 
 #include "py/runtime.h"
+#include "py/mphal.h"
 #include "extmod/zephyr_kernel/zephyr_kernel.h"
 #include <zephyr/kernel.h>
 #include <zephyr/arch/cpu.h>

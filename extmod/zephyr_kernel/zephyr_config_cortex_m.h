@@ -228,8 +228,9 @@ typedef enum {
 #define CONFIG_GEN_IRQ_VECTOR_TABLE 1
 
 // ARM exception configuration
-#define CONFIG_ARM_SECURE_FIRMWARE 0
-#define CONFIG_ARM_NONSECURE_FIRMWARE 0
+// Must use #undef (not #define 0) because Zephyr uses #if defined() checks
+#undef CONFIG_ARM_SECURE_FIRMWARE
+#undef CONFIG_ARM_NONSECURE_FIRMWARE
 #define CONFIG_GEN_SW_ISR_TABLE 1
 
 // ARM FP configuration
