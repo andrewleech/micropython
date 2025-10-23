@@ -13,7 +13,12 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include <zephyr/kernel.h>
+#include "posix_core.h"
+
+// Forward declaration of POSIX board helper
+extern pthread_t posix_get_pthread_handle(int thread_idx);
 
 #if MICROPY_ZEPHYR_THREADING
 
@@ -77,11 +82,24 @@ void mp_zephyr_start(int argc, char **argv) {
 
     k_thread_name_set(thread_id, "mp_main");
 
-    // The bootstrap thread just sleeps forever
-    // The MicroPython thread will call exit() when it's done
-    while (1) {
-        k_sleep(K_FOREVER);
+    // Wait for the MicroPython thread to complete using pthread_join
+    // The thread index is stored in the thread's arch-specific data
+    posix_thread_status_t *thread_status = (posix_thread_status_t *)mp_main_thread.callee_saved.thread_status;
+    if (thread_status != NULL) {
+        int thread_idx = thread_status->thread_idx;
+        pthread_t pthread_handle = posix_get_pthread_handle(thread_idx);
+
+        fprintf(stderr, "[bootstrap] Waiting for MicroPython thread %d (pthread=%p) to complete\n",
+            thread_idx, (void *)pthread_handle);
+
+        // Wait for the thread to finish
+        pthread_join(pthread_handle, NULL);
+
+        fprintf(stderr, "[bootstrap] MicroPython thread completed\n");
     }
+
+    // Exit with the exit code from real_main
+    exit(exit_code);
 }
 
 #endif // MICROPY_ZEPHYR_THREADING
