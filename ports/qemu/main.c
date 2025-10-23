@@ -34,6 +34,10 @@
 #include "shared/runtime/gchelper.h"
 #include "shared/runtime/pyexec.h"
 
+#if MICROPY_PY_THREAD
+#include "py/mpthread.h"
+#endif
+
 #if MICROPY_HEAP_SIZE <= 0
 #error MICROPY_HEAP_SIZE must be a positive integer.
 #endif
@@ -41,8 +45,23 @@
 static uint32_t gc_heap[MICROPY_HEAP_SIZE / sizeof(uint32_t)];
 
 int main(int argc, char **argv) {
+    // Initialize Zephyr kernel before anything else (if threading enabled)
+    #if MICROPY_ZEPHYR_THREADING
+    extern void mp_zephyr_kernel_init(void *main_stack, uint32_t main_stack_len);
+    char stack_dummy;
+    mp_zephyr_kernel_init(&stack_dummy, 8192);  // 8KB main thread stack
+    #endif
+
+    // Initialize MicroPython threading
+    #if MICROPY_PY_THREAD
+    mp_thread_init();
+    #endif
+
+    // Configure stack
     mp_stack_ctrl_init();
     mp_stack_set_limit(10240);
+
+    // Initialize garbage collector
     gc_init(gc_heap, (char *)gc_heap + MICROPY_HEAP_SIZE);
 
     for (;;) {
@@ -61,6 +80,10 @@ int main(int argc, char **argv) {
         }
 
         mp_printf(&mp_plat_print, "MPY: soft reboot\n");
+
+        #if MICROPY_PY_THREAD
+        mp_thread_deinit();
+        #endif
 
         gc_sweep_all();
         mp_deinit();
