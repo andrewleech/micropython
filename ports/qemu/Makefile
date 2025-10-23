@@ -178,10 +178,14 @@ SRC_C += zephyr_arch_cortex_m.c
 # Add Zephyr kernel to source list
 SRC_C += $(ZEPHYR_KERNEL_SRC_C)
 # Add Zephyr assembly files (context switching, etc.)
-SRC_S += $(ZEPHYR_ARCH_SRC_S)
+# Use flattened name to avoid path issues with $(BUILD)/../../
+ZEPHYR_SWAP_HELPER_O = $(BUILD)/swap_helper.o
+OBJ_ZEPHYR_ASM = $(ZEPHYR_SWAP_HELPER_O)
 # Ensure Zephyr objects depend on generated headers
 $(addprefix $(BUILD)/, $(ZEPHYR_KERNEL_SRC_C:.c=.o)): $(ZEPHYR_GEN_HEADERS)
-$(addprefix $(BUILD)/, $(ZEPHYR_ARCH_SRC_S:.S=.o)): $(ZEPHYR_GEN_HEADERS)
+$(ZEPHYR_SWAP_HELPER_O): $(ZEPHYR_ARCH_SRC_S) $(ZEPHYR_GEN_HEADERS)
+	$(ECHO) "CC $<"
+	$(Q)$(CC) -x assembler-with-cpp -D_ASMLANGUAGE $(filter-out -std=% -Wdouble-promotion -Wfloat-conversion,$(CFLAGS)) -Wa,-mimplicit-it=thumb -c -o $@ $<
 else
 $(error MICROPY_ZEPHYR_THREADING=1 only supported for QEMU_ARCH=arm (Cortex-M))
 endif
@@ -194,6 +198,10 @@ OBJ += $(PY_O)
 OBJ += $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_BOARD_O))
 OBJ += $(addprefix $(BUILD)/, $(LIB_SRC_C:.c=.o))
+# Add Zephyr assembly objects (using flattened paths to avoid $(BUILD)/../../ issues)
+ifeq ($(MICROPY_ZEPHYR_THREADING),1)
+OBJ += $(OBJ_ZEPHYR_ASM)
+endif
 
 # List of sources for qstr extraction
 SRC_QSTR += $(SRC_C) $(LIB_SRC_C)

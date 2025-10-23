@@ -42,7 +42,7 @@ typedef struct _mp_thread_recursive_mutex_t {
     struct k_mutex handle;
 } mp_thread_recursive_mutex_t;
 
-void mp_thread_init(void);
+void mp_thread_init(void *stack, uint32_t stack_len);
 void mp_thread_deinit(void);
 void mp_thread_gc_others(void);
 

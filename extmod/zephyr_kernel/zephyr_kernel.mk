@@ -132,6 +132,7 @@ ifeq ($(ZEPHYR_ARCH),arm)
 # ARM Cortex-M arch files - minimal set for threading
 ZEPHYR_ARCH_SRC_C += \
 	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/thread.c \
+	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/thread_abort.c \
 	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/irq_manage.c \
 	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/irq_init.c \
 	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/prep_c.c \
@@ -147,6 +148,7 @@ ZEPHYR_ARCH_SRC_S := \
 # Add ARM Cortex-M include paths
 ZEPHYR_INC += -I$(ZEPHYR_KERNEL)/generated/zephyr/arch/arm
 ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/arm/include
+ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/arm/include/cortex_m
 ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/arm/core/cortex_m
 # Add CMSIS include path (required for ARM architecture)
 # Use MicroPython's CMSIS headers (not Zephyr's wrappers)

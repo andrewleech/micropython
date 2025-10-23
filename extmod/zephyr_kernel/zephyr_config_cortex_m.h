@@ -32,6 +32,8 @@
 #endif
 
 // IRQ number enum (minimal for QEMU mps2-an385)
+// Guard C-only constructs from assembly preprocessing
+#ifndef _ASMLANGUAGE
 typedef enum {
     // Cortex-M3 system exceptions
     Reset_IRQn            = -15,
@@ -50,6 +52,7 @@ typedef enum {
     UART2_IRQn            = 2,
     // Add more as needed for QEMU mps2-an385
 } IRQn_Type;
+#endif /* _ASMLANGUAGE */
 
 // Core kernel features
 #define CONFIG_MULTITHREADING 1
@@ -160,9 +163,9 @@ typedef enum {
 #define CONFIG_SCHED_THREAD_USAGE 0
 #define CONFIG_SCHED_THREAD_USAGE_ALL 0
 
-// FPU support
-#define CONFIG_FPU 0
-#define CONFIG_FPU_SHARING 0
+// FPU support (must use #undef for #if defined() checks)
+#undef CONFIG_FPU
+#undef CONFIG_FPU_SHARING
 
 // Errno configuration
 #define CONFIG_ERRNO 1
@@ -207,6 +210,7 @@ typedef enum {
 #define CONFIG_CPU_CORTEX_M3 1  // Specify exact Cortex-M variant
 #define CONFIG_ARMV7_M_ARMV8_M_MAINLINE 1  // Cortex-M3/M4/M7/M33
 #define CONFIG_ARCH "arm"
+#define CONFIG_ASSEMBLER_ISA_THUMB2 1  // Cortex-M uses Thumb-2 instruction set
 
 // ARM-specific options
 #define CONFIG_ARCH_HAS_CUSTOM_BUSY_WAIT 1
@@ -221,6 +225,7 @@ typedef enum {
 #undef CONFIG_MPU_GAP_FILLING
 
 // ARM interrupt configuration
+#define CONFIG_NUM_IRQS 48  // Number of external IRQs for mps2-an385
 #define CONFIG_ZERO_LATENCY_IRQS 0
 #define CONFIG_SW_ISR_TABLE 1
 #define CONFIG_SW_ISR_TABLE_DYNAMIC 1
@@ -234,7 +239,8 @@ typedef enum {
 #define CONFIG_GEN_SW_ISR_TABLE 1
 
 // ARM FP configuration
-#define CONFIG_CPU_HAS_FPU 0  // Can be enabled for Cortex-M4F/M7 if needed
+// Cortex-M3 has no FPU - must use #undef (not #define 0) for #if defined() checks
+#undef CONFIG_CPU_HAS_FPU  // Enable for Cortex-M4F/M7 if needed
 #define CONFIG_FP_HARDABI 0
 #define CONFIG_FP_SOFTABI 1
 

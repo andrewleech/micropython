@@ -54,7 +54,12 @@ int main(int argc, char **argv) {
 
     // Initialize MicroPython threading
     #if MICROPY_PY_THREAD
-    mp_thread_init();
+    #if MICROPY_ZEPHYR_THREADING
+    // Pass stack parameters for bare-metal Zephyr threading
+    mp_thread_init(&stack_dummy, 8192);
+    #else
+    mp_thread_init(NULL, 0);
+    #endif
     #endif
 
     // Configure stack
