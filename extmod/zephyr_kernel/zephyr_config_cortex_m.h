@@ -178,6 +178,7 @@
 // ARM architecture
 #define CONFIG_ARM 1
 #define CONFIG_CPU_CORTEX_M 1
+#define CONFIG_CPU_CORTEX_M3 1  // Specify exact Cortex-M variant
 #define CONFIG_ARMV7_M_ARMV8_M_MAINLINE 1  // Cortex-M3/M4/M7/M33
 #define CONFIG_ARCH "arm"
 

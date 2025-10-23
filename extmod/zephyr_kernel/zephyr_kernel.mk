@@ -27,7 +27,15 @@ ZEPHYR_INC := \
 # Zephyr CFLAGS
 # Note: -Wno-error allows warnings without stopping the build (POC)
 # -Wno-macro-redefined suppresses ISR_FLAG_DIRECT redefinition warnings
-ZEPHYR_CFLAGS := -include $(ZEPHYR_KERNEL)/zephyr_config.h -Wno-error -Wno-macro-redefined
+# Select appropriate config header based on architecture
+ifeq ($(ZEPHYR_ARCH),posix)
+ZEPHYR_CONFIG_HEADER := $(ZEPHYR_KERNEL)/zephyr_config.h
+else ifeq ($(ZEPHYR_ARCH),arm)
+ZEPHYR_CONFIG_HEADER := $(ZEPHYR_KERNEL)/zephyr_config_cortex_m.h
+else
+$(error Unsupported ZEPHYR_ARCH: $(ZEPHYR_ARCH))
+endif
+ZEPHYR_CFLAGS := -include $(ZEPHYR_CONFIG_HEADER) -Wno-error -Wno-macro-redefined
 
 # Generated header files
 ZEPHYR_GEN_HEADERS := \
@@ -139,6 +147,8 @@ ZEPHYR_ARCH_SRC_C += \
 ZEPHYR_INC += -I$(ZEPHYR_KERNEL)/generated/zephyr/arch/arm
 ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/arm/include
 ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/arm/core/cortex_m
+# Add CMSIS include path (required for ARM architecture)
+ZEPHYR_INC += -I$(ZEPHYR_BASE)/modules/cmsis
 endif
 
 # Export for ports to use

@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2016-2018 Damien P. George
+ * Copyright (c) 2025 MicroPython Developers
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,12 +24,28 @@
  * THE SOFTWARE.
  */
 
-#include <stddef.h>
-#include "shared/runtime/interrupt_char.h"
+#ifndef MICROPY_INCLUDED_QEMU_MPTHREADPORT_H
+#define MICROPY_INCLUDED_QEMU_MPTHREADPORT_H
 
-// Threading atomic sections
 #if MICROPY_ZEPHYR_THREADING
-#include <zephyr/arch/cpu.h>
-#define MICROPY_BEGIN_ATOMIC_SECTION()     arch_irq_lock()
-#define MICROPY_END_ATOMIC_SECTION(state)  arch_irq_unlock(state)
-#endif
+
+// Use Zephyr kernel threading
+#include <zephyr/kernel.h>
+
+// Both mutex types use k_mutex (which is recursive by default in Zephyr)
+typedef struct _mp_thread_mutex_t {
+    struct k_mutex handle;
+} mp_thread_mutex_t;
+
+// Recursive mutex is the same structure (k_mutex is already recursive)
+typedef struct _mp_thread_recursive_mutex_t {
+    struct k_mutex handle;
+} mp_thread_recursive_mutex_t;
+
+void mp_thread_init(void);
+void mp_thread_deinit(void);
+void mp_thread_gc_others(void);
+
+#endif // MICROPY_ZEPHYR_THREADING
+
+#endif // MICROPY_INCLUDED_QEMU_MPTHREADPORT_H
