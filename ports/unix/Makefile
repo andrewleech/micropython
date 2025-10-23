@@ -138,7 +138,11 @@ ifeq ($(MICROPY_PY_SOCKET),1)
 CFLAGS += -DMICROPY_PY_SOCKET=1
 endif
 ifeq ($(MICROPY_PY_THREAD),1)
-CFLAGS += -DMICROPY_PY_THREAD=1 -DMICROPY_PY_THREAD_GIL=0
+CFLAGS += -DMICROPY_PY_THREAD=1
+# GIL setting depends on threading backend - let mpconfigport.h decide
+ifneq ($(MICROPY_ZEPHYR_THREADING),1)
+CFLAGS += -DMICROPY_PY_THREAD_GIL=0
+endif
 LDFLAGS += $(LIBPTHREAD)
 
 # Optional: Use Zephyr kernel for threading (experimental POC)

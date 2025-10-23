@@ -117,15 +117,19 @@ MP_DEFINE_CONST_FUN_OBJ_0(mp_time_time_ns_obj, time_time_ns);
 #endif // MICROPY_PY_TIME_TIME_TIME_NS
 
 static mp_obj_t time_sleep(mp_obj_t seconds_o) {
+    fprintf(stderr, "[time_sleep] START\n");
     #ifdef MICROPY_PY_TIME_CUSTOM_SLEEP
     mp_time_sleep(seconds_o);
     #else
     #if MICROPY_PY_BUILTINS_FLOAT
+    fprintf(stderr, "[time_sleep] calling mp_hal_delay_ms\n");
     mp_hal_delay_ms((mp_uint_t)(1000 * mp_obj_get_float(seconds_o)));
+    fprintf(stderr, "[time_sleep] mp_hal_delay_ms done\n");
     #else
     mp_hal_delay_ms(1000 * mp_obj_get_int(seconds_o));
     #endif
     #endif
+    fprintf(stderr, "[time_sleep] DONE\n");
     return mp_const_none;
 }
 MP_DEFINE_CONST_FUN_OBJ_1(mp_time_sleep_obj, time_sleep);

@@ -25,10 +25,16 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "py/mpstate.h"
 #include "py/gc.h"
+#include "py/mpthread.h"
 #include "shared/runtime/gchelper.h"
+
+#if MICROPY_ZEPHYR_THREADING
+#include <zephyr/kernel.h>
+#endif
 
 #if MICROPY_ENABLE_GC
 
@@ -216,7 +222,22 @@ MP_NOINLINE void gc_helper_collect_regs_and_stack(void) {
     gc_helper_get_regs(regs);
     // GC stack (and regs because we captured them)
     void **regs_ptr = (void **)(void *)&regs;
-    gc_collect_root(regs_ptr, ((uintptr_t)MP_STATE_THREAD(stack_top) - (uintptr_t)&regs) / sizeof(uintptr_t));
+
+    // Debug: Check for stack_top corruption
+    uintptr_t stack_top = (uintptr_t)MP_STATE_THREAD(stack_top);
+    uintptr_t regs_addr = (uintptr_t)&regs;
+    fprintf(stderr, "[gchelper] stack_top=%p, regs=%p, TLS=%p\n",
+        (void *)stack_top, (void *)regs_addr, (void *)mp_thread_get_state());
+
+    if (stack_top < regs_addr) {
+        fprintf(stderr, "[gchelper] ERROR: stack_top < regs! Underflow detected!\n");
+        #if MICROPY_PY_THREAD
+        fprintf(stderr, "[gchelper] Current thread ID: %lx\n", (unsigned long)mp_thread_get_id());
+        #endif
+        exit(1);
+    }
+
+    gc_collect_root(regs_ptr, (stack_top - regs_addr) / sizeof(uintptr_t));
 }
 
 #endif // MICROPY_ENABLE_GC

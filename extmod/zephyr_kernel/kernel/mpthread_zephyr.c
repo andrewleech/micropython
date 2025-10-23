@@ -20,6 +20,11 @@
 
 #include "../zephyr_kernel.h"
 
+// For native POSIX, use compiler TLS instead of Zephyr's global _current
+#if CONFIG_ARCH_POSIX
+static __thread mp_state_thread_t *mp_thread_tls_state = NULL;
+#endif
+
 #if MICROPY_PY_THREAD
 
 #define DEBUG_printf(...) // printk("mpthread: " __VA_ARGS__)
@@ -172,12 +177,22 @@ void mp_thread_gc_others(void) {
 
 // Get thread-local state
 mp_state_thread_t *mp_thread_get_state(void) {
+    #if CONFIG_ARCH_POSIX
+    // On native POSIX, use compiler TLS to avoid _current global variable issues
+    return mp_thread_tls_state;
+    #else
     return (mp_state_thread_t *)k_thread_custom_data_get();
+    #endif
 }
 
 // Set thread-local state
 void mp_thread_set_state(mp_state_thread_t *state) {
+    #if CONFIG_ARCH_POSIX
+    // On native POSIX, ONLY use compiler TLS (don't use Zephyr's broken _current)
+    mp_thread_tls_state = state;
+    #else
     k_thread_custom_data_set((void *)state);
+    #endif
 }
 
 // Get current thread ID
@@ -187,16 +202,15 @@ mp_uint_t mp_thread_get_id(void) {
 
 // Mark thread as started (called by new thread)
 void mp_thread_start(void) {
-    mp_thread_mutex_lock(&thread_mutex, 1);
-
+    // Update status without locking - the thread list is only modified by
+    // the main thread, and we're only updating our own status field.
+    // The status field is used for informational purposes only.
     for (mp_thread_t *th = thread; th != NULL; th = th->next) {
         if (th->id == k_current_get()) {
             th->status = MP_THREAD_STATUS_READY;
             break;
         }
     }
-
-    mp_thread_mutex_unlock(&thread_mutex);
 }
 
 // Zephyr thread entry point wrapper

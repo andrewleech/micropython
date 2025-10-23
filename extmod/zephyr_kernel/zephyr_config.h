@@ -36,6 +36,10 @@
 #define CONFIG_THREAD_MONITOR 0
 #define CONFIG_DYNAMIC_THREAD 1
 
+// TODO: Enable CONFIG_CURRENT_THREAD_USE_TLS to avoid races with _current global
+// Currently causes hangs during initialization - needs investigation
+// #define CONFIG_CURRENT_THREAD_USE_TLS 1
+
 // Scheduler configuration
 #define CONFIG_SCHED_DUMB 0
 #define CONFIG_SCHED_SCALABLE 1

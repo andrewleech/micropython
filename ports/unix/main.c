@@ -529,20 +529,25 @@ MP_NOINLINE int real_main(int argc, char **argv) {
     fprintf(stderr, "[8] calling mp_thread_init\n");
     mp_thread_init((void *)&stack_dummy, stack_size / sizeof(uintptr_t));
     fprintf(stderr, "[9] threading initialized\n");
-    #endif
 
-    // Follow Zephyr port pattern for stack initialization
-    fprintf(stderr, "[10] setting stack top and limit\n");
+    // Configure stack after mp_thread_init() - threading init sets up TLS
+    // which is required by mp_stack_set_top() when using Zephyr threading
+    fprintf(stderr, "[9.5] setting stack top and limit\n");
+    mp_state_thread_t *tls = mp_thread_get_state();
+    fprintf(stderr, "[9.5.1] mp_thread_get_state() returned: %p\n", (void *)tls);
+    if (tls == NULL) {
+        fprintf(stderr, "[9.5.2] ERROR: TLS is NULL!\n");
+        exit(1);
+    }
     mp_stack_set_top((void *)&stack_dummy);
-
-    #if MICROPY_PY_THREAD && MICROPY_ZEPHYR_THREADING
-    // Use actual pthread stack size minus guard
-    size_t stack_limit = stack_size - 4096;
-    #else
-    size_t stack_limit = 40000;  // Default for non-Zephyr threading
-    #endif
+    size_t stack_limit = stack_size - 4096;  // Use actual pthread stack minus guard
     mp_stack_set_limit(stack_limit);
-    fprintf(stderr, "[11] stack configured\n");
+    fprintf(stderr, "[9.6] stack configured\n");
+    #else
+    // Non-Zephyr threading: configure stack before gc_init
+    mp_stack_set_top((void *)&stack_dummy);
+    mp_stack_set_limit(40000);
+    #endif
 
     #ifdef SIGPIPE
     // Do not raise SIGPIPE, instead return EPIPE. Otherwise, e.g. writing

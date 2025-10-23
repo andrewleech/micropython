@@ -27,6 +27,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "py/gc.h"
@@ -214,7 +215,15 @@ void gc_init(void *start, void *end) {
     #endif
 
     // unlock the GC
+    fprintf(stderr, "[gc_init] About to set gc_lock_depth\n");
+    mp_state_thread_t *tls_check = mp_thread_get_state();
+    fprintf(stderr, "[gc_init] TLS pointer: %p\n", (void *)tls_check);
+    if (tls_check == NULL) {
+        fprintf(stderr, "[gc_init] ERROR: TLS is NULL!\n");
+        exit(1);
+    }
     MP_STATE_THREAD(gc_lock_depth) = 0;
+    fprintf(stderr, "[gc_init] gc_lock_depth set successfully\n");
 
     // allow auto collection
     MP_STATE_MEM(gc_auto_collect_enabled) = 1;

@@ -50,8 +50,9 @@ static void micropython_thread_main(void *p1, void *p2, void *p3) {
     // This will initialize threading from within the Zephyr thread
     exit_code = real_main(args->argc, args->argv);
 
-    // Exit the entire process - we can't properly clean up the bootstrap thread
-    exit(exit_code);
+    // Don't call exit() - let the thread return naturally
+    // exit(exit_code);
+    fprintf(stderr, "[micropython_thread_main] real_main returned with code %d\n", exit_code);
 }
 
 // Start MicroPython as a Zephyr thread
