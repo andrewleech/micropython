@@ -209,6 +209,14 @@ int posix_arch_thread_name_set(int thread_idx, const char *str) {
     return 0;
 }
 
+// Get pthread handle for a thread index (for pthread_join)
+pthread_t posix_get_pthread_handle(int thread_idx) {
+    if (thread_idx < 0 || thread_idx >= MAX_THREADS) {
+        return 0;
+    }
+    return board_state.threads[thread_idx].pthread;
+}
+
 // ============================================================================
 // Thread context switching
 // ============================================================================
