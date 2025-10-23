@@ -98,13 +98,21 @@ static void *posix_thread_wrapper(void *arg) {
     int thread_idx = (int)(intptr_t)arg;
     thread_state_t *ts = &board_state.threads[thread_idx];
 
+    fprintf(stderr, "POSIX: Thread %d starting (pthread=%p, payload=%p)\n",
+            thread_idx, (void*)pthread_self(), ts->payload);
+
     pthread_setspecific(board_state.thread_idx_key, arg);
 
     // Call the Zephyr thread entry point
+    // Note: This should never return - z_thread_entry() calls k_thread_abort()
+    // which calls posix_abort_thread() which calls pthread_exit()
     extern void posix_arch_thread_entry(void *pa_thread_status);
     posix_arch_thread_entry(ts->payload);
 
-    return NULL;
+    // Should never reach here - but if we do, clean exit
+    fprintf(stderr, "WARNING: posix_thread_wrapper returned unexpectedly\n");
+    ts->active = 0;
+    pthread_exit(NULL);
 }
 
 // Create a new thread
@@ -148,22 +156,35 @@ int posix_new_thread(void *payload) {
 
 // Abort a thread
 void posix_abort_thread(int thread_idx) {
+    fprintf(stderr, "POSIX: posix_abort_thread called for thread %d\n", thread_idx);
+
     if (thread_idx < 0 || thread_idx >= MAX_THREADS) {
+        fprintf(stderr, "POSIX: Invalid thread_idx %d\n", thread_idx);
         return;
     }
 
     thread_state_t *ts = &board_state.threads[thread_idx];
     if (!ts->active || ts->aborted) {
+        fprintf(stderr, "POSIX: Thread %d not active or already aborted\n", thread_idx);
         return;
     }
 
     ts->aborted = 1;
 
-    // Cancel and join the thread
+    // If the thread is aborting itself, we cannot pthread_cancel or pthread_join
+    // on ourselves - just mark as done and exit via pthread_exit()
+    if (pthread_equal(pthread_self(), ts->pthread)) {
+        fprintf(stderr, "POSIX: Thread %d aborting itself, calling pthread_exit\n", thread_idx);
+        ts->active = 0;
+        pthread_exit(NULL);  // This never returns
+    }
+
+    // Aborting a different thread - cancel and join
+    fprintf(stderr, "POSIX: Thread %d being aborted by another thread, canceling and joining\n", thread_idx);
     pthread_cancel(ts->pthread);
     pthread_join(ts->pthread, NULL);
-
     ts->active = 0;
+    fprintf(stderr, "POSIX: Thread %d abort complete\n", thread_idx);
 }
 
 // Get unique thread ID for debugging

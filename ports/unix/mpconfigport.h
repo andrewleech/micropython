@@ -219,6 +219,20 @@ static inline unsigned long mp_random_seed_init(void) {
 #include <sched.h>
 #define MICROPY_UNIX_MACHINE_IDLE sched_yield();
 
+// Zephyr threading configuration
+#if MICROPY_ZEPHYR_THREADING
+// Zephyr threading requires GIL=1 (override Unix default GIL=0)
+#ifndef MICROPY_PY_THREAD_GIL
+#define MICROPY_PY_THREAD_GIL (1)
+#endif
+#ifndef MICROPY_PY_THREAD_GIL_VM_DIVISOR
+#define MICROPY_PY_THREAD_GIL_VM_DIVISOR (32)
+#endif
+// Async keyboard interrupt is incompatible with GIL
+#undef MICROPY_ASYNC_KBD_INTR
+#define MICROPY_ASYNC_KBD_INTR (0)
+#endif
+
 #ifndef MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
 #define MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE (1)
 #endif

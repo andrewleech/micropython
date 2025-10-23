@@ -53,7 +53,7 @@ void mp_zephyr_arch_init(void) {
 
     unix_arch_state.initialized = 1;
 
-    printf("Zephyr arch (Unix): Initialized\n");
+    fprintf(stderr, "Zephyr arch (Unix): Initialized\n");
 }
 
 // Get current system tick count
@@ -78,6 +78,7 @@ void mp_zephyr_arch_yield(void) {
 // Bootstrap thread structure for the process main thread (Thread 1)
 // This provides a valid _current for the initial k_thread_create() call
 static struct k_thread bootstrap_thread;
+static posix_thread_status_t bootstrap_thread_status;
 static int kernel_initialized = 0;
 
 // Zephyr kernel initialization for Unix
@@ -107,6 +108,14 @@ void mp_zephyr_kernel_init(void *main_stack, uint32_t main_stack_len) {
     // Set up a minimal bootstrap thread for Thread 1 (the process main thread)
     // This is needed so that k_thread_create() has a valid _current to copy from
     memset(&bootstrap_thread, 0, sizeof(bootstrap_thread));
+    memset(&bootstrap_thread_status, 0, sizeof(bootstrap_thread_status));
+
+    // Initialize the thread_status structure for the bootstrap thread
+    // This is critical so that k_thread_abort() doesn't crash when accessing
+    // _current->callee_saved.thread_status
+    bootstrap_thread_status.thread_idx = 0;  // Main thread is always thread 0
+    bootstrap_thread_status.aborted = 0;
+    bootstrap_thread.callee_saved.thread_status = &bootstrap_thread_status;
     bootstrap_thread.resource_pool = NULL;  // No resource pool for bootstrap thread
 
     // Set this bootstrap thread as the current thread
@@ -316,17 +325,8 @@ void z_reset_time_slice(struct k_thread *thread) {
     // Stub - time slicing not needed for POC
 }
 
-// Thread entry point wrapper - calls the actual thread entry function
-FUNC_NORETURN void z_thread_entry(k_thread_entry_t entry, void *p1, void *p2, void *p3) {
-    // Call the thread's entry point
-    entry(p1, p2, p3);
-
-    // Thread returned - this should not happen for most threads
-    // Abort the thread
-    k_thread_abort(_current);
-
-    // Should never reach here
-    CODE_UNREACHABLE;
-}
+// Note: z_thread_entry() is provided by lib/zephyr/lib/os/thread_entry.c
+// which calls k_thread_abort() at the end. We no longer override it here
+// since our posix_abort_thread() now properly handles thread self-termination.
 
 #endif // MICROPY_ZEPHYR_THREADING

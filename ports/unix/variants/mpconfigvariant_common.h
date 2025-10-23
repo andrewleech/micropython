@@ -29,7 +29,9 @@
 
 // Send raise KeyboardInterrupt directly from the signal handler rather than
 // scheduling it into the VM.
+#ifndef MICROPY_ASYNC_KBD_INTR
 #define MICROPY_ASYNC_KBD_INTR         (1)
+#endif
 
 // Enable helpers for printing debugging information.
 #ifndef MICROPY_DEBUG_PRINTERS
