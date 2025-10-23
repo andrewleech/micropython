@@ -208,10 +208,14 @@ static void zephyr_entry(void *arg1, void *arg2, void *arg3) {
         entry(arg2);
     }
 
+    // For POSIX arch (Unix/native), threads can just return and pthread will terminate
+    // For real embedded Zephyr, threads shouldn't return, so we'd need abort logic here
+    #if !defined(CONFIG_ARCH_POSIX)
     k_thread_abort(k_current_get());
     for (;;) {
         ;  // Never reached
     }
+    #endif
 }
 
 // Create new thread
