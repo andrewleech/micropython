@@ -104,19 +104,23 @@ ZEPHYR_ARCH_SRC_C :=
 
 # POSIX architecture (for Unix/native simulation)
 ifeq ($(ZEPHYR_ARCH),posix)
-# POSIX arch files - board-specific headers provided by posix_minimal_board layer
-# Note: posix_core_nsi.c excluded (requires Native Simulator Infrastructure)
+# POSIX arch files - using NSI (Native Simulator Infrastructure) for threading
 ZEPHYR_ARCH_SRC_C += \
 	$(ZEPHYR_BASE)/arch/posix/core/swap.c \
 	$(ZEPHYR_BASE)/arch/posix/core/thread.c \
 	$(ZEPHYR_BASE)/arch/posix/core/irq.c \
 	$(ZEPHYR_BASE)/arch/posix/core/cpuhalt.c \
 	$(ZEPHYR_BASE)/arch/posix/core/fatal.c \
-	$(ZEPHYR_KERNEL)/posix_minimal_board.c
+	$(ZEPHYR_KERNEL)/posix_nsi_board.c \
+	$(ZEPHYR_BASE)/scripts/native_simulator/common/src/nct.c
 
 # Add POSIX arch include paths (generated headers and arch headers)
 ZEPHYR_INC += -I$(ZEPHYR_KERNEL)/generated/zephyr/arch/posix
 ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/posix/include
+
+# Add NSI include paths for nct.c and our NSI board layer
+ZEPHYR_INC += -I$(ZEPHYR_BASE)/scripts/native_simulator/common/src/include
+ZEPHYR_INC += -I$(ZEPHYR_BASE)/scripts/native_simulator/common/src
 endif
 
 # ARM architecture (for STM32, nRF, etc.) - future
