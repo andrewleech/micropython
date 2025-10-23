@@ -143,13 +143,15 @@ LDFLAGS += $(LIBPTHREAD)
 
 # Optional: Use Zephyr kernel for threading (experimental POC)
 ifeq ($(MICROPY_ZEPHYR_THREADING),1)
+# Remove -Werror to allow Zephyr header warnings (macro redefinitions)
+CFLAGS := $(filter-out -Werror,$(CFLAGS))
+# Enable Zephyr threading (GIL and other configs set in mpconfigport.h)
 CFLAGS += -DMICROPY_ZEPHYR_THREADING=1
 # Use centralized Zephyr kernel integration
 ZEPHYR_ARCH := posix
 include $(TOP)/extmod/zephyr_kernel/zephyr_kernel.mk
-# Apply Zephyr includes and flags
-INC += $(ZEPHYR_INC)
-CFLAGS += $(ZEPHYR_CFLAGS)
+# Apply Zephyr includes and flags directly to CFLAGS (needed for QSTR generation)
+CFLAGS += $(ZEPHYR_INC) $(ZEPHYR_CFLAGS)
 # Combine all Zephyr sources
 ZEPHYR_KERNEL_SRC_C := $(ZEPHYR_KERNEL_SRC_C) $(ZEPHYR_ARCH_SRC_C) $(ZEPHYR_MP_SRC_C)
 # Add Unix-specific architecture bridge

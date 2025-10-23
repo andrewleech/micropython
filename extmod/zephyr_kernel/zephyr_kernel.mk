@@ -26,7 +26,8 @@ ZEPHYR_INC := \
 
 # Zephyr CFLAGS
 # Note: -Wno-error allows warnings without stopping the build (POC)
-ZEPHYR_CFLAGS := -include $(ZEPHYR_KERNEL)/zephyr_config.h -Wno-error
+# -Wno-macro-redefined suppresses ISR_FLAG_DIRECT redefinition warnings
+ZEPHYR_CFLAGS := -include $(ZEPHYR_KERNEL)/zephyr_config.h -Wno-error -Wno-macro-redefined
 
 # Generated header files
 ZEPHYR_GEN_HEADERS := \
@@ -91,6 +92,7 @@ ZEPHYR_KERNEL_SRC_C := \
 	$(ZEPHYR_BASE)/kernel/thread_monitor.c \
 	$(ZEPHYR_BASE)/kernel/errno.c \
 	$(ZEPHYR_BASE)/kernel/version.c \
+	$(ZEPHYR_BASE)/lib/os/thread_entry.c \
 	$(ZEPHYR_BASE)/lib/utils/rb.c
 
 # MicroPython-Zephyr integration
