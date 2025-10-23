@@ -19,9 +19,10 @@
 #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
 #endif
 
-/* Stub for device count */
-#ifndef DT_N_INST
-#define DT_N_INST 0
+/* Define specific NVIC devicetree properties that Zephyr needs */
+/* NUM_IRQ_PRIO_BITS: Number of priority bits (3 for Cortex-M3) */
+#ifndef DT_N_INST_0_arm_v7m_nvic_P_arm_num_irq_priority_bits
+#define DT_N_INST_0_arm_v7m_nvic_P_arm_num_irq_priority_bits 3
 #endif
 
 #endif /* MICROPYTHON_DEVICETREE_FIXUP_H */

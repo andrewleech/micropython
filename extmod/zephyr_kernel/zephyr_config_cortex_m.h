@@ -25,6 +25,32 @@
 // This must be first to stub out problematic DT macros
 #include "zephyr/devicetree_fixup.h"
 
+// Device-specific CMSIS definitions (required before including CMSIS headers)
+// These would normally come from device-specific headers like stm32f4xx.h
+#ifndef __NVIC_PRIO_BITS
+#define __NVIC_PRIO_BITS 3U  // Cortex-M3 has 3 bits of priority (8 levels)
+#endif
+
+// IRQ number enum (minimal for QEMU mps2-an385)
+typedef enum {
+    // Cortex-M3 system exceptions
+    Reset_IRQn            = -15,
+    NonMaskableInt_IRQn   = -14,
+    HardFault_IRQn        = -13,
+    MemoryManagement_IRQn = -12,
+    BusFault_IRQn         = -11,
+    UsageFault_IRQn       = -10,
+    SVCall_IRQn           = -5,
+    DebugMonitor_IRQn     = -4,
+    PendSV_IRQn           = -2,
+    SysTick_IRQn          = -1,
+    // External interrupts (device-specific)
+    UART0_IRQn            = 0,
+    UART1_IRQn            = 1,
+    UART2_IRQn            = 2,
+    // Add more as needed for QEMU mps2-an385
+} IRQn_Type;
+
 // Core kernel features
 #define CONFIG_MULTITHREADING 1
 #define CONFIG_NUM_PREEMPT_PRIORITIES 15

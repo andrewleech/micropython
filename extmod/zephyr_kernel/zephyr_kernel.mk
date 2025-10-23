@@ -148,7 +148,11 @@ ZEPHYR_INC += -I$(ZEPHYR_KERNEL)/generated/zephyr/arch/arm
 ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/arm/include
 ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/arm/core/cortex_m
 # Add CMSIS include path (required for ARM architecture)
-ZEPHYR_INC += -I$(ZEPHYR_BASE)/modules/cmsis
+# Use MicroPython's CMSIS headers (not Zephyr's wrappers)
+CMSIS_DIR ?= $(TOP)/lib/cmsis
+ZEPHYR_INC += -I$(CMSIS_DIR)/inc
+# Add our CMSIS wrapper (provides cmsis_core.h)
+ZEPHYR_INC += -I$(ZEPHYR_KERNEL)/generated
 endif
 
 # Export for ports to use
