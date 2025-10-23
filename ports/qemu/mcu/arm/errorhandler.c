@@ -165,6 +165,8 @@ __attribute__((naked)) MP_NORETURN void DebugMon_Handler(void) {
     exception_handler(DEBUG_MONITOR);
 }
 
+// PendSV and SysTick handlers are provided by Zephyr when threading is enabled
+#if !MICROPY_ZEPHYR_THREADING
 __attribute__((naked)) MP_NORETURN void PendSV_Handler(void) {
     exception_handler(PENDING_SV);
 }
@@ -172,5 +174,6 @@ __attribute__((naked)) MP_NORETURN void PendSV_Handler(void) {
 __attribute__((naked)) MP_NORETURN void SysTick_Handler(void) {
     exception_handler(SYSTEM_TICK);
 }
+#endif
 
 #endif

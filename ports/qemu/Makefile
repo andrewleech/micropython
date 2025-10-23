@@ -166,6 +166,8 @@ ifeq ($(QEMU_ARCH),arm)
 CFLAGS := $(filter-out -Werror,$(CFLAGS))
 # Enable Zephyr threading
 CFLAGS += -DMICROPY_ZEPHYR_THREADING=1
+# Disable DEBUG output for bare-metal (no stdio functions available)
+CFLAGS += -DNDEBUG
 # Use centralized Zephyr kernel integration
 ZEPHYR_ARCH := arm
 include $(TOP)/extmod/zephyr_kernel/zephyr_kernel.mk

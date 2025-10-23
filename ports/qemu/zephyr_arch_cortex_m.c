@@ -25,6 +25,47 @@
 #include <zephyr/kernel.h>
 #include <zephyr/arch/cpu.h>
 
+// Minimal stdio stubs for bare-metal environment (DEBUG_printf support)
+// These weak symbols are used when DEBUG_printf is enabled but C library stdio is unavailable
+// If C library provides these, those versions will be used instead
+
+// Newlib re-entrancy structure stub
+struct _reent;
+__attribute__((weak))
+struct _reent *_impure_ptr = NULL;
+
+__attribute__((weak))
+int fputs(const char *s, FILE *stream) {
+    (void)stream;
+    // Output to MicroPython's stdout
+    while (*s) {
+        mp_hal_stdout_tx_strn(s, 1);
+        s++;
+    }
+    return 0;
+}
+
+__attribute__((weak))
+int fprintf(FILE *stream, const char *format, ...) {
+    (void)stream;
+    (void)format;
+    // Minimal implementation - just suppress the output
+    // A full implementation would need va_list handling
+    return 0;
+}
+
+__attribute__((weak))
+size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
+    (void)stream;
+    // Output to MicroPython's stdout
+    const char *s = (const char *)ptr;
+    size_t total = size * nmemb;
+    for (size_t i = 0; i < total; i++) {
+        mp_hal_stdout_tx_strn(&s[i], 1);
+    }
+    return nmemb;
+}
+
 // Global kernel state (normally provided by kernel/init.c)
 // For bare-metal, we provide it here
 struct z_kernel _kernel __attribute__((section(".bss")));
@@ -82,13 +123,12 @@ void mp_zephyr_arch_yield(void) {
     *(volatile uint32_t *)0xE000ED04 = (1 << 28);  // PENDSVSET
 }
 
-// SysTick interrupt handler - increments tick counter and calls Zephyr timer
+// SysTick interrupt handler - increments tick counter
 void SysTick_Handler(void) {
     cortexm_arch_state.ticks++;
 
-    // Call Zephyr clock announce (if available)
-    extern void z_clock_announce(int32_t ticks);
-    z_clock_announce(1);
+    // For full Zephyr timer support, would call z_clock_announce(1) here
+    // For now, we just maintain tick counter for basic threading
 }
 
 // PendSV interrupt handler - performs context switching
