@@ -23,6 +23,9 @@ QSTR_DEFS = qstrdefsport.h
 # MicroPython feature configurations
 MICROPY_ROM_TEXT_COMPRESSION ?= 1
 
+# Zephyr threading configuration (experimental - Cortex-M only)
+MICROPY_ZEPHYR_THREADING ?= 0
+
 ifeq ($(QEMU_ARCH),arm)
 MICROPY_HEAP_SIZE ?= 143360
 ifeq ($(BOARD),MICROBIT)
@@ -155,6 +158,31 @@ SRC_C += \
 	shared/runtime/pyexec.c \
 	shared/runtime/stdout_helpers.c \
 	shared/runtime/sys_stdio_mphal.c \
+
+# Zephyr threading integration (ARM Cortex-M only)
+ifeq ($(MICROPY_ZEPHYR_THREADING),1)
+ifeq ($(QEMU_ARCH),arm)
+# Remove -Werror to allow Zephyr header warnings
+CFLAGS := $(filter-out -Werror,$(CFLAGS))
+# Enable Zephyr threading
+CFLAGS += -DMICROPY_ZEPHYR_THREADING=1
+# Use centralized Zephyr kernel integration
+ZEPHYR_ARCH := arm
+include $(TOP)/extmod/zephyr_kernel/zephyr_kernel.mk
+# Apply Zephyr includes and flags
+CFLAGS += $(ZEPHYR_INC) $(ZEPHYR_CFLAGS)
+# Combine all Zephyr sources
+ZEPHYR_KERNEL_SRC_C := $(ZEPHYR_KERNEL_SRC_C) $(ZEPHYR_ARCH_SRC_C) $(ZEPHYR_MP_SRC_C)
+# Add QEMU-specific Cortex-M architecture bridge
+SRC_C += zephyr_arch_cortex_m.c
+# Add Zephyr kernel to source list
+SRC_C += $(ZEPHYR_KERNEL_SRC_C)
+# Ensure Zephyr objects depend on generated headers
+$(addprefix $(BUILD)/, $(ZEPHYR_KERNEL_SRC_C:.c=.o)): $(ZEPHYR_GEN_HEADERS)
+else
+$(error MICROPY_ZEPHYR_THREADING=1 only supported for QEMU_ARCH=arm (Cortex-M))
+endif
+endif
 
 LIB_SRC_C += $(SRC_LIB_LIBM_C)
 LIB_SRC_C += $(SRC_LIB_LIBM_SQRT_SW_C)
