@@ -425,30 +425,20 @@ void mp_bluetooth_zephyr_hci_uart_wfi(void) {
         return;
     }
 
-    // ARCHITECTURAL FIX for Issue #6:
-    // When called from within a wait loop (k_sem_take), we need to:
-    // 1. Process HCI packets directly (to get responses)
-    // 2. Process work queue (because soft timers can't fire while blocked)
+    // ARCHITECTURAL FIX for regression introduced in commit 6bdcbeb9ef:
+    // Connection events were not being received because run_zephyr_hci_task()
+    // was removed from this function. Restoring it fixes connection event reception.
     //
-    // The in_wait_loop flag allows work processing to bypass recursion prevention.
+    // run_zephyr_hci_task() calls mp_bluetooth_zephyr_poll() which is CRITICAL
+    // for proper HCI event processing. It must be called BEFORE processing buffers.
+    run_zephyr_hci_task(NULL);
 
-    // Read any new HCI packets from hardware (IPCC on STM32WB)
-    while (mp_bluetooth_hci_uart_readpacket(h4_uart_byte_callback) > 0) {
-        // Keep reading while packets are available
-    }
-
-    // Process any queued RX buffers directly
-    // DO NOT strip H4 packet type byte - Zephyr expects it!
-    // bt_hci_recv() -> bt_recv_unsafe() pulls the type byte itself.
-    // See comment at hci_core.c:4474-4477
+    // Process any remaining queued RX buffers directly
+    // This handles buffers that arrived after run_zephyr_hci_task() completed
     struct net_buf *buf;
     while ((buf = rx_queue_get()) != NULL) {
         recv_cb(hci_dev, buf);
     }
-
-    // Process work queue (allowed via in_wait_loop flag)
-    // This is essential because soft timers can't fire while blocked in k_sem_take()
-    mp_bluetooth_zephyr_work_process();
 
     // Give IPCC hardware minimal time to complete any ongoing transfers
     // 100μs is sufficient for hardware without introducing significant latency
