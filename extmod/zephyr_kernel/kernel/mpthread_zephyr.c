@@ -23,6 +23,9 @@
 // For native POSIX, use compiler TLS instead of Zephyr's global _current
 #if CONFIG_ARCH_POSIX
 static __thread mp_state_thread_t *mp_thread_tls_state = NULL;
+#else
+// On bare-metal ARM, use static TLS (no __thread keyword for bare-metal)
+static mp_state_thread_t *mp_thread_tls_state = NULL;
 #endif
 
 #if MICROPY_PY_THREAD
@@ -181,7 +184,9 @@ mp_state_thread_t *mp_thread_get_state(void) {
     // On native POSIX, use compiler TLS to avoid _current global variable issues
     return mp_thread_tls_state;
     #else
-    return (mp_state_thread_t *)k_thread_custom_data_get();
+    // On bare-metal ARM, also use static TLS since k_thread_custom_data requires
+    // a fully initialized Zephyr thread, but we use a minimal bootstrap thread
+    return mp_thread_tls_state;
     #endif
 }
 
@@ -191,7 +196,9 @@ void mp_thread_set_state(mp_state_thread_t *state) {
     // On native POSIX, ONLY use compiler TLS (don't use Zephyr's broken _current)
     mp_thread_tls_state = state;
     #else
-    k_thread_custom_data_set((void *)state);
+    // On bare-metal ARM, also use static TLS since k_thread_custom_data requires
+    // a fully initialized Zephyr thread, but we use a minimal bootstrap thread
+    mp_thread_tls_state = state;
     #endif
 }
 
