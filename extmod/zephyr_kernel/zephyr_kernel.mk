@@ -119,9 +119,26 @@ ZEPHYR_INC += -I$(ZEPHYR_KERNEL)/generated/zephyr/arch/posix
 ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/posix/include
 endif
 
-# ARM architecture (for STM32, nRF, etc.) - future
+# ARM Cortex-M architecture (for embedded targets)
 ifeq ($(ZEPHYR_ARCH),arm)
-# TBD: ARM-specific files
+# ARM Cortex-M arch files - minimal set for threading
+ZEPHYR_ARCH_SRC_C += \
+	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/thread.c \
+	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/irq_manage.c \
+	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/irq_init.c \
+	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/prep_c.c \
+	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/fault.c \
+	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/exc_exit.c \
+	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/cpu_idle.c \
+	$(ZEPHYR_BASE)/arch/arm/core/fatal.c
+
+# ARM assembly files need to be handled by the port's Makefile
+# Typically: swap_helper.S, reset.S, vector_table.S
+
+# Add ARM Cortex-M include paths
+ZEPHYR_INC += -I$(ZEPHYR_KERNEL)/generated/zephyr/arch/arm
+ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/arm/include
+ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/arm/core/cortex_m
 endif
 
 # Export for ports to use
