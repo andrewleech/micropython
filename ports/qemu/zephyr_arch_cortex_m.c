@@ -98,8 +98,9 @@ void mp_zephyr_arch_init(void) {
     *(volatile uint32_t *)0xE000E014 = reload;
     // SysTick Current Value Register
     *(volatile uint32_t *)0xE000E018 = 0;
-    // SysTick Control and Status Register: enable, enable interrupt, use processor clock
-    *(volatile uint32_t *)0xE000E010 = 0x07;
+    // NOTE: Do NOT enable SysTick interrupt yet - wait until after kernel init
+    // SysTick Control and Status Register: enable counter, use processor clock, but NO interrupt yet
+    *(volatile uint32_t *)0xE000E010 = 0x05;  // Enable + processor clock, NO interrupt (bit 1 = 0)
 
     // Set PendSV to lowest priority (for context switching)
     // SHPR3 (System Handler Priority Register 3) at 0xE000ED20
@@ -107,7 +108,8 @@ void mp_zephyr_arch_init(void) {
 
     cortexm_arch_state.initialized = 1;
 
-    mp_printf(&mp_plat_print, "Zephyr arch (Cortex-M): Initialized\n");
+    // NOTE: Cannot use mp_printf here - stdio not initialized yet
+    // mp_printf(&mp_plat_print, "Zephyr arch (Cortex-M): Initialized\n");
 }
 
 // Get current system tick count
@@ -144,40 +146,56 @@ static int kernel_initialized = 0;
 
 // Zephyr kernel initialization for Cortex-M
 void mp_zephyr_kernel_init(void *main_stack, uint32_t main_stack_len) {
+    // NOTE: Cannot use mp_printf here - stdio not initialized yet
+    // mp_printf(&mp_plat_print, "[1] Entering mp_zephyr_kernel_init\n");
+
     // Make this function idempotent - safe to call multiple times
     if (kernel_initialized) {
+        // mp_printf(&mp_plat_print, "[1] Already initialized, returning\n");
         return;
     }
 
     (void)main_stack;      // For now, use existing stack
     (void)main_stack_len;
 
+    // mp_printf(&mp_plat_print, "[2] Calling mp_zephyr_arch_init\n");
     // Initialize arch-specific components (SysTick, PendSV, etc.)
     mp_zephyr_arch_init();
 
+    // mp_printf(&mp_plat_print, "[3] Zeroing _kernel structure\n");
     // Zero out the kernel structure
     memset(&_kernel, 0, sizeof(_kernel));
 
+    // mp_printf(&mp_plat_print, "[4] Calling z_sched_init\n");
     // Initialize the scheduler and ready queue
     extern void z_sched_init(void);
     z_sched_init();
 
+    // mp_printf(&mp_plat_print, "[5] Setting up bootstrap thread\n");
     // Set up a minimal bootstrap thread for the main thread
     // This is needed so that k_thread_create() has a valid _current to copy from
     memset(&bootstrap_thread, 0, sizeof(bootstrap_thread));
 
+    // mp_printf(&mp_plat_print, "[6] Setting current thread\n");
     // Set this bootstrap thread as the current thread
     _kernel.cpus[0].current = &bootstrap_thread;
 
     kernel_initialized = 1;
 
-    mp_printf(&mp_plat_print, "Zephyr kernel initialized (Cortex-M threading mode)\n");
+    // mp_printf(&mp_plat_print, "[7] Enabling SysTick interrupt\n");
+    // NOW it's safe to enable SysTick interrupt - kernel is fully initialized
+    // SysTick Control and Status Register: enable, enable interrupt, use processor clock
+    // TEMPORARY: Disable SysTick interrupt to test if it's causing Python execution hang
+    // *(volatile uint32_t *)0xE000E010 = 0x07;
+
+    // mp_printf(&mp_plat_print, "Zephyr kernel initialized (Cortex-M threading mode)\n");
 }
 
 // Zephyr kernel deinitialization
 void mp_zephyr_kernel_deinit(void) {
     // Cleanup if needed
-    mp_printf(&mp_plat_print, "Zephyr kernel deinitialized (Cortex-M mode)\n");
+    // NOTE: This may be called before stdio is fully ready, be careful with prints
+    // mp_printf(&mp_plat_print, "Zephyr kernel deinitialized (Cortex-M mode)\n");
 }
 
 // ============================================================================
