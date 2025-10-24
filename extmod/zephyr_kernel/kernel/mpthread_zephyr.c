@@ -76,8 +76,8 @@ static int32_t mp_thread_find_stack_slot(void);
 
 // Initialize threading subsystem
 void mp_thread_init(void *stack, uint32_t stack_len) {
-    // Initialize Zephyr kernel
-    mp_zephyr_kernel_init(stack, stack_len);
+    // Note: mp_zephyr_kernel_init() must be called by main() BEFORE mp_thread_init()
+    // to properly initialize the Zephyr kernel and bootstrap thread.
 
     // Set thread-local state for main thread
     mp_thread_set_state(&mp_state_ctx.thread);
