@@ -47,16 +47,22 @@ static uint32_t gc_heap[MICROPY_HEAP_SIZE / sizeof(uint32_t)];
 int main(int argc, char **argv) {
     // Initialize Zephyr kernel before anything else (if threading enabled)
     #if MICROPY_ZEPHYR_THREADING
-    extern void mp_zephyr_kernel_init(void *main_stack, uint32_t main_stack_len);
-    char stack_dummy;
-    mp_zephyr_kernel_init(&stack_dummy, 8192);  // 8KB main thread stack
+    extern bool mp_zephyr_kernel_init(void);
+    if (!mp_zephyr_kernel_init()) {
+        mp_printf(&mp_plat_print, "Failed to initialize Zephyr kernel\n");
+        return 1;
+    }
     #endif
 
     // Initialize MicroPython threading
     #if MICROPY_PY_THREAD
     #if MICROPY_ZEPHYR_THREADING
-    // Pass stack parameters for bare-metal Zephyr threading
-    mp_thread_init(&stack_dummy, 8192);
+    // Pass stack pointer for bare-metal Zephyr threading
+    char stack_dummy;
+    if (!mp_thread_init(&stack_dummy)) {
+        mp_printf(&mp_plat_print, "Failed to initialize threading\n");
+        return 1;
+    }
     #else
     mp_thread_init(NULL, 0);
     #endif

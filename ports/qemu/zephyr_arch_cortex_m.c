@@ -145,18 +145,15 @@ static struct k_thread bootstrap_thread;
 static int kernel_initialized = 0;
 
 // Zephyr kernel initialization for Cortex-M
-void mp_zephyr_kernel_init(void *main_stack, uint32_t main_stack_len) {
+bool mp_zephyr_kernel_init(void) {
     // NOTE: Cannot use mp_printf here - stdio not initialized yet
     // mp_printf(&mp_plat_print, "[1] Entering mp_zephyr_kernel_init\n");
 
     // Make this function idempotent - safe to call multiple times
     if (kernel_initialized) {
         // mp_printf(&mp_plat_print, "[1] Already initialized, returning\n");
-        return;
+        return true;
     }
-
-    (void)main_stack;      // For now, use existing stack
-    (void)main_stack_len;
 
     // mp_printf(&mp_plat_print, "[2] Calling mp_zephyr_arch_init\n");
     // Initialize arch-specific components (SysTick, PendSV, etc.)
@@ -180,6 +177,7 @@ void mp_zephyr_kernel_init(void *main_stack, uint32_t main_stack_len) {
     // See lib/zephyr/kernel/thread.c:z_dummy_thread_init() for reference
     bootstrap_thread.base.thread_state = _THREAD_DUMMY;
     bootstrap_thread.resource_pool = NULL;  // Explicitly set to NULL (acceptable in Zephyr)
+    bootstrap_thread.custom_data = NULL;    // Will be set by mp_thread_init()
 
     // mp_printf(&mp_plat_print, "[6] Setting current thread\n");
     // Set this bootstrap thread as the current thread
@@ -188,12 +186,13 @@ void mp_zephyr_kernel_init(void *main_stack, uint32_t main_stack_len) {
     kernel_initialized = 1;
 
     // mp_printf(&mp_plat_print, "[7] Enabling SysTick interrupt\n");
-    // NOW it's safe to enable SysTick interrupt - kernel is fully initialized
-    // SysTick Control and Status Register: enable, enable interrupt, use processor clock
-    // TEMPORARY: Disable SysTick interrupt to test if it's causing Python execution hang
-    // *(volatile uint32_t *)0xE000E010 = 0x07;
+    // NOTE: SysTick interrupt will be enabled later, after MicroPython is fully initialized
+    // Enabling it here causes hangs because Python VM is not ready to handle interrupts yet
+    // *(volatile uint32_t *)0xE000E010 = 0x07;  // Enable + interrupt + processor clock
 
     // mp_printf(&mp_plat_print, "Zephyr kernel initialized (Cortex-M threading mode)\n");
+
+    return true;
 }
 
 // Zephyr kernel deinitialization
