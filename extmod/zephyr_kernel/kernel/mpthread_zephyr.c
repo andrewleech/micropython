@@ -254,10 +254,19 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
 
     // Find available stack slot
     int32_t _slot = mp_thread_find_stack_slot();
+    mp_printf(&mp_plat_print, "DEBUG: Found stack slot: %d\n", (int)_slot);
     if (_slot < 0) {
         mp_thread_mutex_unlock(&thread_mutex);
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("maximum number of threads reached"));
     }
+
+    // Debug: Print k_thread_create parameters
+    mp_printf(&mp_plat_print, "DEBUG: k_thread_create params:\n");
+    mp_printf(&mp_plat_print, "  z_thread: %p\n", &th->z_thread);
+    mp_printf(&mp_plat_print, "  stack: %p\n", mp_thread_stack_array[_slot]);
+    mp_printf(&mp_plat_print, "  stack_size: %u\n", (unsigned)K_THREAD_STACK_SIZEOF(mp_thread_stack_array[_slot]));
+    mp_printf(&mp_plat_print, "  entry: %p\n", zephyr_entry);
+    mp_printf(&mp_plat_print, "  priority: %d\n", priority);
 
     // Create Zephyr thread
     th->id = k_thread_create(
@@ -269,7 +278,10 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
         priority, 0, K_NO_WAIT
     );
 
+    mp_printf(&mp_plat_print, "DEBUG: k_thread_create returned: %p\n", th->id);
+
     if (th->id == NULL) {
+        mp_printf(&mp_plat_print, "DEBUG: Thread creation FAILED - k_thread_create returned NULL\n");
         mp_thread_mutex_unlock(&thread_mutex);
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("can't create thread"));
     }
