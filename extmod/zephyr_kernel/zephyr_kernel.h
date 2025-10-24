@@ -30,7 +30,8 @@ extern "C" {
 #endif
 
 // Initialize Zephyr kernel for MicroPython use
-void mp_zephyr_kernel_init(void *main_stack, uint32_t main_stack_len);
+// Returns true on success, false on failure
+bool mp_zephyr_kernel_init(void);
 
 // Deinitialize Zephyr kernel
 void mp_zephyr_kernel_deinit(void);

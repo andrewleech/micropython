@@ -20,11 +20,15 @@
 
 #include "../zephyr_kernel.h"
 
-// For native POSIX, use compiler TLS instead of Zephyr's global _current
+// Thread-local storage for mp_state_thread_t pointer
 #if CONFIG_ARCH_POSIX
+// On native POSIX, use compiler TLS to avoid _current global variable issues
 static __thread mp_state_thread_t *mp_thread_tls_state = NULL;
 #else
-// On bare-metal ARM, use static TLS (no __thread keyword for bare-metal)
+// On bare-metal ARM, use static TLS (shared across all threads)
+// TODO: This is NOT correct for multi-threading - each thread will share the same TLS!
+// Should use k_thread_custom_data_get/set, but bootstrap thread initialization
+// needs to be fixed first. See review plan for details.
 static mp_state_thread_t *mp_thread_tls_state = NULL;
 #endif
 
@@ -75,12 +79,9 @@ static void mp_thread_iterate_threads_cb(const struct k_thread *thread, void *us
 static int32_t mp_thread_find_stack_slot(void);
 
 // Initialize threading subsystem
-void mp_thread_init(void *stack, uint32_t stack_len) {
+bool mp_thread_init(void *stack) {
     // Note: mp_zephyr_kernel_init() must be called by main() BEFORE mp_thread_init()
     // to properly initialize the Zephyr kernel and bootstrap thread.
-
-    // Set thread-local state for main thread
-    mp_thread_set_state(&mp_state_ctx.thread);
 
     // Create first entry in linked list (main thread)
     thread_entry0.id = k_current_get();
@@ -88,7 +89,7 @@ void mp_thread_init(void *stack, uint32_t stack_len) {
     thread_entry0.alive = 1;
     thread_entry0.arg = NULL;
     thread_entry0.stack = stack;
-    thread_entry0.stack_len = stack_len / sizeof(uintptr_t);
+    thread_entry0.stack_len = 0;  // Bootstrap thread uses C runtime stack, size unknown
     thread_entry0.next = NULL;
 
     k_thread_name_set(thread_entry0.id, "mp_main");
@@ -101,7 +102,18 @@ void mp_thread_init(void *stack, uint32_t stack_len) {
 
     thread = &thread_entry0;
 
+    // Set thread-local state for main thread
+    mp_thread_set_state(&mp_state_ctx.thread);
+
+    // TODO: Convert bootstrap thread from dummy to real thread
+    // The main thread should be schedulable for mutex/sync to work, but clearing
+    // _THREAD_DUMMY flag here causes system hangs. Need to investigate why.
+    // struct k_thread *bootstrap = (struct k_thread *)thread_entry0.id;
+    // bootstrap->base.thread_state &= ~_THREAD_DUMMY;  // Clear dummy flag
+
     DEBUG_printf("Threading initialized\n");
+
+    return true;
 }
 
 // Clean up threading subsystem
@@ -137,21 +149,29 @@ void mp_thread_gc_others(void) {
     k_thread_foreach(mp_thread_iterate_threads_cb, NULL);
 
     // Clean up finished threads and collect GC roots
-    for (mp_thread_t *th = thread; th != NULL; th = th->next) {
+    mp_thread_t *th = thread;
+    while (th != NULL) {
+        mp_thread_t *next = th->next;  // Capture next before any modifications
+
         // Remove finished, non-alive threads from list
         if ((th->status == MP_THREAD_STATUS_FINISHED) && !th->alive) {
             if (prev != NULL) {
-                prev->next = th->next;
+                prev->next = next;
             } else {
-                thread = th->next;
+                thread = next;
             }
-            stack_slot[th->slot].used = false;
+            if (th->slot >= 0 && th->slot < MP_THREAD_MAXIMUM_USER_THREADS) {
+                stack_slot[th->slot].used = false;
+            }
             mp_thread_counter--;
             DEBUG_printf("GC: Collected thread %s\n", k_thread_name_get(th->id));
+            // Don't update prev - we removed this node
         } else {
             th->alive = 0;  // Reset for next GC cycle
             prev = th;
         }
+
+        th = next;  // Use captured next pointer
     }
 
     DEBUG_printf("GC: Scanning %d threads\n", mp_thread_counter + 1);
@@ -180,26 +200,12 @@ void mp_thread_gc_others(void) {
 
 // Get thread-local state
 mp_state_thread_t *mp_thread_get_state(void) {
-    #if CONFIG_ARCH_POSIX
-    // On native POSIX, use compiler TLS to avoid _current global variable issues
     return mp_thread_tls_state;
-    #else
-    // On bare-metal ARM, also use static TLS since k_thread_custom_data requires
-    // a fully initialized Zephyr thread, but we use a minimal bootstrap thread
-    return mp_thread_tls_state;
-    #endif
 }
 
 // Set thread-local state
 void mp_thread_set_state(mp_state_thread_t *state) {
-    #if CONFIG_ARCH_POSIX
-    // On native POSIX, ONLY use compiler TLS (don't use Zephyr's broken _current)
     mp_thread_tls_state = state;
-    #else
-    // On bare-metal ARM, also use static TLS since k_thread_custom_data requires
-    // a fully initialized Zephyr thread, but we use a minimal bootstrap thread
-    mp_thread_tls_state = state;
-    #endif
 }
 
 // Get current thread ID
@@ -256,6 +262,7 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     int32_t _slot = mp_thread_find_stack_slot();
     if (_slot < 0) {
         mp_thread_mutex_unlock(&thread_mutex);
+        m_del_obj(mp_thread_t, th);  // Clean up allocated memory
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("maximum number of threads reached"));
     }
 
@@ -267,10 +274,11 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
         zephyr_entry,
         entry, arg, NULL,
         priority, 0, K_NO_WAIT
-    );
+        );
 
     if (th->id == NULL) {
         mp_thread_mutex_unlock(&thread_mutex);
+        m_del_obj(mp_thread_t, th);  // Clean up allocated memory
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("can't create thread"));
     }
 
