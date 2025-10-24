@@ -176,6 +176,11 @@ void mp_zephyr_kernel_init(void *main_stack, uint32_t main_stack_len) {
     // This is needed so that k_thread_create() has a valid _current to copy from
     memset(&bootstrap_thread, 0, sizeof(bootstrap_thread));
 
+    // Initialize bootstrap thread fields to match Zephyr's dummy thread initialization
+    // See lib/zephyr/kernel/thread.c:z_dummy_thread_init() for reference
+    bootstrap_thread.base.thread_state = _THREAD_DUMMY;
+    bootstrap_thread.resource_pool = NULL;  // Explicitly set to NULL (acceptable in Zephyr)
+
     // mp_printf(&mp_plat_print, "[6] Setting current thread\n");
     // Set this bootstrap thread as the current thread
     _kernel.cpus[0].current = &bootstrap_thread;
