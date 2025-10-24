@@ -176,7 +176,8 @@ bool mp_zephyr_kernel_init(void) {
     // Initialize bootstrap thread fields to match Zephyr's dummy thread initialization
     // See lib/zephyr/kernel/thread.c:z_dummy_thread_init() for reference
     bootstrap_thread.base.thread_state = _THREAD_DUMMY;
-    bootstrap_thread.resource_pool = NULL;  // Explicitly set to NULL (acceptable in Zephyr)
+    bootstrap_thread.base.prio = 0;  // Neutral priority
+    bootstrap_thread.resource_pool = NULL;  // NULL is acceptable for bootstrap thread
     bootstrap_thread.custom_data = NULL;    // Will be set by mp_thread_init()
 
     // mp_printf(&mp_plat_print, "[6] Setting current thread\n");
@@ -185,12 +186,11 @@ bool mp_zephyr_kernel_init(void) {
 
     kernel_initialized = 1;
 
-    // mp_printf(&mp_plat_print, "[7] Enabling SysTick interrupt\n");
-    // NOTE: SysTick interrupt will be enabled later, after MicroPython is fully initialized
-    // Enabling it here causes hangs because Python VM is not ready to handle interrupts yet
-    // *(volatile uint32_t *)0xE000E010 = 0x07;  // Enable + interrupt + processor clock
-
-    // mp_printf(&mp_plat_print, "Zephyr kernel initialized (Cortex-M threading mode)\n");
+    // NOTE: SysTick interrupt is NOT enabled for bare-metal bootstrap mode.
+    // The bootstrap thread remains as _THREAD_DUMMY and doesn't participate in
+    // scheduling. Only threads created via k_thread_create() will be scheduled.
+    // If full scheduling support is needed in the future, the bootstrap thread
+    // would need to be converted to a real Zephyr thread with proper stack allocation.
 
     return true;
 }

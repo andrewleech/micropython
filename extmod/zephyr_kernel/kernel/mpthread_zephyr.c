@@ -21,16 +21,8 @@
 #include "../zephyr_kernel.h"
 
 // Thread-local storage for mp_state_thread_t pointer
-#if CONFIG_ARCH_POSIX
-// On native POSIX, use compiler TLS to avoid _current global variable issues
-static __thread mp_state_thread_t *mp_thread_tls_state = NULL;
-#else
-// On bare-metal ARM, use static TLS (shared across all threads)
-// TODO: This is NOT correct for multi-threading - each thread will share the same TLS!
-// Should use k_thread_custom_data_get/set, but bootstrap thread initialization
-// needs to be fixed first. See review plan for details.
-static mp_state_thread_t *mp_thread_tls_state = NULL;
-#endif
+// Use Zephyr's k_thread_custom_data mechanism for per-thread storage
+// This works on all architectures (ARM Cortex-M, POSIX, etc.)
 
 #if MICROPY_PY_THREAD
 
@@ -83,7 +75,7 @@ bool mp_thread_init(void *stack) {
     // Note: mp_zephyr_kernel_init() must be called by main() BEFORE mp_thread_init()
     // to properly initialize the Zephyr kernel and bootstrap thread.
 
-    // Create first entry in linked list (main thread)
+    // Create first entry in linked list (main thread running on bootstrap)
     thread_entry0.id = k_current_get();
     thread_entry0.status = MP_THREAD_STATUS_READY;
     thread_entry0.alive = 1;
@@ -104,12 +96,6 @@ bool mp_thread_init(void *stack) {
 
     // Set thread-local state for main thread
     mp_thread_set_state(&mp_state_ctx.thread);
-
-    // TODO: Convert bootstrap thread from dummy to real thread
-    // The main thread should be schedulable for mutex/sync to work, but clearing
-    // _THREAD_DUMMY flag here causes system hangs. Need to investigate why.
-    // struct k_thread *bootstrap = (struct k_thread *)thread_entry0.id;
-    // bootstrap->base.thread_state &= ~_THREAD_DUMMY;  // Clear dummy flag
 
     DEBUG_printf("Threading initialized\n");
 
@@ -200,12 +186,12 @@ void mp_thread_gc_others(void) {
 
 // Get thread-local state
 mp_state_thread_t *mp_thread_get_state(void) {
-    return mp_thread_tls_state;
+    return (mp_state_thread_t *)k_thread_custom_data_get();
 }
 
 // Set thread-local state
 void mp_thread_set_state(mp_state_thread_t *state) {
-    mp_thread_tls_state = state;
+    k_thread_custom_data_set((void *)state);
 }
 
 // Get current thread ID
