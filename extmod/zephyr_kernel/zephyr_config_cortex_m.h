@@ -62,7 +62,7 @@ typedef enum {
 #define CONFIG_NUM_PREEMPT_PRIORITIES 15
 #define CONFIG_NUM_COOP_PRIORITIES 16
 #define CONFIG_MAIN_STACK_SIZE 10240  // 10KB for main thread (matches mp_stack_set_limit)
-#define CONFIG_MAIN_THREAD_PRIORITY 0
+#define CONFIG_MAIN_THREAD_PRIORITY 1  // Slightly lower priority than user threads (0)
 #define CONFIG_IDLE_STACK_SIZE 512
 #define CONFIG_ISR_STACK_SIZE 2048
 #define CONFIG_THREAD_STACK_INFO 1
@@ -102,7 +102,7 @@ typedef enum {
 
 // Timeslicing
 #define CONFIG_TIMESLICING 1
-#define CONFIG_TIMESLICE_SIZE 0
+#define CONFIG_TIMESLICE_SIZE 0  // Disabled - using priority-based preemption instead
 #define CONFIG_TIMESLICE_PRIORITY 0
 
 // Memory and heap

@@ -97,6 +97,7 @@ ZEPHYR_KERNEL_SRC_C := \
 	$(ZEPHYR_BASE)/kernel/priority_queues.c \
 	$(ZEPHYR_BASE)/kernel/timeout.c \
 	$(ZEPHYR_BASE)/kernel/timer.c \
+	$(ZEPHYR_BASE)/kernel/timeslicing.c \
 	$(ZEPHYR_BASE)/kernel/thread_monitor.c \
 	$(ZEPHYR_BASE)/kernel/errno.c \
 	$(ZEPHYR_BASE)/kernel/version.c \

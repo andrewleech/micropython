@@ -30,7 +30,7 @@
 
 #define MP_THREAD_MIN_STACK_SIZE                (4 * 1024)
 #define MP_THREAD_DEFAULT_STACK_SIZE            (MP_THREAD_MIN_STACK_SIZE + 1024)
-#define MP_THREAD_PRIORITY                      K_PRIO_PREEMPT(5)  // Mid-priority
+#define MP_THREAD_PRIORITY                      K_PRIO_PREEMPT(0)  // Higher priority than main (1)
 #define MP_THREAD_MAXIMUM_USER_THREADS          (8)
 
 typedef enum {

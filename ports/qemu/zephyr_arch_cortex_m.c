@@ -133,17 +133,24 @@ void mp_zephyr_arch_yield(void) {
     *(volatile uint32_t *)0xE000ED04 = (1 << 28);  // PENDSVSET
 }
 
-// SysTick interrupt handler - increments tick counter and triggers scheduling
+// SysTick interrupt handler - increments tick counter and calls Zephyr timer subsystem
 void SysTick_Handler(void) {
     cortexm_arch_state.ticks++;
 
-    // Simplified timer-based preemption: Check if a ready thread exists
-    // In full Zephyr, this would call z_clock_announce() to handle timeouts
-    // and update ready queue. For basic threading, we just trigger PendSV
-    // every tick to let the scheduler check for higher-priority ready threads.
-    extern struct z_kernel _kernel;
+    // Call Zephyr's timer subsystem to process timeouts and trigger scheduling
+    // sys_clock_announce() will:
+    // - Process expired timeouts from timeout_list
+    // - Call timeout callback functions (including thread wakeup via z_ready_thread())
+    // - Update curr_tick
+    // - Call z_time_slice() if CONFIG_TIMESLICING is enabled
+    extern void sys_clock_announce(int32_t ticks);
+    sys_clock_announce(1);
 
-    // If there's a ready thread in cache that's different from current, schedule it
+    // After processing timeouts, check if we need to reschedule
+    // sys_clock_announce() may have woken up threads via timeout callbacks,
+    // but it doesn't automatically trigger a context switch. We need to check
+    // if a higher-priority thread is ready and trigger PendSV if needed.
+    extern struct z_kernel _kernel;
     if (_kernel.ready_q.cache != NULL &&
         _kernel.ready_q.cache != _kernel.cpus[0].current) {
         // Trigger PendSV for context switch
@@ -280,10 +287,10 @@ void z_fatal_error(unsigned int reason, const struct arch_esf *esf) {
     }
 }
 
-// Time slice reset stub
-void z_reset_time_slice(struct k_thread *thread) {
-    (void)thread;
-}
+// Idle thread array stub (normally defined in init.c)
+// We don't use an idle thread in our minimal implementation, but timeslicing.c
+// needs this to exist for z_is_idle_thread_object() to work.
+struct k_thread z_idle_threads[CONFIG_MP_MAX_NUM_CPUS];
 
 // SMP/IPI stubs - single-core, no IPI needed
 uint32_t ipi_mask_create(struct k_thread *thread) {
