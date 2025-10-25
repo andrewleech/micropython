@@ -112,6 +112,14 @@ void mp_zephyr_arch_init(void) {
     // mp_printf(&mp_plat_print, "Zephyr arch (Cortex-M): Initialized\n");
 }
 
+// Enable SysTick interrupt - must be called AFTER kernel is fully initialized
+// This should be called from micropython_main_thread_entry() after z_cstart() completes
+void mp_zephyr_arch_enable_systick_interrupt(void) {
+    // Enable SysTick interrupt (set bit 1 in SysTick Control register)
+    // SysTick Control and Status Register: enable counter + processor clock + interrupt
+    *(volatile uint32_t *)0xE000E010 = 0x07;  // Enable + processor clock + interrupt
+}
+
 // Get current system tick count
 uint64_t mp_zephyr_arch_get_ticks(void) {
     return cortexm_arch_state.ticks;
@@ -140,60 +148,9 @@ void PendSV_Handler(void) {
     z_arm_pendsv();
 }
 
-// Bootstrap thread structure for the main thread
-static struct k_thread bootstrap_thread;
-static int kernel_initialized = 0;
-
-// Zephyr kernel initialization for Cortex-M
-bool mp_zephyr_kernel_init(void) {
-    // NOTE: Cannot use mp_printf here - stdio not initialized yet
-    // mp_printf(&mp_plat_print, "[1] Entering mp_zephyr_kernel_init\n");
-
-    // Make this function idempotent - safe to call multiple times
-    if (kernel_initialized) {
-        // mp_printf(&mp_plat_print, "[1] Already initialized, returning\n");
-        return true;
-    }
-
-    // mp_printf(&mp_plat_print, "[2] Calling mp_zephyr_arch_init\n");
-    // Initialize arch-specific components (SysTick, PendSV, etc.)
-    mp_zephyr_arch_init();
-
-    // mp_printf(&mp_plat_print, "[3] Zeroing _kernel structure\n");
-    // Zero out the kernel structure
-    memset(&_kernel, 0, sizeof(_kernel));
-
-    // mp_printf(&mp_plat_print, "[4] Calling z_sched_init\n");
-    // Initialize the scheduler and ready queue
-    extern void z_sched_init(void);
-    z_sched_init();
-
-    // mp_printf(&mp_plat_print, "[5] Setting up bootstrap thread\n");
-    // Set up a minimal bootstrap thread for the main thread
-    // This is needed so that k_thread_create() has a valid _current to copy from
-    memset(&bootstrap_thread, 0, sizeof(bootstrap_thread));
-
-    // Initialize bootstrap thread fields to match Zephyr's dummy thread initialization
-    // See lib/zephyr/kernel/thread.c:z_dummy_thread_init() for reference
-    bootstrap_thread.base.thread_state = _THREAD_DUMMY;
-    bootstrap_thread.base.prio = 0;  // Neutral priority
-    bootstrap_thread.resource_pool = NULL;  // NULL is acceptable for bootstrap thread
-    bootstrap_thread.custom_data = NULL;    // Will be set by mp_thread_init()
-
-    // mp_printf(&mp_plat_print, "[6] Setting current thread\n");
-    // Set this bootstrap thread as the current thread
-    _kernel.cpus[0].current = &bootstrap_thread;
-
-    kernel_initialized = 1;
-
-    // NOTE: SysTick interrupt is NOT enabled for bare-metal bootstrap mode.
-    // The bootstrap thread remains as _THREAD_DUMMY and doesn't participate in
-    // scheduling. Only threads created via k_thread_create() will be scheduled.
-    // If full scheduling support is needed in the future, the bootstrap thread
-    // would need to be converted to a real Zephyr thread with proper stack allocation.
-
-    return true;
-}
+// NOTE: With the new z_cstart() approach, most kernel initialization
+// is now done in extmod/zephyr_kernel/zephyr_cstart.c
+// This function is kept for compatibility but is now minimal
 
 // Zephyr kernel deinitialization
 void mp_zephyr_kernel_deinit(void) {
@@ -332,10 +289,11 @@ void signal_pending_ipi(void) {
     // No-op for single-core
 }
 
-// Thread return value (not used on Cortex-M)
+// Thread return value - provided by arch layer for legacy swap (not CONFIG_USE_SWITCH)
+// Note: Cortex-M's kernel_arch_func.h provides this as static inline,
+// but we need a non-inline version for linking in some contexts
 void arch_thread_return_value_set(struct k_thread *thread, unsigned int value) {
-    (void)thread;
-    (void)value;
+    thread->arch.swap_return_value = value;
 }
 
 #endif // MICROPY_ZEPHYR_THREADING

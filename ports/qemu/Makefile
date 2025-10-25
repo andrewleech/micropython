@@ -173,18 +173,18 @@ ZEPHYR_ARCH := arm
 include $(TOP)/extmod/zephyr_kernel/zephyr_kernel.mk
 # Apply Zephyr includes and flags
 CFLAGS += $(ZEPHYR_INC) $(ZEPHYR_CFLAGS)
-# Combine all Zephyr sources
-ZEPHYR_KERNEL_SRC_C := $(ZEPHYR_KERNEL_SRC_C) $(ZEPHYR_ARCH_SRC_C) $(ZEPHYR_MP_SRC_C)
 # Add QEMU-specific Cortex-M architecture bridge
 SRC_C += zephyr_arch_cortex_m.c
-# Add Zephyr kernel to source list
-SRC_C += $(ZEPHYR_KERNEL_SRC_C)
+# Note: Zephyr kernel sources are added to SRC_THIRDPARTY_C by zephyr_kernel.mk
 # Add Zephyr assembly files (context switching, etc.)
 # Use flattened name to avoid path issues with $(BUILD)/../../
 ZEPHYR_SWAP_HELPER_O = $(BUILD)/swap_helper.o
 OBJ_ZEPHYR_ASM = $(ZEPHYR_SWAP_HELPER_O)
 # Ensure Zephyr objects depend on generated headers
-$(addprefix $(BUILD)/, $(ZEPHYR_KERNEL_SRC_C:.c=.o)): $(ZEPHYR_GEN_HEADERS)
+$(addprefix $(BUILD)/, $(SRC_THIRDPARTY_C:.c=.o)): $(ZEPHYR_GEN_HEADERS)
+# Pattern-specific CFLAGS for Zephyr objects (suppress warnings like nimble.mk)
+$(BUILD)/$(TOP)/lib/zephyr/%.o: CFLAGS += -Wno-unused-parameter -Wno-sign-compare
+$(BUILD)/$(TOP)/extmod/zephyr_kernel/%.o: CFLAGS += -Wno-unused-parameter
 $(ZEPHYR_SWAP_HELPER_O): $(ZEPHYR_ARCH_SRC_S) $(ZEPHYR_GEN_HEADERS)
 	$(ECHO) "CC $<"
 	$(Q)$(CC) -x assembler-with-cpp -D_ASMLANGUAGE $(filter-out -std=% -Wdouble-promotion -Wfloat-conversion,$(CFLAGS)) -Wa,-mimplicit-it=thumb -c -o $@ $<
@@ -200,6 +200,7 @@ OBJ += $(PY_O)
 OBJ += $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_BOARD_O))
 OBJ += $(addprefix $(BUILD)/, $(LIB_SRC_C:.c=.o))
+# Note: SRC_THIRDPARTY_C is already added to PY_O by extmod.mk, no need to add again
 # Add Zephyr assembly objects (using flattened paths to avoid $(BUILD)/../../ issues)
 ifeq ($(MICROPY_ZEPHYR_THREADING),1)
 OBJ += $(OBJ_ZEPHYR_ASM)

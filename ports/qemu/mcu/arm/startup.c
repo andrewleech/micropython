@@ -115,12 +115,20 @@ void _start(void) {
     // Enable the UART
     uart_init();
 
-    // Now that we have a basic system up and running we can call main
+    #if MICROPY_ZEPHYR_THREADING
+    // When Zephyr threading is enabled, use z_cstart() instead of main()
+    // z_cstart() initializes the kernel and context-switches to z_main_thread
+    // which then runs micropython_main_thread_entry()
+    extern void z_cstart(void);
+    z_cstart();  // Never returns - switches to z_main_thread
+    #else
+    // Traditional path: call main() directly
     extern int main();
     main(0, 0);
 
     // Finished
     exit(0);
+    #endif
 }
 
 void exit(int status) {

@@ -38,30 +38,46 @@
 #include "py/mpthread.h"
 #endif
 
+#if MICROPY_ZEPHYR_THREADING
+#include <zephyr/kernel.h>
+#endif
+
 #if MICROPY_HEAP_SIZE <= 0
 #error MICROPY_HEAP_SIZE must be a positive integer.
 #endif
 
 static uint32_t gc_heap[MICROPY_HEAP_SIZE / sizeof(uint32_t)];
 
+#if !MICROPY_ZEPHYR_THREADING
+// When Zephyr threading is disabled, use traditional main() entry point
 int main(int argc, char **argv) {
-    // Initialize Zephyr kernel before anything else (if threading enabled)
-    #if MICROPY_ZEPHYR_THREADING
-    extern bool mp_zephyr_kernel_init(void);
-    if (!mp_zephyr_kernel_init()) {
-        mp_printf(&mp_plat_print, "Failed to initialize Zephyr kernel\n");
-        return 1;
-    }
-    #endif
+    (void)argc;
+    (void)argv;
+#else
+// When Zephyr threading is enabled, this function runs IN z_main_thread context
+// It's called by z_cstart() after context switching from boot/dummy thread
+void micropython_main_thread_entry(void *p1, void *p2, void *p3) {
+    (void)p1;
+    (void)p2;
+    (void)p3;
+
+    // NOTE: We're now running in z_main_thread context, not boot/dummy context
+    // This means k_thread_create() and other threading operations are safe to call
+#endif
 
     // Initialize MicroPython threading
     #if MICROPY_PY_THREAD
     #if MICROPY_ZEPHYR_THREADING
-    // Pass stack pointer for bare-metal Zephyr threading
+    // For Zephyr threading, pass stack pointer for thread-local storage
     char stack_dummy;
     if (!mp_thread_init(&stack_dummy)) {
         mp_printf(&mp_plat_print, "Failed to initialize threading\n");
+        #if !MICROPY_ZEPHYR_THREADING
         return 1;
+        #else
+        // In thread context, can't return - just loop forever
+        for (;;) {}
+        #endif
     }
     #else
     mp_thread_init(NULL, 0);
