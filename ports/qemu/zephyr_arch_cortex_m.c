@@ -133,12 +133,22 @@ void mp_zephyr_arch_yield(void) {
     *(volatile uint32_t *)0xE000ED04 = (1 << 28);  // PENDSVSET
 }
 
-// SysTick interrupt handler - increments tick counter
+// SysTick interrupt handler - increments tick counter and triggers scheduling
 void SysTick_Handler(void) {
     cortexm_arch_state.ticks++;
 
-    // For full Zephyr timer support, would call z_clock_announce(1) here
-    // For now, we just maintain tick counter for basic threading
+    // Simplified timer-based preemption: Check if a ready thread exists
+    // In full Zephyr, this would call z_clock_announce() to handle timeouts
+    // and update ready queue. For basic threading, we just trigger PendSV
+    // every tick to let the scheduler check for higher-priority ready threads.
+    extern struct z_kernel _kernel;
+
+    // If there's a ready thread in cache that's different from current, schedule it
+    if (_kernel.ready_q.cache != NULL &&
+        _kernel.ready_q.cache != _kernel.cpus[0].current) {
+        // Trigger PendSV for context switch
+        *(volatile uint32_t *)0xE000ED04 = (1 << 28);  // PENDSVSET
+    }
 }
 
 // PendSV interrupt handler - performs context switching
