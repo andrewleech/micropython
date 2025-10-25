@@ -220,6 +220,9 @@ void mp_thread_start(void) {
 static void zephyr_entry(void *arg1, void *arg2, void *arg3) {
     (void)arg3;
 
+    // DEBUG: Print that we entered
+    mp_hal_stdout_tx_strn("[THREAD ENTRY]\n", 15);
+
     // Get the mp_thread_t structure for this thread (passed via arg3 actually stored in custom_data)
     // Find our thread in the list
     mp_thread_t *self = NULL;
@@ -336,7 +339,12 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     mp_thread_mutex_unlock(&thread_mutex);
 
     DEBUG_printf("Created thread %s (id=%p)\n", name, th->id);
+    mp_hal_stdout_tx_strn("[THREAD CREATED]\n", 17);
 
+    // Note: The new thread will run when the next SysTick interrupt fires
+    // or when the current thread blocks/yields. This is normal Zephyr behavior.
+
+    mp_hal_stdout_tx_strn("[RETURNING FROM CREATE]\n", 24);
     return (mp_uint_t)th->id;
 }
 

@@ -160,9 +160,13 @@ void SysTick_Handler(void) {
 
 // PendSV interrupt handler - performs context switching
 void PendSV_Handler(void) {
+    mp_hal_stdout_tx_strn("[PENDSV HANDLER]\n", 17);
+
     // Call Zephyr's PendSV handler
     extern void z_arm_pendsv(void);
     z_arm_pendsv();
+
+    mp_hal_stdout_tx_strn("[PENDSV DONE]\n", 14);
 }
 
 // NOTE: With the new z_cstart() approach, most kernel initialization
