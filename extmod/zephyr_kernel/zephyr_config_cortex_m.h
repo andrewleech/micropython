@@ -57,9 +57,11 @@ typedef enum {
 // Core kernel features
 #define CONFIG_MULTITHREADING 1
 // Note: CONFIG_USE_SWITCH is not supported on ARM Cortex-M
+// ARM Cortex-M uses custom main thread switching
+#define CONFIG_ARCH_HAS_CUSTOM_SWAP_TO_MAIN 1
 #define CONFIG_NUM_PREEMPT_PRIORITIES 15
 #define CONFIG_NUM_COOP_PRIORITIES 16
-#define CONFIG_MAIN_STACK_SIZE 8192  // 8KB for main thread
+#define CONFIG_MAIN_STACK_SIZE 10240  // 10KB for main thread (matches mp_stack_set_limit)
 #define CONFIG_MAIN_THREAD_PRIORITY 0
 #define CONFIG_IDLE_STACK_SIZE 512
 #define CONFIG_ISR_STACK_SIZE 2048

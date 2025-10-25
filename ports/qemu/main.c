@@ -61,6 +61,11 @@ void micropython_main_thread_entry(void *p1, void *p2, void *p3) {
     (void)p2;
     (void)p3;
 
+    // Enable SysTick interrupt now that kernel is fully initialized
+    // (SysTick counter was started in mp_zephyr_arch_init() but interrupt was disabled)
+    extern void mp_zephyr_arch_enable_systick_interrupt(void);
+    mp_zephyr_arch_enable_systick_interrupt();
+
     // NOTE: We're now running in z_main_thread context, not boot/dummy context
     // This means k_thread_create() and other threading operations are safe to call
 #endif

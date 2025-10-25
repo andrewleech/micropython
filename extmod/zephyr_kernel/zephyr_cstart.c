@@ -35,10 +35,12 @@ extern void z_mark_thread_as_not_sleeping(struct k_thread *thread);
 extern void z_ready_thread(struct k_thread *thread);
 // z_swap_unlocked() is static inline in kswap.h, included via kernel_includes.h
 
-// ARM Cortex-M specific function for initial switch to main thread
+// Architecture-specific function for initial switch to main thread
+#ifdef CONFIG_ARCH_HAS_CUSTOM_SWAP_TO_MAIN
 extern void arch_switch_to_main_thread(struct k_thread *main_thread,
                                         char *stack_ptr,
                                         k_thread_entry_t entry);
+#endif
 
 // External architecture init function
 extern void mp_zephyr_arch_init(void);
@@ -93,8 +95,10 @@ static char *prepare_multithreading(void) {
  * z_cstart - Zephyr kernel initialization and startup
  *
  * This is the C entry point after CMSIS assembly startup (Reset_Handler).
- * It follows Zephyr's z_cstart() pattern from kernel/init.c:538-610 but
- * adapted for MicroPython's bare-metal environment.
+ * Implements a minimal subset of Zephyr's z_cstart() pattern (inspired by
+ * kernel/init.c:538-610) adapted for bare-metal MicroPython. Unlike full
+ * Zephyr, this omits device initialization, PRE_KERNEL hooks, and other
+ * infrastructure not needed for threading-only operation.
  *
  * Flow:
  * 1. Initialize architecture (SysTick, PendSV, etc.)
@@ -110,7 +114,8 @@ FUNC_NORETURN void z_cstart(void) {
     // This sets up SysTick, PendSV, etc. but does NOT enable interrupts yet
     mp_zephyr_arch_init();
 
-    // Zero out the kernel structure (equivalent to BSS initialization)
+    // Zero out the kernel structure (defensive programming - _kernel is in BSS
+    // which startup.c already zeroed, but this ensures clean state)
     memset(&_kernel, 0, sizeof(_kernel));
 
     #if defined(CONFIG_MULTITHREADING)
@@ -128,9 +133,10 @@ FUNC_NORETURN void z_cstart(void) {
 
     // Switch from boot/dummy context to z_main_thread using arch_switch_to_main_thread()
     // This is the correct Zephyr approach for the initial boot→main transition.
-    // Unlike z_swap_unlocked() (which uses PendSV for context switching between
-    // running threads), arch_switch_to_main_thread() is designed specifically
-    // for switching FROM the dummy boot context TO a newly created main thread.
+    // Unlike z_swap_unlocked() (which is designed for context switching between
+    // already-running threads via the scheduler), arch_switch_to_main_thread()
+    // handles the one-time initialization switch from the dummy boot context
+    // to the newly created main thread without involving the scheduler.
     //
     // NOTE: After this call, we're running in z_main_thread context.
     //       The dummy thread is never scheduled again and its stack is abandoned.
