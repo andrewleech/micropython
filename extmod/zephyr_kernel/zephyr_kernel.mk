@@ -105,7 +105,8 @@ ZEPHYR_KERNEL_SRC_C := \
 
 # MicroPython-Zephyr integration
 ZEPHYR_MP_SRC_C := \
-	$(ZEPHYR_KERNEL)/kernel/mpthread_zephyr.c
+	$(ZEPHYR_KERNEL)/kernel/mpthread_zephyr.c \
+	$(ZEPHYR_KERNEL)/zephyr_cstart.c
 
 # Architecture-specific files (defined per-architecture below)
 ZEPHYR_ARCH_SRC_C :=
@@ -166,3 +167,7 @@ export ZEPHYR_KERNEL_SRC_C
 export ZEPHYR_ARCH_SRC_C
 export ZEPHYR_ARCH_SRC_S
 export ZEPHYR_MP_SRC_C
+
+# Add all Zephyr sources to SRC_THIRDPARTY_C (following nimble.mk pattern)
+# This allows the port Makefile to convert them to objects properly
+SRC_THIRDPARTY_C += $(ZEPHYR_KERNEL_SRC_C) $(ZEPHYR_ARCH_SRC_C) $(ZEPHYR_MP_SRC_C)
