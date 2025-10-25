@@ -216,6 +216,7 @@ void gc_init(void *start, void *end) {
     #endif
 
     // unlock the GC
+    #if MICROPY_PY_THREAD
     fprintf(stderr, "[gc_init] About to set gc_lock_depth\n");
     mp_state_thread_t *tls_check = mp_thread_get_state();
     fprintf(stderr, "[gc_init] TLS pointer: %p\n", (void *)tls_check);
@@ -223,8 +224,11 @@ void gc_init(void *start, void *end) {
         fprintf(stderr, "[gc_init] ERROR: TLS is NULL!\n");
         exit(1);
     }
+    #endif
     MP_STATE_THREAD(gc_lock_depth) = 0;
+    #if MICROPY_PY_THREAD
     fprintf(stderr, "[gc_init] gc_lock_depth set successfully\n");
+    #endif
 
     // allow auto collection
     MP_STATE_MEM(gc_auto_collect_enabled) = 1;
