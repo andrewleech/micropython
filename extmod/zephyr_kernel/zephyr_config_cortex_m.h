@@ -27,8 +27,16 @@
 
 // Device-specific CMSIS definitions (required before including CMSIS headers)
 // These would normally come from device-specific headers like stm32f4xx.h
+// Only define these for bare-metal targets (e.g., QEMU) that don't have vendor CMSIS headers
+// STM32 and other vendor ports define these in their own headers
+#if !defined(STM32) && !defined(STM32F0) && !defined(STM32F1) && !defined(STM32F2) && \
+    !defined(STM32F3) && !defined(STM32F4) && !defined(STM32F7) && !defined(STM32H7) && \
+    !defined(STM32L0) && !defined(STM32L1) && !defined(STM32L4) && !defined(STM32L5) && \
+    !defined(STM32G0) && !defined(STM32G4) && !defined(STM32WB) && !defined(STM32WL) && \
+    !defined(STM32U5)
+
 #ifndef __NVIC_PRIO_BITS
-#define __NVIC_PRIO_BITS 3U  // Cortex-M3/M4 has 3 bits of priority (8 levels)
+#define __NVIC_PRIO_BITS 3U  // Cortex-M3/M4 default: 3 bits of priority (8 levels)
 #endif
 
 // FPU present for Cortex-M4
@@ -36,7 +44,15 @@
 #define __FPU_PRESENT 1U  // M4 has FPU
 #endif
 
+#endif // !defined(STM32...)
+
 // IRQ number enum (minimal for QEMU mps2-an385)
+// Only define for bare-metal targets that don't have vendor IRQ definitions
+#if !defined(STM32) && !defined(STM32F0) && !defined(STM32F1) && !defined(STM32F2) && \
+    !defined(STM32F3) && !defined(STM32F4) && !defined(STM32F7) && !defined(STM32H7) && \
+    !defined(STM32L0) && !defined(STM32L1) && !defined(STM32L4) && !defined(STM32L5) && \
+    !defined(STM32G0) && !defined(STM32G4) && !defined(STM32WB) && !defined(STM32WL) && \
+    !defined(STM32U5)
 // Guard C-only constructs from assembly preprocessing
 #ifndef _ASMLANGUAGE
 typedef enum {
@@ -58,6 +74,7 @@ typedef enum {
     // Add more as needed for QEMU mps2-an385
 } IRQn_Type;
 #endif /* _ASMLANGUAGE */
+#endif // !defined(STM32...)
 
 // Core kernel features
 #define CONFIG_MULTITHREADING 1
