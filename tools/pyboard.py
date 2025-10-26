@@ -250,6 +250,8 @@ class ProcessPtyToTerminal:
         # rtscts, dsrdtr params are to workaround pyserial bug:
         # http://stackoverflow.com/questions/34831131/pyserial-does-not-play-well-with-virtual-port
         self.serial = serial.Serial(pty, interCharTimeout=1, rtscts=True, dsrdtr=True)
+        # ProcessPtyToTerminal is ALWAYS connected to a PTY, so mark it as such
+        self.is_pty = True
 
     def close(self):
         import signal
@@ -263,7 +265,10 @@ class ProcessPtyToTerminal:
         return self.serial.write(data)
 
     def inWaiting(self):
-        return self.serial.inWaiting()
+        # PTY devices don't reliably report inWaiting(), but since this class
+        # is always used with PTY, we return 1 to indicate data might be available
+        # The actual blocking behavior is handled by pyserial's read() timeout
+        return 1
 
 
 class Pyboard:
@@ -283,7 +288,7 @@ class Pyboard:
         if device.startswith("exec:"):
             self.serial = ProcessToSerial(device[len("exec:") :])
         elif device.startswith("execpty:"):
-            self.serial = ProcessPtyToTerminal(device[len("qemupty:") :])
+            self.serial = ProcessPtyToTerminal(device[len("execpty:") :])
         elif device and device[0].isdigit() and device[-1].isdigit() and device.count(".") == 3:
             # device looks like an IP address
             self.serial = TelnetToSerial(device, user, password, read_timeout=10)
