@@ -56,9 +56,11 @@ $(error Zephyr offsets file not found for architecture $(ZEPHYR_ARCH): $(ZEPHYR_
 endif
 
 # Rule to compile offsets.c to object file
+# Note: ZEPHYR_OFFSETS_EXTRA_CFLAGS can be set by ports (e.g., to undefine STM32 macros)
 $(BUILD)/zephyr_offsets.o: $(ZEPHYR_OFFSETS_C) $(ZEPHYR_GEN)/version.h
 	@echo "CC (Zephyr offsets) $<"
-	$(Q)$(CC) $(CFLAGS) $(ZEPHYR_INC) $(ZEPHYR_CFLAGS) -c -o $@ $<
+	$(Q)$(CC) $(CFLAGS) $(ZEPHYR_INC) $(ZEPHYR_CFLAGS) $(ZEPHYR_OFFSETS_EXTRA_CFLAGS) \
+		-include $(ZEPHYR_KERNEL)/zephyr_config_cortex_m.h -c -o $@ $<
 
 # Rule to generate offsets.h from offsets.o using Zephyr's official script
 $(ZEPHYR_GEN)/offsets.h: $(BUILD)/zephyr_offsets.o
