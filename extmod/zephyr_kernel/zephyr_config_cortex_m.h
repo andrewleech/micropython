@@ -81,7 +81,7 @@ typedef enum {
 #define CONFIG_SCHED_MULTIQ 0
 #define CONFIG_WAITQ_SCALABLE 1
 #define CONFIG_WAITQ_DUMB 0
-#define CONFIG_SCHED_CPU_MASK 0
+#undef CONFIG_SCHED_CPU_MASK
 
 // SMP configuration (disabled - single-core only)
 // Note: #ifndef checks in kernel_structs.h require CONFIG_SMP to be undefined, not 0
@@ -134,8 +134,8 @@ typedef enum {
 #define CONFIG_OBJ_CORE_STATS_THREAD 0
 
 // Synchronization primitives
-#define CONFIG_POLL 1
-#define CONFIG_EVENTS 1
+#undef CONFIG_POLL
+#undef CONFIG_EVENTS
 
 // IRQ and interrupt configuration
 #define CONFIG_IRQ_OFFLOAD 0
@@ -163,7 +163,7 @@ typedef enum {
 #define CONFIG_BOOTARGS 0
 
 // Thread usage monitoring
-#define CONFIG_SCHED_THREAD_USAGE 0
+#define CONFIG_SCHED_THREAD_USAGE 1
 #define CONFIG_SCHED_THREAD_USAGE_ALL 0
 
 // FPU support (must use #undef for #if defined() checks)

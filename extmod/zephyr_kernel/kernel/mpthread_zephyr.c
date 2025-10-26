@@ -300,14 +300,14 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("maximum number of threads reached"));
     }
 
-    // Create Zephyr thread
+    // Create Zephyr thread (use K_FOREVER to skip auto-start via k_thread_start/k_wakeup)
     th->id = k_thread_create(
         &th->z_thread,
         mp_thread_stack_array[_slot],
         K_THREAD_STACK_SIZEOF(mp_thread_stack_array[_slot]),
         zephyr_entry,
         entry, arg, NULL,
-        priority, 0, K_NO_WAIT
+        priority, 0, K_FOREVER
         );
 
     if (th->id == NULL) {
@@ -318,6 +318,11 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     }
 
     k_thread_name_set(th->id, (const char *)name);
+
+    // Manually start the thread using our custom function that calls z_ready_thread
+    // (k_thread_start uses k_wakeup which only works for sleeping threads)
+    extern void mp_zephyr_thread_start(struct k_thread *thread);
+    mp_zephyr_thread_start(th->id);
 
     // Add to linked list
     th->status = MP_THREAD_STATUS_CREATED;
