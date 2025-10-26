@@ -28,7 +28,12 @@
 // Device-specific CMSIS definitions (required before including CMSIS headers)
 // These would normally come from device-specific headers like stm32f4xx.h
 #ifndef __NVIC_PRIO_BITS
-#define __NVIC_PRIO_BITS 3U  // Cortex-M3 has 3 bits of priority (8 levels)
+#define __NVIC_PRIO_BITS 3U  // Cortex-M3/M4 has 3 bits of priority (8 levels)
+#endif
+
+// FPU present for Cortex-M4
+#ifndef __FPU_PRESENT
+#define __FPU_PRESENT 1U  // M4 has FPU
 #endif
 
 // IRQ number enum (minimal for QEMU mps2-an385)
@@ -166,9 +171,9 @@ typedef enum {
 #define CONFIG_SCHED_THREAD_USAGE 1
 #define CONFIG_SCHED_THREAD_USAGE_ALL 0
 
-// FPU support (must use #undef for #if defined() checks)
-#undef CONFIG_FPU
-#undef CONFIG_FPU_SHARING
+// FPU support - Cortex-M4 has FPU
+#define CONFIG_FPU 1
+#define CONFIG_FPU_SHARING 1
 
 // Errno configuration
 #define CONFIG_ERRNO 1
@@ -210,7 +215,8 @@ typedef enum {
 // ARM architecture
 #define CONFIG_ARM 1
 #define CONFIG_CPU_CORTEX_M 1
-#define CONFIG_CPU_CORTEX_M3 1  // Specify exact Cortex-M variant
+#define CONFIG_CPU_CORTEX_M4 1  // Cortex-M4 with FPU
+#undef CONFIG_CPU_CORTEX_M3  // Not M3
 #define CONFIG_ARMV7_M_ARMV8_M_MAINLINE 1  // Cortex-M3/M4/M7/M33
 #define CONFIG_ARCH "arm"
 #define CONFIG_ASSEMBLER_ISA_THUMB2 1  // Cortex-M uses Thumb-2 instruction set
@@ -239,13 +245,16 @@ typedef enum {
 // Must use #undef (not #define 0) because Zephyr uses #if defined() checks
 #undef CONFIG_ARM_SECURE_FIRMWARE
 #undef CONFIG_ARM_NONSECURE_FIRMWARE
+// CRITICAL: Store EXC_RETURN value in thread structure for proper context switching
+// Without this, mode_exc_return field is uninitialized, causing garbage LR values
+// during PendSV and resulting in HardFault lockup
+#define CONFIG_ARM_STORE_EXC_RETURN 1
 #define CONFIG_GEN_SW_ISR_TABLE 1
 
-// ARM FP configuration
-// Cortex-M3 has no FPU - must use #undef (not #define 0) for #if defined() checks
-#undef CONFIG_CPU_HAS_FPU  // Enable for Cortex-M4F/M7 if needed
-#define CONFIG_FP_HARDABI 0
-#define CONFIG_FP_SOFTABI 1
+// ARM FP configuration - Cortex-M4 has FPU
+#define CONFIG_CPU_HAS_FPU 1
+#define CONFIG_FP_HARDABI 1
+#define CONFIG_FP_SOFTABI 0
 
 // Memory addresses for Cortex-M
 #define CONFIG_PRIVILEGED_STACK_SIZE 1024

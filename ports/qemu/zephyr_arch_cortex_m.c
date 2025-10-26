@@ -23,6 +23,7 @@
 #include "py/mphal.h"
 #include "extmod/zephyr_kernel/zephyr_kernel.h"
 #include <zephyr/kernel.h>
+#include <zephyr/kernel_structs.h>
 #include <zephyr/arch/cpu.h>
 
 // Minimal stdio stubs for bare-metal environment (DEBUG_printf support)
@@ -84,6 +85,29 @@ void mp_zephyr_arch_init(void) {
 
     // Initialize tick counter
     cortexm_arch_state.ticks = 0;
+
+    #if defined(CONFIG_FPU)
+    // FPU initialization (from Zephyr's z_arm_floating_point_init)
+    // Clear CPACR first
+    SCB->CPACR &= (~(CPACR_CP10_Msk | CPACR_CP11_Msk));
+    // Enable CP10 and CP11 for FPU access (privileged access only)
+    SCB->CPACR |= CPACR_CP10_PRIV_ACCESS | CPACR_CP11_PRIV_ACCESS;
+
+    #if defined(CONFIG_FPU_SHARING)
+    // FP register sharing mode: enable automatic and lazy state preservation
+    FPU->FPCCR = FPU_FPCCR_ASPEN_Msk | FPU_FPCCR_LSPEN_Msk;
+    #else
+    // Unshared mode: disable automatic stacking
+    FPU->FPCCR &= (~(FPU_FPCCR_ASPEN_Msk | FPU_FPCCR_LSPEN_Msk));
+    #endif
+
+    // Memory barriers to ensure FPCCR changes take effect
+    __DMB();
+    __ISB();
+
+    // Initialize FPSCR
+    __set_FPSCR(0);
+    #endif
 
     // Configure SysTick for 1ms ticks (1000 Hz = CONFIG_SYS_CLOCK_TICKS_PER_SEC)
     // This assumes a 25MHz CPU clock (typical for QEMU mps2-an385)
@@ -150,7 +174,7 @@ void SysTick_Handler(void) {
     // sys_clock_announce() may have woken up threads via timeout callbacks,
     // but it doesn't automatically trigger a context switch. We need to check
     // if a higher-priority thread is ready and trigger PendSV if needed.
-    extern struct z_kernel _kernel;
+    // _kernel is now properly defined via kernel_structs.h include
     if (_kernel.ready_q.cache != NULL &&
         _kernel.ready_q.cache != _kernel.cpus[0].current) {
         // Trigger PendSV for context switch
@@ -242,17 +266,13 @@ void *k_mem_map_phys_guard(uintptr_t phys, size_t size, uint32_t flags, bool is_
 }
 
 // Start a newly created thread (called from mpthread)
-// The default k_thread_start calls k_wakeup which only works for sleeping threads
-// We need to use z_ready_thread for newly created threads
+// Threads are created with K_NO_WAIT so they're already in the ready queue
 void mp_zephyr_thread_start(struct k_thread *thread) {
-    extern void z_ready_thread(struct k_thread *thread);
-    extern void z_reschedule(void);
-
-    // Add thread to ready queue
-    z_ready_thread(thread);
-
-    // Trigger a reschedule to potentially switch to the new thread
-    z_reschedule();
+    // Thread is already in ready queue (created with K_NO_WAIT)
+    // Just trigger PendSV to force a context switch
+    // This will cause the scheduler to run and switch to the new thread if it has higher priority
+    (void)thread;  // Unused - thread is already ready
+    *(volatile uint32_t *)0xE000ED04 = (1 << 28);  // PENDSVSET
 }
 
 // Scheduler lock/unlock (use simple critical sections for single-core)

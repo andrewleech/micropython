@@ -16,7 +16,6 @@ ZEPHYR_GEN := $(ZEPHYR_KERNEL)/generated/zephyr
 ZEPHYR_INC := \
 	-I$(ZEPHYR_KERNEL)/generated \
 	-I$(ZEPHYR_BASE)/include \
-	-I$(ZEPHYR_BASE)/include/zephyr \
 	-I$(ZEPHYR_BASE)/kernel/include \
 	-I$(ZEPHYR_KERNEL)
 
