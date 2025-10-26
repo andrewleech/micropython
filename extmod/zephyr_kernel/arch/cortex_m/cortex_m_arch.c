@@ -50,9 +50,9 @@
 #define SCB_SHPR3_PENDSV    (0xFFUL << 16)  // PendSV priority field (bits 23:16), lowest priority
 
 // Clock configuration
-// Default to 25MHz for QEMU mps2-an385/an386, can be overridden by board config
+// Default CPU frequency - should be overridden by port's mpconfigboard.h
 #ifndef MICROPY_HW_CPU_FREQ_HZ
-#define MICROPY_HW_CPU_FREQ_HZ  (25000000)  // 25 MHz
+#define MICROPY_HW_CPU_FREQ_HZ  (25000000)  // 25 MHz default
 #endif
 
 // Calculate SysTick reload value for CONFIG_SYS_CLOCK_TICKS_PER_SEC (1000 Hz)

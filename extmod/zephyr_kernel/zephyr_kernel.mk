@@ -142,6 +142,10 @@ ZEPHYR_ARCH_SRC_C += \
 	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/cpu_idle.c \
 	$(ZEPHYR_BASE)/arch/arm/core/fatal.c
 
+# MicroPython-specific Cortex-M arch bridge (SysTick, PendSV, FPU init, stubs)
+ZEPHYR_ARCH_SRC_C += \
+	$(ZEPHYR_KERNEL)/arch/cortex_m/cortex_m_arch.c
+
 # ARM Cortex-M assembly files (critical for context switching)
 ZEPHYR_ARCH_SRC_S := \
 	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/swap_helper.S

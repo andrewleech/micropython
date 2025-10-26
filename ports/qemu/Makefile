@@ -173,9 +173,7 @@ ZEPHYR_ARCH := arm
 include $(TOP)/extmod/zephyr_kernel/zephyr_kernel.mk
 # Apply Zephyr includes and flags
 CFLAGS += $(ZEPHYR_INC) $(ZEPHYR_CFLAGS)
-# Add QEMU-specific Cortex-M architecture bridge
-SRC_C += zephyr_arch_cortex_m.c
-# Note: Zephyr kernel sources are added to SRC_THIRDPARTY_C by zephyr_kernel.mk
+# Note: Zephyr kernel sources (including cortex_m_arch.c) are added to SRC_THIRDPARTY_C by zephyr_kernel.mk
 # Add Zephyr assembly files (context switching, etc.)
 # Use flattened name to avoid path issues with $(BUILD)/../../
 ZEPHYR_SWAP_HELPER_O = $(BUILD)/swap_helper.o
