@@ -34,6 +34,19 @@
 #define MP_THREAD_PRIORITY                      K_PRIO_PREEMPT(0)  // Higher priority than main (1)
 #define MP_THREAD_MAXIMUM_USER_THREADS          (8)
 
+// FPU context size validation
+// With CONFIG_FPU_SHARING, each thread context switch may save/restore:
+// - 32 FP registers (S0-S31): 32 * 4 = 128 bytes
+// - FPSCR: 4 bytes
+// Total: 132 bytes additional stack usage
+#if defined(CONFIG_FPU) && defined(CONFIG_FPU_SHARING)
+#define MP_THREAD_FPU_CONTEXT_SIZE              (132)
+// Ensure minimum stack size accounts for FPU context overhead
+#if (MP_THREAD_MIN_STACK_SIZE < (2048 + MP_THREAD_FPU_CONTEXT_SIZE))
+#warning "MP_THREAD_MIN_STACK_SIZE may be too small for FPU context preservation"
+#endif
+#endif
+
 typedef enum {
     MP_THREAD_STATUS_CREATED = 0,
     MP_THREAD_STATUS_READY,

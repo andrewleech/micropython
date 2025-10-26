@@ -26,6 +26,39 @@
 #include <zephyr/kernel_structs.h>
 #include <zephyr/arch/cpu.h>
 
+// ARM Cortex-M System Control Block (SCB) register addresses
+// These may not be defined when using minimal CMSIS headers
+#ifndef SCB_ICSR
+#define SCB_ICSR_ADDR       ((volatile uint32_t *)0xE000ED04)  // Interrupt Control and State Register
+#define SCB_ICSR_PENDSVSET  (1UL << 28)  // Bit 28: PendSV set-pending bit
+#else
+#define SCB_ICSR_ADDR       (&(SCB->ICSR))
+#define SCB_ICSR_PENDSVSET  SCB_ICSR_PENDSVSET_Msk
+#endif
+
+// SysTick register addresses (ARMv7-M Architecture Reference Manual B3.3)
+#define SYST_CSR_ADDR       ((volatile uint32_t *)0xE000E010)  // SysTick Control and Status
+#define SYST_RVR_ADDR       ((volatile uint32_t *)0xE000E014)  // SysTick Reload Value
+#define SYST_CVR_ADDR       ((volatile uint32_t *)0xE000E018)  // SysTick Current Value
+// SysTick CSR bit definitions
+#define SYST_CSR_ENABLE     (1UL << 0)  // Counter enable
+#define SYST_CSR_TICKINT    (1UL << 1)  // Enable SysTick exception
+#define SYST_CSR_CLKSOURCE  (1UL << 2)  // Use processor clock (not external)
+
+// System Handler Priority Register 3 (for PendSV priority)
+#define SCB_SHPR3_ADDR      ((volatile uint32_t *)0xE000ED20)  // SHPR3 contains PendSV priority
+#define SCB_SHPR3_PENDSV    (0xFFUL << 16)  // PendSV priority field (bits 23:16), lowest priority
+
+// Clock configuration
+// Default to 25MHz for QEMU mps2-an385/an386, can be overridden by board config
+#ifndef MICROPY_HW_CPU_FREQ_HZ
+#define MICROPY_HW_CPU_FREQ_HZ  (25000000)  // 25 MHz
+#endif
+
+// Calculate SysTick reload value for CONFIG_SYS_CLOCK_TICKS_PER_SEC (1000 Hz)
+// SysTick is a 24-bit down-counter, reload = (CPU_FREQ / TICK_FREQ) - 1
+#define SYSTICK_RELOAD_VALUE    ((MICROPY_HW_CPU_FREQ_HZ / CONFIG_SYS_CLOCK_TICKS_PER_SEC) - 1)
+
 // Minimal stdio stubs for bare-metal environment (DEBUG_printf support)
 // These weak symbols are used when DEBUG_printf is enabled but C library stdio is unavailable
 // If C library provides these, those versions will be used instead
@@ -90,45 +123,44 @@ void mp_zephyr_arch_init(void) {
     // FPU initialization (from Zephyr's z_arm_floating_point_init)
     // Clear CPACR first
     SCB->CPACR &= (~(CPACR_CP10_Msk | CPACR_CP11_Msk));
-    // Enable CP10 and CP11 for FPU access (privileged access only)
-    SCB->CPACR |= CPACR_CP10_PRIV_ACCESS | CPACR_CP11_PRIV_ACCESS;
+    // Enable CP10 and CP11 for FPU access (full access for both privileged and unprivileged)
+    // CPACR bits [21:20] = CP10, bits [23:22] = CP11: 11b = full access, 01b = privileged only
+    SCB->CPACR |= CPACR_CP10_FULL_ACCESS | CPACR_CP11_FULL_ACCESS;
 
     #if defined(CONFIG_FPU_SHARING)
     // FP register sharing mode: enable automatic and lazy state preservation
+    // ASPEN: Enable automatic FP context save on exception entry
+    // LSPEN: Enable lazy FP context save (only save if FP instructions used)
     FPU->FPCCR = FPU_FPCCR_ASPEN_Msk | FPU_FPCCR_LSPEN_Msk;
     #else
     // Unshared mode: disable automatic stacking
     FPU->FPCCR &= (~(FPU_FPCCR_ASPEN_Msk | FPU_FPCCR_LSPEN_Msk));
     #endif
 
-    // Memory barriers to ensure FPCCR changes take effect
+    // Memory barriers to ensure CPACR and FPCCR changes take effect
     __DMB();
     __ISB();
 
-    // Initialize FPSCR
+    // Initialize FPSCR (Floating Point Status and Control Register)
     __set_FPSCR(0);
+
+    // Instruction barrier to ensure FPSCR initialization completes before any FP operations
+    __ISB();
     #endif
 
-    // Configure SysTick for 1ms ticks (1000 Hz = CONFIG_SYS_CLOCK_TICKS_PER_SEC)
-    // This assumes a 25MHz CPU clock (typical for QEMU mps2-an385)
-    // SysTick reload = (CPU_FREQ / TICKS_PER_SEC) - 1
-    // 25000000 / 1000 - 1 = 24999
-    uint32_t reload = 24999;  // For 25MHz CPU @ 1kHz tick rate
+    // Configure SysTick for CONFIG_SYS_CLOCK_TICKS_PER_SEC (1000 Hz = 1ms ticks)
+    // Reload value calculated from MICROPY_HW_CPU_FREQ_HZ configuration
 
     // Configure SysTick (ARMv7-M System Control Block)
-    // SysTick Control and Status Register
-    *(volatile uint32_t *)0xE000E010 = 0;  // Disable SysTick first
-    // SysTick Reload Value Register
-    *(volatile uint32_t *)0xE000E014 = reload;
-    // SysTick Current Value Register
-    *(volatile uint32_t *)0xE000E018 = 0;
+    *SYST_CSR_ADDR = 0;  // Disable SysTick first
+    *SYST_RVR_ADDR = SYSTICK_RELOAD_VALUE;  // Set reload value
+    *SYST_CVR_ADDR = 0;  // Clear current value
     // NOTE: Do NOT enable SysTick interrupt yet - wait until after kernel init
-    // SysTick Control and Status Register: enable counter, use processor clock, but NO interrupt yet
-    *(volatile uint32_t *)0xE000E010 = 0x05;  // Enable + processor clock, NO interrupt (bit 1 = 0)
+    // Enable counter with processor clock source, but NO interrupt yet
+    *SYST_CSR_ADDR = SYST_CSR_ENABLE | SYST_CSR_CLKSOURCE;  // No TICKINT bit
 
     // Set PendSV to lowest priority (for context switching)
-    // SHPR3 (System Handler Priority Register 3) at 0xE000ED20
-    *(volatile uint32_t *)0xE000ED20 |= 0xFF000000;  // PendSV priority = 0xFF (lowest)
+    *SCB_SHPR3_ADDR |= (0xFFUL << 16);  // PendSV priority = 0xFF (lowest)
 
     cortexm_arch_state.initialized = 1;
 
@@ -139,9 +171,8 @@ void mp_zephyr_arch_init(void) {
 // Enable SysTick interrupt - must be called AFTER kernel is fully initialized
 // This should be called from micropython_main_thread_entry() after z_cstart() completes
 void mp_zephyr_arch_enable_systick_interrupt(void) {
-    // Enable SysTick interrupt (set bit 1 in SysTick Control register)
-    // SysTick Control and Status Register: enable counter + processor clock + interrupt
-    *(volatile uint32_t *)0xE000E010 = 0x07;  // Enable + processor clock + interrupt
+    // Enable SysTick interrupt (add TICKINT bit to existing configuration)
+    *SYST_CSR_ADDR = SYST_CSR_ENABLE | SYST_CSR_CLKSOURCE | SYST_CSR_TICKINT;
 }
 
 // Get current system tick count
@@ -152,9 +183,8 @@ uint64_t mp_zephyr_arch_get_ticks(void) {
 // Trigger a context switch (yield to scheduler)
 // On Cortex-M, we use PendSV for context switching
 void mp_zephyr_arch_yield(void) {
-    // Set PendSV interrupt pending bit
-    // ICSR (Interrupt Control and State Register) at 0xE000ED04
-    *(volatile uint32_t *)0xE000ED04 = (1 << 28);  // PENDSVSET
+    // Set PendSV interrupt pending bit in ICSR register
+    *SCB_ICSR_ADDR = SCB_ICSR_PENDSVSET;
 }
 
 // SysTick interrupt handler - increments tick counter and calls Zephyr timer subsystem
@@ -178,7 +208,7 @@ void SysTick_Handler(void) {
     if (_kernel.ready_q.cache != NULL &&
         _kernel.ready_q.cache != _kernel.cpus[0].current) {
         // Trigger PendSV for context switch
-        *(volatile uint32_t *)0xE000ED04 = (1 << 28);  // PENDSVSET
+        *SCB_ICSR_ADDR = SCB_ICSR_PENDSVSET;
     }
 }
 
@@ -272,7 +302,7 @@ void mp_zephyr_thread_start(struct k_thread *thread) {
     // Just trigger PendSV to force a context switch
     // This will cause the scheduler to run and switch to the new thread if it has higher priority
     (void)thread;  // Unused - thread is already ready
-    *(volatile uint32_t *)0xE000ED04 = (1 << 28);  // PENDSVSET
+    *SCB_ICSR_ADDR = SCB_ICSR_PENDSVSET;
 }
 
 // Scheduler lock/unlock (use simple critical sections for single-core)
