@@ -153,30 +153,18 @@ void SysTick_Handler(void) {
     extern struct z_kernel _kernel;
     if (_kernel.ready_q.cache != NULL &&
         _kernel.ready_q.cache != _kernel.cpus[0].current) {
-        // Debug: Print thread switch information
-        {
-            char buf[128];
-            extern int snprintf(char *, size_t, const char *, ...);
-            int len = snprintf(buf, sizeof(buf), "[SysTick] Switch from %p (PSP=0x%08x) to %p (PSP=0x%08x)\n",
-                _kernel.cpus[0].current,
-                (unsigned int)_kernel.cpus[0].current->callee_saved.psp,
-                _kernel.ready_q.cache,
-                (unsigned int)_kernel.ready_q.cache->callee_saved.psp);
-            if (len > 0 && len < sizeof(buf)) {
-                mp_hal_stdout_tx_strn(buf, len);
-            }
-        }
         // Trigger PendSV for context switch
         *(volatile uint32_t *)0xE000ED04 = (1 << 28);  // PENDSVSET
     }
 }
 
 // PendSV interrupt handler - performs context switching
-// Must be naked to avoid stack frame corruption
+// Must be naked to avoid stack frame corruption - directly branch to Zephyr handler
 __attribute__((naked)) void PendSV_Handler(void) {
-    // Jump directly to Zephyr's PendSV handler
-    // z_arm_pendsv expects to be entered as the exception handler
-    __asm__ volatile ("b z_arm_pendsv");
+    __asm__ volatile (
+        "b z_arm_pendsv \n"
+        : : : "memory"
+        );
 }
 
 // NOTE: With the new z_cstart() approach, most kernel initialization
