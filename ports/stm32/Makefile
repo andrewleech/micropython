@@ -73,12 +73,13 @@ CFLAGS := $(filter-out -Werror,$(CFLAGS))
 # Set architecture for Zephyr
 ZEPHYR_ARCH := arm
 
+# Undefine STM32 device macros for Zephyr compilation so zephyr_config_cortex_m.h provides generic CMSIS defines
+ZEPHYR_OFFSETS_EXTRA_CFLAGS := -USTM32WB55xx -USTM32F407xx -USTM32H743xx -USTM32F405xx
+
 # Include Zephyr kernel build
 include $(TOP)/extmod/zephyr_kernel/zephyr_kernel.mk
 
 # Add Zephyr includes and flags
-# Note: Don't use -include for zephyr_config_cortex_m.h (causes conflicts with STM32 CMSIS headers)
-# Instead, it will be included from mpconfigport.h
 CFLAGS += $(ZEPHYR_INC)
 CFLAGS += -Wno-error -Wno-macro-redefined
 
@@ -88,9 +89,11 @@ CFLAGS += -Wno-error -Wno-macro-redefined
 # Ensure Zephyr objects depend on generated headers
 $(addprefix $(BUILD)/, $(SRC_THIRDPARTY_C:.c=.o)): $(ZEPHYR_GEN_HEADERS)
 
-# Pattern-specific CFLAGS for Zephyr objects (suppress warnings)
-$(BUILD)/$(TOP)/lib/zephyr/%.o: CFLAGS += -Wno-unused-parameter -Wno-sign-compare
-$(BUILD)/$(TOP)/extmod/zephyr_kernel/%.o: CFLAGS += -Wno-unused-parameter
+# Pattern-specific CFLAGS for Zephyr objects (suppress warnings, include config, undefine STM32 macros)
+# Note: We undefine STM32 device macros so zephyr_config_cortex_m.h provides generic CMSIS defines
+# instead of expecting vendor headers. This is needed because Zephyr code doesn't include vendor headers.
+$(BUILD)/$(TOP)/lib/zephyr/%.o: CFLAGS += -USTM32WB55xx -USTM32F407xx -USTM32H743xx -include $(TOP)/extmod/zephyr_kernel/zephyr_config_cortex_m.h -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function -Wno-return-type
+$(BUILD)/$(TOP)/extmod/zephyr_kernel/%.o: CFLAGS += -include $(TOP)/extmod/zephyr_kernel/zephyr_config_cortex_m.h -Wno-unused-parameter -Wno-unused-function
 
 # Build Zephyr swap_helper.S (context switching)
 ZEPHYR_SWAP_HELPER_O = $(BUILD)/swap_helper.o
@@ -100,11 +103,11 @@ OBJ += $(BUILD)/zephyr_offsets.o
 $(ZEPHYR_SWAP_HELPER_O): $(ZEPHYR_ARCH_SRC_S) $(ZEPHYR_GEN_HEADERS)
 	$(ECHO) "CC $<"
 	$(Q)$(CC) -x assembler-with-cpp -D_ASMLANGUAGE \
-		$(filter-out -std=% -Wdouble-promotion -Wfloat-conversion,$(CFLAGS)) \
+		$(filter-out -std=% -Wdouble-promotion -Wfloat-conversion -Werror,$(CFLAGS)) \
+		$(CFLAGS_MCU_$(MCU_SERIES)) \
+		-include $(TOP)/extmod/zephyr_kernel/zephyr_config_cortex_m.h \
 		-Wa,-mimplicit-it=thumb -c -o $@ $<
 
-# Conditionally exclude legacy threading files
-SRC_C := $(filter-out pybthread.c mpthreadport.c,$(SRC_C))
 endif
 
 LD_DIR=boards
@@ -161,7 +164,11 @@ INC += -I$(USBDEV_DIR)/core/inc -I$(USBDEV_DIR)/class/inc
 #INC += -I$(USBHOST_DIR)
 INC += -Ilwip_inc
 
+ifneq ($(MICROPY_ZEPHYR_THREADING),1)
 CFLAGS += $(INC) -Wall -Wpointer-arith -Werror -Wdouble-promotion -Wfloat-conversion -std=gnu99 -nostdlib $(CFLAGS_EXTRA)
+else
+CFLAGS += $(INC) -Wall -Wpointer-arith -Wdouble-promotion -Wfloat-conversion -std=gnu99 -nostdlib $(CFLAGS_EXTRA)
+endif
 CFLAGS += -D$(CMSIS_MCU) -DUSE_FULL_LL_DRIVER
 CFLAGS += $(CFLAGS_MCU_$(MCU_SERIES))
 CFLAGS += $(COPT)
@@ -500,6 +507,12 @@ ifeq ($(MICROPY_PY_OPENAMP_REMOTEPROC),1)
 SRC_C += mpremoteprocport.c
 $(BUILD)/mpremoteprocport.o: $(BUILD)/openamp/metal/config.h
 endif
+endif
+
+# Conditionally exclude legacy threading and interrupt handler files when using Zephyr
+# pendsv.c and systick.c contain handlers that conflict with Zephyr's implementations
+ifeq ($(MICROPY_ZEPHYR_THREADING),1)
+SRC_C := $(filter-out pybthread.c mpthreadport.c pendsv.c systick.c,$(SRC_C))
 endif
 
 # SRC_O should be placed first to work around this LTO bug with binutils <2.35:
