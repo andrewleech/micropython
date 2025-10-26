@@ -29,11 +29,13 @@
 // These would normally come from device-specific headers like stm32f4xx.h
 // Only define these for bare-metal targets (e.g., QEMU) that don't have vendor CMSIS headers
 // STM32 and other vendor ports define these in their own headers
+// Note: Checks both family macros (STM32F4) and device macros (STM32F407xx)
 #if !defined(STM32) && !defined(STM32F0) && !defined(STM32F1) && !defined(STM32F2) && \
     !defined(STM32F3) && !defined(STM32F4) && !defined(STM32F7) && !defined(STM32H7) && \
     !defined(STM32L0) && !defined(STM32L1) && !defined(STM32L4) && !defined(STM32L5) && \
     !defined(STM32G0) && !defined(STM32G4) && !defined(STM32WB) && !defined(STM32WL) && \
-    !defined(STM32U5)
+    !defined(STM32U5) && !defined(STM32WB55xx) && !defined(STM32F407xx) && \
+    !defined(STM32F405xx) && !defined(STM32H743xx)
 
 #ifndef __NVIC_PRIO_BITS
 #define __NVIC_PRIO_BITS 3U  // Cortex-M3/M4 default: 3 bits of priority (8 levels)
@@ -52,7 +54,8 @@
     !defined(STM32F3) && !defined(STM32F4) && !defined(STM32F7) && !defined(STM32H7) && \
     !defined(STM32L0) && !defined(STM32L1) && !defined(STM32L4) && !defined(STM32L5) && \
     !defined(STM32G0) && !defined(STM32G4) && !defined(STM32WB) && !defined(STM32WL) && \
-    !defined(STM32U5)
+    !defined(STM32U5) && !defined(STM32WB55xx) && !defined(STM32F407xx) && \
+    !defined(STM32F405xx) && !defined(STM32H743xx)
 // Guard C-only constructs from assembly preprocessing
 #ifndef _ASMLANGUAGE
 typedef enum {
