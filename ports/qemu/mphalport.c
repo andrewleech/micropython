@@ -28,6 +28,10 @@
 #include "shared/runtime/semihosting_arm.h"
 #include "uart.h"
 
+#if MICROPY_PY_THREAD
+#include "zephyr/kernel.h"
+#endif
+
 // UART is better behaved with redirection under qemu-system-arm, so prefer that for stdio.
 #define USE_UART (1)
 #define USE_SEMIHOSTING (0)
@@ -51,6 +55,10 @@ int mp_hal_stdin_rx_chr(void) {
         if (ret == 0) {
             return str[0];
         }
+        #endif
+        #if MICROPY_PY_THREAD
+        // Sleep briefly to allow other threads to run while waiting for input
+        k_sleep(K_MSEC(1));
         #endif
     }
 }
