@@ -31,6 +31,12 @@
 #include "mpconfigboard.h"
 #include "mpconfigboard_common.h"
 
+// Zephyr kernel configuration (when Zephyr threading is enabled)
+// Include after board headers so STM32 CMSIS defines take precedence
+#if MICROPY_ZEPHYR_THREADING
+#include "extmod/zephyr_kernel/zephyr_config_cortex_m.h"
+#endif
+
 #ifndef MICROPY_CONFIG_ROM_LEVEL
 #define MICROPY_CONFIG_ROM_LEVEL (MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES)
 #endif

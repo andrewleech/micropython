@@ -60,6 +60,53 @@ include $(TOP)/extmod/extmod.mk
 
 GIT_SUBMODULES += lib/libhydrogen lib/stm32lib
 
+# Zephyr threading integration (optional)
+MICROPY_ZEPHYR_THREADING ?= 0
+
+ifeq ($(MICROPY_ZEPHYR_THREADING),1)
+# Add Zephyr submodule
+GIT_SUBMODULES += lib/zephyr
+
+# Remove -Werror for Zephyr headers
+CFLAGS := $(filter-out -Werror,$(CFLAGS))
+
+# Set architecture for Zephyr
+ZEPHYR_ARCH := arm
+
+# Include Zephyr kernel build
+include $(TOP)/extmod/zephyr_kernel/zephyr_kernel.mk
+
+# Add Zephyr includes and flags
+# Note: Don't use -include for zephyr_config_cortex_m.h (causes conflicts with STM32 CMSIS headers)
+# Instead, it will be included from mpconfigport.h
+CFLAGS += $(ZEPHYR_INC)
+CFLAGS += -Wno-error -Wno-macro-redefined
+
+# Add STM32-specific Zephyr integration (to be created in Phase 3)
+# SRC_C += zephyr_stm32.c
+
+# Ensure Zephyr objects depend on generated headers
+$(addprefix $(BUILD)/, $(SRC_THIRDPARTY_C:.c=.o)): $(ZEPHYR_GEN_HEADERS)
+
+# Pattern-specific CFLAGS for Zephyr objects (suppress warnings)
+$(BUILD)/$(TOP)/lib/zephyr/%.o: CFLAGS += -Wno-unused-parameter -Wno-sign-compare
+$(BUILD)/$(TOP)/extmod/zephyr_kernel/%.o: CFLAGS += -Wno-unused-parameter
+
+# Build Zephyr swap_helper.S (context switching)
+ZEPHYR_SWAP_HELPER_O = $(BUILD)/swap_helper.o
+OBJ += $(ZEPHYR_SWAP_HELPER_O)
+OBJ += $(BUILD)/zephyr_offsets.o
+
+$(ZEPHYR_SWAP_HELPER_O): $(ZEPHYR_ARCH_SRC_S) $(ZEPHYR_GEN_HEADERS)
+	$(ECHO) "CC $<"
+	$(Q)$(CC) -x assembler-with-cpp -D_ASMLANGUAGE \
+		$(filter-out -std=% -Wdouble-promotion -Wfloat-conversion,$(CFLAGS)) \
+		-Wa,-mimplicit-it=thumb -c -o $@ $<
+
+# Conditionally exclude legacy threading files
+SRC_C := $(filter-out pybthread.c mpthreadport.c,$(SRC_C))
+endif
+
 LD_DIR=boards
 USBDEV_DIR=usbdev
 #USBHOST_DIR=usbhost
