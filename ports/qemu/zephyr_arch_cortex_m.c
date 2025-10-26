@@ -153,20 +153,30 @@ void SysTick_Handler(void) {
     extern struct z_kernel _kernel;
     if (_kernel.ready_q.cache != NULL &&
         _kernel.ready_q.cache != _kernel.cpus[0].current) {
+        // Debug: Print thread switch information
+        {
+            char buf[128];
+            extern int snprintf(char *, size_t, const char *, ...);
+            int len = snprintf(buf, sizeof(buf), "[SysTick] Switch from %p (PSP=0x%08x) to %p (PSP=0x%08x)\n",
+                _kernel.cpus[0].current,
+                (unsigned int)_kernel.cpus[0].current->callee_saved.psp,
+                _kernel.ready_q.cache,
+                (unsigned int)_kernel.ready_q.cache->callee_saved.psp);
+            if (len > 0 && len < sizeof(buf)) {
+                mp_hal_stdout_tx_strn(buf, len);
+            }
+        }
         // Trigger PendSV for context switch
         *(volatile uint32_t *)0xE000ED04 = (1 << 28);  // PENDSVSET
     }
 }
 
 // PendSV interrupt handler - performs context switching
-void PendSV_Handler(void) {
-    mp_hal_stdout_tx_strn("[PENDSV HANDLER]\n", 17);
-
-    // Call Zephyr's PendSV handler
-    extern void z_arm_pendsv(void);
-    z_arm_pendsv();
-
-    mp_hal_stdout_tx_strn("[PENDSV DONE]\n", 14);
+// Must be naked to avoid stack frame corruption
+__attribute__((naked)) void PendSV_Handler(void) {
+    // Jump directly to Zephyr's PendSV handler
+    // z_arm_pendsv expects to be entered as the exception handler
+    __asm__ volatile ("b z_arm_pendsv");
 }
 
 // NOTE: With the new z_cstart() approach, most kernel initialization
@@ -241,6 +251,20 @@ void *k_mem_map_phys_guard(uintptr_t phys, size_t size, uint32_t flags, bool is_
     (void)flags;
     (void)is_anon;
     return NULL;
+}
+
+// Start a newly created thread (called from mpthread)
+// The default k_thread_start calls k_wakeup which only works for sleeping threads
+// We need to use z_ready_thread for newly created threads
+void mp_zephyr_thread_start(struct k_thread *thread) {
+    extern void z_ready_thread(struct k_thread *thread);
+    extern void z_reschedule(void);
+
+    // Add thread to ready queue
+    z_ready_thread(thread);
+
+    // Trigger a reschedule to potentially switch to the new thread
+    z_reschedule();
 }
 
 // Scheduler lock/unlock (use simple critical sections for single-core)

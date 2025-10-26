@@ -204,6 +204,7 @@ OBJ += $(addprefix $(BUILD)/, $(LIB_SRC_C:.c=.o))
 # Add Zephyr assembly objects (using flattened paths to avoid $(BUILD)/../../ issues)
 ifeq ($(MICROPY_ZEPHYR_THREADING),1)
 OBJ += $(OBJ_ZEPHYR_ASM)
+OBJ += $(BUILD)/zephyr_offsets.o
 endif
 
 # List of sources for qstr extraction
