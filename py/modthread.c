@@ -158,42 +158,38 @@ static void *thread_entry(void *args_in) {
 
     thread_entry_args_t *args = (thread_entry_args_t *)args_in;
 
-    fprintf(stderr, "[thread_entry] Starting new thread\n");
+    #if !MICROPY_ZEPHYR_THREADING
+    // For Zephyr threading, thread state is already initialized by zephyr_entry()
+    // using heap-allocated state. Do NOT reinitialize here with local variable.
     mp_state_thread_t ts;
-    fprintf(stderr, "[thread_entry] About to init thread state, ts=%p, stack_size=%zu\n", &ts, args->stack_size);
     mp_thread_init_state(&ts, args->stack_size, args->dict_locals, args->dict_globals);
-    fprintf(stderr, "[thread_entry] Thread state initialized\n");
-    mp_state_thread_t *tls_check = mp_thread_get_state();
-    fprintf(stderr, "[thread_entry] TLS check: %p (should match ts=%p)\n", (void *)tls_check, (void *)&ts);
 
     #if MICROPY_ENABLE_PYSTACK
     // TODO threading and pystack is not fully supported, for now just make a small stack
     mp_obj_t mini_pystack[128];
     mp_pystack_init(mini_pystack, &mini_pystack[128]);
     #endif
+    #endif
 
-    fprintf(stderr, "[thread_entry] About to acquire GIL\n");
     MP_THREAD_GIL_ENTER();
-    fprintf(stderr, "[thread_entry] GIL acquired\n");
 
-    // signal that we are set up and running
-    fprintf(stderr, "[thread_entry] Calling mp_thread_start()\n");
+    #if !MICROPY_ZEPHYR_THREADING
+    // For Zephyr threading, mp_thread_start() is already called by zephyr_entry()
     mp_thread_start();
-    fprintf(stderr, "[thread_entry] mp_thread_start() returned\n");
+    #endif
 
     // TODO set more thread-specific state here:
     //  cur_exception (root pointer)
 
+    #if !MICROPY_ZEPHYR_THREADING
     DEBUG_printf("[thread] start ts=%p args=%p stack=%p\n", &ts, &args, MP_STATE_THREAD(stack_top));
+    #else
+    DEBUG_printf("[thread] start args=%p stack=%p\n", &args, MP_STATE_THREAD(stack_top));
+    #endif
 
     nlr_buf_t nlr;
-    fprintf(stderr, "[thread_entry] About to push NLR handler\n");
-    fprintf(stderr, "[thread_entry] Before nlr_push: nlr_top=%p\n", (void *)MP_STATE_THREAD(nlr_top));
     if (nlr_push(&nlr) == 0) {
-        fprintf(stderr, "[thread_entry] After nlr_push: nlr_top=%p, nlr=%p\n", (void *)MP_STATE_THREAD(nlr_top), (void *)&nlr);
-        fprintf(stderr, "[thread_entry] Calling Python function\n");
         mp_call_function_n_kw(args->fun, args->n_args, args->n_kw, args->args);
-        fprintf(stderr, "[thread_entry] Python function returned normally\n");
         nlr_pop();
     } else {
         // uncaught exception
@@ -210,7 +206,11 @@ static void *thread_entry(void *args_in) {
         }
     }
 
+    #if !MICROPY_ZEPHYR_THREADING
     DEBUG_printf("[thread] finish ts=%p\n", &ts);
+    #else
+    DEBUG_printf("[thread] finish\n");
+    #endif
 
     // signal that we are finished
     mp_thread_finish();
