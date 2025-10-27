@@ -10,21 +10,45 @@
  * This file provides the architecture-specific functions required by
  * the Zephyr kernel when running on bare-metal ARM Cortex-M systems
  * (e.g., QEMU mps2-an385, STM32, nRF52).
+ *
+ * This is minimal bootstrap code - ports should use their own proven
+ * CMSIS and system/startup includes.
  */
+
+// Prevent MicroPython port headers from being included
+#define MICROPY_MPCONFIG_H
+#define MICROPY_PY_MPSTATE_H
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdbool.h>
+
+// Provide minimal CONFIG symbols (normally from autoconf.h)
+#ifndef CONFIG_SYS_CLOCK_TICKS_PER_SEC
+#define CONFIG_SYS_CLOCK_TICKS_PER_SEC 1000
+#endif
+#ifndef CONFIG_MP_MAX_NUM_CPUS
+#define CONFIG_MP_MAX_NUM_CPUS 1
+#endif
 
 #if MICROPY_ZEPHYR_THREADING
 
-#include "py/runtime.h"
-#include "py/mphal.h"
-#include "extmod/zephyr_kernel/zephyr_kernel.h"
+// Forward declarations from MicroPython (avoid including port-specific headers)
+// These are resolved by the linker from the port's code
+typedef struct _mp_print_t mp_print_t;
+extern const mp_print_t mp_plat_print;
+extern void mp_hal_stdout_tx_strn(const char *str, size_t len);
+extern int mp_printf(const mp_print_t *print, const char *fmt, ...);
+
+// Only include minimal Zephyr headers that don't pull in port config
 #include <zephyr/kernel.h>
 #include <zephyr/kernel_structs.h>
 #include <zephyr/arch/cpu.h>
+
+// Forward declarations for Zephyr functions we provide
+void sys_clock_announce(int32_t ticks);
 
 // ARM Cortex-M System Control Block (SCB) register addresses
 // These may not be defined when using minimal CMSIS headers
@@ -50,14 +74,17 @@
 #define SCB_SHPR3_PENDSV    (0xFFUL << 16)  // PendSV priority field (bits 23:16), lowest priority
 
 // Clock configuration
-// Default CPU frequency - should be overridden by port's mpconfigboard.h
-#ifndef MICROPY_HW_CPU_FREQ_HZ
-#define MICROPY_HW_CPU_FREQ_HZ  (25000000)  // 25 MHz default
-#endif
+// CPU frequency will be provided by the linker from the port
+// This extern declaration allows each port to define it in their own code
+extern const uint32_t micropy_hw_cpu_freq_hz __attribute__((weak));
 
-// Calculate SysTick reload value for CONFIG_SYS_CLOCK_TICKS_PER_SEC (1000 Hz)
+// Calculate SysTick reload value at runtime
 // SysTick is a 24-bit down-counter, reload = (CPU_FREQ / TICK_FREQ) - 1
-#define SYSTICK_RELOAD_VALUE    ((MICROPY_HW_CPU_FREQ_HZ / CONFIG_SYS_CLOCK_TICKS_PER_SEC) - 1)
+static inline uint32_t get_systick_reload_value(void) {
+    // Use port-provided frequency if available, otherwise use 25MHz default
+    uint32_t cpu_freq = (&micropy_hw_cpu_freq_hz != NULL) ? micropy_hw_cpu_freq_hz : 25000000;
+    return (cpu_freq / CONFIG_SYS_CLOCK_TICKS_PER_SEC) - 1;
+}
 
 // Minimal stdio stubs for bare-metal environment (DEBUG_printf support)
 // These weak symbols are used when DEBUG_printf is enabled but C library stdio is unavailable
@@ -153,7 +180,7 @@ void mp_zephyr_arch_init(void) {
 
     // Configure SysTick (ARMv7-M System Control Block)
     *SYST_CSR_ADDR = 0;  // Disable SysTick first
-    *SYST_RVR_ADDR = SYSTICK_RELOAD_VALUE;  // Set reload value
+    *SYST_RVR_ADDR = get_systick_reload_value();  // Set reload value
     *SYST_CVR_ADDR = 0;  // Clear current value
     // NOTE: Do NOT enable SysTick interrupt yet - wait until after kernel init
     // Enable counter with processor clock source, but NO interrupt yet

@@ -144,9 +144,10 @@ ZEPHYR_ARCH_SRC_C += \
 	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/cpu_idle.c \
 	$(ZEPHYR_BASE)/arch/arm/core/fatal.c
 
-# MicroPython-specific Cortex-M arch bridge (SysTick, PendSV, FPU init, stubs)
-ZEPHYR_ARCH_SRC_C += \
-	$(ZEPHYR_KERNEL)/arch/cortex_m/cortex_m_arch.c
+# MicroPython-specific Cortex-M arch bridge
+# NOTE: Each port now provides its own zephyr_arch_*.c file (e.g., zephyr_arch_qemu.c, zephyr_arch_stm32.c)
+# This allows each port to use its proven CMSIS and system/startup includes
+# The common extmod/zephyr_kernel/arch/cortex_m/cortex_m_arch.c is no longer used
 
 # ARM Cortex-M assembly files (critical for context switching)
 ZEPHYR_ARCH_SRC_S := \
