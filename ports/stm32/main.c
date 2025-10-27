@@ -309,6 +309,145 @@ static bool init_sdcard_fs(void) {
 }
 #endif
 
+#if MICROPY_ZEPHYR_THREADING
+// Zephyr threading entry point - called by Zephyr kernel after z_cstart()
+// This function runs in z_main_thread context after kernel initialization
+void micropython_main_thread_entry(void *p1, void *p2, void *p3) {
+    (void)p1;
+    (void)p2;
+    (void)p3;
+
+    // Enable SysTick interrupt now that Zephyr kernel is fully initialized
+    extern void mp_zephyr_arch_enable_systick_interrupt(void);
+    mp_zephyr_arch_enable_systick_interrupt();
+
+    // NOTE: We're now running in z_main_thread context, not boot/dummy context
+    // This means k_thread_create() and other threading operations are safe
+
+    // Initialize MicroPython threading (Zephyr-specific)
+    char stack_dummy;
+    if (!mp_thread_init(&stack_dummy)) {
+        mp_printf(&mp_plat_print, "Failed to initialize threading\n");
+        // In thread context, can't return - just loop forever
+        for (;;) {}
+    }
+
+    // Initialize board state for main loop
+    boardctrl_state_t state;
+    state.reset_mode = 1;  // Normal boot for Zephyr entry
+    state.log_soft_reset = false;
+
+    MICROPY_BOARD_BEFORE_SOFT_RESET_LOOP(&state);
+
+    // Jump into main soft reset loop (reuse existing code path)
+    // This is implemented by calling into the soft_reset section of stm32_main
+    // For now, we'll just implement the main loop directly here
+    goto micropython_soft_reset;
+
+micropython_soft_reset:
+    MICROPY_BOARD_TOP_SOFT_RESET_LOOP(&state);
+
+    // Stack limit init
+    extern uint8_t _estack, _sstack;
+    mp_cstack_init_with_top(&_estack, (char *)&_estack - (char *)&_sstack);
+
+    // GC init
+    gc_init(MICROPY_HEAP_START, MICROPY_HEAP_END);
+
+    #if MICROPY_ENABLE_PYSTACK
+    static mp_obj_t pystack[384];
+    mp_pystack_init(pystack, &pystack[384]);
+    #endif
+
+    // MicroPython init
+    mp_init();
+
+    // Initialise low-level sub-systems
+    readline_init0();
+    pin_init0();
+    extint_init0();
+    timer_init0();
+
+    #if MICROPY_HW_ENABLE_CAN
+    pyb_can_init0();
+    #endif
+
+    #if MICROPY_HW_ENABLE_USB
+    pyb_usb_init0();
+    #endif
+
+    #if MICROPY_PY_MACHINE_I2S
+    machine_i2s_init0();
+    #endif
+
+    // Initialize filesystem
+    bool mounted_flash = false;
+    #if MICROPY_HW_FLASH_MOUNT_AT_BOOT
+    mounted_flash = init_flash_fs(state.reset_mode);
+    #endif
+
+    bool mounted_sdcard = false;
+    #if MICROPY_HW_SDCARD_MOUNT_AT_BOOT
+    if (sdcard_is_present()) {
+        if (!mounted_flash || mp_vfs_import_stat("SKIPSD") == MP_IMPORT_STAT_NO_EXIST) {
+            mounted_sdcard = init_sdcard_fs();
+        }
+    }
+    #endif
+
+    #if MICROPY_HW_ENABLE_USB
+    if (pyb_usb_storage_medium == PYB_USB_STORAGE_MEDIUM_NONE) {
+        pyb_usb_storage_medium = PYB_USB_STORAGE_MEDIUM_FLASH;
+    }
+    #endif
+
+    // Set sys.path
+    if (mounted_sdcard) {
+        mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_sd));
+        mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_sd_slash_lib));
+    }
+    if (mounted_flash) {
+        mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_flash));
+        mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_flash_slash_lib));
+    }
+
+    MP_STATE_PORT(pyb_config_main) = MP_OBJ_NULL;
+
+    #ifdef MICROPY_BOARD_FROZEN_BOOT_FILE
+    pyexec_frozen_module(MICROPY_BOARD_FROZEN_BOOT_FILE, false);
+    #endif
+
+    if (MICROPY_BOARD_RUN_BOOT_PY(&state) == BOARDCTRL_GOTO_SOFT_RESET_EXIT) {
+        goto micropython_soft_reset_exit;
+    }
+
+    // Continue with rest of initialization and REPL
+    // (Simplified for Zephyr - full init continues in main loop)
+
+    // Run main.py or REPL
+    for (;;) {
+        if (pyexec_mode_kind == PYEXEC_MODE_RAW_REPL) {
+            if (pyexec_raw_repl() != 0) {
+                break;
+            }
+        } else {
+            if (pyexec_friendly_repl() != 0) {
+                break;
+            }
+        }
+    }
+
+micropython_soft_reset_exit:
+    mp_printf(&mp_plat_print, "MPY: soft reboot\n");
+
+    mp_thread_deinit();
+    gc_sweep_all();
+    mp_deinit();
+
+    goto micropython_soft_reset;
+}
+#endif // MICROPY_ZEPHYR_THREADING
+
 void stm32_main(uint32_t reset_mode) {
     // Low-level MCU initialisation.
     stm32_system_init();
