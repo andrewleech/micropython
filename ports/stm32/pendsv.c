@@ -62,8 +62,6 @@ void pendsv_dispatch_handler(void) {
 }
 #endif
 
-#if !MICROPY_ZEPHYR_THREADING
-// When using Zephyr threading, PendSV_Handler is provided by Zephyr's cortex_m_arch.c
 __attribute__((naked)) void PendSV_Handler(void) {
     // Handle a PendSV interrupt
     //
@@ -94,6 +92,11 @@ __attribute__((naked)) void PendSV_Handler(void) {
     //   sp[0]: ?
 
     __asm volatile (
+        #if MICROPY_ZEPHYR_THREADING
+        // With Zephyr threading, delegate to Zephyr's z_arm_pendsv handler
+        "b z_arm_pendsv\n"
+        #else
+        // Legacy threading mode
         #if defined(PENDSV_DISPATCH_NUM_SLOTS)
         // Check if there are any pending calls to dispatch to
         "ldr r1, pendsv_dispatch_active_ptr\n"
@@ -131,6 +134,6 @@ __attribute__((naked)) void PendSV_Handler(void) {
         #if defined(PENDSV_DISPATCH_NUM_SLOTS)
         "pendsv_dispatch_active_ptr: .word pendsv_dispatch_active\n"
         #endif
+        #endif // MICROPY_ZEPHYR_THREADING
         );
 }
-#endif // !MICROPY_ZEPHYR_THREADING

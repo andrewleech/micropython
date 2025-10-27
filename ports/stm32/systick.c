@@ -74,13 +74,17 @@ void systick_process(void) {
     #endif
 }
 
-#if !MICROPY_ZEPHYR_THREADING
-// When using Zephyr threading, SysTick_Handler is provided by Zephyr's cortex_m_arch.c
-// which calls systick_process() to handle STM32-specific infrastructure
 void SysTick_Handler(void) {
+    // Call STM32-specific systick processing first (uwTick, soft timers, dispatch)
     systick_process();
+
+    #if MICROPY_ZEPHYR_THREADING
+    // Zephyr threading: call Zephyr scheduler and timer subsystem
+    // Delegate to arch layer which handles tick counting and scheduling
+    extern void mp_zephyr_systick_handler(void);
+    mp_zephyr_systick_handler();
+    #endif // MICROPY_ZEPHYR_THREADING
 }
-#endif // !MICROPY_ZEPHYR_THREADING
 
 // We provide our own version of HAL_Delay that calls __WFI while waiting,
 // and works when interrupts are disabled.  This function is intended to be

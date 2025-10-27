@@ -347,8 +347,7 @@ void micropython_main_thread_entry(void *p1, void *p2, void *p3) {
 micropython_soft_reset:
     MICROPY_BOARD_TOP_SOFT_RESET_LOOP(&state);
 
-    // Stack limit init
-    extern uint8_t _estack, _sstack;
+    // Stack limit init (symbols declared in gccollect.h)
     mp_cstack_init_with_top(&_estack, (char *)&_estack - (char *)&_sstack);
 
     // GC init
@@ -580,7 +579,10 @@ void stm32_main(uint32_t reset_mode) {
     // Legacy threading initialization (not used with Zephyr)
     pyb_thread_init(&pyb_thread_main);
     #endif
+    #if !MICROPY_ZEPHYR_THREADING
+    // PendSV init not needed with Zephyr - Zephyr provides its own PendSV handler
     pendsv_init();
+    #endif
     led_init();
     #if MICROPY_HW_HAS_SWITCH
     switch_init0();
@@ -660,8 +662,8 @@ soft_reset:
 
     MICROPY_BOARD_TOP_SOFT_RESET_LOOP(&state);
 
-    // Python threading init
-    #if MICROPY_PY_THREAD
+    // Python threading init (legacy - Zephyr inits threading in micropython_main_thread_entry)
+    #if MICROPY_PY_THREAD && !MICROPY_ZEPHYR_THREADING
     mp_thread_init();
     #endif
 

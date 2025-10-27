@@ -73,31 +73,29 @@ CFLAGS := $(filter-out -Werror,$(CFLAGS))
 # Set architecture for Zephyr
 ZEPHYR_ARCH := arm
 
-# Undefine STM32 device macros for Zephyr compilation so zephyr_config_cortex_m.h provides generic CMSIS defines
-ZEPHYR_OFFSETS_EXTRA_CFLAGS := -USTM32WB55xx -USTM32F407xx -USTM32H743xx -USTM32F405xx
-
 # Include Zephyr kernel build
 include $(TOP)/extmod/zephyr_kernel/zephyr_kernel.mk
 
 # Add Zephyr includes and flags
 CFLAGS += $(ZEPHYR_INC)
 CFLAGS += -Wno-error -Wno-macro-redefined
+# Define MICROPY_ZEPHYR_THREADING as a preprocessor symbol for C code
+CFLAGS += -DMICROPY_ZEPHYR_THREADING=1
 
 # CRITICAL: Explicitly add optimization flags for Zephyr builds
 # Without this, code is compiled with no optimization, causing 50-100x code size bloat
 CFLAGS += -Os -DNDEBUG
 
-# Add STM32-specific Zephyr integration
-SRC_C += zephyr_stm32.c
+# Add STM32-specific Zephyr architecture implementation
+SRC_C += zephyr_arch_stm32.c
 
 # Ensure Zephyr objects depend on generated headers
 $(addprefix $(BUILD)/, $(SRC_THIRDPARTY_C:.c=.o)): $(ZEPHYR_GEN_HEADERS)
 
-# Pattern-specific CFLAGS for Zephyr objects (suppress warnings, include config, undefine STM32 macros)
-# Note: We undefine STM32 device macros so zephyr_config_cortex_m.h provides generic CMSIS defines
-# instead of expecting vendor headers. This is needed because Zephyr code doesn't include vendor headers.
-$(BUILD)/$(TOP)/lib/zephyr/%.o: CFLAGS += -USTM32WB55xx -USTM32F407xx -USTM32H743xx -include $(TOP)/extmod/zephyr_kernel/zephyr_config_cortex_m.h -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function -Wno-return-type
-$(BUILD)/$(TOP)/extmod/zephyr_kernel/%.o: CFLAGS += -include $(TOP)/extmod/zephyr_kernel/zephyr_config_cortex_m.h -Wno-unused-parameter -Wno-unused-function
+# Pattern-specific CFLAGS for Zephyr objects
+# Zephyr kernel files: Use STM32 CMSIS headers + Zephyr config (for CONFIG_* symbols)
+$(BUILD)/$(TOP)/lib/zephyr/%.o: CFLAGS += -include $(TOP)/extmod/zephyr_kernel/zephyr_config_cortex_m.h -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function -Wno-return-type
+$(BUILD)/$(TOP)/extmod/zephyr_kernel/%.o: CFLAGS += -Wno-unused-parameter -Wno-unused-function
 
 # Build Zephyr swap_helper.S (context switching)
 ZEPHYR_SWAP_HELPER_O = $(BUILD)/swap_helper.o

@@ -1,0 +1,692 @@
+Use make V=1 or set BUILD_VERBOSE in your environment to increase build verbosity.
+GEN build-NUCLEO_F429ZI/genhdr/mpversion.h
+GEN build-NUCLEO_F429ZI/genhdr/qstr.split
+GEN build-NUCLEO_F429ZI/genhdr/qstrdefs.collected.h
+QSTR updated
+GEN build-NUCLEO_F429ZI/genhdr/qstrdefs.generated.h
+GEN build-NUCLEO_F429ZI/genhdr/moduledefs.split
+GEN build-NUCLEO_F429ZI/genhdr/moduledefs.collected
+Module registrations updated
+GEN build-NUCLEO_F429ZI/genhdr/moduledefs.h
+GEN build-NUCLEO_F429ZI/genhdr/root_pointers.split
+GEN build-NUCLEO_F429ZI/genhdr/root_pointers.collected
+Root pointer registrations updated
+GEN build-NUCLEO_F429ZI/genhdr/root_pointers.h
+GEN build-NUCLEO_F429ZI/genhdr/compressed.split
+GEN build-NUCLEO_F429ZI/genhdr/compressed.collected
+Compressed data updated
+GEN build-NUCLEO_F429ZI/genhdr/compressed.data.h
+mkdir -p build-NUCLEO_F429ZI/drivers/bus/
+mkdir -p build-NUCLEO_F429ZI/drivers/dht/
+mkdir -p build-NUCLEO_F429ZI/drivers/memory/
+mkdir -p build-NUCLEO_F429ZI/extmod/
+mkdir -p build-NUCLEO_F429ZI/extmod/mbedtls/
+mkdir -p build-NUCLEO_F429ZI/lib/libm/
+mkdir -p build-NUCLEO_F429ZI/lib/lwip/src/apps/mdns/
+mkdir -p build-NUCLEO_F429ZI/lib/lwip/src/core/
+mkdir -p build-NUCLEO_F429ZI/lib/lwip/src/core/ipv4/
+mkdir -p build-NUCLEO_F429ZI/lib/lwip/src/core/ipv6/
+mkdir -p build-NUCLEO_F429ZI/lib/lwip/src/netif/
+mkdir -p build-NUCLEO_F429ZI/lib/lwip/src/netif/ppp/
+mkdir -p build-NUCLEO_F429ZI/lib/lwip/src/netif/ppp/polarssl/
+mkdir -p build-NUCLEO_F429ZI/lib/mbedtls/library/
+mkdir -p build-NUCLEO_F429ZI/lib/mbedtls_errors/
+mkdir -p build-NUCLEO_F429ZI/lib/oofatfs/
+mkdir -p build-NUCLEO_F429ZI/lib/stm32lib/CMSIS/STM32F4xx/Source/Templates/
+mkdir -p build-NUCLEO_F429ZI/lib/stm32lib/CMSIS/STM32F4xx/Source/Templates/gcc/
+mkdir -p build-NUCLEO_F429ZI/lib/stm32lib/STM32F4xx_HAL_Driver/Src/
+mkdir -p build-NUCLEO_F429ZI/mbedtls/
+mkdir -p build-NUCLEO_F429ZI/py/
+mkdir -p build-NUCLEO_F429ZI/shared/libc/
+mkdir -p build-NUCLEO_F429ZI/shared/netutils/
+mkdir -p build-NUCLEO_F429ZI/shared/readline/
+mkdir -p build-NUCLEO_F429ZI/shared/runtime/
+mkdir -p build-NUCLEO_F429ZI/shared/timeutils/
+mkdir -p build-NUCLEO_F429ZI/usbdev/class/src/
+mkdir -p build-NUCLEO_F429ZI/usbdev/core/src/
+CC (Zephyr offsets) ../../lib/zephyr/arch/arm/core/offsets/offsets.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/include/zephyr/kernel_includes.h:36,
+                 from ../../lib/zephyr/include/zephyr/kernel.h:17,
+                 from ../../lib/zephyr/arch/arm/core/offsets/offsets_aarch32.c:29,
+                 from ../../lib/zephyr/arch/arm/core/offsets/offsets.c:9:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ./../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from <command-line>:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+GEN (Zephyr) ../../extmod/zephyr_kernel/generated/zephyr/offsets.h
+CC ../../lib/zephyr/arch/arm/core/cortex_m/swap_helper.S
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/arch/arm/core/cortex_m/swap_helper.S:21:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ./../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from <command-line>:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+AS ../../lib/stm32lib/CMSIS/STM32F4xx/Source/Templates/gcc/startup_stm32f429xx.s
+CC ../../lib/stm32lib/CMSIS/STM32F4xx/Source/Templates/system_stm32f4xx.c
+CC system_stm32.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ./mphalport.h:47,
+                 from ../../py/mphal.h:35,
+                 from system_stm32.c:78:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from ./mpconfigport.h:37,
+                 from ../../py/mpconfig.h:91,
+                 from ../../py/mphal.h:30:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+AS resethandler.s
+AS ../../shared/runtime/gchelper_thumb2.s
+CC ../../py/mpstate.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/include/zephyr/kernel_includes.h:36,
+                 from ../../lib/zephyr/include/zephyr/kernel.h:17,
+                 from ./mpthreadport_zephyr.h:32,
+                 from ./mpthreadport.h:30,
+                 from ../../py/mpthread.h:38,
+                 from ../../py/mpstate.h:32,
+                 from ../../py/mpstate.c:27:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from ./mpconfigport.h:37,
+                 from ../../py/mpconfig.h:91,
+                 from ../../py/mpstate.h:31:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+CC ../../py/nlr.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/include/zephyr/kernel_includes.h:36,
+                 from ../../lib/zephyr/include/zephyr/kernel.h:17,
+                 from ./mpthreadport_zephyr.h:32,
+                 from ./mpthreadport.h:30,
+                 from ../../py/mpthread.h:38,
+                 from ../../py/mpstate.h:32,
+                 from ../../py/nlr.c:27:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from ./mpconfigport.h:37,
+                 from ../../py/mpconfig.h:91,
+                 from ../../py/mpstate.h:31:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+CC ../../py/nlrx86.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/include/zephyr/kernel_includes.h:36,
+                 from ../../lib/zephyr/include/zephyr/kernel.h:17,
+                 from ./mpthreadport_zephyr.h:32,
+                 from ./mpthreadport.h:30,
+                 from ../../py/mpthread.h:38,
+                 from ../../py/mpstate.h:32,
+                 from ../../py/nlrx86.c:27:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from ./mpconfigport.h:37,
+                 from ../../py/mpconfig.h:91,
+                 from ../../py/mpstate.h:31:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+CC ../../py/nlrx64.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/include/zephyr/kernel_includes.h:36,
+                 from ../../lib/zephyr/include/zephyr/kernel.h:17,
+                 from ./mpthreadport_zephyr.h:32,
+                 from ./mpthreadport.h:30,
+                 from ../../py/mpthread.h:38,
+                 from ../../py/mpstate.h:32,
+                 from ../../py/nlrx64.c:27:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from ./mpconfigport.h:37,
+                 from ../../py/mpconfig.h:91,
+                 from ../../py/mpstate.h:31:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+CC ../../py/nlrthumb.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/include/zephyr/kernel_includes.h:36,
+                 from ../../lib/zephyr/include/zephyr/kernel.h:17,
+                 from ./mpthreadport_zephyr.h:32,
+                 from ./mpthreadport.h:30,
+                 from ../../py/mpthread.h:38,
+                 from ../../py/mpstate.h:32,
+                 from ../../py/nlrthumb.c:27:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from ./mpconfigport.h:37,
+                 from ../../py/mpconfig.h:91,
+                 from ../../py/mpstate.h:31:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+CC ../../py/nlraarch64.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/include/zephyr/kernel_includes.h:36,
+                 from ../../lib/zephyr/include/zephyr/kernel.h:17,
+                 from ./mpthreadport_zephyr.h:32,
+                 from ./mpthreadport.h:30,
+                 from ../../py/mpthread.h:38,
+                 from ../../py/mpstate.h:32,
+                 from ../../py/nlraarch64.c:27:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from ./mpconfigport.h:37,
+                 from ../../py/mpconfig.h:91,
+                 from ../../py/mpstate.h:31:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+CC ../../py/nlrmips.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/include/zephyr/kernel_includes.h:36,
+                 from ../../lib/zephyr/include/zephyr/kernel.h:17,
+                 from ./mpthreadport_zephyr.h:32,
+                 from ./mpthreadport.h:30,
+                 from ../../py/mpthread.h:38,
+                 from ../../py/mpstate.h:32,
+                 from ../../py/nlrmips.c:27:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from ./mpconfigport.h:37,
+                 from ../../py/mpconfig.h:91,
+                 from ../../py/mpstate.h:31:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+CC ../../py/nlrpowerpc.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/include/zephyr/kernel_includes.h:36,
+                 from ../../lib/zephyr/include/zephyr/kernel.h:17,
+                 from ./mpthreadport_zephyr.h:32,
+                 from ./mpthreadport.h:30,
+                 from ../../py/mpthread.h:38,
+                 from ../../py/mpstate.h:32,
+                 from ../../py/nlrpowerpc.c:27:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from ./mpconfigport.h:37,
+                 from ../../py/mpconfig.h:91,
+                 from ../../py/mpstate.h:31:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+CC ../../py/nlrxtensa.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/include/zephyr/kernel_includes.h:36,
+                 from ../../lib/zephyr/include/zephyr/kernel.h:17,
+                 from ./mpthreadport_zephyr.h:32,
+                 from ./mpthreadport.h:30,
+                 from ../../py/mpthread.h:38,
+                 from ../../py/mpstate.h:32,
+                 from ../../py/nlrxtensa.c:27:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from ./mpconfigport.h:37,
+                 from ../../py/mpconfig.h:91,
+                 from ../../py/mpstate.h:31:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+CC ../../py/nlrrv32.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/include/zephyr/kernel_includes.h:36,
+                 from ../../lib/zephyr/include/zephyr/kernel.h:17,
+                 from ./mpthreadport_zephyr.h:32,
+                 from ./mpthreadport.h:30,
+                 from ../../py/mpthread.h:38,
+                 from ../../py/mpstate.h:32,
+                 from ../../py/nlrrv32.c:27:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from ./mpconfigport.h:37,
+                 from ../../py/mpconfig.h:91,
+                 from ../../py/mpstate.h:31:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+CC ../../py/nlrrv64.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/include/zephyr/kernel_includes.h:36,
+                 from ../../lib/zephyr/include/zephyr/kernel.h:17,
+                 from ./mpthreadport_zephyr.h:32,
+                 from ./mpthreadport.h:30,
+                 from ../../py/mpthread.h:38,
+                 from ../../py/mpstate.h:32,
+                 from ../../py/nlrrv64.c:27:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from ./mpconfigport.h:37,
+                 from ../../py/mpconfig.h:91,
+                 from ../../py/mpstate.h:31:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+CC ../../py/nlrsetjmp.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/include/zephyr/kernel_includes.h:36,
+                 from ../../lib/zephyr/include/zephyr/kernel.h:17,
+                 from ./mpthreadport_zephyr.h:32,
+                 from ./mpthreadport.h:30,
+                 from ../../py/mpthread.h:38,
+                 from ../../py/mpstate.h:32,
+                 from ../../py/nlrsetjmp.c:27:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from ./mpconfigport.h:37,
+                 from ../../py/mpconfig.h:91,
+                 from ../../py/mpstate.h:31:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+CC ../../py/malloc.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/include/zephyr/kernel_includes.h:36,
+                 from ../../lib/zephyr/include/zephyr/kernel.h:17,
+                 from ./mpthreadport_zephyr.h:32,
+                 from ./mpthreadport.h:30,
+                 from ../../py/mpthread.h:38,
+                 from ../../py/mpstate.h:32,
+                 from ../../py/malloc.c:33:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from ./mpconfigport.h:37,
+                 from ../../py/mpconfig.h:91,
+                 from ../../py/malloc.c:31:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+CC ../../py/gc.c
+In file included from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:20,
+                 from ../../lib/zephyr/include/zephyr/arch/cpu.h:19,
+                 from ../../lib/zephyr/include/zephyr/kernel_includes.h:36,
+                 from ../../lib/zephyr/include/zephyr/kernel.h:17,
+                 from ./mpthreadport_zephyr.h:32,
+                 from ./mpthreadport.h:30,
+                 from ../../py/mpthread.h:38,
+                 from ../../py/mpstate.h:32,
+                 from ../../py/runtime.h:29,
+                 from ../../py/gc.c:34:
+../../lib/zephyr/include/zephyr/devicetree.h:3711:9: warning: "DT_HAS_COMPAT_STATUS_OKAY" redefined
+ 3711 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) \
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h:26,
+                 from ./mpconfigport.h:37,
+                 from ../../py/mpconfig.h:91,
+                 from ../../py/mpprint.h:29,
+                 from ../../py/gc.h:31,
+                 from ../../py/gc.c:33:
+../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h:19:9: note: this is the location of the previous definition
+   19 | #define DT_HAS_COMPAT_STATUS_OKAY(compat) 0
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+../../py/gc.c: In function 'gc_sweep_run_finalisers':
+../../py/gc.c:592:72: error: 'MP_QSTR___del__' undeclared (first use in this function); did you mean 'MP_QSTR___new__'?
+  592 |                             mp_load_method_maybe(MP_OBJ_FROM_PTR(obj), MP_QSTR___del__, dest);
+      |                                                                        ^~~~~~~~~~~~~~~
+      |                                                                        MP_QSTR___new__
+../../py/gc.c:592:72: note: each undeclared identifier is reported only once for each function it appears in
+In file included from ../../lib/zephyr/include/zephyr/sw_isr_table.h:18,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/irq.h:19,
+                 from ../../lib/zephyr/include/zephyr/arch/arm/arch.h:24:
+../../lib/zephyr/include/zephyr/device.h: At top level:
+../../lib/zephyr/include/zephyr/device.h:838:32: warning: 'device_get_binding' declared 'static' but never defined [-Wunused-function]
+  838 | __syscall const struct device *device_get_binding(const char *name);
+      |                                ^~~~~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:866:16: warning: 'device_is_ready' declared 'static' but never defined [-Wunused-function]
+  866 | __syscall bool device_is_ready(const struct device *dev);
+      |                ^~~~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:881:15: warning: 'device_init' declared 'static' but never defined [-Wunused-function]
+  881 | __syscall int device_init(const struct device *dev);
+      |               ^~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:903:15: warning: 'device_deinit' declared 'static' but never defined [-Wunused-function]
+  903 | __syscall int device_deinit(const struct device *dev);
+      |               ^~~~~~~~~~~~~
+../../lib/zephyr/include/zephyr/device.h:1061:32: warning: 'device_get_by_dt_nodelabel' declared 'static' but never defined [-Wunused-function]
+ 1061 | __syscall const struct device *device_get_by_dt_nodelabel(const char *nodelabel);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: note: unrecognized command-line option '-Wno-macro-redefined' may have been intended to silence earlier diagnostics
+-e See [1;31mhttps://github.com/micropython/micropython/wiki/Build-Troubleshooting[0m
+make: *** [../../py/mkrules.mk:101: build-NUCLEO_F429ZI/py/gc.o] Error 1

@@ -30,6 +30,7 @@
 #include "rtc.h"
 #include "extmod/modbluetooth.h"
 #include "py/mpconfig.h"
+#include "irq.h"
 #ifndef NO_QSTR
 #include "genhdr/pllfreqtable.h"
 #endif

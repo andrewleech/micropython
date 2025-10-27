@@ -30,6 +30,7 @@
 #include "py/mperrno.h"
 #include "py/mphal.h"
 #include "usb.h"
+#include "irq.h"
 
 #if MICROPY_HW_USB_HID
 

@@ -35,6 +35,7 @@
 #include "mpbthciport.h"
 #include "rtc.h"
 #include "rfcore.h"
+#include "irq.h"
 
 #if defined(STM32WB)
 
