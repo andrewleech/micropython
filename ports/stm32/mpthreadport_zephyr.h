@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2016 Damien P. George
+ * Copyright (c) 2025 MicroPython Developers
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,39 +24,27 @@
  * THE SOFTWARE.
  */
 
+#ifndef MICROPY_INCLUDED_STM32_MPTHREADPORT_ZEPHYR_H
+#define MICROPY_INCLUDED_STM32_MPTHREADPORT_ZEPHYR_H
+
 #if MICROPY_ZEPHYR_THREADING
 
-// Use Zephyr threading (mpthread_zephyr.c in extmod/zephyr_kernel)
-#include "mpthreadport_zephyr.h"
+#include <zephyr/kernel.h>
 
-#else
+// Mutex types using Zephyr k_mutex
+typedef struct _mp_thread_mutex_t {
+    struct k_mutex handle;
+} mp_thread_mutex_t;
 
-// Use legacy STM32 threading (pybthread.c)
-#include "pybthread.h"
+typedef struct _mp_thread_recursive_mutex_t {
+    struct k_mutex handle;
+} mp_thread_recursive_mutex_t;
 
-typedef pyb_mutex_t mp_thread_mutex_t;
-
-void mp_thread_init(void);
+// Threading functions (implemented in extmod/zephyr_kernel/mpthread_zephyr.c)
+bool mp_thread_init(void *stack);
+void mp_thread_deinit(void);
 void mp_thread_gc_others(void);
 
-static inline void mp_thread_set_state(struct _mp_state_thread_t *state) {
-    pyb_thread_set_local(state);
-}
-
-static inline struct _mp_state_thread_t *mp_thread_get_state(void) {
-    return pyb_thread_get_local();
-}
-
-static inline void mp_thread_mutex_init(mp_thread_mutex_t *m) {
-    pyb_mutex_init(m);
-}
-
-static inline int mp_thread_mutex_lock(mp_thread_mutex_t *m, int wait) {
-    return pyb_mutex_lock(m, wait);
-}
-
-static inline void mp_thread_mutex_unlock(mp_thread_mutex_t *m) {
-    pyb_mutex_unlock(m);
-}
-
 #endif // MICROPY_ZEPHYR_THREADING
+
+#endif // MICROPY_INCLUDED_STM32_MPTHREADPORT_ZEPHYR_H

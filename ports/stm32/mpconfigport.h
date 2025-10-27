@@ -98,7 +98,18 @@
 #define MICROPY_PY_SYS_PLATFORM     "pyboard"
 #endif
 #ifndef MICROPY_PY_THREAD
+#if MICROPY_ZEPHYR_THREADING
+#define MICROPY_PY_THREAD           (1)
+#else
 #define MICROPY_PY_THREAD           (0)
+#endif
+#endif
+
+// Zephyr threading configuration
+#if MICROPY_ZEPHYR_THREADING
+#define MICROPY_PY_THREAD_GIL               (1)
+#define MICROPY_PY_THREAD_GIL_VM_DIVISOR    (32)
+#define MICROPY_ENABLE_FINALISER            (1)
 #endif
 
 // extended modules
@@ -259,7 +270,22 @@ typedef unsigned int mp_uint_t; // must be pointer size
 
 typedef long mp_off_t;
 
-#if MICROPY_PY_THREAD
+#if MICROPY_ZEPHYR_THREADING
+// Zephyr threading: use k_yield() instead of pyb_thread_yield()
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+        extern void k_yield(void); \
+        MP_THREAD_GIL_EXIT(); \
+        k_yield(); \
+        MP_THREAD_GIL_ENTER(); \
+    } while (0);
+
+#define MICROPY_THREAD_YIELD() k_yield()
+
+#elif MICROPY_PY_THREAD
+// Legacy threading: use pyb_thread_yield()
 #define MICROPY_EVENT_POLL_HOOK \
     do { \
         extern void mp_handle_pending(bool); \
@@ -274,7 +300,9 @@ typedef long mp_off_t;
     } while (0);
 
 #define MICROPY_THREAD_YIELD() pyb_thread_yield()
+
 #else
+// No threading
 #define MICROPY_EVENT_POLL_HOOK \
     do { \
         extern void mp_handle_pending(bool); \

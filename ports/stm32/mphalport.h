@@ -42,10 +42,17 @@ void mp_hal_set_interrupt_char(int c); // -1 to disable
 
 // Atomic section helpers.
 
+#if MICROPY_ZEPHYR_THREADING
+// Use Zephyr atomic primitives for thread-safe atomic sections
+#include <zephyr/arch/cpu.h>
+#define MICROPY_BEGIN_ATOMIC_SECTION()     arch_irq_lock()
+#define MICROPY_END_ATOMIC_SECTION(state)  arch_irq_unlock(state)
+#else
+// Use STM32 IRQ disable/enable for atomic sections
 #include "irq.h"
-
 #define MICROPY_BEGIN_ATOMIC_SECTION()     disable_irq()
 #define MICROPY_END_ATOMIC_SECTION(state)  enable_irq(state)
+#endif
 
 // For regular code that wants to prevent "background tasks" from running.
 // These background tasks (LWIP, Bluetooth) run in PENDSV context.
