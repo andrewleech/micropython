@@ -62,6 +62,8 @@ void pendsv_dispatch_handler(void) {
 }
 #endif
 
+#if !MICROPY_ZEPHYR_THREADING
+// When using Zephyr threading, PendSV_Handler is provided by Zephyr's cortex_m_arch.c
 __attribute__((naked)) void PendSV_Handler(void) {
     // Handle a PendSV interrupt
     //
@@ -131,3 +133,4 @@ __attribute__((naked)) void PendSV_Handler(void) {
         #endif
         );
 }
+#endif // !MICROPY_ZEPHYR_THREADING

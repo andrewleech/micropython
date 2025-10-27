@@ -187,9 +187,18 @@ void mp_zephyr_arch_yield(void) {
     *SCB_ICSR_ADDR = SCB_ICSR_PENDSVSET;
 }
 
+// Port-specific systick processing hook (weak symbol, can be overridden by port)
+// This allows ports to inject their own systick infrastructure (e.g., STM32's uwTick, soft timers)
+__attribute__((weak)) void mp_zephyr_port_systick_hook(void) {
+    // Default: no additional processing
+}
+
 // SysTick interrupt handler - increments tick counter and calls Zephyr timer subsystem
 void SysTick_Handler(void) {
     cortexm_arch_state.ticks++;
+
+    // Call port-specific hook first (e.g., STM32's systick_process())
+    mp_zephyr_port_systick_hook();
 
     // Call Zephyr's timer subsystem to process timeouts and trigger scheduling
     // sys_clock_announce() will:

@@ -54,6 +54,10 @@ static inline void systick_disable_dispatch(size_t slot) {
     systick_dispatch_table[slot] = NULL;
 }
 
+// STM32 systick processing - called from SysTick_Handler
+// Handles uwTick, soft timers, and dispatch callbacks
+void systick_process(void);
+
 void systick_wait_at_least(uint32_t stc, uint32_t delay_ms);
 bool systick_has_passed(uint32_t stc, uint32_t delay_ms);
 

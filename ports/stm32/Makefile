@@ -83,8 +83,8 @@ include $(TOP)/extmod/zephyr_kernel/zephyr_kernel.mk
 CFLAGS += $(ZEPHYR_INC)
 CFLAGS += -Wno-error -Wno-macro-redefined
 
-# Add STM32-specific Zephyr integration (to be created in Phase 3)
-# SRC_C += zephyr_stm32.c
+# Add STM32-specific Zephyr integration
+SRC_C += zephyr_stm32.c
 
 # Ensure Zephyr objects depend on generated headers
 $(addprefix $(BUILD)/, $(SRC_THIRDPARTY_C:.c=.o)): $(ZEPHYR_GEN_HEADERS)
@@ -509,10 +509,11 @@ $(BUILD)/mpremoteprocport.o: $(BUILD)/openamp/metal/config.h
 endif
 endif
 
-# Conditionally exclude legacy threading and interrupt handler files when using Zephyr
-# pendsv.c and systick.c contain handlers that conflict with Zephyr's implementations
+# Conditionally exclude legacy threading files when using Zephyr
+# Note: pendsv.c and systick.c are kept because they contain utility functions,
+# but their interrupt handlers are conditionally compiled out via #if !MICROPY_ZEPHYR_THREADING
 ifeq ($(MICROPY_ZEPHYR_THREADING),1)
-SRC_C := $(filter-out pybthread.c mpthreadport.c pendsv.c systick.c,$(SRC_C))
+SRC_C := $(filter-out pybthread.c mpthreadport.c,$(SRC_C))
 endif
 
 # SRC_O should be placed first to work around this LTO bug with binutils <2.35:
