@@ -83,6 +83,10 @@ include $(TOP)/extmod/zephyr_kernel/zephyr_kernel.mk
 CFLAGS += $(ZEPHYR_INC)
 CFLAGS += -Wno-error -Wno-macro-redefined
 
+# CRITICAL: Explicitly add optimization flags for Zephyr builds
+# Without this, code is compiled with no optimization, causing 50-100x code size bloat
+CFLAGS += -Os -DNDEBUG
+
 # Add STM32-specific Zephyr integration
 SRC_C += zephyr_stm32.c
 
