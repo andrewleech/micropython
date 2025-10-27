@@ -65,7 +65,9 @@
 #include "systick.h"
 #include "pendsv.h"
 #include "powerctrl.h"
+#if !MICROPY_ZEPHYR_THREADING
 #include "pybthread.h"
+#endif
 #include "gccollect.h"
 #include "factoryreset.h"
 #include "modmachine.h"
@@ -89,7 +91,8 @@
 #include "pyb_can.h"
 #include "subghz.h"
 
-#if MICROPY_PY_THREAD
+#if MICROPY_PY_THREAD && !MICROPY_ZEPHYR_THREADING
+// Legacy threading main thread structure (not used with Zephyr)
 static pyb_thread_t pyb_thread_main;
 #endif
 
@@ -434,7 +437,8 @@ void stm32_main(uint32_t reset_mode) {
     sdram_valid = sdram_test(false);
     #endif
     #endif
-    #if MICROPY_PY_THREAD
+    #if MICROPY_PY_THREAD && !MICROPY_ZEPHYR_THREADING
+    // Legacy threading initialization (not used with Zephyr)
     pyb_thread_init(&pyb_thread_main);
     #endif
     pendsv_init();
@@ -505,6 +509,13 @@ void stm32_main(uint32_t reset_mode) {
     state.log_soft_reset = false;
 
     MICROPY_BOARD_BEFORE_SOFT_RESET_LOOP(&state);
+
+    #if MICROPY_ZEPHYR_THREADING
+    // When Zephyr threading enabled, transfer control to Zephyr kernel
+    // z_cstart() initializes Zephyr kernel and never returns
+    extern void z_cstart(void);
+    z_cstart();  // Never returns - Zephyr takes over from here
+    #endif
 
 soft_reset:
 
@@ -696,7 +707,8 @@ soft_reset_exit:
     machine_deinit();
     #endif
 
-    #if MICROPY_PY_THREAD
+    #if MICROPY_PY_THREAD && !MICROPY_ZEPHYR_THREADING
+    // Legacy threading deinitialization (not used with Zephyr)
     pyb_thread_deinit();
     #endif
 
