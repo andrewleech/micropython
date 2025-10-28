@@ -10,10 +10,11 @@ endif
 # Zephyr paths
 ZEPHYR_BASE := $(TOP)/lib/zephyr
 ZEPHYR_KERNEL := $(TOP)/extmod/zephyr_kernel
-ZEPHYR_GEN := $(ZEPHYR_KERNEL)/generated/zephyr
+ZEPHYR_GEN := $(BUILD)/zephyr_gen
 
-# Zephyr include paths (order matters - generated/ first for overrides)
+# Zephyr include paths (order matters - build-generated first, then static stubs)
 ZEPHYR_INC := \
+	-I$(BUILD)/zephyr_gen_root \
 	-I$(ZEPHYR_KERNEL)/generated \
 	-I$(ZEPHYR_BASE)/include \
 	-I$(ZEPHYR_BASE)/kernel/include \
@@ -36,15 +37,15 @@ $(error Unsupported ZEPHYR_ARCH: $(ZEPHYR_ARCH))
 endif
 ZEPHYR_CFLAGS := -include $(ZEPHYR_CONFIG_HEADER) -Wno-error -Wno-macro-redefined
 
-# Generated header files
+# Generated header files (mimic Zephyr's build layout)
 ZEPHYR_GEN_HEADERS := \
-	$(ZEPHYR_GEN)/version.h \
-	$(ZEPHYR_GEN)/syscalls/log_msg.h
+	$(BUILD)/zephyr_gen_root/zephyr/version.h \
+	$(BUILD)/zephyr_gen_root/zephyr/syscalls/log_msg.h
 
 # POSIX architecture uses static offsets.h stub (no real offsets needed)
 # Other architectures would generate offsets.h from offsets.c
 ifneq ($(ZEPHYR_ARCH),posix)
-ZEPHYR_GEN_HEADERS += $(ZEPHYR_GEN)/offsets.h
+ZEPHYR_GEN_HEADERS += $(BUILD)/zephyr_gen_root/zephyr/offsets.h
 endif
 
 # Offsets source file (architecture-specific)
@@ -57,27 +58,29 @@ endif
 
 # Rule to compile offsets.c to object file
 # Note: ZEPHYR_OFFSETS_EXTRA_CFLAGS can be set by ports (e.g., to undefine STM32 macros)
-$(BUILD)/zephyr_offsets.o: $(ZEPHYR_OFFSETS_C) $(ZEPHYR_GEN)/version.h
+$(BUILD)/zephyr_offsets.o: $(ZEPHYR_OFFSETS_C) $(BUILD)/zephyr_gen_root/zephyr/version.h
 	@echo "CC (Zephyr offsets) $<"
 	$(Q)$(CC) $(CFLAGS) $(ZEPHYR_INC) $(ZEPHYR_CFLAGS) $(ZEPHYR_OFFSETS_EXTRA_CFLAGS) \
 		-include $(ZEPHYR_KERNEL)/zephyr_config_cortex_m.h -c -o $@ $<
 
 # Rule to generate offsets.h from offsets.o using Zephyr's official script
-$(ZEPHYR_GEN)/offsets.h: $(BUILD)/zephyr_offsets.o
+$(BUILD)/zephyr_gen_root/zephyr/offsets.h: $(BUILD)/zephyr_offsets.o
 	@echo "GEN (Zephyr) $@"
+	$(Q)mkdir -p $(dir $@)
 	$(Q)python3 $(ZEPHYR_BASE)/scripts/build/gen_offset_header.py \
 		-i $< \
 		-o $@
 
 # Rule to generate version.h from Zephyr VERSION file
-$(ZEPHYR_GEN)/version.h: $(ZEPHYR_BASE)/VERSION $(ZEPHYR_KERNEL)/gen_zephyr_version.py
+$(BUILD)/zephyr_gen_root/zephyr/version.h: $(ZEPHYR_BASE)/VERSION $(ZEPHYR_KERNEL)/gen_zephyr_version.py
 	@echo "GEN (Zephyr) $@"
+	$(Q)mkdir -p $(dir $@)
 	$(Q)python3 $(ZEPHYR_KERNEL)/gen_zephyr_version.py \
 		-i $< \
 		-o $@
 
 # Rule to generate empty log_msg.h stub (logging disabled)
-$(ZEPHYR_GEN)/syscalls/log_msg.h:
+$(BUILD)/zephyr_gen_root/zephyr/syscalls/log_msg.h:
 	@echo "GEN (Zephyr) $@"
 	$(Q)mkdir -p $(dir $@)
 	$(Q)echo '/* Auto-generated log_msg syscalls stub - logging disabled (CONFIG_LOG=0) */' > $@
@@ -126,7 +129,7 @@ ZEPHYR_ARCH_SRC_C += \
 	$(ZEPHYR_KERNEL)/posix_minimal_board.c
 
 # Add POSIX arch include paths (generated headers and arch headers)
-ZEPHYR_INC += -I$(ZEPHYR_KERNEL)/generated/zephyr/arch/posix
+ZEPHYR_INC += -I$(BUILD)/zephyr_gen_root/zephyr/arch/posix
 ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/posix/include
 endif
 
@@ -154,7 +157,7 @@ ZEPHYR_ARCH_SRC_S := \
 	$(ZEPHYR_BASE)/arch/arm/core/cortex_m/swap_helper.S
 
 # Add ARM Cortex-M include paths
-ZEPHYR_INC += -I$(ZEPHYR_KERNEL)/generated/zephyr/arch/arm
+ZEPHYR_INC += -I$(BUILD)/zephyr_gen_root/zephyr/arch/arm
 ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/arm/include
 ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/arm/include/cortex_m
 ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/arm/core/cortex_m
@@ -163,7 +166,7 @@ ZEPHYR_INC += -I$(ZEPHYR_BASE)/arch/arm/core/cortex_m
 CMSIS_DIR ?= $(TOP)/lib/cmsis
 ZEPHYR_INC += -I$(CMSIS_DIR)/inc
 # Add our CMSIS wrapper (provides cmsis_core.h)
-ZEPHYR_INC += -I$(ZEPHYR_KERNEL)/generated
+ZEPHYR_INC += -I$(BUILD)/zephyr_gen_root
 endif
 
 # Export for ports to use
