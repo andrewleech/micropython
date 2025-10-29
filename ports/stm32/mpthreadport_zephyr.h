@@ -31,15 +31,13 @@
 
 #include <zephyr/kernel.h>
 
-// Mutex types using Zephyr k_sem (binary semaphore)
-// Need a binary semaphore so a lock can be acquired on one Python thread
-// and then released on another (required for GIL).
+// Mutex types using Zephyr k_mutex
 typedef struct _mp_thread_mutex_t {
-    struct k_sem handle;
+    struct k_mutex handle;
 } mp_thread_mutex_t;
 
 typedef struct _mp_thread_recursive_mutex_t {
-    struct k_sem handle;
+    struct k_mutex handle;
 } mp_thread_recursive_mutex_t;
 
 // Threading functions (implemented in extmod/zephyr_kernel/mpthread_zephyr.c)

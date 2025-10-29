@@ -384,43 +384,38 @@ void mp_thread_finish(void) {
     mp_thread_mutex_unlock(&thread_mutex);
 }
 
-// Initialize mutex - use Zephyr's k_sem (binary semaphore)
-// Need a binary semaphore so a lock can be acquired on one Python thread
-// and then released on another (required for GIL).
+// Initialize mutex - use Zephyr's k_mutex (recursive by default)
 void mp_thread_mutex_init(mp_thread_mutex_t *mutex) {
-    k_sem_init(&mutex->handle, 0, 1);
-    k_sem_give(&mutex->handle);
+    k_mutex_init(&mutex->handle);
 }
 
 // Lock mutex
 int mp_thread_mutex_lock(mp_thread_mutex_t *mutex, int wait) {
-    int ret = k_sem_take(&mutex->handle, wait ? K_FOREVER : K_NO_WAIT);
+    int ret = k_mutex_lock(&mutex->handle, wait ? K_FOREVER : K_NO_WAIT);
     return ret == 0;  // Return 1 on success, 0 on failure
 }
 
 // Unlock mutex
 void mp_thread_mutex_unlock(mp_thread_mutex_t *mutex) {
-    k_sem_give(&mutex->handle);
-    k_yield();
+    k_mutex_unlock(&mutex->handle);
+    // Note: Do NOT call k_yield() here - it can cause crashes during thread
+    // creation/destruction and the Zephyr scheduler will handle preemption
 }
 
 // Recursive mutex functions (for GC and memory allocation)
-// Note: k_sem is not inherently recursive, but MicroPython's usage pattern
-// typically doesn't require true recursion for these mutexes.
+// Zephyr's k_mutex is recursive by default, so these are the same as regular mutex
 
 void mp_thread_recursive_mutex_init(mp_thread_recursive_mutex_t *mutex) {
-    k_sem_init(&mutex->handle, 0, 1);
-    k_sem_give(&mutex->handle);
+    k_mutex_init(&mutex->handle);
 }
 
 int mp_thread_recursive_mutex_lock(mp_thread_recursive_mutex_t *mutex, int wait) {
-    int ret = k_sem_take(&mutex->handle, wait ? K_FOREVER : K_NO_WAIT);
+    int ret = k_mutex_lock(&mutex->handle, wait ? K_FOREVER : K_NO_WAIT);
     return ret == 0;  // Return 1 on success, 0 on failure
 }
 
 void mp_thread_recursive_mutex_unlock(mp_thread_recursive_mutex_t *mutex) {
-    k_sem_give(&mutex->handle);
-    k_yield();
+    k_mutex_unlock(&mutex->handle);
 }
 
 // Helper: Thread iteration callback for GC
