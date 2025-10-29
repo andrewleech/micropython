@@ -20,9 +20,13 @@
 #endif
 
 /* Define specific NVIC devicetree properties that Zephyr needs */
-/* NUM_IRQ_PRIO_BITS: Number of priority bits (3 for Cortex-M3) */
+/* NUM_IRQ_PRIO_BITS: Derive from device-specific CMSIS header __NVIC_PRIO_BITS */
 #ifndef DT_N_INST_0_arm_v7m_nvic_P_arm_num_irq_priority_bits
-#define DT_N_INST_0_arm_v7m_nvic_P_arm_num_irq_priority_bits 3
+  #if defined(__NVIC_PRIO_BITS)
+    #define DT_N_INST_0_arm_v7m_nvic_P_arm_num_irq_priority_bits __NVIC_PRIO_BITS
+  #else
+    #define DT_N_INST_0_arm_v7m_nvic_P_arm_num_irq_priority_bits 3  // Fallback for Cortex-M3
+  #endif
 #endif
 
 #endif /* MICROPYTHON_DEVICETREE_FIXUP_H */

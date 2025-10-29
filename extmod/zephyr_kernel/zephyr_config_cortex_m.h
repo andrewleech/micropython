@@ -127,7 +127,7 @@ typedef enum {
 
 // Timeslicing
 #define CONFIG_TIMESLICING 1
-#define CONFIG_TIMESLICE_SIZE 0  // Disabled - using priority-based preemption instead
+#define CONFIG_TIMESLICE_SIZE 10  // 10ms time slices - ENABLE PREEMPTIVE MULTITASKING
 #define CONFIG_TIMESLICE_PRIORITY 0
 
 // Memory and heap
@@ -240,6 +240,11 @@ typedef enum {
 #define CONFIG_ARMV7_M_ARMV8_M_MAINLINE 1  // Cortex-M3/M4/M7/M33
 #define CONFIG_ARCH "arm"
 #define CONFIG_ASSEMBLER_ISA_THUMB2 1  // Cortex-M uses Thumb-2 instruction set
+
+// Cortex-M4 has programmable fault exception priorities
+// This enables _EXCEPTION_RESERVED_PRIO=1, making _EXC_IRQ_DEFAULT_PRIO=0x10 instead of 0x00
+// Without this, arch_irq_lock() sets BASEPRI=0x00 which disables all masking
+#define CONFIG_CPU_CORTEX_M_HAS_PROGRAMMABLE_FAULT_PRIOS 1
 
 // ARM-specific options
 #define CONFIG_ARCH_HAS_CUSTOM_BUSY_WAIT 1

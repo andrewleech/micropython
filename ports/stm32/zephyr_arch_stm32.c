@@ -20,11 +20,21 @@
 #include <string.h>
 #include <stdbool.h>
 
+// CRITICAL: Include CMSIS device header FIRST to define __NVIC_PRIO_BITS
+// This must come before any Zephyr headers, because devicetree_fixup.h checks
+// for __NVIC_PRIO_BITS to determine NUM_IRQ_PRIO_BITS. If not defined, it falls
+// back to 3 (Cortex-M3), causing _EXC_IRQ_DEFAULT_PRIO to be 0x20 instead of 0x10.
+// This breaks interrupt masking because SysTick (also at 0x20) won't be masked!
+#if MICROPY_ZEPHYR_THREADING
+// Force inclusion of device-specific CMSIS header via STM32 HAL
+#include "py/mphal.h"  // This indirectly includes stm32fxxx.h which defines __NVIC_PRIO_BITS
+#endif
+
 #include "py/runtime.h"
-#include "py/mphal.h"
 
 // STM32 HAL headers - use port's proven includes
 #include "irq.h"
+#include "powerctrl.h"
 
 // Provide minimal CONFIG symbols (normally from autoconf.h)
 #ifndef CONFIG_SYS_CLOCK_TICKS_PER_SEC
@@ -36,7 +46,7 @@
 
 #if MICROPY_ZEPHYR_THREADING
 
-// Include Zephyr headers
+// Include Zephyr headers (NOW __NVIC_PRIO_BITS is defined)
 #include <zephyr/kernel.h>
 #include <zephyr/kernel_structs.h>
 #include <zephyr/arch/cpu.h>
@@ -170,6 +180,8 @@ void mp_zephyr_arch_init(void) {
 // Enable SysTick interrupt - must be called AFTER kernel is fully initialized
 // This should be called from micropython_main_thread_entry() after z_cstart() completes
 void mp_zephyr_arch_enable_systick_interrupt(void) {
+    // Set SysTick priority to maskable level (SystemClock_Config resets it to 0x00)
+    NVIC_SetPriority(SysTick_IRQn, IRQ_PRI_SYSTICK);
     // Enable SysTick interrupt (add TICKINT bit to existing configuration)
     *SYST_CSR_ADDR = SYST_CSR_ENABLE | SYST_CSR_CLKSOURCE | SYST_CSR_TICKINT;
 }

@@ -169,7 +169,14 @@ static inline void restore_irq_pri(uint32_t state) {
 
 #else
 
+// For Zephyr threading, SysTick must be at priority >= 2 so arch_irq_lock() can mask it
+// arch_irq_lock() sets BASEPRI to _EXC_IRQ_DEFAULT_PRIO (0x10), which masks priority >= 1
+// Priority 0 (highest) cannot be masked, so we use priority 2 (0x20) to allow masking
+#if MICROPY_ZEPHYR_THREADING
+#define IRQ_PRI_SYSTICK         NVIC_EncodePriority(NVIC_PRIORITYGROUP_4, 2, 0)
+#else
 #define IRQ_PRI_SYSTICK         NVIC_EncodePriority(NVIC_PRIORITYGROUP_4, 0, 0)
+#endif
 
 // The UARTs have no FIFOs, so if they don't get serviced quickly then characters
 // get dropped. The handling for each character only consumes about 0.5 usec

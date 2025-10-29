@@ -525,7 +525,12 @@ void stm32_main(uint32_t reset_mode) {
     #endif
 
     // SysTick is needed by HAL_RCC_ClockConfig (called in SystemClock_Config)
+    // For Zephyr threading, use IRQ_PRI_SYSTICK which is set to a maskable priority
+    #if MICROPY_ZEPHYR_THREADING
+    HAL_InitTick(IRQ_PRI_SYSTICK);
+    #else
     HAL_InitTick(TICK_INT_PRIORITY);
+    #endif
 
     // set the system clock to be HSE
     SystemClock_Config();
