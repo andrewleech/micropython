@@ -317,20 +317,21 @@ void micropython_main_thread_entry(void *p1, void *p2, void *p3) {
     (void)p2;
     (void)p3;
 
-    // Enable SysTick interrupt now that Zephyr kernel is fully initialized
-    extern void mp_zephyr_arch_enable_systick_interrupt(void);
-    mp_zephyr_arch_enable_systick_interrupt();
-
     // NOTE: We're now running in z_main_thread context, not boot/dummy context
     // This means k_thread_create() and other threading operations are safe
 
-    // Initialize MicroPython threading (Zephyr-specific)
+    // Initialize MicroPython threading FIRST (before enabling SysTick)
+    // This ensures the main thread is properly registered before timer interrupts start
     char stack_dummy;
     if (!mp_thread_init(&stack_dummy)) {
         mp_printf(&mp_plat_print, "Failed to initialize threading\n");
         // In thread context, can't return - just loop forever
         for (;;) {}
     }
+
+    // THEN enable SysTick interrupt now that threading is fully initialized
+    extern void mp_zephyr_arch_enable_systick_interrupt(void);
+    mp_zephyr_arch_enable_systick_interrupt();
 
     // Initialize board state for main loop
     boardctrl_state_t state;
