@@ -329,6 +329,10 @@ void micropython_main_thread_entry(void *p1, void *p2, void *p3) {
         for (;;) {}
     }
 
+    // Initialize stdio mutex for thread-safe print()
+    extern void mp_hal_stdio_init(void);
+    mp_hal_stdio_init();
+
     // THEN enable SysTick interrupt now that threading is fully initialized
     extern void mp_zephyr_arch_enable_systick_interrupt(void);
     mp_zephyr_arch_enable_systick_interrupt();
