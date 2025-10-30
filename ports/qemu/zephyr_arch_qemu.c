@@ -304,16 +304,6 @@ void *k_mem_map_phys_guard(uintptr_t phys, size_t size, uint32_t flags, bool is_
     return NULL;
 }
 
-// Start a newly created thread (called from mpthread)
-// Threads are created with K_NO_WAIT so they're already in the ready queue
-void mp_zephyr_thread_start(struct k_thread *thread) {
-    // Thread is already in ready queue (created with K_NO_WAIT)
-    // Just trigger PendSV to force a context switch
-    // This will cause the scheduler to run and switch to the new thread if it has higher priority
-    (void)thread;  // Unused - thread is already ready
-    *SCB_ICSR_ADDR = SCB_ICSR_PENDSVSET;
-}
-
 // Scheduler lock/unlock (use simple critical sections for single-core)
 void z_sched_lock(void) {
     // Disable interrupts for critical section
