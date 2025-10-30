@@ -125,9 +125,11 @@ typedef enum {
 #define CONFIG_TICKLESS_KERNEL 0
 #define CONFIG_TIMEOUT_64BIT 1
 
-// Timeslicing
+// Timeslicing - REQUIRED for preemptive multitasking
 #define CONFIG_TIMESLICING 1
-#define CONFIG_TIMESLICE_SIZE 10  // 10ms time slices - ENABLE PREEMPTIVE MULTITASKING
+#define CONFIG_TIMESLICE_SIZE 10  // 10ms time slices - MUST REMAIN ENABLED
+                                   // Preemptive multitasking is fundamental requirement
+                                   // See extmod/zephyr_kernel/SCHEDULER_ANALYSIS.md
 #define CONFIG_TIMESLICE_PRIORITY 0
 
 // Memory and heap

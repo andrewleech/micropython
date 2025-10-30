@@ -21,6 +21,12 @@
 
 #include "../zephyr_kernel.h"
 
+// Include internal Zephyr kernel headers for z_mark_thread_as_not_sleeping()
+#include "../../../lib/zephyr/kernel/include/kthread.h"
+
+// Forward declaration for z_ready_thread() (defined in kernel/sched.c)
+void z_ready_thread(struct k_thread *thread);
+
 // Thread-local storage for mp_state_thread_t pointer
 // Use Zephyr's k_thread_custom_data mechanism for per-thread storage
 // This works on all architectures (ARM Cortex-M, POSIX, etc.)
@@ -310,15 +316,15 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("maximum number of threads reached"));
     }
 
-    // Create Zephyr thread with K_NO_WAIT so it's ready to run immediately
-    // We'll manually control when it starts via mp_zephyr_thread_start()
+    // Create Zephyr thread with K_FOREVER so it stays unscheduled initially
+    // We'll manually wake it and add to ready queue following official Zephyr pattern
     th->id = k_thread_create(
         &th->z_thread,
         mp_thread_stack_array[_slot],
         K_THREAD_STACK_SIZEOF(mp_thread_stack_array[_slot]),
         zephyr_entry,
         entry, arg, NULL,
-        priority, 0, K_NO_WAIT
+        priority, 0, K_FOREVER
         );
 
     if (th->id == NULL) {
@@ -347,17 +353,20 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     // Adjust stack size to leave margin
     *stack_size = th->z_thread.stack_info.size - 1024;
 
-    mp_thread_mutex_unlock(&thread_mutex);
-
     DEBUG_printf("Created thread %s (id=%p)\n", name, th->id);
 
-    // Manually start the thread using our custom function that calls z_ready_thread
-    // (k_thread_start uses k_wakeup which only works for sleeping threads)
-    // IMPORTANT: This must be called AFTER unlocking the mutex to allow context switch
-    extern void mp_zephyr_thread_start(struct k_thread *thread);
-    mp_zephyr_thread_start(th->id);
+    // Mark thread as not sleeping and add to ready queue
+    // This follows official Zephyr's prepare_multithreading() pattern (init.c:467-468)
+    // Note: z_ready_thread() uses K_SPINLOCK internally for IRQ protection
+    z_mark_thread_as_not_sleeping(th->id);
+    z_ready_thread(th->id);
 
-    // Note: The new thread will run when PendSV fires (triggered by mp_zephyr_thread_start)
+    mp_thread_mutex_unlock(&thread_mutex);
+
+    // Trigger context switch to give new thread a chance to run
+    // This just sets PendSV which will fire when we return to thread mode
+    extern void mp_zephyr_arch_yield(void);
+    mp_zephyr_arch_yield();
 
     return (mp_uint_t)th->id;
 }

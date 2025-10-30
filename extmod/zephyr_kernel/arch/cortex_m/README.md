@@ -108,6 +108,16 @@ The architecture layer requires these Zephyr kernel options (provided by `zephyr
 #define CONFIG_TIMESLICE_SIZE 10  // 10ms timeslice
 ```
 
+### Preemptive Multitasking Requirement
+
+**CRITICAL**: `CONFIG_TIMESLICING` and `CONFIG_TIMESLICE_SIZE` MUST remain enabled. These provide preemptive multitasking, which is a fundamental requirement for Zephyr threading.
+
+Without time slicing, threads only switch at explicit yield points (like `time.sleep_ms()` or lock acquisition). This defeats the primary benefit of threading - threads cannot be preempted mid-execution based on priority and time slices. This makes threading effectively useless for real applications.
+
+The Zephyr scheduler infrastructure provides proper spinlock-based synchronization to protect scheduler data structures (rb-trees) from interrupt reentrancy. All scheduler files (sched.c, timeslicing.c, timeout.c, rb.c) are integrated and properly locked.
+
+See `extmod/zephyr_kernel/SCHEDULER_ANALYSIS.md` for detailed analysis of preemptive multitasking requirements.
+
 ## Compatibility
 
 This architecture layer is compatible with:
