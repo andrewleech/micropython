@@ -8,21 +8,6 @@
 #include "usb.h"
 #include "uart.h"
 
-#if MICROPY_PY_THREAD
-#include "py/mpthread.h"
-
-// Mutex to protect UART/stdio from concurrent thread access
-static mp_thread_mutex_t stdio_mutex;
-static bool stdio_mutex_initialized = false;
-
-void mp_hal_stdio_init(void) {
-    if (!stdio_mutex_initialized) {
-        mp_thread_mutex_init(&stdio_mutex);
-        stdio_mutex_initialized = true;
-    }
-}
-#endif
-
 // this table converts from HAL_StatusTypeDef to POSIX errno
 const byte mp_hal_status_to_errno_table[4] = {
     [HAL_OK] = 0,
@@ -73,13 +58,6 @@ MP_WEAK int mp_hal_stdin_rx_chr(void) {
 }
 
 MP_WEAK mp_uint_t mp_hal_stdout_tx_strn(const char *str, size_t len) {
-    #if MICROPY_PY_THREAD
-    // Protect UART/stdio access from concurrent threads
-    // Mutex should be initialized during startup, but check just in case
-    mp_hal_stdio_init();
-    mp_thread_mutex_lock(&stdio_mutex, 1);
-    #endif
-
     mp_uint_t ret = len;
     bool did_write = false;
     if (MP_STATE_PORT(pyb_stdio_uart) != NULL) {
@@ -94,11 +72,6 @@ MP_WEAK mp_uint_t mp_hal_stdout_tx_strn(const char *str, size_t len) {
         did_write = true;
         ret = MIN((mp_uint_t)dupterm_res, ret);
     }
-
-    #if MICROPY_PY_THREAD
-    mp_thread_mutex_unlock(&stdio_mutex);
-    #endif
-
     return did_write ? ret : 0;
 }
 
