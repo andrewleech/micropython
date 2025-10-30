@@ -355,13 +355,13 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
 
     DEBUG_printf("Created thread %s (id=%p)\n", name, th->id);
 
-    // Mark thread as not sleeping and add to ready queue
+    // Mark thread as not sleeping, then UNLOCK MUTEX before adding to ready queue
     // This follows official Zephyr's prepare_multithreading() pattern (init.c:467-468)
+    // CRITICAL: Must unlock BEFORE z_ready_thread() to allow context switch to occur
     // Note: z_ready_thread() uses K_SPINLOCK internally for IRQ protection
     z_mark_thread_as_not_sleeping(th->id);
-    z_ready_thread(th->id);
-
     mp_thread_mutex_unlock(&thread_mutex);
+    z_ready_thread(th->id);
 
     // Trigger context switch to give new thread a chance to run
     // This just sets PendSV which will fire when we return to thread mode

@@ -23,7 +23,7 @@
 
 // Include devicetree fixup BEFORE any CONFIG defines
 // This must be first to stub out problematic DT macros
-#include "zephyr/devicetree_fixup.h"
+#include "generated/zephyr/devicetree_fixup.h"
 
 // Device-specific CMSIS definitions (required before including CMSIS headers)
 // These would normally come from device-specific headers like stm32f4xx.h
