@@ -262,6 +262,16 @@ static void zephyr_entry(void *arg1, void *arg2, void *arg3) {
     // Set up thread-local storage using pre-allocated state
     mp_thread_set_state(self->thread_state);
 
+    // Initialize thread state fields
+    self->thread_state->gc_lock_depth = 0;
+    self->thread_state->nlr_top = NULL;
+    self->thread_state->nlr_jump_callback_top = NULL;
+    self->thread_state->mp_pending_exception = MP_OBJ_NULL;
+
+    // Inherit globals/locals from main thread
+    mp_locals_set(mp_state_ctx.thread.dict_locals);
+    mp_globals_set(mp_state_ctx.thread.dict_globals);
+
     // Get stack info from current thread
     struct k_thread *current = k_current_get();
     void *stack_top = (void *)((uintptr_t)current->stack_info.start + current->stack_info.size);
