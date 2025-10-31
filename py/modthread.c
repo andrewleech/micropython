@@ -158,9 +158,6 @@ static void *thread_entry(void *args_in) {
 
     thread_entry_args_t *args = (thread_entry_args_t *)args_in;
 
-    #if !MICROPY_ZEPHYR_THREADING
-    // For Zephyr threading, thread state is already initialized by zephyr_entry()
-    // using heap-allocated state. Do NOT reinitialize here with local variable.
     mp_state_thread_t ts;
     mp_thread_init_state(&ts, args->stack_size, args->dict_locals, args->dict_globals);
 
@@ -169,23 +166,15 @@ static void *thread_entry(void *args_in) {
     mp_obj_t mini_pystack[128];
     mp_pystack_init(mini_pystack, &mini_pystack[128]);
     #endif
-    #endif
 
     MP_THREAD_GIL_ENTER();
 
-    #if !MICROPY_ZEPHYR_THREADING
-    // For Zephyr threading, mp_thread_start() is already called by zephyr_entry()
     mp_thread_start();
-    #endif
 
     // TODO set more thread-specific state here:
     //  cur_exception (root pointer)
 
-    #if !MICROPY_ZEPHYR_THREADING
     DEBUG_printf("[thread] start ts=%p args=%p stack=%p\n", &ts, &args, MP_STATE_THREAD(stack_top));
-    #else
-    DEBUG_printf("[thread] start args=%p stack=%p\n", &args, MP_STATE_THREAD(stack_top));
-    #endif
 
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {

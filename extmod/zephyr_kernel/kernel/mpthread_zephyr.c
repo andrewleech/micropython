@@ -73,7 +73,6 @@ typedef struct _mp_thread_t {
     void *arg;                      // Python args (GC root pointer)
     void *stack;                    // Stack pointer
     size_t stack_len;               // Stack size in words
-    mp_state_thread_t *thread_state;// Python thread state (GC root)
     struct _mp_thread_t *next;      // Next in linked list
 } mp_thread_t;
 
@@ -103,7 +102,6 @@ bool mp_thread_init(void *stack) {
     thread_entry0.arg = NULL;
     thread_entry0.stack = stack;
     thread_entry0.stack_len = 0;  // Bootstrap thread uses C runtime stack, size unknown
-    thread_entry0.thread_state = &mp_state_ctx.thread;  // Main thread uses global state
     thread_entry0.next = NULL;
 
     k_thread_name_set(thread_entry0.id, "mp_main");
@@ -190,7 +188,6 @@ void mp_thread_gc_others(void) {
 
         gc_collect_root((void **)&th, 1);
         gc_collect_root(&th->arg, 1);
-        gc_collect_root((void **)&th->thread_state, 1);  // Scan thread state
 
         if (th->id == k_current_get()) {
             continue;  // Don't scan current thread's stack (done separately)
@@ -239,59 +236,11 @@ void mp_thread_start(void) {
 static void zephyr_entry(void *arg1, void *arg2, void *arg3) {
     (void)arg3;
 
-    // Get the mp_thread_t structure for this thread (passed via arg3 actually stored in custom_data)
-    // Find our thread in the list
-    mp_thread_t *self = NULL;
-    k_tid_t current_tid = k_current_get();
-
-    mp_thread_mutex_lock(&thread_mutex, 1);
-    for (mp_thread_t *th = thread; th != NULL; th = th->next) {
-        if (th->id == current_tid) {
-            self = th;
-            break;
-        }
-    }
-    mp_thread_mutex_unlock(&thread_mutex);
-
-    if (self == NULL || self->thread_state == NULL) {
-        // Fatal error - thread state not set up
-        k_thread_abort(current_tid);
-        for (;;) { ; }
-    }
-
-    // Set up thread-local storage using pre-allocated state
-    mp_thread_set_state(self->thread_state);
-
-    // Initialize thread state fields
-    self->thread_state->gc_lock_depth = 0;
-    self->thread_state->nlr_top = NULL;
-    self->thread_state->nlr_jump_callback_top = NULL;
-    self->thread_state->mp_pending_exception = MP_OBJ_NULL;
-
-    // Inherit globals/locals from main thread
-    mp_locals_set(mp_state_ctx.thread.dict_locals);
-    mp_globals_set(mp_state_ctx.thread.dict_globals);
-
-    // Get stack info from current thread
-    struct k_thread *current = k_current_get();
-    void *stack_top = (void *)((uintptr_t)current->stack_info.start + current->stack_info.size);
-    size_t stack_limit = current->stack_info.size - 1024;  // Leave margin for Zephyr
-
-    // Set up stack bounds for Python stack checking
-    mp_stack_set_top(stack_top);
-    mp_stack_set_limit(stack_limit);
-
-    // Mark thread as started (updates status to READY)
-    mp_thread_start();
-
-    // Now safe to execute Python code
+    // arg1 contains the python thread entry point
     if (arg1) {
         void *(*entry)(void *) = arg1;
         entry(arg2);
     }
-
-    // Clean up when thread finishes
-    mp_thread_finish();
     k_thread_abort(k_current_get());
     for (;;) {
         ;  // Never reached
@@ -310,10 +259,8 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     // Try to garbage collect old threads
     gc_collect();
 
-    // Allocate thread node and thread state (must be outside mutex lock for GC)
+    // Allocate thread node (must be outside mutex lock for GC)
     mp_thread_t *th = m_new_obj(mp_thread_t);
-    mp_state_thread_t *ts = m_new_obj(mp_state_thread_t);
-    memset(ts, 0, sizeof(mp_state_thread_t));
 
     mp_thread_mutex_lock(&thread_mutex, 1);
 
@@ -321,25 +268,23 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     int32_t _slot = mp_thread_find_stack_slot();
     if (_slot < 0) {
         mp_thread_mutex_unlock(&thread_mutex);
-        m_del_obj(mp_state_thread_t, ts);  // Clean up allocated memory
         m_del_obj(mp_thread_t, th);
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("maximum number of threads reached"));
     }
 
-    // Create Zephyr thread with K_FOREVER so it stays unscheduled initially
-    // We'll manually wake it and add to ready queue following official Zephyr pattern
+    // Create Zephyr thread with K_NO_WAIT to start immediately
+    // This matches the ports/zephyr pattern
     th->id = k_thread_create(
         &th->z_thread,
         mp_thread_stack_array[_slot],
         K_THREAD_STACK_SIZEOF(mp_thread_stack_array[_slot]),
         zephyr_entry,
         entry, arg, NULL,
-        priority, 0, K_FOREVER
+        priority, 0, K_NO_WAIT
         );
 
     if (th->id == NULL) {
         mp_thread_mutex_unlock(&thread_mutex);
-        m_del_obj(mp_state_thread_t, ts);  // Clean up allocated memory
         m_del_obj(mp_thread_t, th);
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("can't create thread"));
     }
@@ -353,7 +298,6 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     th->arg = arg;
     th->stack = (void *)th->z_thread.stack_info.start;
     th->stack_len = th->z_thread.stack_info.size / sizeof(uintptr_t);
-    th->thread_state = ts;  // Store pre-allocated thread state
     th->next = thread;
     thread = th;
 
@@ -365,18 +309,7 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
 
     DEBUG_printf("Created thread %s (id=%p)\n", name, th->id);
 
-    // Mark thread as not sleeping, then UNLOCK MUTEX before adding to ready queue
-    // This follows official Zephyr's prepare_multithreading() pattern (init.c:467-468)
-    // CRITICAL: Must unlock BEFORE z_ready_thread() to allow context switch to occur
-    // Note: z_ready_thread() uses K_SPINLOCK internally for IRQ protection
-    z_mark_thread_as_not_sleeping(th->id);
     mp_thread_mutex_unlock(&thread_mutex);
-    z_ready_thread(th->id);
-
-    // Trigger context switch to give new thread a chance to run
-    // This just sets PendSV which will fire when we return to thread mode
-    extern void mp_zephyr_arch_yield(void);
-    mp_zephyr_arch_yield();
 
     return (mp_uint_t)th->id;
 }
