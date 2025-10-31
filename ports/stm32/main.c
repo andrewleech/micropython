@@ -310,6 +310,13 @@ static bool init_sdcard_fs(void) {
 #endif
 
 #if MICROPY_ZEPHYR_THREADING
+// Static heap for Zephyr threading builds to avoid overlap with thread stacks
+// Thread stacks go into .noinit section after .bss, so we use a static array in .bss
+// This ensures clear separation between heap and thread stack memory regions
+// Reduced to 40KB to fit in NUCLEO_F429ZI RAM (192KB total) with thread stacks (50KB)
+#define MICROPY_HEAP_SIZE (40 * 1024)
+static char heap[MICROPY_HEAP_SIZE];
+
 // Zephyr threading entry point - called by Zephyr kernel after z_cstart()
 // This function runs in z_main_thread context after kernel initialization
 void micropython_main_thread_entry(void *p1, void *p2, void *p3) {
@@ -351,8 +358,8 @@ micropython_soft_reset:
     // Stack limit init (symbols declared in gccollect.h)
     mp_cstack_init_with_top(&_estack, (char *)&_estack - (char *)&_sstack);
 
-    // GC init
-    gc_init(MICROPY_HEAP_START, MICROPY_HEAP_END);
+    // GC init with static heap (avoids overlap with thread stacks in .noinit section)
+    gc_init(heap, heap + sizeof(heap));
 
     #if MICROPY_ENABLE_PYSTACK
     static mp_obj_t pystack[384];
