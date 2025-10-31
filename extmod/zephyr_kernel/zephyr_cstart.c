@@ -55,8 +55,10 @@ static struct k_thread dummy_thread;
 struct k_thread z_main_thread;
 K_THREAD_STACK_DEFINE(z_main_stack, CONFIG_MAIN_STACK_SIZE);
 
-// TODO: z_init_cpu implementation requires idle thread and IRQ stack arrays
-// from Zephyr's init.c which we're not building. For now, testing without it.
+// TODO: z_init_cpu() initializes idle thread, IRQ stack, and CPU struct fields.
+// Not required for minimal threading: MicroPython main thread never idles (always
+// running REPL), IRQ stack already set up by CMSIS/HAL, single-CPU only.
+// Would be needed for: power management (idle thread sleep), SMP, per-CPU IRQ stacks.
 
 /**
  * prepare_multithreading - Initialize main thread and ready queue
@@ -91,7 +93,7 @@ static char *prepare_multithreading(void) {
     z_mark_thread_as_not_sleeping(&z_main_thread);
     z_ready_thread(&z_main_thread);
 
-    // TODO: Initialize CPU 0 - requires implementing z_init_cpu() with idle thread support
+    // TODO: z_init_cpu(0) - see TODO comment at top of file for why not needed yet
     // z_init_cpu(0);
 
     return stack_ptr;
