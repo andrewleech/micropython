@@ -221,15 +221,14 @@ mp_uint_t mp_thread_get_id(void) {
 
 // Mark thread as started (called by new thread)
 void mp_thread_start(void) {
-    // Update status without locking - the thread list is only modified by
-    // the main thread, and we're only updating our own status field.
-    // The status field is used for informational purposes only.
+    mp_thread_mutex_lock(&thread_mutex, 1);
     for (mp_thread_t *th = thread; th != NULL; th = th->next) {
         if (th->id == k_current_get()) {
             th->status = MP_THREAD_STATUS_READY;
             break;
         }
     }
+    mp_thread_mutex_unlock(&thread_mutex);
 }
 
 // Zephyr thread entry point wrapper
@@ -249,14 +248,16 @@ static void zephyr_entry(void *arg1, void *arg2, void *arg3) {
 
 // Create new thread
 mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_size, int priority, char *name) {
-    // Default stack size
-    if (*stack_size == 0) {
-        *stack_size = MP_THREAD_DEFAULT_STACK_SIZE;
-    } else if (*stack_size < MP_THREAD_MIN_STACK_SIZE) {
-        *stack_size = MP_THREAD_MIN_STACK_SIZE;
-    }
+    // TODO: we need to support CONFIG_DYNAMIC_THREAD in order to dynamically allocate the stack of a thread
+    // For now we use statically allocated stacks, so stack_size parameter is ignored during creation
+    // but we still update it to reflect the actual stack size allocated
+    // if (*stack_size == 0) {
+    //     *stack_size = MP_THREAD_DEFAULT_STACK_SIZE;
+    // } else if (*stack_size < MP_THREAD_MIN_STACK_SIZE) {
+    //     *stack_size = MP_THREAD_MIN_STACK_SIZE;
+    // }
 
-    // Try to garbage collect old threads
+    // in case some threads have finished but their stack has not been collected yet
     gc_collect();
 
     // Allocate thread node (must be outside mutex lock for GC)
