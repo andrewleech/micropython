@@ -529,7 +529,8 @@ static int eth_mac_init(eth_t *self) {
     #if defined(STM32H5) || defined(STM32H7)
     ETH->DMACRDLAR = (uint32_t)&eth_dma.rx_descr[0];
     #elif defined(STM32N6)
-    // rx descriptor list address register
+    // Set number of RX descriptors and buffer pointers.
+    ETH->DMA_CH[0].DMACRXRLR = RX_BUF_NUM - 1;
     ETH->DMA_CH[0].DMACRXDLAR = (uint32_t)&eth_dma.rx_descr[0];
     ETH->DMA_CH[0].DMACRXDTPR = (uint32_t)&eth_dma.rx_descr[RX_BUF_NUM - 1];
     #else
@@ -559,10 +560,8 @@ static int eth_mac_init(eth_t *self) {
 
     ETH->DMACTDLAR = (uint32_t)&eth_dma.tx_descr[0];
     #elif defined(STM32N6)
-    // set number of descriptors and buffers
-    // ring length register
+    // Set number of TX descriptors and buffer pointers.
     ETH->DMA_CH[0].DMACTXRLR = TX_BUF_NUM - 1;
-    ETH->DMA_CH[0].DMACRXRLR = RX_BUF_NUM - 1;
     ETH->DMA_CH[0].DMACTXDLAR = (uint32_t)&eth_dma.tx_descr[0];
     ETH->DMA_CH[0].DMACTXDTPR = (uint32_t)&eth_dma.tx_descr[1];
     #else
@@ -622,25 +621,25 @@ static int eth_mac_init(eth_t *self) {
     }
 
     maccr |=
-        ETH_INTERPACKETGAP_96BIT
+        ETH_MACCR_IPG_96BIT
         | ETH_MACCR_SARC_REPADDR0
         | ETH_MACCR_IPC
-        | ETH_BACKOFFLIMIT_10
-        | ETH_PREAMBLELENGTH_7;
+        | ETH_MACCR_BL_10
+        | ETH_MACCR_PRELEN_7;
 
     ETH->MACCR = maccr;
     ETH->MACECR = 0x618U;
     ETH->MACWTR = ETH_MACWTR_WTO_2KB;
-    ETH->MACQ0TXFCR = ETH_PAUSELOWTHRESHOLD_MINUS_4;
+    ETH->MACQ0TXFCR = ETH_MACQ0TXFCR_PLT_MINUS4;
     ETH->MACRXFCR = 0;
-    ETH->MACRXQC0R = ETH_RX_QUEUE0_ENABLED | ETH_RX_QUEUE1_DISABLED;
+    ETH->MACRXQC0R = ETH_MACRXQC0R_RXQ0EN_GT | ETH_MACRXQC0R_RXQ1EN_NOT;
 
     ETH->MTLOMR = ETH_MTLOMR_SCHALG_SP | ETH_MTLOMR_RAA_SP;
-    ETH->MTLRXQDMAMR = ETH_MTL_Q0_MAPPED_TO_DMA_CH0 | ETH_MTL_Q1_MAPPED_TO_DMA_CH1;
-    ETH->MTL_QUEUE[0].MTLTXQOMR = ETH_TX_QUEUE_ENABLED | ETH_TRANSMITSTOREFORWARD | ETH_TRANSMIT_QUEUE_SIZE_2048;
-    ETH->MTL_QUEUE[1].MTLTXQOMR = ETH_TX_QUEUE_ENABLED | ETH_TRANSMITSTOREFORWARD | ETH_TRANSMIT_QUEUE_SIZE_2048;
-    ETH->MTL_QUEUE[0].MTLRXQOMR = ETH_RECEIVESTOREFORWARD | ETH_RECEIVE_QUEUE_SIZE_4096;
-    ETH->MTL_QUEUE[1].MTLRXQOMR = ETH_RECEIVESTOREFORWARD | ETH_RECEIVE_QUEUE_SIZE_4096;
+    ETH->MTLRXQDMAMR = ETH_MTLRXQDMAMR_Q0MDMACH_DMACH0 | ETH_MTLRXQDMAMR_Q1MDMACH_DMACH1;
+    ETH->MTL_QUEUE[0].MTLTXQOMR = ETH_MTLTXQxOMR_TXQEN_EN | ETH_MTLTXQxOMR_TSF | 7 << ETH_MTLTXQxOMR_TQS_Pos;
+    ETH->MTL_QUEUE[1].MTLTXQOMR = ETH_MTLTXQxOMR_TXQEN_EN | ETH_MTLTXQxOMR_TSF | 7 << ETH_MTLTXQxOMR_TQS_Pos;
+    ETH->MTL_QUEUE[0].MTLRXQOMR = ETH_MTLRXQxOMR_RSF | 15 << ETH_MTLRXQxOMR_RQS_Pos;
+    ETH->MTL_QUEUE[1].MTLRXQOMR = ETH_MTLRXQxOMR_RSF | 15 << ETH_MTLRXQxOMR_RQS_Pos;
 
     #else
 
