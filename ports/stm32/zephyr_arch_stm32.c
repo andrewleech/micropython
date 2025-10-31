@@ -180,7 +180,8 @@ void mp_zephyr_arch_init(void) {
 // Enable SysTick interrupt - must be called AFTER kernel is fully initialized
 // This should be called from micropython_main_thread_entry() after z_cstart() completes
 void mp_zephyr_arch_enable_systick_interrupt(void) {
-    // Set SysTick priority to maskable level (SystemClock_Config resets it to 0x00)
+    // Verify SysTick priority is still at maskable level
+    // (system_stm32.c now preserves IRQ_PRI_SYSTICK for Zephyr threading)
     NVIC_SetPriority(SysTick_IRQn, IRQ_PRI_SYSTICK);
     // Enable SysTick interrupt (add TICKINT bit to existing configuration)
     *SYST_CSR_ADDR = SYST_CSR_ENABLE | SYST_CSR_CLKSOURCE | SYST_CSR_TICKINT;

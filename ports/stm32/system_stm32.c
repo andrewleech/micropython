@@ -585,7 +585,13 @@ MP_WEAK void SystemClock_Config(void) {
 
     HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
     HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+    // For Zephyr threading, maintain IRQ_PRI_SYSTICK priority set in main.c (priority 2, maskable)
+    // For normal mode, use TICK_INT_PRIORITY (priority 0, non-maskable)
+    #if MICROPY_ZEPHYR_THREADING
+    NVIC_SetPriority(SysTick_IRQn, IRQ_PRI_SYSTICK);
+    #else
     NVIC_SetPriority(SysTick_IRQn, NVIC_EncodePriority(NVIC_PRIORITYGROUP_4, TICK_INT_PRIORITY, 0));
+    #endif
     #endif
 
     #if defined(STM32H7) && !defined(NDEBUG)
