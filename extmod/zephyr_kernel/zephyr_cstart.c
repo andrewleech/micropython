@@ -55,6 +55,9 @@ static struct k_thread dummy_thread;
 struct k_thread z_main_thread;
 K_THREAD_STACK_DEFINE(z_main_stack, CONFIG_MAIN_STACK_SIZE);
 
+// TODO: z_init_cpu implementation requires idle thread and IRQ stack arrays
+// from Zephyr's init.c which we're not building. For now, testing without it.
+
 /**
  * prepare_multithreading - Initialize main thread and ready queue
  *
@@ -87,6 +90,9 @@ static char *prepare_multithreading(void) {
     // Mark main thread as ready to run
     z_mark_thread_as_not_sleeping(&z_main_thread);
     z_ready_thread(&z_main_thread);
+
+    // TODO: Initialize CPU 0 - requires implementing z_init_cpu() with idle thread support
+    // z_init_cpu(0);
 
     return stack_ptr;
 }
