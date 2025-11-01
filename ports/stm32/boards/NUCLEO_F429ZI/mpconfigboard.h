@@ -2,7 +2,7 @@
 #define MICROPY_HW_MCU_NAME         "STM32F429"
 
 // Enable Zephyr threading for development
-#define MICROPY_ZEPHYR_THREADING    (1)
+#define MICROPY_ZEPHYR_THREADING    1
 
 #define MICROPY_HW_HAS_SWITCH       (1)
 #define MICROPY_HW_HAS_FLASH        (1)
