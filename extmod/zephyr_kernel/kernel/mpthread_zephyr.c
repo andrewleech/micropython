@@ -343,37 +343,36 @@ void mp_thread_finish(void) {
     mp_thread_mutex_unlock(&thread_mutex);
 }
 
-// Initialize mutex - use Zephyr's k_sem (matches ports/zephyr pattern)
-// Binary semaphore allows lock to be acquired on one thread and released on another
+// Initialize mutex - use Zephyr's k_mutex (native mutex with owner tracking)
 void mp_thread_mutex_init(mp_thread_mutex_t *mutex) {
-    k_sem_init(&mutex->handle, 0, 1);
-    k_sem_give(&mutex->handle);
+    k_mutex_init(&mutex->handle);
 }
 
 // Lock mutex
 int mp_thread_mutex_lock(mp_thread_mutex_t *mutex, int wait) {
-    return k_sem_take(&mutex->handle, wait ? K_FOREVER : K_NO_WAIT) == 0;
+    return k_mutex_lock(&mutex->handle, wait ? K_FOREVER : K_NO_WAIT) == 0;
 }
 
 // Unlock mutex
 void mp_thread_mutex_unlock(mp_thread_mutex_t *mutex) {
-    k_sem_give(&mutex->handle);
+    k_mutex_unlock(&mutex->handle);
+    k_yield();  // Yield CPU to allow waiting threads to run
 }
 
 // Recursive mutex functions (for GC and memory allocation)
-// Using k_sem for consistency with ports/zephyr
+// k_mutex natively supports recursion via lock_count field
 
 void mp_thread_recursive_mutex_init(mp_thread_recursive_mutex_t *mutex) {
-    k_sem_init(&mutex->handle, 0, 1);
-    k_sem_give(&mutex->handle);
+    k_mutex_init(&mutex->handle);
 }
 
 int mp_thread_recursive_mutex_lock(mp_thread_recursive_mutex_t *mutex, int wait) {
-    return k_sem_take(&mutex->handle, wait ? K_FOREVER : K_NO_WAIT) == 0;
+    return k_mutex_lock(&mutex->handle, wait ? K_FOREVER : K_NO_WAIT) == 0;
 }
 
 void mp_thread_recursive_mutex_unlock(mp_thread_recursive_mutex_t *mutex) {
-    k_sem_give(&mutex->handle);
+    k_mutex_unlock(&mutex->handle);
+    k_yield();  // Yield CPU to allow waiting threads to run
 }
 
 // Helper: Thread iteration callback for GC
