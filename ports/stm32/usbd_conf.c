@@ -174,6 +174,17 @@ static void mp_usbd_ll_init_fs(void) {
         // Configure VBUS sensing for TinyUSB on STM32F4/F7 which have separate GCCFG register
         // The DWC2 PHY init only sets PWRDWN bit, but doesn't configure VBUS sensing
         #if defined(STM32F4) || defined(STM32F7)
+        #if defined(USB_OTG_GCCFG_VBDEN)
+        // Newer STM32F4/F7 with VBDEN register bit
+        #if defined(MICROPY_HW_USB_VBUS_DETECT_PIN)
+        // Enable VBUS detection
+        USB_OTG_FS->GCCFG |= USB_OTG_GCCFG_VBDEN;
+        #else
+        // Disable VBUS detection (force VBUS valid)
+        USB_OTG_FS->GCCFG &= ~USB_OTG_GCCFG_VBDEN;
+        #endif
+        #else
+        // Older STM32F4 with separate VBUSASEN/VBUSBSEN/NOVBUSSENS register bits
         #if defined(MICROPY_HW_USB_VBUS_DETECT_PIN)
         // Enable VBUS sensing in "B device" mode (using PA9)
         USB_OTG_FS->GCCFG &= ~USB_OTG_GCCFG_NOVBUSSENS;
@@ -184,6 +195,11 @@ static void mp_usbd_ll_init_fs(void) {
         USB_OTG_FS->GCCFG &= ~(USB_OTG_GCCFG_VBUSBSEN | USB_OTG_GCCFG_VBUSASEN);
         #endif
         #endif
+        #endif
+        #endif
+
+        #if MICROPY_HW_STM_USB_STACK
+        return;
         #endif
     }
 }
