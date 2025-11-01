@@ -14,6 +14,7 @@ import multiprocessing
 from multiprocessing.pool import ThreadPool
 import threading
 import tempfile
+import time
 
 # Maximum time to run a PC-based test, in seconds.
 TEST_TIMEOUT = 30
@@ -54,6 +55,9 @@ RESULTS_FILE = "_results.json"
 
 # For diff'ing test output
 DIFF = os.getenv("MICROPY_DIFF", "diff -u")
+
+# Optional reset command to run after failed tests (for hardware targets)
+RESET = os.getenv("RESET")
 
 # Set PYTHONIOENCODING so that CPython will use utf-8 on systems which set another encoding in the locale
 os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -1024,6 +1028,21 @@ def run_tests(pyb, tests, args, result_dir, num_threads=1):
             test_results.append((test_name, test_file, "fail", ""))
 
         test_count.increment()
+
+        # Reset the device if requested and running on hardware
+        if RESET and pyb is not None:
+            print("Resetting device...")
+            try:
+                subprocess.run(RESET, shell=True, check=True, capture_output=True, timeout=10)
+                time.sleep(0.5)  # Give device time to reset
+                pyb.enter_raw_repl()  # Re-enter raw REPL after reset
+            except subprocess.CalledProcessError as e:
+                stderr_output = e.stderr.decode('utf-8', errors='replace') if e.stderr else ''
+                print(f"Warning: Reset command failed: {stderr_output}")
+            except subprocess.TimeoutExpired:
+                print("Warning: Reset command timed out")
+            except Exception as e:
+                print(f"Warning: Reset failed: {e}")
 
         # Print a note if this looks like it might have been a misfired unittest
         if not uses_unittest and not test_passed:
