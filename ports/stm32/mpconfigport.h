@@ -107,8 +107,7 @@
 
 // Zephyr threading configuration
 #if MICROPY_ZEPHYR_THREADING
-#define MICROPY_PY_THREAD_GIL               (1)
-#define MICROPY_PY_THREAD_GIL_VM_DIVISOR    (32)
+#define MICROPY_PY_THREAD_GIL               (0)
 #define MICROPY_ENABLE_FINALISER            (1)
 #endif
 
