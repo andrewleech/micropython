@@ -31,13 +31,13 @@
 
 #include <zephyr/kernel.h>
 
-// Mutex types using Zephyr k_sem (matches ports/zephyr pattern)
+// Mutex types using Zephyr k_mutex (native recursive mutex support)
 typedef struct _mp_thread_mutex_t {
-    struct k_sem handle;
+    struct k_mutex handle;
 } mp_thread_mutex_t;
 
 typedef struct _mp_thread_recursive_mutex_t {
-    struct k_sem handle;
+    struct k_mutex handle;
 } mp_thread_recursive_mutex_t;
 
 // Threading functions (implemented in extmod/zephyr_kernel/mpthread_zephyr.c)
