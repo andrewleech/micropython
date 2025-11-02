@@ -91,7 +91,6 @@ $(BUILD)/zephyr_gen_root/zephyr/syscalls/log_msg.h:
 
 # Minimal Zephyr kernel source files (threading-only subset)
 # Excludes files requiring device tree or full hardware support
-# Note: init.c excluded (z_init_cpu provided in zephyr_cstart.c instead)
 ZEPHYR_KERNEL_SRC_C := \
 	$(ZEPHYR_BASE)/kernel/thread.c \
 	$(ZEPHYR_BASE)/kernel/sched.c \

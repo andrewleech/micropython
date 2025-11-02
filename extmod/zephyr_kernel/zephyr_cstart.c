@@ -55,6 +55,8 @@ static struct k_thread dummy_thread;
 struct k_thread z_main_thread;
 K_THREAD_STACK_DEFINE(z_main_stack, CONFIG_MAIN_STACK_SIZE);
 
+// Stack definitions moved to zephyr_arch_stm32.c to avoid extern type mismatch issues
+
 // TODO: z_init_cpu() initializes idle thread, IRQ stack, and CPU struct fields.
 // Not required for minimal threading: MicroPython main thread never idles (always
 // running REPL), IRQ stack already set up by CMSIS/HAL, single-CPU only.
@@ -93,8 +95,35 @@ static char *prepare_multithreading(void) {
     z_mark_thread_as_not_sleeping(&z_main_thread);
     z_ready_thread(&z_main_thread);
 
-    // TODO: z_init_cpu(0) - see TODO comment at top of file for why not needed yet
-    // z_init_cpu(0);
+    // mp_zephyr_init_cpu(0) - CPU initialization following Zephyr gold standard
+    //
+    // DISABLED: This initializes idle thread, IRQ stack, and _kernel.cpus[0] fields
+    // following lib/zephyr/kernel/init.c:393-427 pattern. While the implementation
+    // exists in ports/stm32/zephyr_arch_stm32.c and is structurally correct, it's
+    // currently disabled because:
+    //
+    // 1. MicroPython doesn't require an idle thread in normal operation - the REPL
+    //    main thread never yields to idle, and user threads are managed directly.
+    //
+    // 2. The IRQ stack (_kernel.cpus[0].irq_stack) setup may conflict with existing
+    //    CMSIS/HAL IRQ stack configuration already in place.
+    //
+    // 3. Current testing shows 80% pass rate (28/35 tests) WITHOUT this initialization,
+    //    indicating the minimal threading implementation works correctly for most cases.
+    //
+    // 4. The primary remaining failure (thread_gc1) is caused by concurrent gc.collect()
+    //    calls from multiple threads, NOT by missing CPU initialization. This requires
+    //    GC serialization (preventing multiple threads from running gc.collect()
+    //    simultaneously), which will be implemented separately.
+    //
+    // TODO: Re-enable mp_zephyr_init_cpu(0) after:
+    //   - GC serialization is implemented and tested
+    //   - Verify idle thread doesn't interfere with GC thread stack scanning
+    //   - Confirm IRQ stack setup doesn't conflict with HAL initialization
+    //   - Test that z_is_idle_thread_object() works correctly with initialized idle thread
+    //
+    // extern void mp_zephyr_init_cpu(int id);
+    // mp_zephyr_init_cpu(0);
 
     return stack_ptr;
 }

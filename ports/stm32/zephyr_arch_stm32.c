@@ -50,6 +50,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/kernel_structs.h>
 #include <zephyr/arch/cpu.h>
+#include "../../lib/zephyr/kernel/include/kthread.h"  // z_mark_thread_as_not_sleeping, z_setup_new_thread
 
 // ARM Cortex-M System Control Block (SCB) register addresses
 // Use CMSIS definitions from STM32 headers
@@ -305,20 +306,8 @@ void z_sched_unlock(void) {
     arch_irq_unlock(1);
 }
 
-// Check if in ISR context
-bool arch_is_in_isr(void) {
-    // Read IPSR (Interrupt Program Status Register) - bits 0-8
-    // If IPSR != 0, we're in an exception handler
-    uint32_t ipsr;
-    __asm__ volatile ("mrs %0, ipsr" : "=r" (ipsr));
-    return (ipsr & 0x1FF) != 0;
-}
-
-// Idle thread check
-bool z_is_idle_thread_object(void *obj) {
-    // For now, assume no idle thread
-    return false;
-}
+// arch_is_in_isr() provided by Zephyr's cortex_m/exception.h (static inline)
+// z_is_idle_thread_object() provided by Zephyr's kthread.h (static inline)
 
 // Console output function
 void k_str_out(char *c, size_t n) {
@@ -361,11 +350,76 @@ void signal_pending_ipi(void) {
     // No-op for single-core
 }
 
-// Thread return value - provided by arch layer for legacy swap (not CONFIG_USE_SWITCH)
-// Note: Cortex-M's kernel_arch_func.h provides this as static inline,
-// but we need a non-inline version for linking in some contexts
-void arch_thread_return_value_set(struct k_thread *thread, unsigned int value) {
-    thread->arch.swap_return_value = value;
+// arch_thread_return_value_set() provided by Zephyr's kernel_arch_func.h (static inline)
+
+// ============================================================================
+// Zephyr Idle Thread and CPU Initialization
+// ============================================================================
+
+// Idle thread stacks (required by z_init_cpu)
+// Following gold standard from lib/zephyr/kernel/init.c:62-64
+static K_KERNEL_STACK_ARRAY_DEFINE(z_idle_stacks,
+    CONFIG_MP_MAX_NUM_CPUS,
+    CONFIG_IDLE_STACK_SIZE);
+
+// Interrupt stacks (required by z_init_cpu)
+// Following gold standard from lib/zephyr/kernel/init.c:149-151
+K_KERNEL_STACK_ARRAY_DEFINE(z_interrupt_stacks,
+    CONFIG_MP_MAX_NUM_CPUS,
+    CONFIG_ISR_STACK_SIZE);
+
+// Idle thread entry point - must never return
+// Gold standard: lib/zephyr/kernel/idle.c (full implementation)
+// Minimal implementation for bare-metal MicroPython
+void idle(void *unused1, void *unused2, void *unused3) {
+    (void)unused1;
+    (void)unused2;
+    (void)unused3;
+
+    // Idle thread runs when no other threads are ready
+    // For now, just loop forever
+    while (1) {
+        // On real systems, this would:
+        // - Enter low-power mode
+        // - Handle background tasks
+        // For bare-metal MicroPython, just yield
+        arch_cpu_idle();
+    }
+}
+
+// Initialize CPU-specific kernel structures
+// Following gold standard from lib/zephyr/kernel/init.c:393-427
+void mp_zephyr_init_cpu(int id) {
+    // Initialize idle thread using Zephyr's init_idle_thread pattern
+    struct k_thread *thread = &z_idle_threads[id];
+    k_thread_stack_t *stack = (k_thread_stack_t *)z_idle_stacks[id];
+    size_t stack_size = K_KERNEL_STACK_SIZEOF(z_idle_stacks[id]);
+
+    #ifdef CONFIG_THREAD_NAME
+    char *tname = "idle";
+    #else
+    char *tname = NULL;
+    #endif
+
+    z_setup_new_thread(thread, stack, stack_size, idle,
+        &_kernel.cpus[id], NULL, NULL,
+        K_IDLE_PRIO, K_ESSENTIAL, tname);
+    z_mark_thread_as_not_sleeping(thread);
+
+    // Set CPU fields (gold standard: init.c:396-405)
+    _kernel.cpus[id].idle_thread = &z_idle_threads[id];
+    _kernel.cpus[id].id = id;
+
+    // Set IRQ stack pointer
+    char *irq_buf = K_KERNEL_STACK_BUFFER((k_thread_stack_t *)z_interrupt_stacks[id]);
+    size_t irq_size = K_KERNEL_STACK_SIZEOF(z_interrupt_stacks[id]);
+    _kernel.cpus[id].irq_stack = irq_buf + irq_size;
+
+    #ifdef CONFIG_SCHED_THREAD_USAGE_ALL
+    _kernel.cpus[id].usage = &_kernel.usage[id];
+    _kernel.cpus[id].usage->track_usage =
+        CONFIG_SCHED_THREAD_USAGE_AUTO_ENABLE;
+    #endif
 }
 
 #endif // MICROPY_ZEPHYR_THREADING
