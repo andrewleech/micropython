@@ -31,6 +31,14 @@
 #include "mpconfigboard.h"
 #include "mpconfigboard_common.h"
 
+// Link MICROPY_ZEPHYR_THREADING to MICROPY_PY_THREAD for standard threading support
+// This enables the GIL and all standard MicroPython threading infrastructure
+#if MICROPY_ZEPHYR_THREADING && !defined(MICROPY_PY_THREAD)
+#define MICROPY_PY_THREAD (1)
+#define MICROPY_PY_THREAD_GIL (1)
+#define MICROPY_PY_THREAD_GIL_VM_DIVISOR (32)
+#endif
+
 // Zephyr kernel configuration (when Zephyr threading is enabled)
 // Include after board headers so STM32 CMSIS defines take precedence
 #if MICROPY_ZEPHYR_THREADING
@@ -107,7 +115,8 @@
 
 // Zephyr threading configuration
 #if MICROPY_ZEPHYR_THREADING
-#define MICROPY_PY_THREAD_GIL               (0)
+// MICROPY_PY_THREAD_GIL defaults to 1 when MICROPY_PY_THREAD is set (via py/mpconfig.h)
+// This provides thread safety through the Global Interpreter Lock
 #define MICROPY_ENABLE_FINALISER            (1)
 #endif
 
@@ -270,7 +279,8 @@ typedef unsigned int mp_uint_t; // must be pointer size
 typedef long mp_off_t;
 
 #if MICROPY_ZEPHYR_THREADING
-// Zephyr threading: use k_yield() instead of pyb_thread_yield()
+// Zephyr threading: k_yield() with GIL exit/enter for proper thread switching
+// Main thread must release GIL to allow other threads to acquire it and run
 #define MICROPY_EVENT_POLL_HOOK \
     do { \
         extern void mp_handle_pending(bool); \

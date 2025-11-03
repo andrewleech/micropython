@@ -31,14 +31,20 @@
 
 #include <zephyr/kernel.h>
 
-// Mutex types using Zephyr k_mutex (native recursive mutex support)
+// Mutex type using Zephyr k_sem (binary semaphore, non-recursive)
+// Non-recursive behavior is required for Python threading semantics.
+// k_sem is used instead of k_mutex because Zephyr's k_mutex is always recursive.
 typedef struct _mp_thread_mutex_t {
-    struct k_mutex handle;
+    struct k_sem handle;
 } mp_thread_mutex_t;
 
+// Recursive mutex type (only used when GIL is disabled)
+// When MICROPY_PY_THREAD_GIL=1, MICROPY_PY_THREAD_RECURSIVE_MUTEX=0 and this is not used.
+#if MICROPY_PY_THREAD_RECURSIVE_MUTEX
 typedef struct _mp_thread_recursive_mutex_t {
     struct k_mutex handle;
 } mp_thread_recursive_mutex_t;
+#endif
 
 // Threading functions (implemented in extmod/zephyr_kernel/mpthread_zephyr.c)
 struct _mp_state_thread_t *mp_thread_get_state(void);
