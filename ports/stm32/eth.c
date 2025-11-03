@@ -565,7 +565,7 @@ static int eth_mac_init(eth_t *self) {
     // Set number of TX descriptors and buffer pointers.
     ETH->DMA_CH[0].DMACTXRLR = TX_BUF_NUM - 1;
     ETH->DMA_CH[0].DMACTXDLAR = (uint32_t)&eth_dma.tx_descr[0];
-    ETH->DMA_CH[0].DMACTXDTPR = (uint32_t)&eth_dma.tx_descr[1];
+    ETH->DMA_CH[0].DMACTXDTPR = (uint32_t)&eth_dma.tx_descr[0];
     #else
     ETH->DMATDLAR = (uint32_t)&eth_dma.tx_descr[0];
     #endif
@@ -665,9 +665,9 @@ static int eth_mac_init(eth_t *self) {
     #elif defined(STM32N6)
     ETH->MTL_QUEUE[0].MTLTXQOMR |= ETH_MTLTXQxOMR_FTQ; // flush TX FIFO
     ETH->MTL_QUEUE[1].MTLTXQOMR |= ETH_MTLTXQxOMR_FTQ; // flush TX FIFO
-    ETH->DMA_CH[0].DMACRXCR |= RX_BUF_SIZE << ETH_DMACxRXCR_RBSZ_Pos;
+    ETH->DMA_CH[0].DMACRXCR = RX_BUF_SIZE << ETH_DMACxRXCR_RBSZ_Pos;
     ETH->DMA_CH[0].DMACRXCR |= ETH_DMACxRXCR_SR; // start RX
-    ETH->DMA_CH[0].DMACTXCR |= 4 << ETH_DMACxTXCR_TXPBL_Pos;
+    ETH->DMA_CH[0].DMACTXCR = 4 << ETH_DMACxTXCR_TXPBL_Pos;
     ETH->DMA_CH[0].DMACTXCR |= ETH_DMACxTXCR_ST; // start TX
     ETH->DMA_CH[0].DMACSR |= ETH_DMACxSR_TPS | ETH_DMACxSR_RPS; // clear TX/RX process stopped flags
     #else
