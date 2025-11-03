@@ -97,30 +97,20 @@ static char *prepare_multithreading(void) {
 
     // mp_zephyr_init_cpu(0) - CPU initialization following Zephyr gold standard
     //
-    // DISABLED: This initializes idle thread, IRQ stack, and _kernel.cpus[0] fields
-    // following lib/zephyr/kernel/init.c:393-427 pattern. While the implementation
-    // exists in ports/stm32/zephyr_arch_stm32.c and is structurally correct, it's
-    // currently disabled because:
+    // DISABLED: Not required when using k_yield() in MICROPY_EVENT_POLL_HOOK.
+    // k_yield() cooperatively yields CPU without sleep, so no idle thread needed.
     //
-    // 1. MicroPython doesn't require an idle thread in normal operation - the REPL
-    //    main thread never yields to idle, and user threads are managed directly.
+    // When using k_msleep(1), idle thread IS required:
+    // - Main thread sleeps, scheduler needs idle thread to run
+    // - Without idle thread: scheduler has nothing to run → HardFault
     //
-    // 2. The IRQ stack (_kernel.cpus[0].irq_stack) setup may conflict with existing
-    //    CMSIS/HAL IRQ stack configuration already in place.
+    // Current approach uses k_yield() to avoid idle thread complexity while
+    // still allowing GIL exit/enter for thread switching.
     //
-    // 3. Current testing shows 80% pass rate (28/35 tests) WITHOUT this initialization,
-    //    indicating the minimal threading implementation works correctly for most cases.
-    //
-    // 4. The primary remaining failure (thread_gc1) is caused by concurrent gc.collect()
-    //    calls from multiple threads, NOT by missing CPU initialization. This requires
-    //    GC serialization (preventing multiple threads from running gc.collect()
-    //    simultaneously), which will be implemented separately.
-    //
-    // TODO: Re-enable mp_zephyr_init_cpu(0) after:
-    //   - GC serialization is implemented and tested
-    //   - Verify idle thread doesn't interfere with GC thread stack scanning
-    //   - Confirm IRQ stack setup doesn't conflict with HAL initialization
-    //   - Test that z_is_idle_thread_object() works correctly with initialized idle thread
+    // TODO: Debug idle thread initialization issues if k_msleep(1) is needed:
+    // - Board resets continuously with idle thread enabled
+    // - PC stuck at Reset_Handler (0x080201a0)
+    // - May be stack overflow or interrupt configuration conflict
     //
     // extern void mp_zephyr_init_cpu(int id);
     // mp_zephyr_init_cpu(0);

@@ -343,24 +343,29 @@ void mp_thread_finish(void) {
     mp_thread_mutex_unlock(&thread_mutex);
 }
 
-// Initialize mutex - use Zephyr's k_mutex (native mutex with owner tracking)
+// Initialize mutex - use Zephyr's k_sem (binary semaphore, non-recursive)
+// Non-recursive behavior is required for Python threading semantics
 void mp_thread_mutex_init(mp_thread_mutex_t *mutex) {
-    k_mutex_init(&mutex->handle);
+    k_sem_init(&mutex->handle, 0, 1);
+    k_sem_give(&mutex->handle);
 }
 
 // Lock mutex
 int mp_thread_mutex_lock(mp_thread_mutex_t *mutex, int wait) {
-    return k_mutex_lock(&mutex->handle, wait ? K_FOREVER : K_NO_WAIT) == 0;
+    return k_sem_take(&mutex->handle, wait ? K_FOREVER : K_NO_WAIT) == 0;
 }
 
 // Unlock mutex
 void mp_thread_mutex_unlock(mp_thread_mutex_t *mutex) {
-    k_mutex_unlock(&mutex->handle);
+    k_sem_give(&mutex->handle);
     k_yield();  // Yield CPU to allow waiting threads to run
 }
 
-// Recursive mutex functions (for GC and memory allocation)
-// k_mutex natively supports recursion via lock_count field
+// Recursive mutex functions (only compiled when GIL is disabled)
+// When MICROPY_PY_THREAD_GIL=1, these are not used because the GIL already
+// provides serialization. When MICROPY_PY_THREAD_GIL=0, recursive mutexes
+// are needed for GC protection.
+#if MICROPY_PY_THREAD_RECURSIVE_MUTEX
 
 void mp_thread_recursive_mutex_init(mp_thread_recursive_mutex_t *mutex) {
     k_mutex_init(&mutex->handle);
@@ -374,6 +379,8 @@ void mp_thread_recursive_mutex_unlock(mp_thread_recursive_mutex_t *mutex) {
     k_mutex_unlock(&mutex->handle);
     k_yield();  // Yield CPU to allow waiting threads to run
 }
+
+#endif // MICROPY_PY_THREAD_RECURSIVE_MUTEX
 
 // Helper: Thread iteration callback for GC
 static void mp_thread_iterate_threads_cb(const struct k_thread *z_thread, void *user_data) {
