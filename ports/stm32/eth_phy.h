@@ -51,6 +51,11 @@
 #define PHY_ANAR_SPEED_100FULL  (0x0100)
 #define PHY_ANAR_IEEE802_3      (0x0001)
 
+// 1000BASE-T Control Register (for gigabit PHYs)
+#define PHY_1000BTCR            (0x0009)
+#define PHY_1000BTCR_1000HALF   (0x0100)
+#define PHY_1000BTCR_1000FULL   (0x0200)
+
 #define PHY_SPEED_10HALF        (0x01)
 #define PHY_SPEED_100HALF       (0x02)
 #define PHY_SPEED_1000HALF      (0x04)

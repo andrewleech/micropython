@@ -295,6 +295,7 @@ void eth_set_trace(eth_t *self, uint32_t value) {
 }
 
 static int eth_mac_init(eth_t *self) {
+    mp_printf(&mp_plat_print, "ETH: MAC init starting\n");
     // Configure MPU
     uint32_t irq_state = mpu_config_start();
     #if defined(STM32H5) || defined(STM32N6)
@@ -333,8 +334,10 @@ static int eth_mac_init(eth_t *self) {
     #elif defined(STM32N6)
     #if defined(MICROPY_HW_ETH_RGMII_CLK125)
     LL_RCC_SetETHPHYInterface(LL_RCC_ETH1PHY_IF_RGMII);
+    mp_printf(&mp_plat_print, "ETH: N6 PHY interface = RGMII\n");
     #else
     LL_RCC_SetETHPHYInterface(LL_RCC_ETH1PHY_IF_RMII);
+    mp_printf(&mp_plat_print, "ETH: N6 PHY interface = RMII\n");
     #endif
     #else
     __HAL_RCC_SYSCFG_CLK_ENABLE();
@@ -596,6 +599,7 @@ static int eth_mac_init(eth_t *self) {
     mp_hal_delay_ms(2);
 
     // Start MAC layer
+    mp_printf(&mp_plat_print, "ETH: Starting MAC TX/RX\n");
     ETH->MACCR |=
         ETH_MACCR_TE // enable TX
         | ETH_MACCR_RE // enable RX
@@ -603,6 +607,7 @@ static int eth_mac_init(eth_t *self) {
     mp_hal_delay_ms(2);
 
     // Start DMA layer
+    mp_printf(&mp_plat_print, "ETH: Starting DMA\n");
     #if defined(STM32H5) || defined(STM32H7)
     ETH->DMACRCR |= ETH_DMACRCR_SR; // start RX
     ETH->DMACTCR |= ETH_DMACTCR_ST; // start TX
@@ -618,6 +623,10 @@ static int eth_mac_init(eth_t *self) {
     ETH->DMA_CH[0].DMACTXCR |= ETH_DMACxTXCR_ST;
     // Clear TX/RX process stopped flags
     ETH->DMA_CH[0].DMACSR |= ETH_DMACxSR_TPS | ETH_DMACxSR_RPS;
+    mp_printf(&mp_plat_print, "ETH: N6 DMA CH0: CSR=0x%08x TXCR=0x%08x RXCR=0x%08x\n",
+        (unsigned)ETH->DMA_CH[0].DMACSR,
+        (unsigned)ETH->DMA_CH[0].DMACTXCR,
+        (unsigned)ETH->DMA_CH[0].DMACRXCR);
     #else
     ETH->DMAOMR |=
         ETH_DMAOMR_ST // start TX
@@ -625,6 +634,7 @@ static int eth_mac_init(eth_t *self) {
     ;
     #endif
     mp_hal_delay_ms(2);
+    mp_printf(&mp_plat_print, "ETH: MAC/DMA started, MACCR=0x%08x\n", (unsigned)ETH->MACCR);
 
     // Enable interrupts
     NVIC_SetPriority(ETH_IRQn, IRQ_PRI_PENDSV);
@@ -1157,11 +1167,14 @@ int eth_start(eth_t *self) {
     }
 
     // Initialize PHY (reset and configure)
+    mp_printf(&mp_plat_print, "ETH: Calling PHY init\n");
     ret = eth_phy_init(self);
     if (ret < 0) {
+        mp_printf(&mp_plat_print, "ETH: PHY init failed: %d\n", ret);
         eth_mac_deinit(self);
         return ret;
     }
+    mp_printf(&mp_plat_print, "ETH: PHY init success\n");
 
     MICROPY_PY_LWIP_ENTER
     struct netif *n = &self->netif;
@@ -1232,6 +1245,7 @@ void eth_low_power_mode(eth_t *self, bool enable) {
 
 static int eth_phy_init(eth_t *self) {
     // Reset and initialize the PHY
+    mp_printf(&mp_plat_print, "ETH: PHY init addr=%d\n", (int)self->phy_addr);
     self->phy_init(self->phy_addr);
     mp_hal_delay_ms(10);
 
@@ -1239,20 +1253,36 @@ static int eth_phy_init(eth_t *self) {
     uint32_t t0 = mp_hal_ticks_ms();
     while (eth_phy_read(self->phy_addr, PHY_BCR) & PHY_BCR_SOFT_RESET) {
         if (mp_hal_ticks_ms() - t0 > 1000) {  // 1 second timeout for reset
+            mp_printf(&mp_plat_print, "ETH: PHY reset timeout\n");
             return -MP_ETIMEDOUT;
         }
         mp_hal_delay_ms(2);
     }
+    mp_printf(&mp_plat_print, "ETH: PHY reset complete\n");
+
+    // Read PHY ID to verify MDIO communication
+    uint32_t phy_id1 = eth_phy_read(self->phy_addr, 0x02);
+    uint32_t phy_id2 = eth_phy_read(self->phy_addr, 0x03);
+    mp_printf(&mp_plat_print, "ETH: PHY ID=0x%04x%04x\n", (int)phy_id1, (int)phy_id2);
 
     // Enable autonegotiation for all speed/duplex modes
     // This starts the autonegotiation process in the background
+    mp_printf(&mp_plat_print, "ETH: Configuring autoneg\n");
+
+    // Configure 10/100 speeds
     eth_phy_write(self->phy_addr, PHY_ANAR,
         PHY_ANAR_SPEED_10HALF |
         PHY_ANAR_SPEED_10FULL |
         PHY_ANAR_SPEED_100HALF |
         PHY_ANAR_SPEED_100FULL |
         PHY_ANAR_IEEE802_3);
+
+    // For gigabit PHYs, also advertise 1000Mbps capability
+    eth_phy_write(self->phy_addr, PHY_1000BTCR,
+        PHY_1000BTCR_1000HALF | PHY_1000BTCR_1000FULL);
+
     eth_phy_write(self->phy_addr, PHY_BCR, PHY_BCR_AUTONEG_EN | PHY_BCR_AUTONEG_RESTART);
+    mp_printf(&mp_plat_print, "ETH: Autoneg started\n");
 
     // Initialize link status tracking (current state, whatever it is)
     self->last_link_status = false;
