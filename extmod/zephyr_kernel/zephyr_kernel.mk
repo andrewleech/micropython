@@ -107,6 +107,13 @@ ZEPHYR_KERNEL_SRC_C := \
 	$(ZEPHYR_BASE)/lib/os/thread_entry.c \
 	$(ZEPHYR_BASE)/lib/utils/rb.c
 
+# Optional idle thread support (disabled by default)
+# Enable with: MICROPY_ZEPHYR_USE_IDLE_THREAD=1 in mpconfigport.h
+ifeq ($(MICROPY_ZEPHYR_USE_IDLE_THREAD),1)
+ZEPHYR_KERNEL_SRC_C += \
+	$(ZEPHYR_BASE)/kernel/idle.c
+endif
+
 # MicroPython-Zephyr integration
 ZEPHYR_MP_SRC_C := \
 	$(ZEPHYR_KERNEL)/kernel/mpthread_zephyr.c \

@@ -97,7 +97,7 @@ typedef enum {
 #define CONFIG_THREAD_CUSTOM_DATA 1
 #define CONFIG_THREAD_NAME 1
 #define CONFIG_THREAD_MAX_NAME_LEN 32
-#define CONFIG_THREAD_MONITOR 0
+#define CONFIG_THREAD_MONITOR 1  // Required for k_thread_foreach() to work
 #define CONFIG_DYNAMIC_THREAD 1
 
 // Scheduler configuration

@@ -57,10 +57,88 @@ K_THREAD_STACK_DEFINE(z_main_stack, CONFIG_MAIN_STACK_SIZE);
 
 // Stack definitions moved to zephyr_arch_stm32.c to avoid extern type mismatch issues
 
-// TODO: z_init_cpu() initializes idle thread, IRQ stack, and CPU struct fields.
-// Not required for minimal threading: MicroPython main thread never idles (always
-// running REPL), IRQ stack already set up by CMSIS/HAL, single-CPU only.
-// Would be needed for: power management (idle thread sleep), SMP, per-CPU IRQ stacks.
+// ============================================================================
+// Optional Idle Thread Infrastructure (disabled by default)
+// ============================================================================
+//
+// This infrastructure enables k_msleep() support in MICROPY_EVENT_POLL_HOOK.
+// Currently disabled because threading works fine with k_yield() approach.
+//
+// To enable: #define MICROPY_ZEPHYR_USE_IDLE_THREAD 1 in mpconfigport.h
+//
+// Requirements when enabled:
+// - Add idle.c to build (zephyr_kernel.mk)
+// - Uncomment z_init_cpu() call in prepare_multithreading()
+// - Debug continuous reset issue (PC stuck at Reset_Handler)
+//
+#if defined(MICROPY_ZEPHYR_USE_IDLE_THREAD) && MICROPY_ZEPHYR_USE_IDLE_THREAD
+
+// Idle thread infrastructure (required for k_msleep in EVENT_POLL_HOOK)
+// Idle thread runs when no other thread is ready (e.g., all threads sleeping)
+struct k_thread z_idle_threads[1];
+K_KERNEL_STACK_ARRAY_DEFINE(z_idle_stacks, 1, CONFIG_IDLE_STACK_SIZE);
+
+// Interrupt stack array (required for z_init_cpu irq_stack initialization)
+K_KERNEL_STACK_ARRAY_DEFINE(z_interrupt_stacks, 1, CONFIG_ISR_STACK_SIZE);
+
+// Forward declaration for idle thread entry point (defined in lib/zephyr/kernel/idle.c)
+extern void idle(void *unused1, void *unused2, void *unused3);
+
+/**
+ * init_idle_thread - Initialize idle thread for CPU
+ * @param i: CPU id (always 0 for single-CPU)
+ *
+ * Sets up the idle thread which runs when no other threads are ready.
+ * Essential for k_msleep() - when main thread sleeps, scheduler needs
+ * idle thread to execute.
+ */
+static void init_idle_thread(int i) {
+    struct k_thread *thread = &z_idle_threads[i];
+    k_thread_stack_t *stack = z_idle_stacks[i];
+    size_t stack_size = K_KERNEL_STACK_SIZEOF(z_idle_stacks[i]);
+
+    #ifdef CONFIG_THREAD_NAME
+    char *tname = "idle";
+    #else
+    char *tname = NULL;
+    #endif
+
+    // Setup idle thread using z_setup_new_thread()
+    // Priority K_IDLE_PRIO (lowest) ensures it only runs when nothing else ready
+    z_setup_new_thread(thread, stack, stack_size,
+                      idle, &_kernel.cpus[i], NULL, NULL,
+                      K_IDLE_PRIO, K_ESSENTIAL, tname);
+
+    // Mark as not sleeping (ready to run)
+    z_mark_thread_as_not_sleeping(thread);
+}
+
+/**
+ * z_init_cpu - Initialize CPU-specific kernel structures
+ * @param id: CPU id (always 0 for single-CPU)
+ *
+ * Following Zephyr's z_init_cpu() pattern from lib/zephyr/kernel/init.c:393-413
+ * Initializes:
+ * - Idle thread (runs when no other thread ready)
+ * - CPU struct fields (idle_thread, id, irq_stack)
+ *
+ * Required for k_msleep() in MICROPY_EVENT_POLL_HOOK - when main thread
+ * calls k_msleep(1), scheduler switches to idle thread until timeout.
+ */
+void z_init_cpu(int id) {
+    // Initialize idle thread
+    init_idle_thread(id);
+
+    // Set CPU struct fields
+    _kernel.cpus[id].idle_thread = &z_idle_threads[id];
+    _kernel.cpus[id].id = id;
+
+    // Set IRQ stack pointer to end of stack (ARM stacks grow downward)
+    _kernel.cpus[id].irq_stack = (K_KERNEL_STACK_BUFFER(z_interrupt_stacks[id]) +
+                                   K_KERNEL_STACK_SIZEOF(z_interrupt_stacks[id]));
+}
+
+#endif // MICROPY_ZEPHYR_USE_IDLE_THREAD
 
 /**
  * prepare_multithreading - Initialize main thread and ready queue
@@ -95,25 +173,11 @@ static char *prepare_multithreading(void) {
     z_mark_thread_as_not_sleeping(&z_main_thread);
     z_ready_thread(&z_main_thread);
 
-    // mp_zephyr_init_cpu(0) - CPU initialization following Zephyr gold standard
-    //
-    // DISABLED: Not required when using k_yield() in MICROPY_EVENT_POLL_HOOK.
-    // k_yield() cooperatively yields CPU without sleep, so no idle thread needed.
-    //
-    // When using k_msleep(1), idle thread IS required:
-    // - Main thread sleeps, scheduler needs idle thread to run
-    // - Without idle thread: scheduler has nothing to run → HardFault
-    //
-    // Current approach uses k_yield() to avoid idle thread complexity while
-    // still allowing GIL exit/enter for thread switching.
-    //
-    // TODO: Debug idle thread initialization issues if k_msleep(1) is needed:
-    // - Board resets continuously with idle thread enabled
-    // - PC stuck at Reset_Handler (0x080201a0)
-    // - May be stack overflow or interrupt configuration conflict
-    //
-    // extern void mp_zephyr_init_cpu(int id);
-    // mp_zephyr_init_cpu(0);
+    // Initialize CPU (idle thread, IRQ stack, CPU struct) if enabled
+    // Required for k_msleep() support - disabled by default, use k_yield() instead
+    #if defined(MICROPY_ZEPHYR_USE_IDLE_THREAD) && MICROPY_ZEPHYR_USE_IDLE_THREAD
+    z_init_cpu(0);
+    #endif
 
     return stack_ptr;
 }

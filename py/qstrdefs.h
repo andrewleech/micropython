@@ -76,3 +76,6 @@ Q(/rom/lib)
 #if MICROPY_ENABLE_PYSTACK
 Q(pystack exhausted)
 #endif
+
+// Special methods
+Q(__del__)
