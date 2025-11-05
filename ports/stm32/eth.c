@@ -278,8 +278,14 @@ int eth_init(eth_t *self, int mac_idx, uint32_t phy_addr, int phy_type) {
     __HAL_RCC_ETH1RX_CLK_ENABLE();
     #elif defined(STM32N6)
     __HAL_RCC_ETH1_CLK_ENABLE();
+    __HAL_RCC_ETH1MAC_CLK_ENABLE();
     __HAL_RCC_ETH1TX_CLK_ENABLE();
     __HAL_RCC_ETH1RX_CLK_ENABLE();
+    mp_printf(&mp_plat_print, "ETH: N6 clocks enabled: ETH1=%d MAC=%d TX=%d RX=%d\n",
+        (int)__HAL_RCC_ETH1_IS_CLK_ENABLED(),
+        (int)__HAL_RCC_ETH1MAC_IS_CLK_ENABLED(),
+        (int)__HAL_RCC_ETH1TX_IS_CLK_ENABLED(),
+        (int)__HAL_RCC_ETH1RX_IS_CLK_ENABLED());
     #else
     __HAL_RCC_ETH_CLK_ENABLE();
     #endif
@@ -658,6 +664,9 @@ static void eth_mac_deinit(eth_t *self) {
     __HAL_RCC_ETH1_FORCE_RESET();
     __HAL_RCC_ETH1_RELEASE_RESET();
     __HAL_RCC_ETH1_CLK_DISABLE();
+    __HAL_RCC_ETH1MAC_CLK_DISABLE();
+    __HAL_RCC_ETH1TX_CLK_DISABLE();
+    __HAL_RCC_ETH1RX_CLK_DISABLE();
     #else
     __HAL_RCC_ETHMAC_FORCE_RESET();
     __HAL_RCC_ETHMAC_RELEASE_RESET();
@@ -1234,6 +1243,9 @@ void eth_low_power_mode(eth_t *self, bool enable) {
         __HAL_RCC_ETH1MAC_CLK_DISABLE();
         #elif defined(STM32N6)
         __HAL_RCC_ETH1_CLK_DISABLE();
+        __HAL_RCC_ETH1MAC_CLK_DISABLE();
+        __HAL_RCC_ETH1TX_CLK_DISABLE();
+        __HAL_RCC_ETH1RX_CLK_DISABLE();
         #else
         __HAL_RCC_ETH_CLK_DISABLE();
         #endif
