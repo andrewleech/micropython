@@ -108,8 +108,9 @@
 #define PHY_INIT_TIMEOUT_MS (10000)
 #define PHY_AUTONEG_TIMEOUT_MS (5000)
 
-#define RX_BUF_SIZE (1524) // includes 4-byte CRC at end
-#define TX_BUF_SIZE (1524)
+// These buffer sizes need to be a multiple of 8 (for STM32N6 at least).
+#define RX_BUF_SIZE (1528) // includes 4-byte CRC at end
+#define TX_BUF_SIZE (1528)
 
 #define RX_BUF_NUM (5)
 #define TX_BUF_NUM (5)
@@ -156,7 +157,7 @@ static void eth_lwip_init(eth_t *self);
 static int eth_phy_init(eth_t *self);
 
 void eth_phy_write(uint32_t phy_addr, uint32_t reg, uint32_t val) {
-    #if defined(STM32H5) || defined(STM32H7)
+    #if defined(STM32H5) || defined(STM32H7) || defined(STM32N6)
     while (ETH->MACMDIOAR & ETH_MACMDIOAR_MB) {
     }
     uint32_t ar = ETH->MACMDIOAR;
@@ -184,7 +185,7 @@ void eth_phy_write(uint32_t phy_addr, uint32_t reg, uint32_t val) {
 }
 
 uint32_t eth_phy_read(uint32_t phy_addr, uint32_t reg) {
-    #if defined(STM32H5) || defined(STM32H7)
+    #if defined(STM32H5) || defined(STM32H7) || defined(STM32N6)
     while (ETH->MACMDIOAR & ETH_MACMDIOAR_MB) {
     }
     uint32_t ar = ETH->MACMDIOAR;
@@ -296,7 +297,7 @@ void eth_set_trace(eth_t *self, uint32_t value) {
 static int eth_mac_init(eth_t *self) {
     // Configure MPU
     uint32_t irq_state = mpu_config_start();
-    #if defined(STM32H5)
+    #if defined(STM32H5) || defined(STM32N6)
     mpu_config_region(MPU_REGION_ETH, (uint32_t)&eth_dma, MPU_CONFIG_ETH(16 * 1024));
     #else
     mpu_config_region(MPU_REGION_ETH, (uint32_t)&eth_dma, MPU_CONFIG_ETH(MPU_REGION_SIZE_16KB));
@@ -316,8 +317,10 @@ static int eth_mac_init(eth_t *self) {
 
     // Configure clock sources for N6
     #if defined(STM32N6)
-    LL_RCC_SetETH1TXClockSource(LL_RCC_ETH1TX_CLKSOURCE_HSE);
-    LL_RCC_SetETH1RXClockSource(LL_RCC_ETH1RX_CLKSOURCE_HSE);
+    LL_RCC_SetETHREFTXClockSource(LL_RCC_ETH1REFTX_CLKSOURCE_EXT); // max 25MHz
+    LL_RCC_SetETHREFRXClockSource(LL_RCC_ETH1REFRX_CLKSOURCE_EXT); // max 125MHz
+    LL_RCC_SetETHClockSource(LL_RCC_ETH1_CLKSOURCE_IC12); // max 125MHz
+    LL_RCC_SetETH1PTPDivider(LL_RCC_ETH1PTP_DIV_1);
     LL_RCC_SetETHPTPClockSource(LL_RCC_ETH1PTP_CLKSOURCE_HCLK); // max 200MHz
     #endif
 
@@ -389,7 +392,7 @@ static int eth_mac_init(eth_t *self) {
     // Set MII clock range
     uint32_t hclk = HAL_RCC_GetHCLKFreq();
     uint32_t cr_div;
-    #if defined(STM32H5)
+    #if defined(STM32H5) || defined(STM32N6)
     cr_div = ETH->MACMDIOAR & ~ETH_MACMDIOAR_CR;
     if (hclk < 35000000) {
         cr_div |= ETH_MACMDIOAR_CR_DIV16;
@@ -434,6 +437,11 @@ static int eth_mac_init(eth_t *self) {
     ETH->MACMIIAR = cr_div;
     #endif
 
+    #if defined(STM32H5) || defined(STM32H7) || defined(STM32N6)
+    // Set 1us tick counter for MAC operation
+    WRITE_REG(ETH->MAC1USTCR, HAL_RCC_GetHCLKFreq() / 1000000U - 1U);
+    #endif
+
     #if defined(STM32H5) || defined(STM32H7)
     // don't skip 32bit words since our descriptors are continuous in memory
     ETH->DMACCR &= ~(ETH_DMACCR_DSL_Msk);
@@ -442,7 +450,7 @@ static int eth_mac_init(eth_t *self) {
     #endif
 
     // Burst mode configuration
-    #if defined(STM32H5) || defined(STM32H7)
+    #if defined(STM32H5) || defined(STM32H7) || defined(STM32N6)
     ETH->DMASBMR = ETH->DMASBMR & ~ETH_DMASBMR_AAL & ~ETH_DMASBMR_FB;
     #else
     ETH->DMABMR = 0;
@@ -455,6 +463,8 @@ static int eth_mac_init(eth_t *self) {
         | ETH_DMACIER_NIE // enable normal interrupts
         | ETH_DMACIER_RIE // enable RX interrupt
     ;
+    #elif defined(STM32N6)
+    ETH->DMA_CH[0].DMACIER = ETH_DMACxIER_NIE | ETH_DMACxIER_RIE;
     #else
     ETH->DMAIER =
         ETH_DMAIER_NISE // enable normal interrupts
@@ -464,7 +474,7 @@ static int eth_mac_init(eth_t *self) {
 
     // Configure RX descriptor lists
     for (size_t i = 0; i < RX_BUF_NUM; ++i) {
-        #if defined(STM32H5) || defined(STM32H7)
+        #if defined(STM32H5) || defined(STM32H7) || defined(STM32N6)
         eth_dma.rx_descr[i].rdes3 =
             1 << RX_DESCR_3_OWN_Pos
                 | (1 << RX_DESCR_3_BUF1V_Pos) // buf1 address valid
@@ -484,6 +494,10 @@ static int eth_mac_init(eth_t *self) {
 
     #if defined(STM32H5) || defined(STM32H7)
     ETH->DMACRDLAR = (uint32_t)&eth_dma.rx_descr[0];
+    #elif defined(STM32N6)
+    ETH->DMA_CH[0].DMACRXRLR = RX_BUF_NUM - 1;
+    ETH->DMA_CH[0].DMACRXDLAR = (uint32_t)&eth_dma.rx_descr[0];
+    ETH->DMA_CH[0].DMACRXDTPR = (uint32_t)&eth_dma.rx_descr[RX_BUF_NUM - 1];
     #else
     ETH->DMARDLAR = (uint32_t)&eth_dma.rx_descr[0];
     #endif
@@ -491,7 +505,7 @@ static int eth_mac_init(eth_t *self) {
 
     // Configure TX descriptor lists
     for (size_t i = 0; i < TX_BUF_NUM; ++i) {
-        #if defined(STM32H5) || defined(STM32H7)
+        #if defined(STM32H5) || defined(STM32H7) || defined(STM32N6)
         eth_dma.tx_descr[i].tdes0 = 0;
         eth_dma.tx_descr[i].tdes1 = 0;
         eth_dma.tx_descr[i].tdes2 = TX_BUF_SIZE & TX_DESCR_2_B1L_Msk;
@@ -510,6 +524,10 @@ static int eth_mac_init(eth_t *self) {
     ETH->DMACRDRLR = RX_BUF_NUM - 1;
 
     ETH->DMACTDLAR = (uint32_t)&eth_dma.tx_descr[0];
+    #elif defined(STM32N6)
+    ETH->DMA_CH[0].DMACTXRLR = TX_BUF_NUM - 1;
+    ETH->DMA_CH[0].DMACTXDLAR = (uint32_t)&eth_dma.tx_descr[0];
+    ETH->DMA_CH[0].DMACTXDTPR = (uint32_t)&eth_dma.tx_descr[0];
     #else
     ETH->DMATDLAR = (uint32_t)&eth_dma.tx_descr[0];
     #endif
@@ -521,6 +539,9 @@ static int eth_mac_init(eth_t *self) {
     ETH->MTLRQOMR = ETH_MTLRQOMR_RSF;
     // transmission starts when a full packet resides in the Tx queue
     ETH->MTLTQOMR = ETH_MTLTQOMR_TSF;
+    #elif defined(STM32N6)
+    ETH->MTL_QUEUE[0].MTLRXQOMR = ETH_MTLRXQxOMR_RSF;
+    ETH->MTL_QUEUE[0].MTLTXQOMR = ETH_MTLTXQxOMR_TSF;
     #else
     ETH->DMAOMR =
         ETH_DMAOMR_RSF // read from RX FIFO after a full frame is written
@@ -530,7 +551,7 @@ static int eth_mac_init(eth_t *self) {
     mp_hal_delay_ms(2);
 
     // Select MAC filtering options
-    #if defined(STM32H5) || defined(STM32H7)
+    #if defined(STM32H5) || defined(STM32H7) || defined(STM32N6)
     ETH->MACPFR = ETH_MACPFR_RA; // pass all frames up
     #else
     ETH->MACFFR =
@@ -586,13 +607,17 @@ static int eth_mac_init(eth_t *self) {
     ETH->DMACRCR |= ETH_DMACRCR_SR; // start RX
     ETH->DMACTCR |= ETH_DMACTCR_ST; // start TX
     #elif defined(STM32N6)
-    ETH->MTL_QUEUE[0].MTLTXQOMR |= ETH_MTLTXQxOMR_FTQ; // flush TX FIFO
-    ETH->MTL_QUEUE[1].MTLTXQOMR |= ETH_MTLTXQxOMR_FTQ; // flush TX FIFO
+    // Flush TX FIFOs before starting
+    ETH->MTL_QUEUE[0].MTLTXQOMR |= ETH_MTLTXQxOMR_FTQ;
+    ETH->MTL_QUEUE[1].MTLTXQOMR |= ETH_MTLTXQxOMR_FTQ;
+    // Configure RX buffer size and start RX
     ETH->DMA_CH[0].DMACRXCR = RX_BUF_SIZE << ETH_DMACxRXCR_RBSZ_Pos;
-    ETH->DMA_CH[0].DMACRXCR |= ETH_DMACxRXCR_SR; // start RX
+    ETH->DMA_CH[0].DMACRXCR |= ETH_DMACxRXCR_SR;
+    // Configure TX and start TX
     ETH->DMA_CH[0].DMACTXCR = 4 << ETH_DMACxTXCR_TXPBL_Pos;
-    ETH->DMA_CH[0].DMACTXCR |= ETH_DMACxTXCR_ST; // start TX
-    ETH->DMA_CH[0].DMACSR |= ETH_DMACxSR_TPS | ETH_DMACxSR_RPS; // clear TX/RX process stopped flags
+    ETH->DMA_CH[0].DMACTXCR |= ETH_DMACxTXCR_ST;
+    // Clear TX/RX process stopped flags
+    ETH->DMA_CH[0].DMACSR |= ETH_DMACxSR_TPS | ETH_DMACxSR_RPS;
     #else
     ETH->DMAOMR |=
         ETH_DMAOMR_ST // start TX
@@ -694,11 +719,16 @@ static int eth_tx_buf_send(void) {
 
     // Notify ETH DMA that there is a new TX descriptor for sending
     __DMB();
-    #if defined(STM32H5) || defined(STM32H7) || defined(STM32N6)
+    #if defined(STM32H5) || defined(STM32H7)
     if (ETH->DMACSR & ETH_DMACSR_TBU) {
         ETH->DMACSR = ETH_DMACSR_TBU;
     }
     ETH->DMACTDTPR = (uint32_t)&eth_dma.tx_descr[eth_dma.tx_descr_idx];
+    #elif defined(STM32N6)
+    if (ETH->DMA_CH[0].DMACSR & ETH_DMACxSR_TBU) {
+        ETH->DMA_CH[0].DMACSR = ETH_DMACxSR_TBU;
+    }
+    ETH->DMA_CH[0].DMACTXDTPR = (uint32_t)&eth_dma.tx_descr[eth_dma.tx_descr_idx];
     #else
     if (ETH->DMASR & ETH_DMASR_TBUS) {
         ETH->DMASR = ETH_DMASR_TBUS;
@@ -716,7 +746,7 @@ static void eth_dma_rx_free(void) {
     eth_dma.rx_descr_idx = (eth_dma.rx_descr_idx + 1) % RX_BUF_NUM;
 
     // Schedule to get next incoming frame
-    #if defined(STM32H5) || defined(STM32H7)
+    #if defined(STM32H5) || defined(STM32H7) || defined(STM32N6)
     rx_descr->rdes0 = (uint32_t)buf;
     rx_descr->rdes3 = 1 << RX_DESCR_3_OWN_Pos;  // owned by DMA
     rx_descr->rdes3 |= 1 << RX_DESCR_3_BUF1V_Pos; // buf 1 address valid
@@ -735,6 +765,8 @@ static void eth_dma_rx_free(void) {
     __DMB();
     #if defined(STM32H5) || defined(STM32H7)
     ETH->DMACRDTPR = (uint32_t)&rx_descr[eth_dma.rx_descr_idx];
+    #elif defined(STM32N6)
+    ETH->DMA_CH[0].DMACRXDTPR = (uint32_t)&eth_dma.rx_descr[eth_dma.rx_descr_idx];
     #else
     ETH->DMARPDR = 0;
     #endif
@@ -1174,6 +1206,8 @@ void eth_low_power_mode(eth_t *self, bool enable) {
     // Enable eth clock
     #if defined(STM32H7)
     __HAL_RCC_ETH1MAC_CLK_ENABLE();
+    #elif defined(STM32N6)
+    __HAL_RCC_ETH1_CLK_ENABLE();
     #else
     __HAL_RCC_ETH_CLK_ENABLE();
     #endif
@@ -1185,6 +1219,8 @@ void eth_low_power_mode(eth_t *self, bool enable) {
         // Disable eth clock.
         #if defined(STM32H7)
         __HAL_RCC_ETH1MAC_CLK_DISABLE();
+        #elif defined(STM32N6)
+        __HAL_RCC_ETH1_CLK_DISABLE();
         #else
         __HAL_RCC_ETH_CLK_DISABLE();
         #endif
