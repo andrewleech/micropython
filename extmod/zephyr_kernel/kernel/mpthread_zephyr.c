@@ -12,6 +12,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 
 #include "py/runtime.h"
 #include "py/gc.h"
@@ -171,6 +172,7 @@ void mp_thread_gc_others(void) {
             }
             mp_thread_counter--;
             DEBUG_printf("GC: Collected thread %s\n", k_thread_name_get(th->id));
+            // The "th" memory will eventually be reclaimed by the GC
             // Don't update prev - we removed this node
         } else {
             th->alive = 0;  // Reset for next GC cycle
@@ -260,10 +262,11 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     //     *stack_size = MP_THREAD_MIN_STACK_SIZE;
     // }
 
-    // in case some threads have finished but their stack has not been collected yet
-    gc_collect();
+    // NOTE: gc_collect() removed from here - it was causing deadlock with spawned threads
+    // trying to lock thread_mutex while main thread was in gc_collect(). The normal GC
+    // cycles will clean up finished threads anyway.
 
-    // Allocate thread node (must be outside mutex lock for GC)
+    // Allocate linked-list node (must be outside thread_mutex lock)
     mp_thread_t *th = m_new_obj(mp_thread_t);
 
     mp_thread_mutex_lock(&thread_mutex, 1);
@@ -272,7 +275,6 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     int32_t _slot = mp_thread_find_stack_slot();
     if (_slot < 0) {
         mp_thread_mutex_unlock(&thread_mutex);
-        m_del_obj(mp_thread_t, th);
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("maximum number of threads reached"));
     }
 
@@ -289,7 +291,6 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
 
     if (th->id == NULL) {
         mp_thread_mutex_unlock(&thread_mutex);
-        m_del_obj(mp_thread_t, th);
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("can't create thread"));
     }
 
@@ -323,7 +324,7 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
 
 // Create thread (standard API)
 mp_uint_t mp_thread_create(void *(*entry)(void *), void *arg, size_t *stack_size) {
-    char name[16];
+    static char name[16];  // Static to avoid dangling pointer
     snprintf(name, sizeof(name), "mp_thread_%d", mp_thread_counter);
     return mp_thread_create_ex(entry, arg, stack_size, MP_THREAD_PRIORITY, name);
 }
@@ -346,19 +347,26 @@ void mp_thread_finish(void) {
 // Initialize mutex - use Zephyr's k_sem (binary semaphore, non-recursive)
 // Non-recursive behavior is required for Python threading semantics
 void mp_thread_mutex_init(mp_thread_mutex_t *mutex) {
+    // Zero the k_sem structure before init to ensure clean state
+    // This prevents corruption from stale state in global memory across soft resets
+    memset(&mutex->handle, 0, sizeof(struct k_sem));
     k_sem_init(&mutex->handle, 0, 1);
     k_sem_give(&mutex->handle);
 }
 
 // Lock mutex
 int mp_thread_mutex_lock(mp_thread_mutex_t *mutex, int wait) {
+    // DEBUG logging disabled - was causing reentrancy issues
     return k_sem_take(&mutex->handle, wait ? K_FOREVER : K_NO_WAIT) == 0;
 }
 
 // Unlock mutex
 void mp_thread_mutex_unlock(mp_thread_mutex_t *mutex) {
     k_sem_give(&mutex->handle);
-    k_yield();  // Yield CPU to allow waiting threads to run
+    // NOTE: k_yield() removed - was causing deadlock during thread creation
+    // When main thread creates new thread and releases thread_mutex, yielding
+    // immediately causes new thread to run and block on GIL (held by main),
+    // creating deadlock. Rely on timeslicing for context switches instead.
 }
 
 // Recursive mutex functions (only compiled when GIL is disabled)
@@ -368,6 +376,8 @@ void mp_thread_mutex_unlock(mp_thread_mutex_t *mutex) {
 #if MICROPY_PY_THREAD_RECURSIVE_MUTEX
 
 void mp_thread_recursive_mutex_init(mp_thread_recursive_mutex_t *mutex) {
+    // Zero the k_mutex structure before init to ensure clean state
+    memset(&mutex->handle, 0, sizeof(struct k_mutex));
     k_mutex_init(&mutex->handle);
 }
 
