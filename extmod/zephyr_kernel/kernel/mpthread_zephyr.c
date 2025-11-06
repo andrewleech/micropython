@@ -297,8 +297,8 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
         );
 
     if (th->id == NULL) {
-        mp_thread_free(th);
         mp_thread_mutex_unlock(&thread_mutex);
+        // Memory will be reclaimed by GC
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("can't create thread"));
     }
 
