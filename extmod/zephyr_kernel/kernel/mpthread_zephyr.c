@@ -157,9 +157,12 @@ static void check_thread_canaries(mp_thread_t *th, const char *location) {
     }
 }
 
+// Register thread list head as GC root pointer
+// This ensures the main thread and linked list are scanned during GC
+MP_REGISTER_ROOT_POINTER(struct _mp_thread_t *mp_thread_list_head);
+
 // Global state
 static mp_thread_mutex_t thread_mutex;
-static mp_thread_t *thread = NULL;         // Thread list head (GC root)
 static uint8_t mp_thread_counter;
 static mp_thread_stack_slot_t stack_slot[MP_THREAD_MAXIMUM_USER_THREADS];
 
@@ -214,7 +217,7 @@ bool mp_thread_init(void *stack) {
     // Memory barrier to ensure initialization complete
     __sync_synchronize();
 
-    thread = th;  // Set as head of thread list
+    MP_STATE_VM(mp_thread_list_head) = th;  // Set as head of thread list
 
     // Validate canaries after main thread initialization
     check_thread_canaries(th, "mp_thread_init main thread");
@@ -231,7 +234,7 @@ void mp_thread_deinit(void) {
     mp_thread_mutex_lock(&thread_mutex, 1);
 
     // Abort all threads except current
-    for (mp_thread_t *th = thread; th != NULL; th = th->next) {
+    for (mp_thread_t *th = MP_STATE_VM(mp_thread_list_head); th != NULL; th = th->next) {
         if ((th->id != k_current_get()) && (th->status != MP_THREAD_STATUS_FINISHED)) {
             th->status = MP_THREAD_STATUS_FINISHED;
             DEBUG_printf("Aborting thread %s\n", k_thread_name_get(th->id));
@@ -248,7 +251,7 @@ void mp_thread_deinit(void) {
 void mp_thread_gc_others(void) {
     mp_thread_t *prev = NULL;
 
-    if (thread == NULL) {
+    if (MP_STATE_VM(mp_thread_list_head) == NULL) {
         return;  // Threading not initialized
     }
 
@@ -259,7 +262,7 @@ void mp_thread_gc_others(void) {
     k_thread_foreach(mp_thread_iterate_threads_cb, NULL);
 
     // Clean up finished threads and collect GC roots
-    mp_thread_t *th = thread;
+    mp_thread_t *th = MP_STATE_VM(mp_thread_list_head);
     while (th != NULL) {
         mp_thread_t *next = th->next;  // Capture next before any modifications
 
@@ -271,7 +274,7 @@ void mp_thread_gc_others(void) {
             if (prev != NULL) {
                 prev->next = next;
             } else {
-                thread = next;
+                MP_STATE_VM(mp_thread_list_head) = next;
             }
             if (th->slot >= 0 && th->slot < MP_THREAD_MAXIMUM_USER_THREADS) {
                 stack_slot[th->slot].used = false;
@@ -291,7 +294,7 @@ void mp_thread_gc_others(void) {
     DEBUG_printf("GC: Scanning %d threads\n", mp_thread_counter + 1);
 
     // Scan all remaining threads for GC roots
-    for (mp_thread_t *th = thread; th != NULL; th = th->next) {
+    for (mp_thread_t *th = MP_STATE_VM(mp_thread_list_head); th != NULL; th = th->next) {
         DEBUG_printf("GC: Scanning thread %s\n", k_thread_name_get(th->id));
 
         // Validate canaries during GC scan
@@ -355,7 +358,7 @@ mp_uint_t mp_thread_get_id(void) {
 // Mark thread as started (called by new thread)
 void mp_thread_start(void) {
     mp_thread_mutex_lock(&thread_mutex, 1);
-    for (mp_thread_t *th = thread; th != NULL; th = th->next) {
+    for (mp_thread_t *th = MP_STATE_VM(mp_thread_list_head); th != NULL; th = th->next) {
         if (th->id == k_current_get()) {
             th->status = MP_THREAD_STATUS_READY;
             break;
@@ -439,8 +442,8 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     th->arg = arg;
     th->stack = (void *)th->z_thread.stack_info.start;
     th->stack_len = th->z_thread.stack_info.size / sizeof(uintptr_t);
-    th->next = thread;
-    thread = th;
+    th->next = MP_STATE_VM(mp_thread_list_head);
+    MP_STATE_VM(mp_thread_list_head) = th;
 
     stack_slot[_slot].used = true;
     mp_thread_counter++;
@@ -472,7 +475,7 @@ mp_uint_t mp_thread_create(void *(*entry)(void *), void *arg, size_t *stack_size
 void mp_thread_finish(void) {
     mp_thread_mutex_lock(&thread_mutex, 1);
 
-    for (mp_thread_t *th = thread; th != NULL; th = th->next) {
+    for (mp_thread_t *th = MP_STATE_VM(mp_thread_list_head); th != NULL; th = th->next) {
         if (th->id == k_current_get()) {
             // Validate canaries before marking thread finished
             check_thread_canaries(th, "mp_thread_finish");
@@ -535,7 +538,7 @@ void mp_thread_recursive_mutex_unlock(mp_thread_recursive_mutex_t *mutex) {
 
 // Helper: Thread iteration callback for GC
 static void mp_thread_iterate_threads_cb(const struct k_thread *z_thread, void *user_data) {
-    for (mp_thread_t *th = thread; th != NULL; th = th->next) {
+    for (mp_thread_t *th = MP_STATE_VM(mp_thread_list_head); th != NULL; th = th->next) {
         if (th->id == (struct k_thread *)z_thread) {
             th->alive = 1;
             DEBUG_printf("GC: Found thread %s\n", k_thread_name_get(th->id));
