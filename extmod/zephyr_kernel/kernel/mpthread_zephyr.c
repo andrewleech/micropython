@@ -83,9 +83,82 @@ typedef struct _mp_thread_t {
     struct _mp_thread_t *next;      // Next in linked list
 } mp_thread_t;
 
+// Memory corruption detection: canary protection
+#define CANARY_BEFORE 0xDEADBEEF
+#define CANARY_AFTER  0xBEEFDEAD
+
+typedef struct _mp_thread_protected_t {
+    uint32_t canary_before;
+    mp_thread_t thread;
+    uint32_t canary_after;
+} mp_thread_protected_t;
+
+// Dump memory around address for corruption analysis
+static void dump_memory_region(const char *label, uint32_t *addr, int words_before, int words_after) {
+    mp_printf(&mp_plat_print, "\r\n%s:\r\n", label);
+    uint32_t *start = addr - words_before;
+    uint32_t *end = addr + words_after;
+
+    for (uint32_t *p = start; p < end; p += 4) {
+        mp_printf(&mp_plat_print, "  %p: %08x %08x %08x %08x",
+                  p, (unsigned int)p[0], (unsigned int)p[1],
+                  (unsigned int)p[2], (unsigned int)p[3]);
+
+        // Mark the corrupted canary location
+        if (p <= addr && addr < p + 4) {
+            mp_printf(&mp_plat_print, " <- CANARY");
+        }
+        mp_printf(&mp_plat_print, "\r\n");
+    }
+}
+
+// Check thread structure for buffer overflow corruption
+static void check_thread_canaries(mp_thread_t *th, const char *location) {
+    // Calculate offset to protected structure
+    mp_thread_protected_t *protected =
+        (mp_thread_protected_t *)((char *)th - offsetof(mp_thread_protected_t, thread));
+
+    if (protected->canary_before != CANARY_BEFORE) {
+        mp_printf(&mp_plat_print, "\r\n*** CANARY CORRUPTED (BEFORE) ***\r\n");
+        mp_printf(&mp_plat_print, "  Thread: %p\r\n", th);
+        mp_printf(&mp_plat_print, "  Protected struct: %p\r\n", protected);
+        mp_printf(&mp_plat_print, "  Location: %s\r\n", location);
+        mp_printf(&mp_plat_print, "  Expected: 0x%08x\r\n", (unsigned int)CANARY_BEFORE);
+        mp_printf(&mp_plat_print, "  Found: 0x%08x\r\n", (unsigned int)protected->canary_before);
+
+        // Dump memory around corruption
+        uint32_t *canary_addr = &protected->canary_before;
+        dump_memory_region("Memory 32 bytes before canary", canary_addr, 8, 0);
+        dump_memory_region("Canary + 32 bytes after", canary_addr, 0, 8);
+        dump_memory_region("Thread structure", (uint32_t *)th, 0, 16);
+
+        while(1) {
+            __asm volatile("nop");  // Hang for GDB attachment
+        }
+    }
+
+    if (protected->canary_after != CANARY_AFTER) {
+        mp_printf(&mp_plat_print, "\r\n*** CANARY CORRUPTED (AFTER) ***\r\n");
+        mp_printf(&mp_plat_print, "  Thread: %p\r\n", th);
+        mp_printf(&mp_plat_print, "  Protected struct: %p\r\n", protected);
+        mp_printf(&mp_plat_print, "  Location: %s\r\n", location);
+        mp_printf(&mp_plat_print, "  Expected: 0x%08x\r\n", (unsigned int)CANARY_AFTER);
+        mp_printf(&mp_plat_print, "  Found: 0x%08x\r\n", (unsigned int)protected->canary_after);
+
+        // Dump memory around corruption
+        uint32_t *canary_addr = &protected->canary_after;
+        dump_memory_region("Thread structure", (uint32_t *)th, 0, 16);
+        dump_memory_region("Memory 32 bytes before canary", canary_addr, 8, 0);
+        dump_memory_region("Canary + 32 bytes after", canary_addr, 0, 8);
+
+        while(1) {
+            __asm volatile("nop");  // Hang for GDB attachment
+        }
+    }
+}
+
 // Global state
 static mp_thread_mutex_t thread_mutex;
-static mp_thread_t thread_entry0;          // Main thread entry
 static mp_thread_t *thread = NULL;         // Thread list head (GC root)
 static uint8_t mp_thread_counter;
 static mp_thread_stack_slot_t stack_slot[MP_THREAD_MAXIMUM_USER_THREADS];
@@ -97,21 +170,43 @@ K_THREAD_STACK_ARRAY_DEFINE(mp_thread_stack_array, MP_THREAD_MAXIMUM_USER_THREAD
 static void mp_thread_iterate_threads_cb(const struct k_thread *thread, void *user_data);
 static int32_t mp_thread_find_stack_slot(void);
 
-// Initialize threading subsystem
+// Initialize threading subsystem - Phase 1 (early, before GC init)
+// Sets thread-local state pointer to allow gc_init() to access MP_STATE_THREAD()
+// Must be called BEFORE gc_init()
+bool mp_thread_init_early(void) {
+    // Set thread-local state for main thread
+    // This allows gc_init() and other early code to safely access MP_STATE_THREAD()
+    mp_thread_set_state(&mp_state_ctx.thread);
+
+    DEBUG_printf("Threading early init complete (thread-local state set)\n");
+    return true;
+}
+
+// Initialize threading subsystem - Phase 2 (after GC init)
+// Allocates main thread structure on GC heap
+// Must be called AFTER gc_init() and mp_thread_init_early()
 bool mp_thread_init(void *stack) {
-    // Note: mp_zephyr_kernel_init() must be called by main() BEFORE mp_thread_init()
+    // Note: mp_zephyr_kernel_init() must be called by main() BEFORE mp_thread_init_early()
     // to properly initialize the Zephyr kernel and bootstrap thread.
+    // GC must be initialized BEFORE calling this function (heap allocation required)
+    // mp_thread_init_early() must be called BEFORE gc_init() to set thread-local state
 
-    // Create first entry in linked list (main thread running on bootstrap)
-    thread_entry0.id = k_current_get();
-    thread_entry0.status = MP_THREAD_STATUS_READY;
-    thread_entry0.alive = 1;
-    thread_entry0.arg = NULL;
-    thread_entry0.stack = stack;
-    thread_entry0.stack_len = 0;  // Bootstrap thread uses C runtime stack, size unknown
-    thread_entry0.next = NULL;
+    // Allocate main thread with canary protection (same as all other threads)
+    mp_thread_protected_t *protected = m_new_obj(mp_thread_protected_t);
+    protected->canary_before = CANARY_BEFORE;
+    protected->canary_after = CANARY_AFTER;
+    mp_thread_t *th = &protected->thread;
 
-    k_thread_name_set(thread_entry0.id, "mp_main");
+    // Initialize main thread entry in linked list
+    th->id = k_current_get();
+    th->status = MP_THREAD_STATUS_READY;
+    th->alive = 1;
+    th->arg = NULL;
+    th->stack = stack;
+    th->stack_len = 0;  // Bootstrap thread uses C runtime stack, size unknown
+    th->next = NULL;
+
+    k_thread_name_set(th->id, "mp_main");
     mp_thread_counter = 0;
 
     mp_thread_mutex_init(&thread_mutex);
@@ -119,12 +214,14 @@ bool mp_thread_init(void *stack) {
     // Memory barrier to ensure initialization complete
     __sync_synchronize();
 
-    thread = &thread_entry0;
+    thread = th;  // Set as head of thread list
 
-    // Set thread-local state for main thread
-    mp_thread_set_state(&mp_state_ctx.thread);
+    // Validate canaries after main thread initialization
+    check_thread_canaries(th, "mp_thread_init main thread");
 
-    DEBUG_printf("Threading initialized\n");
+    // Note: thread-local state already set in mp_thread_init_early()
+
+    DEBUG_printf("Threading initialized (phase 2 complete)\n");
 
     return true;
 }
@@ -166,6 +263,9 @@ void mp_thread_gc_others(void) {
     while (th != NULL) {
         mp_thread_t *next = th->next;  // Capture next before any modifications
 
+        // Validate canaries during thread list iteration
+        check_thread_canaries(th, "mp_thread_gc_others cleanup");
+
         // Remove finished, non-alive threads from list
         if ((th->status == MP_THREAD_STATUS_FINISHED) && !th->alive) {
             if (prev != NULL) {
@@ -193,6 +293,31 @@ void mp_thread_gc_others(void) {
     // Scan all remaining threads for GC roots
     for (mp_thread_t *th = thread; th != NULL; th = th->next) {
         DEBUG_printf("GC: Scanning thread %s\n", k_thread_name_get(th->id));
+
+        // Validate canaries during GC scan
+        check_thread_canaries(th, "mp_thread_gc_others scan");
+
+        // CHECK FOR 0x1d CORRUPTION: Examine thread_state and nearby pointers
+        uint8_t thread_state = th->z_thread.base.thread_state;
+        if (thread_state == 0x1d) {
+            // Found 0x1d state - check if any pointer fields are corrupted
+            mp_printf(&mp_plat_print, "\n*** FOUND 0x1d THREAD STATE in thread %s ***\n", k_thread_name_get(th->id));
+            mp_printf(&mp_plat_print, "  Thread @ %p\n", th);
+            mp_printf(&mp_plat_print, "  stack:     %p\n", th->stack);
+            mp_printf(&mp_plat_print, "  next:      %p\n", th->next);
+            mp_printf(&mp_plat_print, "  arg:       %p\n", th->arg);
+
+            // Check if any pointer has 0x1d in high byte
+            if (((uintptr_t)th->stack & 0xFF000000) == 0x1d000000) {
+                mp_printf(&mp_plat_print, "  >>> CORRUPTION: stack has 0x1d high byte!\n");
+            }
+            if (((uintptr_t)th->next & 0xFF000000) == 0x1d000000) {
+                mp_printf(&mp_plat_print, "  >>> CORRUPTION: next has 0x1d high byte!\n");
+            }
+            if (((uintptr_t)th->arg & 0xFF000000) == 0x1d000000) {
+                mp_printf(&mp_plat_print, "  >>> CORRUPTION: arg has 0x1d high byte!\n");
+            }
+        }
 
         gc_collect_root((void **)&th, 1);
         gc_collect_root(&th->arg, 1);
@@ -272,10 +397,13 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     // trying to lock thread_mutex while main thread was in gc_collect(). The normal GC
     // cycles will clean up finished threads anyway.
 
-    // Heap allocation (m_new_obj) - matches ports/zephyr pattern
+    // Heap allocation with canary protection for memory corruption detection
+    // Allocate mp_thread_protected_t (contains canaries before/after mp_thread_t)
     // Static pool testing showed: 25/42 pass (worse than 26/40 with heap)
-    // GC does NOT corrupt thread pointers - hypothesis was false
-    mp_thread_t *th = m_new_obj(mp_thread_t);
+    mp_thread_protected_t *protected = m_new_obj(mp_thread_protected_t);
+    protected->canary_before = CANARY_BEFORE;
+    protected->canary_after = CANARY_AFTER;
+    mp_thread_t *th = &protected->thread;
 
     mp_thread_mutex_lock(&thread_mutex, 1);
 
@@ -322,6 +450,9 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
 
     DEBUG_printf("Created thread %s (id=%p)\n", name, th->id);
 
+    // Validate canaries after thread initialization
+    check_thread_canaries(th, "mp_thread_create_ex after init");
+
     mp_thread_mutex_unlock(&thread_mutex);
 
     // Memory barrier to ensure thread list updates are visible to all threads
@@ -343,6 +474,8 @@ void mp_thread_finish(void) {
 
     for (mp_thread_t *th = thread; th != NULL; th = th->next) {
         if (th->id == k_current_get()) {
+            // Validate canaries before marking thread finished
+            check_thread_canaries(th, "mp_thread_finish");
             th->status = MP_THREAD_STATUS_FINISHED;
             DEBUG_printf("Finishing thread %s\n", k_thread_name_get(th->id));
             break;
