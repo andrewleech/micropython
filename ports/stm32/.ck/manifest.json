@@ -1,0 +1,4876 @@
+{
+  "version": "0.1.0",
+  "created": 1762732215,
+  "updated": 1762733885,
+  "files": {
+    "./boards/NUCLEO_H723ZG/pins.csv": {
+      "path": "./boards/NUCLEO_H723ZG/pins.csv",
+      "hash": "ef9be7a15c87076a504db2c061c1861764518943a4bf021c87569682bdb20ff8",
+      "last_modified": 1751235198,
+      "size": 1304
+    },
+    "./lcd.h": {
+      "path": "./lcd.h",
+      "hash": "e2145cc283fdd1027ccf51989a8e9a7a3357932242e98fc0bb38ccd9e9202555",
+      "last_modified": 1751235198,
+      "size": 1387
+    },
+    "./boards/PYBV10/deploy.md": {
+      "path": "./boards/PYBV10/deploy.md",
+      "hash": "aef1064c48c34dd9d6a4caaaadfc9d03c1c2463998df4800584e2f0e08201639",
+      "last_modified": 1751235198,
+      "size": 544
+    },
+    "./boards/NUCLEO_F411RE/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_F411RE/mpconfigboard.mk",
+      "hash": "e530ff35ecdaa802b4b3ff1a208943e4d886d36c7e5c93507d5ffbf69dc0d45f",
+      "last_modified": 1751235198,
+      "size": 225
+    },
+    "./boards/NUCLEO_L152RE/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_L152RE/mpconfigboard.mk",
+      "hash": "6b41057871fd857b9e8d975eefec7fa85c18b24a3f162d0557cac97303a655c7",
+      "last_modified": 1751235198,
+      "size": 181
+    },
+    "./boards/stm32l072xz.ld": {
+      "path": "./boards/stm32l072xz.ld",
+      "hash": "53a11ce0314d66d7f1f68e3d82055bccfef1e6f93e8c8ae064122cbfccddb487",
+      "last_modified": 1751235198,
+      "size": 739
+    },
+    "./mboot/gzstream.h": {
+      "path": "./mboot/gzstream.h",
+      "hash": "c5c0982da8ece13851878c560f91ab42d6bd0080a80c6c789b5c4b94a945c68d",
+      "last_modified": 1751235198,
+      "size": 1920
+    },
+    "./usrsw.c": {
+      "path": "./usrsw.c",
+      "hash": "3d913933c1cd34e90f27dd2a42fb40720b96a3b3c14b7776c2939ed15f51851f",
+      "last_modified": 1751235198,
+      "size": 5466
+    },
+    "./boards/VCC_GND_F407ZG/mpconfigboard.h": {
+      "path": "./boards/VCC_GND_F407ZG/mpconfigboard.h",
+      "hash": "5125288768efb92962381bb45b207fbb98f52fab40847006e61449228d5b1653",
+      "last_modified": 1751235198,
+      "size": 6259
+    },
+    "./boards/stm32f401_af.csv": {
+      "path": "./boards/stm32f401_af.csv",
+      "hash": "9bba4496a0202ce4286f71514ed2e084f3a9540994d76d8975433761a26e9d10",
+      "last_modified": 1751235198,
+      "size": 19230
+    },
+    "./boards/NUCLEO_L152RE/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_L152RE/mpconfigboard.h",
+      "hash": "328b771a7a6089f9f718faa3c9802d909eadbed195e82d245c1ce1a1518d6da8",
+      "last_modified": 1751235198,
+      "size": 3440
+    },
+    "./boards/stm32l1xx_hal_conf_base.h": {
+      "path": "./boards/stm32l1xx_hal_conf_base.h",
+      "hash": "72571e53ad95ba867a1e6571611c0e59b2b82517ea8a86743f4947b99e01c7a7",
+      "last_modified": 1751235198,
+      "size": 3530
+    },
+    "./usbhost/Class/Template/Src/usbh_template.c": {
+      "path": "./usbhost/Class/Template/Src/usbh_template.c",
+      "hash": "6995239640d1efa63e116ea045f17617c4e1a15d0be64f3e3a71ed07c86ba913",
+      "last_modified": 1751235198,
+      "size": 5084
+    },
+    "./boards/ADAFRUIT_F405_EXPRESS/stm32f4xx_hal_conf.h": {
+      "path": "./boards/ADAFRUIT_F405_EXPRESS/stm32f4xx_hal_conf.h",
+      "hash": "bf72420db50fa123dc5653d8ba403f9ce9dfdf9f89d37583cf7ef4039578264f",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./usbhost/Core/Src/usbh_pipes.c": {
+      "path": "./usbhost/Core/Src/usbh_pipes.c",
+      "hash": "cdc629791f6d6c37b83d46f5b934e380b3f67df3834f8e2e9125653cbe488abf",
+      "last_modified": 1751235198,
+      "size": 4541
+    },
+    "./boards/MIKROE_CLICKER2_STM32/board.json": {
+      "path": "./boards/MIKROE_CLICKER2_STM32/board.json",
+      "hash": "d92452f764c902da2df2079739c896ab1e6eeed4fa0a5b90dc3d1e0cda714a9f",
+      "last_modified": 1751235198,
+      "size": 345
+    },
+    "./boards/ESPRUINO_PICO/mpconfigboard.mk": {
+      "path": "./boards/ESPRUINO_PICO/mpconfigboard.mk",
+      "hash": "fb12415a1c34db919bb9dc0ee1c3a64af286c206c7005baf5995938140b7a11e",
+      "last_modified": 1751235198,
+      "size": 271
+    },
+    "./boards/LEGO_HUB_NO6/appupdate.py": {
+      "path": "./boards/LEGO_HUB_NO6/appupdate.py",
+      "hash": "b4b3fc5d6c40506df80c7fb9d44940d2277d3bdd23caaa25d88072b7da35863f",
+      "last_modified": 1751235198,
+      "size": 2262
+    },
+    "./boards/NUCLEO_L4A6ZG/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_L4A6ZG/mpconfigboard.h",
+      "hash": "49e193e2c8caa23333611d2feba8322910874d2ec7bb7b5fffac44d03fe17dd9",
+      "last_modified": 1751235198,
+      "size": 3143
+    },
+    "./boards/NUCLEO_L4A6ZG/stm32l4xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_L4A6ZG/stm32l4xx_hal_conf.h",
+      "hash": "87dfa054d2dd8da850e53ec404301df73b7afe5a2bccd1dd5e30f83c28a53b6b",
+      "last_modified": 1751235198,
+      "size": 592
+    },
+    "./boards/NUCLEO_F756ZG/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_F756ZG/mpconfigboard.h",
+      "hash": "7028bd2491d24a357d1492638bd19a6053a60f605c4c0b679957dc2fd6994c60",
+      "last_modified": 1751235198,
+      "size": 3336
+    },
+    "./boards/NUCLEO_F446RE/pins.csv": {
+      "path": "./boards/NUCLEO_F446RE/pins.csv",
+      "hash": "e2fa9438aa69d7dc03e9d508a33c47e0deb7cf1c681caa0e573dba47c762cad5",
+      "last_modified": 1751235198,
+      "size": 592
+    },
+    "./powerctrl.h": {
+      "path": "./powerctrl.h",
+      "hash": "0021f0d50c21cfa7d061585b58d747d4c76281621e5551b70468058dca08e446",
+      "last_modified": 1751235198,
+      "size": 2048
+    },
+    "./boards/PYBV4/stm32f4xx_hal_conf.h": {
+      "path": "./boards/PYBV4/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./boards/MIKROE_CLICKER2_STM32/mpconfigboard.h": {
+      "path": "./boards/MIKROE_CLICKER2_STM32/mpconfigboard.h",
+      "hash": "0d0190e7ab743ed426d09ac124f2b2a8e30c1409a0dd910225ac9c86cc7851ac",
+      "last_modified": 1751235198,
+      "size": 3143
+    },
+    "./boards/CERB40/board.json": {
+      "path": "./boards/CERB40/board.json",
+      "hash": "015521140853eb2397c9fb0556881dac6577777a5ef1fdf2f0cae96757b1474b",
+      "last_modified": 1751235198,
+      "size": 233
+    },
+    "./stm32_it.c": {
+      "path": "./stm32_it.c",
+      "hash": "eaf8610f862635f7d7a66074cbe4a9f9714df8a0a08d5d9f7f716db575c44495",
+      "last_modified": 1762654310,
+      "size": 30443
+    },
+    "./mboot/pack.h": {
+      "path": "./mboot/pack.h",
+      "hash": "5c34b0974adde8b438b66b668a50d6076ee7cee947f1129192b362e73c2c0a64",
+      "last_modified": 1751235198,
+      "size": 3004
+    },
+    "./mpnimbleport.c": {
+      "path": "./mpnimbleport.c",
+      "hash": "7f7a3dd65c8efeb76627eb53b8fa794954619514e38af6fff858be2403c473b3",
+      "last_modified": 1751235198,
+      "size": 3100
+    },
+    "./boards/STM32F429DISC/mpconfigboard.h": {
+      "path": "./boards/STM32F429DISC/mpconfigboard.h",
+      "hash": "be32fbf25af1048761a54748f0855e58746251bcefb4a6e113769069b19dd12e",
+      "last_modified": 1751235198,
+      "size": 5820
+    },
+    "./boards/PYBLITEV10/mpconfigvariant_NETWORK.mk": {
+      "path": "./boards/PYBLITEV10/mpconfigvariant_NETWORK.mk",
+      "hash": "ddabef7cdf5a6935d94f80adff9c65e0e36d10e91505ba6f5a890e810b3023e1",
+      "last_modified": 1751235198,
+      "size": 35
+    },
+    "./boards/VCC_GND_F407VE/mpconfigboard.h": {
+      "path": "./boards/VCC_GND_F407VE/mpconfigboard.h",
+      "hash": "8f00124cb26baeae4f4b04d20ac2f8087b6ca46e92146a436b8db7b58ee3bd22",
+      "last_modified": 1751235198,
+      "size": 5708
+    },
+    "./boards/NUCLEO_F412ZG/pins.csv": {
+      "path": "./boards/NUCLEO_F412ZG/pins.csv",
+      "hash": "e598592d92df010d354fee1f1257fce34bb8c5ec8ad71c19c3ce925abc86dd04",
+      "last_modified": 1751235198,
+      "size": 1044
+    },
+    "./boards/USBDONGLE_WB55/stm32wbxx_hal_conf.h": {
+      "path": "./boards/USBDONGLE_WB55/stm32wbxx_hal_conf.h",
+      "hash": "0865b12f90b1dc4c143202f641c648bcf0b9b71bb5208f8615c26a63224b44f6",
+      "last_modified": 1751235198,
+      "size": 551
+    },
+    "./boards/LEGO_HUB_NO6/board.json": {
+      "path": "./boards/LEGO_HUB_NO6/board.json",
+      "hash": "308ac4051059058035d44c74ff959b201250f636fef7fa52cc203d116102e3e1",
+      "last_modified": 1751235198,
+      "size": 240
+    },
+    "./usbd_conf.h": {
+      "path": "./usbd_conf.h",
+      "hash": "61df66d1a775a5368c5d3ddbecd15a46f6948d09c1b00844ec6ed7d9238a7892",
+      "last_modified": 1751235198,
+      "size": 2552
+    },
+    "./ulpi.h": {
+      "path": "./ulpi.h",
+      "hash": "dd88d3240e936deaec5b0a29b6f2bb52f654cbdefcf423eee6318a56e3c60a92",
+      "last_modified": 1751235198,
+      "size": 1407
+    },
+    "./usbd_desc.c": {
+      "path": "./usbd_desc.c",
+      "hash": "439b9846e117a1f1739fa824eb3ca8bbb76c39a75ce033ed3dd983a84b3405ab",
+      "last_modified": 1751235198,
+      "size": 7301
+    },
+    "./boards/NUCLEO_F091RC/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_F091RC/mpconfigboard.h",
+      "hash": "366767ea47b399d9e9bac8982538df6d2390c216e96f4b9804a14934d9736a7c",
+      "last_modified": 1751235198,
+      "size": 3447
+    },
+    "./boards/stm32f439.ld": {
+      "path": "./boards/stm32f439.ld",
+      "hash": "2fa126f2a33888edf0ccc3a307486e9d4041cc2c5c4f95c8315fa5f8599b148f",
+      "last_modified": 1751235198,
+      "size": 1731
+    },
+    "./boards/NUCLEO_F429ZI/manifest.py": {
+      "path": "./boards/NUCLEO_F429ZI/manifest.py",
+      "hash": "e82f478e1099486fea00aa8791f8bc3e71ad9c253a90f200f27d31e91a226dc9",
+      "last_modified": 1751235198,
+      "size": 71
+    },
+    "./help.c": {
+      "path": "./help.c",
+      "hash": "25718183801ac538826d7e1651b7e2da572444878d0fe1dcaaadc5f3124d8e54",
+      "last_modified": 1751235198,
+      "size": 4015
+    },
+    "./usbhost/Class/MTP/Src/usbh_mtp.c": {
+      "path": "./usbhost/Class/MTP/Src/usbh_mtp.c",
+      "hash": "d2388df70aadcabd58e15574c8ceaaffc1fb127dd483919cfbf3678d093d6522",
+      "last_modified": 1751235198,
+      "size": 33522
+    },
+    "./boards/PYBV10/board.md": {
+      "path": "./boards/PYBV10/board.md",
+      "hash": "db3065a7166d488d1ff73c2ebafff1c6c34face19b67bc491dc326ada47189ef",
+      "last_modified": 1751235198,
+      "size": 539
+    },
+    "./boards/PYBLITEV10/board.md": {
+      "path": "./boards/PYBLITEV10/board.md",
+      "hash": "db3065a7166d488d1ff73c2ebafff1c6c34face19b67bc491dc326ada47189ef",
+      "last_modified": 1751235198,
+      "size": 539
+    },
+    "./boards/PYBV11/mpconfigboard.mk": {
+      "path": "./boards/PYBV11/mpconfigboard.mk",
+      "hash": "0ac5979768f27bf9d69869dde1eea142bbce93007b842e5e39c5d15350375ead",
+      "last_modified": 1751235198,
+      "size": 556
+    },
+    "./boards/NUCLEO_F756ZG/board.json": {
+      "path": "./boards/NUCLEO_F756ZG/board.json",
+      "hash": "c1bf1039806854b71676b0d3fa9ee4dfb2e2b8343daac7fc94da06fd850ab103",
+      "last_modified": 1751235198,
+      "size": 320
+    },
+    "./usbdev/class/src/usbd_msc_bot.c": {
+      "path": "./usbdev/class/src/usbd_msc_bot.c",
+      "hash": "65c418bf47dadd9fb143c6ed25ee2af361bd268b42dbeaa9f3a81a21efd4990f",
+      "last_modified": 1751235198,
+      "size": 9840
+    },
+    "./boards/NUCLEO_H723ZG/manifest.py": {
+      "path": "./boards/NUCLEO_H723ZG/manifest.py",
+      "hash": "e82f478e1099486fea00aa8791f8bc3e71ad9c253a90f200f27d31e91a226dc9",
+      "last_modified": 1751235198,
+      "size": 71
+    },
+    "./boards/ADAFRUIT_F405_EXPRESS/board.json": {
+      "path": "./boards/ADAFRUIT_F405_EXPRESS/board.json",
+      "hash": "22568d0fa2fb09345f38a56080b7d20de1f33945c06782db0bc3aa955eabf358",
+      "last_modified": 1751235198,
+      "size": 282
+    },
+    "./boards/ESPRUINO_PICO/stm32f4xx_hal_conf.h": {
+      "path": "./boards/ESPRUINO_PICO/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./boards/NUCLEO_L452RE/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_L452RE/mpconfigboard.h",
+      "hash": "f6830ad3f09fe9d5014aed341081ee1f7030e64b2335457c84f4b5ae55259796",
+      "last_modified": 1751235198,
+      "size": 3321
+    },
+    "./boards/PYBD_SF2/mpconfigboard.h": {
+      "path": "./boards/PYBD_SF2/mpconfigboard.h",
+      "hash": "5bf8b72b3cce11cf7887bb86bdc1d1fa34fd7994d32d5eaeba40beb98b0c19eb",
+      "last_modified": 1751235198,
+      "size": 9776
+    },
+    "./boards/ARDUINO_PORTENTA_H7/deploy.md": {
+      "path": "./boards/ARDUINO_PORTENTA_H7/deploy.md",
+      "hash": "01b13e04729fef5fdc8d077dddbd0cea92a8e69723fa25e4ed650cbbdf660085",
+      "last_modified": 1751235198,
+      "size": 427
+    },
+    "./boards/PYBLITEV10/mpconfigvariant_DP.mk": {
+      "path": "./boards/PYBLITEV10/mpconfigvariant_DP.mk",
+      "hash": "05c7aa6f5de1d03fbc466b349895a5705393018a8fd6a5bc8bb1d7701dba57dd",
+      "last_modified": 1751235198,
+      "size": 28
+    },
+    "./boards/LEGO_HUB_NO6/hub_display.c": {
+      "path": "./boards/LEGO_HUB_NO6/hub_display.c",
+      "hash": "5f7325c44beff719d0eb7f0538f49660c9dd20f71da79dfd9142f7bf24ba2467",
+      "last_modified": 1751235198,
+      "size": 5903
+    },
+    "./boards/stm32f411_af.csv": {
+      "path": "./boards/stm32f411_af.csv",
+      "hash": "97182f1ff2a6809b62f13d2af15191e91e0aaf19df63b418efe27d54bfa825b6",
+      "last_modified": 1751235198,
+      "size": 21140
+    },
+    "./boards/USBDONGLE_WB55/mpconfigboard.h": {
+      "path": "./boards/USBDONGLE_WB55/mpconfigboard.h",
+      "hash": "d265d2f178a84dcbeccb139631f6a402ba761e5b86a3314fabbb4f0cce5aa951",
+      "last_modified": 1751235198,
+      "size": 1781
+    },
+    "./boards/OLIMEX_E407/board.json": {
+      "path": "./boards/OLIMEX_E407/board.json",
+      "hash": "7167398a53375d73d2ae93f664dfaf5a6ea056e4b6fe6369f64df6d3eed61b02",
+      "last_modified": 1751235198,
+      "size": 294
+    },
+    "./mpconfigboard_common.h": {
+      "path": "./mpconfigboard_common.h",
+      "hash": "6d0c69e8bbe71503986df421dd8f9b2cd6612a055d8dc0b5a8e709a69a9ea247",
+      "last_modified": 1751235198,
+      "size": 23939
+    },
+    "./boards/PYBLITEV10/mpconfigvariant_THREAD.mk": {
+      "path": "./boards/PYBLITEV10/mpconfigvariant_THREAD.mk",
+      "hash": "c278e51784414c8c5e85862aa90326867b17850f559ba5e2e6667b07dbeb5adf",
+      "last_modified": 1751235198,
+      "size": 32
+    },
+    "./boards/NUCLEO_L073RZ/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_L073RZ/mpconfigboard.mk",
+      "hash": "4796f8a82d86f783e8dbe619d96a90a86078a71b3f94a88d936f465c23c6d2fa",
+      "last_modified": 1751235198,
+      "size": 373
+    },
+    "./boards/ARDUINO_GIGA/stm32h747.ld": {
+      "path": "./boards/ARDUINO_GIGA/stm32h747.ld",
+      "hash": "f51deaf455b90a4521ae629b9929de682d2bb37a8f9427b77128cd92aab06f90",
+      "last_modified": 1751235198,
+      "size": 2459
+    },
+    "./boards/NUCLEO_G0B1RE/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_G0B1RE/mpconfigboard.mk",
+      "hash": "f40f94f025eb0bb9824c24f9a1e4eba66ffc3f22ba50746da1935838739da22d",
+      "last_modified": 1751235198,
+      "size": 396
+    },
+    "./i2c.h": {
+      "path": "./i2c.h",
+      "hash": "ed933d6700632f665a090a55d8a291a6a0db873175284235c92e1dc0aeb0c2de",
+      "last_modified": 1751235198,
+      "size": 2761
+    },
+    "./boards/ARDUINO_GIGA/bdev.c": {
+      "path": "./boards/ARDUINO_GIGA/bdev.c",
+      "hash": "b9a2929fade5d43ec1641b4d022ff0ba0cb38a531ad0de9ea7494af86510668a",
+      "last_modified": 1751235198,
+      "size": 1718
+    },
+    "./machine_i2s.c": {
+      "path": "./machine_i2s.c",
+      "hash": "818f9f298cc996c4f677fb26705ff380ccbefa9209fa08ac8b73bf9adc72d75a",
+      "last_modified": 1751235198,
+      "size": 22973
+    },
+    "./powerctrl.c": {
+      "path": "./powerctrl.c",
+      "hash": "be962fd32283d9faacee0892e2595bf9417eb89266b388ea65df275b3064ab88",
+      "last_modified": 1761596812,
+      "size": 38981
+    },
+    "./machine_adc.c": {
+      "path": "./machine_adc.c",
+      "hash": "8f465c9d1a3f6858cfb2eb2f693f372864a59e95eafe7e8a19bd6dc6abdbcd0a",
+      "last_modified": 1751235198,
+      "size": 21778
+    },
+    "./boards/ARDUINO_OPTA/mbedtls_config_board.h": {
+      "path": "./boards/ARDUINO_OPTA/mbedtls_config_board.h",
+      "hash": "335ca5f136cf245cef231979a13b87a54814d8cb402139d462db693a2eac7868",
+      "last_modified": 1751235198,
+      "size": 236
+    },
+    "./mboot/elem.c": {
+      "path": "./mboot/elem.c",
+      "hash": "d9fd45587ec886a377d8b5d0e5cb94b808eb20519fbe79ad39f62d240b5436aa",
+      "last_modified": 1751235198,
+      "size": 1720
+    },
+    "./timer.c": {
+      "path": "./timer.c",
+      "hash": "0b3424c4ab329938ce9a8ad55ab2815acf765bdc4e023cdb55b0ed4d0c8ee348",
+      "last_modified": 1751235198,
+      "size": 67920
+    },
+    "./boards/ARDUINO_NICLA_VISION/mbedtls_config_board.h": {
+      "path": "./boards/ARDUINO_NICLA_VISION/mbedtls_config_board.h",
+      "hash": "335ca5f136cf245cef231979a13b87a54814d8cb402139d462db693a2eac7868",
+      "last_modified": 1751235198,
+      "size": 236
+    },
+    "./boards/PYBLITEV10/board.json": {
+      "path": "./boards/PYBLITEV10/board.json",
+      "hash": "5c41dd6b2be483492fe29b0fc0ef90364ca1c53a92a51590f6da97e41ed670f9",
+      "last_modified": 1751235198,
+      "size": 568
+    },
+    "./boards/NETDUINO_PLUS_2/board_init.c": {
+      "path": "./boards/NETDUINO_PLUS_2/board_init.c",
+      "hash": "553b450705575e0dfdfe811f90b22e378a0f22cceccbccc809995b68641dedc4",
+      "last_modified": 1751235198,
+      "size": 801
+    },
+    "./rfcore.c": {
+      "path": "./rfcore.c",
+      "hash": "2341746702fc16fad988a1ddad2094a42cc60696dc7bbf8dad6b1867dab51b36",
+      "last_modified": 1761596812,
+      "size": 27671
+    },
+    "./mpbthciport.h": {
+      "path": "./mpbthciport.h",
+      "hash": "cdb9864deb0dd7530da78c9670162c302543ee3ae5bc46c442480cff954e1cc5",
+      "last_modified": 1751235198,
+      "size": 2298
+    },
+    "./rng.h": {
+      "path": "./rng.h",
+      "hash": "c7815f8857794b4e0ff93f361a1216719a249a49999803f7192e094336293200",
+      "last_modified": 1751235198,
+      "size": 1437
+    },
+    "./boards/stm32f413xg.ld": {
+      "path": "./boards/stm32f413xg.ld",
+      "hash": "001b715be3de10bf6b12118f6c663c1eede474d5e56a4f5cf1781cab7cca86f0",
+      "last_modified": 1751235198,
+      "size": 1842
+    },
+    "./mpbtstackport.c": {
+      "path": "./mpbtstackport.c",
+      "hash": "12c2a63b5f7cd03431264ed645ff101c498392be9edbe24a5d747ccf68cef694",
+      "last_modified": 1751235198,
+      "size": 5534
+    },
+    "./boards/stm32l432.ld": {
+      "path": "./boards/stm32l432.ld",
+      "hash": "70417bba3dea5ffcc9339f4e2ed72d39240209cd7221d1128bc6af53f417afa4",
+      "last_modified": 1751235198,
+      "size": 1372
+    },
+    "./mboot/gzstream.c": {
+      "path": "./mboot/gzstream.c",
+      "hash": "083b084ea0e019fa04d2daf94e72739e90e5ca0ee0d613fe751c88d0cbdb8fc2",
+      "last_modified": 1751235198,
+      "size": 3620
+    },
+    "./sdio.c": {
+      "path": "./sdio.c",
+      "hash": "4910b17ce3ee7d045806de9d50323c919ca006c46f884dc3aeb1eb46238ee38f",
+      "last_modified": 1751235198,
+      "size": 18368
+    },
+    "./accel.h": {
+      "path": "./accel.h",
+      "hash": "04ed0cc37718b3ab53c7e51d7e8d92fcbb9d80f1100edfb1bd6ec0e26388dee6",
+      "last_modified": 1751235198,
+      "size": 1419
+    },
+    "./usbhost/Class/AUDIO/Src/usbh_audio.c": {
+      "path": "./usbhost/Class/AUDIO/Src/usbh_audio.c",
+      "hash": "e6924ee053c5107a7f5027c70c4db1393b3d4320f59be8f52b5a0a770b68da25",
+      "last_modified": 1751235198,
+      "size": 65106
+    },
+    "./boards/PYBD_SF2/board.md": {
+      "path": "./boards/PYBD_SF2/board.md",
+      "hash": "e633bd44ab1ccf1f5446e62e5fcdd6e557bd237afd3fc8bea872a5b97a202100",
+      "last_modified": 1751235198,
+      "size": 168
+    },
+    "./boards/STM32F429DISC/stm32f4xx_hal_conf.h": {
+      "path": "./boards/STM32F429DISC/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./boards/STM32F411DISC/pins.csv": {
+      "path": "./boards/STM32F411DISC/pins.csv",
+      "hash": "557e4747321dbb921520e62b9567ad6d5c5990aebc6526b6a46fae98f7e95653",
+      "last_modified": 1751235198,
+      "size": 777
+    },
+    "./boards/WEACT_F411_BLACKPILL/stm32f4xx_hal_conf.h": {
+      "path": "./boards/WEACT_F411_BLACKPILL/stm32f4xx_hal_conf.h",
+      "hash": "b9961793dd9642ffd977ecce9e73e0f463a46b7385efc8db1c41fdf3dd6f4e02",
+      "last_modified": 1751235198,
+      "size": 571
+    },
+    "./mpconfigport.h": {
+      "path": "./mpconfigport.h",
+      "hash": "569acfbbf95157d80e223d3e8983c2057da8d25478592193c76954a1c15f033a",
+      "last_modified": 1762640632,
+      "size": 12525
+    },
+    "./boards/stm32f4xx_hal_conf_base.h": {
+      "path": "./boards/stm32f4xx_hal_conf_base.h",
+      "hash": "b6cb473ef0ccbb24261b178f2610ba7822f9cc5a981bc2f90aae2d46523459b2",
+      "last_modified": 1751235198,
+      "size": 3699
+    },
+    "./boards/ARDUINO_OPTA/mpconfigboard.mk": {
+      "path": "./boards/ARDUINO_OPTA/mpconfigboard.mk",
+      "hash": "87fc97084df1a2f60103bc9390c1d0d0e4743f83dbe08537d024b4a9a94fad72",
+      "last_modified": 1751235198,
+      "size": 853
+    },
+    "./boards/ARDUINO_GIGA/pins.csv": {
+      "path": "./boards/ARDUINO_GIGA/pins.csv",
+      "hash": "b3c3cd5a625fcc0e4e9d7e36110af5ebeefe52c51fd1e61038cd72ed25c539a3",
+      "last_modified": 1751235198,
+      "size": 3222
+    },
+    "./boards/NUCLEO_H743ZI/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_H743ZI/mpconfigboard.h",
+      "hash": "69a905acb9e186c820625c9531e191778d8a8241f36f831d08e4dba87f982a9f",
+      "last_modified": 1751235198,
+      "size": 4102
+    },
+    "./boards/PYBD_SF6/board_init.c": {
+      "path": "./boards/PYBD_SF6/board_init.c",
+      "hash": "9f4a8723777ed8988385b6ff569fb12db9af63c222d7a6969c3ed11f1be19954",
+      "last_modified": 1751235198,
+      "size": 3225
+    },
+    "./boards/SPARKFUN_MICROMOD_STM32/board.json": {
+      "path": "./boards/SPARKFUN_MICROMOD_STM32/board.json",
+      "hash": "b63fd353d57212898a8fb9ce9c95952ee622fff078b47f1883a62f510f82417d",
+      "last_modified": 1751235198,
+      "size": 302
+    },
+    "./boards/STM32F411DISC/stm32f4xx_hal_conf.h": {
+      "path": "./boards/STM32F411DISC/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./eth_phy.h": {
+      "path": "./eth_phy.h",
+      "hash": "1ad22cc091971d95ed57a470e9d4e84ae7983e77d2903c639e041a0cff28b7c3",
+      "last_modified": 1751235198,
+      "size": 2445
+    },
+    "./boards/LEGO_HUB_NO6/stm32f413xg.ld": {
+      "path": "./boards/LEGO_HUB_NO6/stm32f413xg.ld",
+      "hash": "9b20f0af786fb556a12e6adfe527b3c1b246a13f64e70ac579da804b91254187",
+      "last_modified": 1751235198,
+      "size": 1029
+    },
+    "./mphalport.h": {
+      "path": "./mphalport.h",
+      "hash": "9062dd3bda8fd4818488833a19e70bbe512f3806708c707706eaeea450c43034",
+      "last_modified": 1761596812,
+      "size": 6500
+    },
+    "./usbhost/Class/HID/Inc/usbh_hid_usage.h": {
+      "path": "./usbhost/Class/HID/Inc/usbh_hid_usage.h",
+      "hash": "6342a24e6fbcd2e2fabc81bd1d26801af764f3bf892747e2838c3e5c010a598d",
+      "last_modified": 1751235198,
+      "size": 10434
+    },
+    "./boards/ARDUINO_OPTA/board_init.c": {
+      "path": "./boards/ARDUINO_OPTA/board_init.c",
+      "hash": "7aae05b471d45c9c64c45e3c221cc0c88a423d114cf886b9dfebcb275bda32e7",
+      "last_modified": 1751235198,
+      "size": 3430
+    },
+    "./boards/stm32f413_af.csv": {
+      "path": "./boards/stm32f413_af.csv",
+      "hash": "908ef517d097be61284a26855243d229f6fdc9b9118f259498e2ad66dc4754c3",
+      "last_modified": 1751235198,
+      "size": 40044
+    },
+    "./boards/NUCLEO_H743ZI/board_init.c": {
+      "path": "./boards/NUCLEO_H743ZI/board_init.c",
+      "hash": "0a5e55656c4eef8509cabe716aa0e97dc98b78e4b58784961d91646e808a0250",
+      "last_modified": 1751235198,
+      "size": 187
+    },
+    "./boards/NUCLEO_L476RG/pins.csv": {
+      "path": "./boards/NUCLEO_L476RG/pins.csv",
+      "hash": "4f21a30e2452d6f9e61bacb4dd7f1ff5e59dfba70f73c861f3831e0911ff2b3d",
+      "last_modified": 1751235198,
+      "size": 648
+    },
+    "./boards/LEGO_HUB_NO6/cc2564.c": {
+      "path": "./boards/LEGO_HUB_NO6/cc2564.c",
+      "hash": "60313be6839148484a56111ae19becc45359ee4c70850c10fe37d7d1ad0861c2",
+      "last_modified": 1751235198,
+      "size": 3391
+    },
+    "./boards/NUCLEO_F767ZI/manifest.py": {
+      "path": "./boards/NUCLEO_F767ZI/manifest.py",
+      "hash": "e82f478e1099486fea00aa8791f8bc3e71ad9c253a90f200f27d31e91a226dc9",
+      "last_modified": 1751235198,
+      "size": 71
+    },
+    "./boards/STM32F4DISC/mpconfigboard.h": {
+      "path": "./boards/STM32F4DISC/mpconfigboard.h",
+      "hash": "fed25a9530da75cfc60e837f20ce5763a43ffe5bb7b3e9fff3c7abf37b893154",
+      "last_modified": 1751235198,
+      "size": 3172
+    },
+    "./autoflash": {
+      "path": "./autoflash",
+      "hash": "11ce532a2c5022ea51b798626d4838c5382e2c36261b08e4eba3a52a2b3b0f1a",
+      "last_modified": 1751235198,
+      "size": 859
+    },
+    "./mpconfigport.mk": {
+      "path": "./mpconfigport.mk",
+      "hash": "d002f12d39111629c73aeafe3f417d94dc37e0610e640633adeebd71e4871dc0",
+      "last_modified": 1751235198,
+      "size": 487
+    },
+    "./boards/PYBD_SF2/pins.csv": {
+      "path": "./boards/PYBD_SF2/pins.csv",
+      "hash": "6f56a12fe7d0f4071d88f50e31f9d406b13f978dbec0deece55d3a5c835abd22",
+      "last_modified": 1751235198,
+      "size": 1846
+    },
+    "./boards/NUCLEO_WB55/stm32wbxx_hal_conf.h": {
+      "path": "./boards/NUCLEO_WB55/stm32wbxx_hal_conf.h",
+      "hash": "0865b12f90b1dc4c143202f641c648bcf0b9b71bb5208f8615c26a63224b44f6",
+      "last_modified": 1751235198,
+      "size": 551
+    },
+    "./usbhost/Class/HID/Inc/usbh_hid.h": {
+      "path": "./usbhost/Class/HID/Inc/usbh_hid.h",
+      "hash": "70ecd119fbe64a9615292ad0fc7749ff88eb103a477df7ddbc6e90098beeda84",
+      "last_modified": 1751235198,
+      "size": 10729
+    },
+    "./boards/ADAFRUIT_F405_EXPRESS/mpconfigboard.h": {
+      "path": "./boards/ADAFRUIT_F405_EXPRESS/mpconfigboard.h",
+      "hash": "91dfdd5b3f31c02f3492ca4547f92f5bb2ecf46deced9f7647dc97c9e9bae155",
+      "last_modified": 1751235198,
+      "size": 4071
+    },
+    "./boards/PYBV11/board.md": {
+      "path": "./boards/PYBV11/board.md",
+      "hash": "db3065a7166d488d1ff73c2ebafff1c6c34face19b67bc491dc326ada47189ef",
+      "last_modified": 1751235198,
+      "size": 539
+    },
+    "./network_lan.c": {
+      "path": "./network_lan.c",
+      "hash": "e02edd3b44518cbf51d4d2c740cbde9f0a61be4cacf07bf62d62c32e77dc2051",
+      "last_modified": 1751235198,
+      "size": 7528
+    },
+    "./boards/NUCLEO_F401RE/stm32f4xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_F401RE/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./boards/PYBV11/mpconfigboard.h": {
+      "path": "./boards/PYBV11/mpconfigboard.h",
+      "hash": "7de685f5a9088a6fc9698ef9f9751fe23d9c020d06f3ec779c287e5ea577d9c0",
+      "last_modified": 1751235198,
+      "size": 3982
+    },
+    "./boards/NUCLEO_F767ZI/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_F767ZI/mpconfigboard.mk",
+      "hash": "81114c172b28714777f39abf024318b52e0a8d35c360366fbb451de4b4f7ba6b",
+      "last_modified": 1751235198,
+      "size": 383
+    },
+    "./usbhost/Class/HID/Inc/usbh_hid_parser.h": {
+      "path": "./usbhost/Class/HID/Inc/usbh_hid_parser.h",
+      "hash": "53c839378e01f6d0d08107860ba27fe93335076c079c04aaf3edc3783c4bdc58",
+      "last_modified": 1751235198,
+      "size": 2427
+    },
+    "./boards/WEACT_F411_BLACKPILL/mpconfigvariant_V31_XTAL_8M.mk": {
+      "path": "./boards/WEACT_F411_BLACKPILL/mpconfigvariant_V31_XTAL_8M.mk",
+      "hash": "ca8a71cef37480c782c7e5ab15b46a5a0b258e7c27554eb2e83a27b5ce63fcf4",
+      "last_modified": 1751235198,
+      "size": 37
+    },
+    "./boards/WEACT_F411_BLACKPILL/mpconfigvariant_V13.mk": {
+      "path": "./boards/WEACT_F411_BLACKPILL/mpconfigvariant_V13.mk",
+      "hash": "8013f09445f62271ae17bbfc1cb6a28c4c29b575dc296ca65111167ad56b1313",
+      "last_modified": 1751235198,
+      "size": 19
+    },
+    "./boards/NUCLEO_H723ZG/board_init.c": {
+      "path": "./boards/NUCLEO_H723ZG/board_init.c",
+      "hash": "a1e57dc0763e83126faabdd3a11bd9016d4950ecc62298f6abe7fcadaae7a03f",
+      "last_modified": 1751235198,
+      "size": 188
+    },
+    "./boards/NUCLEO_L452RE/stm32l4xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_L452RE/stm32l4xx_hal_conf.h",
+      "hash": "87dfa054d2dd8da850e53ec404301df73b7afe5a2bccd1dd5e30f83c28a53b6b",
+      "last_modified": 1751235198,
+      "size": 592
+    },
+    "./boards/PYBV10/stm32f4xx_hal_conf.h": {
+      "path": "./boards/PYBV10/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./boards/PYBD_SF2/stm32f7xx_hal_conf.h": {
+      "path": "./boards/PYBD_SF2/stm32f7xx_hal_conf.h",
+      "hash": "673e690c02110f0d4a2b766ec97307fbebe67b7b0bd3b323b93031e013d4eb44",
+      "last_modified": 1751235198,
+      "size": 550
+    },
+    "./boards/NUCLEO_F429ZI/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_F429ZI/mpconfigboard.h",
+      "hash": "3c124a66589ea8ddcf9249a1a09ab8e9a7dbf124e7b1d4eb9aa7e607b56f8696",
+      "last_modified": 1761979600,
+      "size": 3434
+    },
+    "./boards/PYBLITEV10/mpconfigboard.mk": {
+      "path": "./boards/PYBLITEV10/mpconfigboard.mk",
+      "hash": "b67f7be45acb059cffed9580859c2603cad65632db722f444c133ef822773f90",
+      "last_modified": 1751235198,
+      "size": 250
+    },
+    "./boards/stm32g0b1_af.csv": {
+      "path": "./boards/stm32g0b1_af.csv",
+      "hash": "5ba045f60ac9566b34d9816b72f0f151071de9b5fd48e7af2ce50e98f9a0c0af",
+      "last_modified": 1751235198,
+      "size": 29585
+    },
+    "./uart.c": {
+      "path": "./uart.c",
+      "hash": "ca771f6e4c95c51dc6291258610ef7719a6b5b3b3974ac442e7b6747af2c4f45",
+      "last_modified": 1751235198,
+      "size": 44704
+    },
+    "./boards/VCC_GND_F407ZG/stm32f4xx_hal_conf.h": {
+      "path": "./boards/VCC_GND_F407ZG/stm32f4xx_hal_conf.h",
+      "hash": "e161ca98cdba50daed4ff26d46641eaaece70361a0b644e2871845ed22dc788f",
+      "last_modified": 1751235198,
+      "size": 408
+    },
+    "./boards/NUCLEO_F767ZI/pins.csv": {
+      "path": "./boards/NUCLEO_F767ZI/pins.csv",
+      "hash": "6c5b9f87dcbd0b0e701f933c722aaf904273f38e5e53fe55b21fc863a25ac7ee",
+      "last_modified": 1751235198,
+      "size": 1397
+    },
+    "./boards/B_L072Z_LRWAN1/pins.csv": {
+      "path": "./boards/B_L072Z_LRWAN1/pins.csv",
+      "hash": "124cbe51d1766800690cb1a7e6e0a22407c94bcf888fe4b3edb97902af49eed5",
+      "last_modified": 1751235198,
+      "size": 929
+    },
+    "./boards/NETDUINO_PLUS_2/pins.csv": {
+      "path": "./boards/NETDUINO_PLUS_2/pins.csv",
+      "hash": "8838a5f206a94756f280b5aa25b7ac58c85df504ba7cde288adef2616da21f5b",
+      "last_modified": 1751235198,
+      "size": 350
+    },
+    "./boards/LEGO_HUB_NO6/bluetooth_init_cc2564C_1.5.c": {
+      "path": "./boards/LEGO_HUB_NO6/bluetooth_init_cc2564C_1.5.c",
+      "hash": "fc58ffa5775aab37da07d756580e027a6c10823610031d52138b878211af5279",
+      "last_modified": 1751235198,
+      "size": 46127
+    },
+    "./gccollect.c": {
+      "path": "./gccollect.c",
+      "hash": "da7a0fe5bfc1d9fde6f7aa45be9a7d9565aaa657321880a92c33d6b5ac5ad52b",
+      "last_modified": 1751235198,
+      "size": 1734
+    },
+    "./boards/STM32F429DISC/mpconfigboard.mk": {
+      "path": "./boards/STM32F429DISC/mpconfigboard.mk",
+      "hash": "1e7ced4ee1e41b59111cf71dbe1ede09872c86f95645a103fe3f2575f65cf83c",
+      "last_modified": 1751235198,
+      "size": 225
+    },
+    "./boards/LEGO_HUB_NO6/mboot_memory.ld": {
+      "path": "./boards/LEGO_HUB_NO6/mboot_memory.ld",
+      "hash": "5a8d2b4c29a4e36e8c1d585360e03b5d77fa68a08a633d0c93690252106055f4",
+      "last_modified": 1751235198,
+      "size": 471
+    },
+    "./modos.c": {
+      "path": "./modos.c",
+      "hash": "efb73711679d76ece6cd38b7553c0896d0499a2a01af3c969f21ce36a32919e0",
+      "last_modified": 1751235198,
+      "size": 2976
+    },
+    "./boards/STM32F439/mpconfigboard.h": {
+      "path": "./boards/STM32F439/mpconfigboard.h",
+      "hash": "8f2d528c48978e8634e6871ad7ce70cf4b5e8d7d2929780097fc967d7023c263",
+      "last_modified": 1751235198,
+      "size": 3227
+    },
+    "./boards/NUCLEO_G0B1RE/pins.csv": {
+      "path": "./boards/NUCLEO_G0B1RE/pins.csv",
+      "hash": "819d7334aab138e15f4087f7520dce785182197fbee7b39b953f0fc440186cba",
+      "last_modified": 1751235198,
+      "size": 659
+    },
+    "./stm32.mk": {
+      "path": "./stm32.mk",
+      "hash": "88069c79839b010d78e34a78d9fd4866280c65a7bcfc51e3a6a5143396e4b272",
+      "last_modified": 1751235198,
+      "size": 3422
+    },
+    "./boards/ARDUINO_PORTENTA_H7/pins.csv": {
+      "path": "./boards/ARDUINO_PORTENTA_H7/pins.csv",
+      "hash": "f8788a5f8596af330d2ac0c3390a2866c07e4d98ef7bf0c8c5cc27f83825707e",
+      "last_modified": 1751235198,
+      "size": 2778
+    },
+    "./boards/NUCLEO_L152RE/board.json": {
+      "path": "./boards/NUCLEO_L152RE/board.json",
+      "hash": "e15e5bf6a24e314936662ef8b623182e6ce43da505e6d23fe1206b8ba3ea9265",
+      "last_modified": 1751235198,
+      "size": 319
+    },
+    "./boards/MIKROE_QUAIL/board.json": {
+      "path": "./boards/MIKROE_QUAIL/board.json",
+      "hash": "aefad2b3680419f7239461a2f90568b13cbeb6737109e6cfd4de1814631e0239",
+      "last_modified": 1751235198,
+      "size": 320
+    },
+    "./boards/stm32f439_af.csv": {
+      "path": "./boards/stm32f439_af.csv",
+      "hash": "e63c64c383eb418e30ba407688fd2af545829de3dac787e37fc2e8b1752af0c8",
+      "last_modified": 1751235198,
+      "size": 45787
+    },
+    "./boards/PYBD_SF2/manifest.py": {
+      "path": "./boards/PYBD_SF2/manifest.py",
+      "hash": "c45e93df1e1da5f53e5feed94f70950d00f2a3c52c0b5a4ba23fec13157df3e2",
+      "last_modified": 1751235198,
+      "size": 121
+    },
+    "./boards/ARDUINO_GIGA/stm32h7xx_hal_conf.h": {
+      "path": "./boards/ARDUINO_GIGA/stm32h7xx_hal_conf.h",
+      "hash": "646ac276785548076b3f6131cbceb53ba24979bad92dc5dd98072753c68cda85",
+      "last_modified": 1751235198,
+      "size": 1361
+    },
+    "./spi.c": {
+      "path": "./spi.c",
+      "hash": "d31be7c5d0f9bcd0cff148df1efb79e635cf601d404bf2b2652d66a6591488fa",
+      "last_modified": 1751235198,
+      "size": 27275
+    },
+    "./boards/stm32l476xg.ld": {
+      "path": "./boards/stm32l476xg.ld",
+      "hash": "d1224b88920f82656c91aa8ff16e996f7d32b5d5912a6063afcc489eb4a6999c",
+      "last_modified": 1751235198,
+      "size": 1496
+    },
+    "./boards/MIKROE_QUAIL/bdev.c": {
+      "path": "./boards/MIKROE_QUAIL/bdev.c",
+      "hash": "eec7b773260ca37117823a99197bc86993e765a40c27f680693728736a0b2909",
+      "last_modified": 1751235198,
+      "size": 623
+    },
+    "./boards/plli2svalues.py": {
+      "path": "./boards/plli2svalues.py",
+      "hash": "997cfe90eaa712d467420fb8ea9aca94be57efe6e37dbdbab2fd55d8ea19f442",
+      "last_modified": 1751235198,
+      "size": 7524
+    },
+    "./lwip_inc/arch/cc.h": {
+      "path": "./lwip_inc/arch/cc.h",
+      "hash": "e3eedaa99c3d0ff73810bd6f51aef333d26ca870287d31b8e750d36b0001b56e",
+      "last_modified": 1751235198,
+      "size": 317
+    },
+    "./boards/NUCLEO_F722ZE/board_init.c": {
+      "path": "./boards/NUCLEO_F722ZE/board_init.c",
+      "hash": "2907c9b02648f2f163f757022f0704ebbee266922722f6b197757ca4db33dcf8",
+      "last_modified": 1751235198,
+      "size": 204
+    },
+    "./boards/STM32H7B3I_DK/mpconfigboard.h": {
+      "path": "./boards/STM32H7B3I_DK/mpconfigboard.h",
+      "hash": "8c2176a3d1c03688f663961cb9256ac73c4c87cf568ace4231be680f52c19fc2",
+      "last_modified": 1751235198,
+      "size": 3823
+    },
+    "./boards/NUCLEO_H743ZI/pins.csv": {
+      "path": "./boards/NUCLEO_H743ZI/pins.csv",
+      "hash": "abfbe6df15374c5b0149d3ad33fefa5aa3cb1a8f6397609ac9bfab8f3ca156fe",
+      "last_modified": 1751235198,
+      "size": 1303
+    },
+    "./boards/ARDUINO_OPTA/board.json": {
+      "path": "./boards/ARDUINO_OPTA/board.json",
+      "hash": "7629fac4b22eef0bf7793a608f0463d1f23044f93c3f18821ca009e9de4cb7a3",
+      "last_modified": 1751235198,
+      "size": 397
+    },
+    "./mboot/version.c": {
+      "path": "./mboot/version.c",
+      "hash": "77d736d29df94449ac2d43cdd5abf796319c130f6ef3b6b47880d9473d6d96d9",
+      "last_modified": 1751235198,
+      "size": 1715
+    },
+    "./dma.c": {
+      "path": "./dma.c",
+      "hash": "a40a84a57f4e37ac47aef1dbb3f83411f5ca0937180b52098e11326e71789fc5",
+      "last_modified": 1751235198,
+      "size": 73597
+    },
+    "./machine_uart.c": {
+      "path": "./machine_uart.c",
+      "hash": "d60a7d5f54a456c97a8e074ab21a9a3c941a8298275a1f624c2b518be13983a3",
+      "last_modified": 1751235198,
+      "size": 20205
+    },
+    "./rtc.h": {
+      "path": "./rtc.h",
+      "hash": "9e51a9676ef8f2b4b33eb8124b105cb83b10225649d231e5aeaa4964b0a3bdce",
+      "last_modified": 1751235198,
+      "size": 1576
+    },
+    "./usbhost/Class/HID/Inc/usbh_hid_mouse.h": {
+      "path": "./usbhost/Class/HID/Inc/usbh_hid_mouse.h",
+      "hash": "34898d6b2f0b39ba45aacbf139454bcc700c9a0b95f0eec688010024b81a27a1",
+      "last_modified": 1751235198,
+      "size": 2594
+    },
+    "./boards/VCC_GND_H743VI/pins.csv": {
+      "path": "./boards/VCC_GND_H743VI/pins.csv",
+      "hash": "e7428e46f28049e6d9b1d874bd7842fcd9f94f249aa34c9a2587a15664d0a530",
+      "last_modified": 1751235198,
+      "size": 620
+    },
+    "./boards/common_basic.ld": {
+      "path": "./boards/common_basic.ld",
+      "hash": "4657d447279031c85284fda51910224c005e46ae22eda214caee9d77e4e98f28",
+      "last_modified": 1751235198,
+      "size": 480
+    },
+    "./boards/LIMIFROG/board_init.c": {
+      "path": "./boards/LIMIFROG/board_init.c",
+      "hash": "1e87a3c3d385482708245bbd276c6475f8209930d1b9958354509ac1ec795d0f",
+      "last_modified": 1751235198,
+      "size": 5314
+    },
+    "./boards/stm32f767.ld": {
+      "path": "./boards/stm32f767.ld",
+      "hash": "a8570dfb34a027f59ace6aae43e74761948d3928f6d1125013288f226a7513b4",
+      "last_modified": 1751235198,
+      "size": 1639
+    },
+    "./boards/PYBV10/board.json": {
+      "path": "./boards/PYBV10/board.json",
+      "hash": "ac9a5e6dd80112c7558d5664bf23a4d9f5b9e131ec1fdc36123517587d39772a",
+      "last_modified": 1751235198,
+      "size": 447
+    },
+    "./boards/PYBD_SF3/bdev.c": {
+      "path": "./boards/PYBD_SF3/bdev.c",
+      "hash": "324e0f96be7048aca77b7dc51b89f64375c0c9cc84b3121922c94825183834fa",
+      "last_modified": 1751235198,
+      "size": 34
+    },
+    "./boards/NUCLEO_WB55/mboot_keys.h": {
+      "path": "./boards/NUCLEO_WB55/mboot_keys.h",
+      "hash": "d4f54ea0a448c0cb24cb1ce571b459e16b23e8086c5609d5e5caf65a8fedd670",
+      "last_modified": 1751235198,
+      "size": 934
+    },
+    "./boards/LEGO_HUB_NO7/README.md": {
+      "path": "./boards/LEGO_HUB_NO7/README.md",
+      "hash": "9d0d5f5acbb9c1cf07499a9da77d0781fa4354adfb395c79d3d5bf1762c43fc4",
+      "last_modified": 1751235198,
+      "size": 5294
+    },
+    "./boards/NUCLEO_H723ZG/stm32h7xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_H723ZG/stm32h7xx_hal_conf.h",
+      "hash": "780fd064756f221fd447014489ca9050f98a8925a0c5a0cefd54cf16488afbe9",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./boards/stm32g474.ld": {
+      "path": "./boards/stm32g474.ld",
+      "hash": "03ddd2d3307031345ef65ae162008a2aa8ba6e824adaca34483a5aa7ee63ab0f",
+      "last_modified": 1751235198,
+      "size": 1222
+    },
+    "./octospi.c": {
+      "path": "./octospi.c",
+      "hash": "a74adca3f689364409d389f7a33fa3c3bcfd352bbfd24c2c8a88a86e27bee966",
+      "last_modified": 1751235198,
+      "size": 14586
+    },
+    "./pendsv.c": {
+      "path": "./pendsv.c",
+      "hash": "a4f8c0495c142f4fc03a2eca36f3b6f93d47bc6d1b2b17147616cfcd28130f0d",
+      "last_modified": 1761596812,
+      "size": 4713
+    },
+    "./boards/VCC_GND_F407VE/board.json": {
+      "path": "./boards/VCC_GND_F407VE/board.json",
+      "hash": "cc024c0ac783b89ad133d796215ecb2cd350cc7e1c6394c26f9df6b2651eea44",
+      "last_modified": 1751235198,
+      "size": 270
+    },
+    "./boards/NUCLEO_WB55/rfcore_makefirmware.py": {
+      "path": "./boards/NUCLEO_WB55/rfcore_makefirmware.py",
+      "hash": "dba603db4fb5d3832f0908a17ded874e86b63a2a38d33745c7932cf0225716ef",
+      "last_modified": 1751235198,
+      "size": 6439
+    },
+    "./boards/STM32F4DISC/staccel.py": {
+      "path": "./boards/STM32F4DISC/staccel.py",
+      "hash": "9ef0cba27994b7b08141c41e5b5c796566ca2eefd353ed98d731e7ab23f90366",
+      "last_modified": 1751235198,
+      "size": 3343
+    },
+    "./boards/ARDUINO_PORTENTA_H7/manifest.py": {
+      "path": "./boards/ARDUINO_PORTENTA_H7/manifest.py",
+      "hash": "f96e5215b1d5891d1a64fe6f8dd311a462b773e82b7c68d2f110941c59941109",
+      "last_modified": 1751235198,
+      "size": 424
+    },
+    "./usbhost/Core/Inc/usbh_conf_template.h": {
+      "path": "./usbhost/Core/Inc/usbh_conf_template.h",
+      "hash": "9ee62f2781fef68231e73a714e5248f117e27b60386eca07a30d50bdd1547ead",
+      "last_modified": 1751235198,
+      "size": 3729
+    },
+    "./boards/NUCLEO_L432KC/pins.csv": {
+      "path": "./boards/NUCLEO_L432KC/pins.csv",
+      "hash": "67ee8da195ae2f09ce918c4c6cec0b6d24850a77d51b9f1ba36bdf0ea3f47750",
+      "last_modified": 1751235198,
+      "size": 381
+    },
+    "./boards/ADAFRUIT_F405_EXPRESS/pins.csv": {
+      "path": "./boards/ADAFRUIT_F405_EXPRESS/pins.csv",
+      "hash": "a0e950d0cd5ea98ad0444bc0430dad21e927f96d8ce0c08faf286dba91919bf4",
+      "last_modified": 1751235198,
+      "size": 481
+    },
+    "./boards/STM32L496GDISC/stm32l4xx_hal_conf.h": {
+      "path": "./boards/STM32L496GDISC/stm32l4xx_hal_conf.h",
+      "hash": "87dfa054d2dd8da850e53ec404301df73b7afe5a2bccd1dd5e30f83c28a53b6b",
+      "last_modified": 1751235198,
+      "size": 592
+    },
+    "./boards/NUCLEO_F411RE/stm32f4xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_F411RE/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./boards/NUCLEO_F439ZI/manifest.py": {
+      "path": "./boards/NUCLEO_F439ZI/manifest.py",
+      "hash": "e82f478e1099486fea00aa8791f8bc3e71ad9c253a90f200f27d31e91a226dc9",
+      "last_modified": 1751235198,
+      "size": 71
+    },
+    "./boards/VCC_GND_H743VI/mpconfigboard.mk": {
+      "path": "./boards/VCC_GND_H743VI/mpconfigboard.mk",
+      "hash": "7e09024aa9d3364609e06e536667e9f0aa7fcf3f69471545e86e9525892a6e95",
+      "last_modified": 1751235198,
+      "size": 482
+    },
+    "./boards/GARATRONIC_NADHAT_F405/stm32f4xx_hal_conf.h": {
+      "path": "./boards/GARATRONIC_NADHAT_F405/stm32f4xx_hal_conf.h",
+      "hash": "22a263ec8406cfb1f74d535a48a66514680e11b755c1e0a87519266524ef5fbf",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./boards/stm32l476xe.ld": {
+      "path": "./boards/stm32l476xe.ld",
+      "hash": "5da2aeca5077730dae1eaece3fc999c8d6c6f4cf8b39e18a72fe70a3602e938d",
+      "last_modified": 1751235198,
+      "size": 1496
+    },
+    "./boards/NUCLEO_F401RE/board.json": {
+      "path": "./boards/NUCLEO_F401RE/board.json",
+      "hash": "3e5e5b43ea0e4fa278f343a4de50f94b73da6326f8eec593bc191c261ee653ae",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./led.h": {
+      "path": "./led.h",
+      "hash": "d5e0905d98317a7808721e9e39be9f666fa2f7012e14dc5e3a44cff2a9ef3bad",
+      "last_modified": 1751235198,
+      "size": 1640
+    },
+    "./usbdev/core/inc/usbd_ctlreq.h": {
+      "path": "./usbdev/core/inc/usbd_ctlreq.h",
+      "hash": "b6b35b8c1dd8766bfe2d82b62497947a9b85c145385cef21e0d5189a3f5c97c5",
+      "last_modified": 1751235198,
+      "size": 2490
+    },
+    "./boards/common_isr_rom/common_isr_extratext.ld": {
+      "path": "./boards/common_isr_rom/common_isr_extratext.ld",
+      "hash": "c66e4c1212f3677d3b7dcfe9dd48182848b438a0cc7d221a08885eb885233bda",
+      "last_modified": 1751235198,
+      "size": 756
+    },
+    "./usbhost/Class/MSC/Inc/usbh_msc_scsi.h": {
+      "path": "./usbhost/Class/MSC/Inc/usbh_msc_scsi.h",
+      "hash": "65b5b50cad3345cc90f6716d01e53f31e484d77cb262887fbaaa8a4485efec29",
+      "last_modified": 1751235198,
+      "size": 6450
+    },
+    "./boards/STM32F769DISC/mpconfigboard.mk": {
+      "path": "./boards/STM32F769DISC/mpconfigboard.mk",
+      "hash": "81ff8590eedd86b23d6ef5f2c375f0073b46eb31b37eea4214ac95b723e46a56",
+      "last_modified": 1751235198,
+      "size": 1528
+    },
+    "./boards/NUCLEO_F746ZG/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_F746ZG/mpconfigboard.mk",
+      "hash": "3632ac1f5b88ddc1c774de917f194ad8746aec7cb9c3b8474076a69f4846523c",
+      "last_modified": 1751235198,
+      "size": 355
+    },
+    "./boards/STM32F769DISC/f769_qspi.ld": {
+      "path": "./boards/STM32F769DISC/f769_qspi.ld",
+      "hash": "96fa77d820f9e494b95a5a7c96819e3083bfe6101575dbb33556ff2f9e82d99a",
+      "last_modified": 1751235198,
+      "size": 2144
+    },
+    "./boards/LEGO_HUB_NO6/hub_display.h": {
+      "path": "./boards/LEGO_HUB_NO6/hub_display.h",
+      "hash": "e592cb817231b31641caaf0281b3668ac078e3e56aa9edb0605091ccb8989619",
+      "last_modified": 1751235198,
+      "size": 137
+    },
+    "./boards/stm32l496xg.ld": {
+      "path": "./boards/stm32l496xg.ld",
+      "hash": "be5462ce52cab6f6e095d4c33f104b7071c4d6df049855fc458906fce082d981",
+      "last_modified": 1751235198,
+      "size": 1384
+    },
+    "./boards/stm32l496_af.csv": {
+      "path": "./boards/stm32l496_af.csv",
+      "hash": "d2eb446df365eedc7bf36c698fc317ba6fd1b64645760fe37dfb79a75c3ec99d",
+      "last_modified": 1751235198,
+      "size": 46379
+    },
+    "./mboot/ui.c": {
+      "path": "./mboot/ui.c",
+      "hash": "ffcee989eb5503d338c3deab53f021ba0b7ac77b935cfb27599bf07d7c5b02bf",
+      "last_modified": 1751235198,
+      "size": 7467
+    },
+    "./usbdev/core/src/usbd_ctlreq.c": {
+      "path": "./usbdev/core/src/usbd_ctlreq.c",
+      "hash": "9f3f912a6dd03bb02a44e134058b635c562ebd11bbff6ff6d314874a48be2dfc",
+      "last_modified": 1751235198,
+      "size": 15592
+    },
+    "./boards/NUCLEO_F429ZI/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_F429ZI/mpconfigboard.mk",
+      "hash": "243b01c4dac262744ea9ae077c1ba31fc4502db8f5ecc36959efd3be4d069754",
+      "last_modified": 1761870633,
+      "size": 427
+    },
+    "./boards/LEGO_HUB_NO6/bdev.c": {
+      "path": "./boards/LEGO_HUB_NO6/bdev.c",
+      "hash": "a964dc2cc6892547ead03301ac5a23b59d2cf31578e6bd382946a76f72410e0d",
+      "last_modified": 1751235198,
+      "size": 2419
+    },
+    "./boardctrl.h": {
+      "path": "./boardctrl.h",
+      "hash": "b1bd623b93601bb0786a076ff278c6fc8b86d6da66c31ea95e3f069e34529307",
+      "last_modified": 1751235198,
+      "size": 4296
+    },
+    "./mpmetalport.c": {
+      "path": "./mpmetalport.c",
+      "hash": "7b7a9be9019476369969577c23bbb2e0b793bad60b81630a04e620734382f804",
+      "last_modified": 1751235198,
+      "size": 3533
+    },
+    "./boards/NUCLEO_F746ZG/board.json": {
+      "path": "./boards/NUCLEO_F746ZG/board.json",
+      "hash": "92fbbc11ba8927410ffa9d8dd679f77ce83b8f4c3f6536584f44abb5efc48677",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./boards/LEGO_HUB_NO7/cc2564.c": {
+      "path": "./boards/LEGO_HUB_NO7/cc2564.c",
+      "hash": "cdbea758778f7a1e720a436cedc122b1c5cee31fb98949e9fd4117e51bc9f32a",
+      "last_modified": 1751235198,
+      "size": 189
+    },
+    "./boards/STM32H573I_DK/pins.csv": {
+      "path": "./boards/STM32H573I_DK/pins.csv",
+      "hash": "227469c0e8a1b5ff44cb6fa4724cd18d9eed909848e75b78b0ae11373cf7f71c",
+      "last_modified": 1751235198,
+      "size": 829
+    },
+    "./eth.c": {
+      "path": "./eth.c",
+      "hash": "6b6f5fafe5ba22342bdf92f2f7718a8c2be4c0661ca89a1639d45db1fcedc5c3",
+      "last_modified": 1751235198,
+      "size": 29485
+    },
+    "./boards/STM32L496GDISC/pins.csv": {
+      "path": "./boards/STM32L496GDISC/pins.csv",
+      "hash": "923d2fcdb1086bfaa2056c48c177bd9e064a4b7e21df01927799789ac124070e",
+      "last_modified": 1751235198,
+      "size": 1220
+    },
+    "./boards/PYBV4/pins.csv": {
+      "path": "./boards/PYBV4/pins.csv",
+      "hash": "0a65a069d725dd2f74747f6c795bdafb75fd01bd64566e6433b77876a2d946e7",
+      "last_modified": 1751235198,
+      "size": 547
+    },
+    "./boards/GARATRONIC_PYBSTICK26_F411/manifest.py": {
+      "path": "./boards/GARATRONIC_PYBSTICK26_F411/manifest.py",
+      "hash": "b307e70ea44344e5709b36e705d37d1008034d0f6e13e20183419a3d60d499ee",
+      "last_modified": 1751235198,
+      "size": 19
+    },
+    "./boards/stm32f405_af.csv": {
+      "path": "./boards/stm32f405_af.csv",
+      "hash": "b5dc571ca32f042b11cd130d956ffe031c3492bccdceee50ff867e61c3c93bb5",
+      "last_modified": 1751235198,
+      "size": 38146
+    },
+    "./boards/NUCLEO_H743ZI2/board_init.c": {
+      "path": "./boards/NUCLEO_H743ZI2/board_init.c",
+      "hash": "e76c153e345eac121c8df0f8ec09655b4c283ed8f5020b0e94816f5c857be9c8",
+      "last_modified": 1751235198,
+      "size": 45
+    },
+    "./boards/stm32l476_af.csv": {
+      "path": "./boards/stm32l476_af.csv",
+      "hash": "97f0cc9a0ba8bf2f94d3095b856e1d49644d29f55df64a0919b625ade61aa16e",
+      "last_modified": 1751235198,
+      "size": 37117
+    },
+    "./boards/CERB40/stm32f4xx_hal_conf.h": {
+      "path": "./boards/CERB40/stm32f4xx_hal_conf.h",
+      "hash": "bf72420db50fa123dc5653d8ba403f9ce9dfdf9f89d37583cf7ef4039578264f",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./boards/STM32H573I_DK/mpconfigboard.mk": {
+      "path": "./boards/STM32H573I_DK/mpconfigboard.mk",
+      "hash": "dc71d1ced373d081d4e7db14a525a74b5b3e1c016f0ac9d3ca84fca6438dba2b",
+      "last_modified": 1751235198,
+      "size": 455
+    },
+    "./boards/VCC_GND_F407VE/bdev.c": {
+      "path": "./boards/VCC_GND_F407VE/bdev.c",
+      "hash": "797e5df8d2fb1f33c6f4031af9a73d1b4def54cce1fceb29ca92e8445ee652ef",
+      "last_modified": 1751235198,
+      "size": 690
+    },
+    "./boards/STM32H7B3I_DK/pins.csv": {
+      "path": "./boards/STM32H7B3I_DK/pins.csv",
+      "hash": "11787dc334810e1dedfd6ffea442c04b08944ee2f84f97e8a7ff4449b5e29c78",
+      "last_modified": 1751235198,
+      "size": 1408
+    },
+    "./pyb_can.h": {
+      "path": "./pyb_can.h",
+      "hash": "57a36be7aeaa9240fd889f794bce3f88a559343a4edd414518b12ecf94af004e",
+      "last_modified": 1751235198,
+      "size": 1925
+    },
+    "./boards/STM32F439/pins.csv": {
+      "path": "./boards/STM32F439/pins.csv",
+      "hash": "856b42df9d0bf4c980e6443e76031093d0216aa032ccc6c80d302ac3297f3e0d",
+      "last_modified": 1751235198,
+      "size": 757
+    },
+    "./boards/ARDUINO_NICLA_VISION/deploy.md": {
+      "path": "./boards/ARDUINO_NICLA_VISION/deploy.md",
+      "hash": "64679815f71c731816c8612806894597143229cfab4f86e3cb80bfe7e02289ea",
+      "last_modified": 1751235198,
+      "size": 429
+    },
+    "./boards/LEGO_HUB_NO6/mpconfigboard.h": {
+      "path": "./boards/LEGO_HUB_NO6/mpconfigboard.h",
+      "hash": "d0cdb2c313da3861f6b70cc62a44b67a5a0669842a1e508ba93dc36cb26bfb19",
+      "last_modified": 1751235198,
+      "size": 8638
+    },
+    "./boards/NUCLEO_L073RZ/stm32l0xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_L073RZ/stm32l0xx_hal_conf.h",
+      "hash": "53e140b86dd73c851112e5e9e19a01c03478879e523922a0aabf46641ea853a1",
+      "last_modified": 1751235198,
+      "size": 508
+    },
+    "./boards/NUCLEO_F401RE/pins.csv": {
+      "path": "./boards/NUCLEO_F401RE/pins.csv",
+      "hash": "afe47d2c0db595f5e1055eb6100e1ef1ec2e5c85b536520874be66f458984599",
+      "last_modified": 1751235198,
+      "size": 638
+    },
+    "./boards/NUCLEO_L452RE/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_L452RE/mpconfigboard.mk",
+      "hash": "6f087eb606d05e4c206b297ccd188c9d8e62cbaf3b00e2c1582e2e2ed3d3f0d7",
+      "last_modified": 1751235198,
+      "size": 225
+    },
+    "./boards/NUCLEO_F756ZG/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_F756ZG/mpconfigboard.mk",
+      "hash": "901abcf77166db8aa92e493bb5d022b33b4011322ec2691f0b34e4962c8bfe53",
+      "last_modified": 1751235198,
+      "size": 355
+    },
+    "./boards/WEACT_F411_BLACKPILL/pins.csv": {
+      "path": "./boards/WEACT_F411_BLACKPILL/pins.csv",
+      "hash": "76e0d4724f1d600a813ec16f1d852b82afaef3ed864807cda70e3a13ac41ac75",
+      "last_modified": 1751235198,
+      "size": 371
+    },
+    "./usbhost/Core/Inc/usbh_ioreq.h": {
+      "path": "./usbhost/Core/Inc/usbh_ioreq.h",
+      "hash": "00373e477f53c1864f3b371117b6cccbb06de5a8e76e85056dc7b38a5dfdf392",
+      "last_modified": 1751235198,
+      "size": 4644
+    },
+    "./boards/NUCLEO_WB55/rfcore_firmware.py": {
+      "path": "./boards/NUCLEO_WB55/rfcore_firmware.py",
+      "hash": "96df72d542a5997849606cd530129cc0a594fae483777065f7e33e8ab9b23a6d",
+      "last_modified": 1751235198,
+      "size": 27271
+    },
+    "./mboot/dfu.h": {
+      "path": "./mboot/dfu.h",
+      "hash": "2dfaa3b26663d757ef8abf67f4ee72721c2b940448d33f7c6015c4d80a82a37f",
+      "last_modified": 1751235198,
+      "size": 4534
+    },
+    "./boards/stm32f746_af.csv": {
+      "path": "./boards/stm32f746_af.csv",
+      "hash": "abf0ceda60c29a984e6bd936d1fa8a7115209993e487783ef79de751ebfa890b",
+      "last_modified": 1751235198,
+      "size": 57010
+    },
+    "./sdio.h": {
+      "path": "./sdio.h",
+      "hash": "e3cf11a0cf4df60be0c7a0b6dbcb57a8a540128fcaf92a0aef4ef9cc9f15d6f8",
+      "last_modified": 1751235198,
+      "size": 1710
+    },
+    "./usbhost/Class/Template/Inc/usbh_template.h": {
+      "path": "./usbhost/Class/Template/Inc/usbh_template.h",
+      "hash": "655fe1478eeabf48ae88b9d52d66e148314c42bbefba9c5aed0d1ba97479114d",
+      "last_modified": 1751235198,
+      "size": 2563
+    },
+    "./usbdev/core/inc/usbd_ioreq.h": {
+      "path": "./usbdev/core/inc/usbd_ioreq.h",
+      "hash": "03f496470838dd223f7ee213c6a4d202892ab355896f4a39b7329d6972fe20bd",
+      "last_modified": 1751235198,
+      "size": 2900
+    },
+    "./boards/MIKROE_CLICKER2_STM32/mpconfigboard.mk": {
+      "path": "./boards/MIKROE_CLICKER2_STM32/mpconfigboard.mk",
+      "hash": "94772e57399ac813c8d3ff45dcfc191000c9292746b7b0d019343cd2173335e4",
+      "last_modified": 1751235198,
+      "size": 435
+    },
+    "./boards/common_isr_rom/common_isr.ld": {
+      "path": "./boards/common_isr_rom/common_isr.ld",
+      "hash": "4628b38390692f2d083009895bd95388a0791af7d9c9bd79566050ad0fbe04af",
+      "last_modified": 1751235198,
+      "size": 229
+    },
+    "./boards/LEGO_HUB_NO7/manifest.py": {
+      "path": "./boards/LEGO_HUB_NO7/manifest.py",
+      "hash": "c75c63dcf1dc86874eebfab4ff4c6e0c885ad77ae448eabba820062942cd30d6",
+      "last_modified": 1751235198,
+      "size": 66
+    },
+    "./boards/NUCLEO_F091RC/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_F091RC/mpconfigboard.mk",
+      "hash": "ed68b3468c753151f8603d9d3d3f30203aa881807477bc8ce6bbd323236f9d89",
+      "last_modified": 1751235198,
+      "size": 445
+    },
+    "./vfs_rom_ioctl.c": {
+      "path": "./vfs_rom_ioctl.c",
+      "hash": "4ca90d7ec1fee6253d3fa1ea16b942d70967a85bdb135ed807d003791a4cb6da",
+      "last_modified": 1751235198,
+      "size": 6369
+    },
+    "./boards/NUCLEO_H743ZI2/board.json": {
+      "path": "./boards/NUCLEO_H743ZI2/board.json",
+      "hash": "9521bafa67639417e85aea8fbc501084b61253980147fbe7181eff245a468876",
+      "last_modified": 1751235198,
+      "size": 265
+    },
+    "./boards/NUCLEO_F746ZG/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_F746ZG/mpconfigboard.h",
+      "hash": "180299ec0519eaecd484d7a738ba26af1cc22cb3fe979234fb27b26140d0a2e0",
+      "last_modified": 1751235198,
+      "size": 3336
+    },
+    "./boards/NUCLEO_F746ZG/manifest.py": {
+      "path": "./boards/NUCLEO_F746ZG/manifest.py",
+      "hash": "e82f478e1099486fea00aa8791f8bc3e71ad9c253a90f200f27d31e91a226dc9",
+      "last_modified": 1751235198,
+      "size": 71
+    },
+    "./boards/ARDUINO_GIGA/wifi_nvram_1dx.h": {
+      "path": "./boards/ARDUINO_GIGA/wifi_nvram_1dx.h",
+      "hash": "fb80efb90ed0487f3099caf2b268b428749aabb540d8fd26d8286c45812a65bd",
+      "last_modified": 1751235198,
+      "size": 1310
+    },
+    "./boards/NUCLEO_L452RE/board.json": {
+      "path": "./boards/NUCLEO_L452RE/board.json",
+      "hash": "99b18f096ea80567b9823530e314ca1fe7395845d6407afbe2e3e9bc9ab505c2",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./boards/LEGO_HUB_NO7/mpconfigboard.mk": {
+      "path": "./boards/LEGO_HUB_NO7/mpconfigboard.mk",
+      "hash": "05463cb6824fe45e21f265f00d93cc62dbc70c8ff5fedcd1d9f2eba94d142b20",
+      "last_modified": 1751235198,
+      "size": 1405
+    },
+    "./nucleo_wb55_flash.sh": {
+      "path": "./nucleo_wb55_flash.sh",
+      "hash": "977f6fbaa9a1f46b5b01e362f5cb238f17c14cc16e4c7b3332aefed77cb41ffd",
+      "last_modified": 1761533957,
+      "size": 1143
+    },
+    "./boards/STM32F7DISC/manifest.py": {
+      "path": "./boards/STM32F7DISC/manifest.py",
+      "hash": "e82f478e1099486fea00aa8791f8bc3e71ad9c253a90f200f27d31e91a226dc9",
+      "last_modified": 1751235198,
+      "size": 71
+    },
+    "./boards/LEGO_HUB_NO7/pins.csv": {
+      "path": "./boards/LEGO_HUB_NO7/pins.csv",
+      "hash": "e162989f2e0acab0d1ec1e573957f5a09aae6283ee89b579160f0fccf7bcd308",
+      "last_modified": 1751235198,
+      "size": 918
+    },
+    "./mboot/vfs_fat.c": {
+      "path": "./mboot/vfs_fat.c",
+      "hash": "2e5db17878c6831557383271445ae0d38774a8796bb388fe6000995c1354539c",
+      "last_modified": 1751235198,
+      "size": 3676
+    },
+    "./eth_phy.c": {
+      "path": "./eth_phy.c",
+      "hash": "0ad4d7ede6e36dcd2af1d83c0bbe2b7f3c08ff44203503a20b066218795618cc",
+      "last_modified": 1751235198,
+      "size": 2274
+    },
+    "./boards/PYBV4/mpconfigboard.mk": {
+      "path": "./boards/PYBV4/mpconfigboard.mk",
+      "hash": "41a73e406f4164801709cfa71d23c160c7edd4441097b43985b054d50349724b",
+      "last_modified": 1751235198,
+      "size": 174
+    },
+    "./boards/ARDUINO_PORTENTA_H7/board_init.c": {
+      "path": "./boards/ARDUINO_PORTENTA_H7/board_init.c",
+      "hash": "f3e27712a05242cc5f686e429b47f0faf30faacf8f2d8301df733f8f10ac4685",
+      "last_modified": 1751235198,
+      "size": 6275
+    },
+    "./boards/GARATRONIC_PYBSTICK26_F411/stm32f4xx_hal_conf.h": {
+      "path": "./boards/GARATRONIC_PYBSTICK26_F411/stm32f4xx_hal_conf.h",
+      "hash": "22a263ec8406cfb1f74d535a48a66514680e11b755c1e0a87519266524ef5fbf",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./boards/B_L475E_IOT01A/board.json": {
+      "path": "./boards/B_L475E_IOT01A/board.json",
+      "hash": "b00f3f20172cb064ef3484aefa4c5743a376a9fa2c2e90592882fe099207c2c7",
+      "last_modified": 1751235198,
+      "size": 333
+    },
+    "./boards/OLIMEX_E407/pins.csv": {
+      "path": "./boards/OLIMEX_E407/pins.csv",
+      "hash": "56f88f9f99f41cc92ee0357d21862e18f0806a9fcb712e7d89d109e2c1c86bbf",
+      "last_modified": 1751235198,
+      "size": 795
+    },
+    "./boards/STM32F439/mpconfigboard.mk": {
+      "path": "./boards/STM32F439/mpconfigboard.mk",
+      "hash": "a43eb55ae6b319adb3672faf911502fbc39f0b45b59c30e92835d3e04b85892b",
+      "last_modified": 1751235198,
+      "size": 174
+    },
+    "./boards/NUCLEO_F413ZH/board.json": {
+      "path": "./boards/NUCLEO_F413ZH/board.json",
+      "hash": "b3f604baf35bf3c113f18f795b5a216a88fcecdba851366e45e3452b970a3774",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./boards/stm32wb55_af.csv": {
+      "path": "./boards/stm32wb55_af.csv",
+      "hash": "d885cce66f9ca4515e13659d2e3a4d583792a299842930bc68a553b5979a528e",
+      "last_modified": 1751235198,
+      "size": 19307
+    },
+    "./boards/STM32H7B3I_DK/mpconfigboard.mk": {
+      "path": "./boards/STM32H7B3I_DK/mpconfigboard.mk",
+      "hash": "d3dd088abc81b1769a236c2e1ca56b1ff7a9e228c2a5f36370047e87a4e96c01",
+      "last_modified": 1751235198,
+      "size": 496
+    },
+    "./boards/GARATRONIC_PYBSTICK26_F411/mpconfigboard.mk": {
+      "path": "./boards/GARATRONIC_PYBSTICK26_F411/mpconfigboard.mk",
+      "hash": "1f91348d5e4d10976c59c424f9a1a99e037bbd23f8d37188c31f95d0bc3cf6d9",
+      "last_modified": 1751235198,
+      "size": 174
+    },
+    "./systick.h": {
+      "path": "./systick.h",
+      "hash": "ab635181d18f967cfe3f1ed034197e092e3110d99d16ab1c1b248a19f43012c7",
+      "last_modified": 1761523589,
+      "size": 2395
+    },
+    "./boards/NUCLEO_F722ZE/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_F722ZE/mpconfigboard.h",
+      "hash": "57930d4f0b868460026f2fc602b0bf98e1d39ac084f918deb3fc9195bca33a5f",
+      "last_modified": 1751235198,
+      "size": 2546
+    },
+    "./boards/NUCLEO_H563ZI/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_H563ZI/mpconfigboard.h",
+      "hash": "9bf8b9944d5e25ea166e05b07228a4cf1d631bef4199b07216d4ff44bb4331a2",
+      "last_modified": 1751235198,
+      "size": 4354
+    },
+    "./boards/PYBD_SF3/board.md": {
+      "path": "./boards/PYBD_SF3/board.md",
+      "hash": "e633bd44ab1ccf1f5446e62e5fcdd6e557bd237afd3fc8bea872a5b97a202100",
+      "last_modified": 1751235198,
+      "size": 168
+    },
+    "./boards/OLIMEX_H407/README.md": {
+      "path": "./boards/OLIMEX_H407/README.md",
+      "hash": "afe2d08a5b09521a5f58e3f0fe9cdaf93657e96e93fd1d1b01022224b7d53259",
+      "last_modified": 1751235198,
+      "size": 333
+    },
+    "./boards/STM32F411DISC/board.json": {
+      "path": "./boards/STM32F411DISC/board.json",
+      "hash": "2b27eb0427e3206bcc7b8d3b0606a71cd087419ab1c445a0a68f0d7c08fd9479",
+      "last_modified": 1751235198,
+      "size": 264
+    },
+    "./boards/OLIMEX_H407/mpconfigboard.h": {
+      "path": "./boards/OLIMEX_H407/mpconfigboard.h",
+      "hash": "ccfdb1730a6ba0e1637a62b4beeb705f7b128074299ce19caab3b6f545b3df5e",
+      "last_modified": 1751235198,
+      "size": 2586
+    },
+    "./boards/LEGO_HUB_NO6/board_init.c": {
+      "path": "./boards/LEGO_HUB_NO6/board_init.c",
+      "hash": "d96af3ef2659401061d56b563e874cb0ef7ee3e59cb0cbf2a322d39de0ee32cd",
+      "last_modified": 1751235198,
+      "size": 7496
+    },
+    "./mpremoteprocport.c": {
+      "path": "./mpremoteprocport.c",
+      "hash": "c65880c0678ea1c911fe037052114aec50855fc18b1932d519b51d3cc25ff048",
+      "last_modified": 1751235198,
+      "size": 5033
+    },
+    "./mboot/README.md": {
+      "path": "./mboot/README.md",
+      "hash": "192c241725a13a20fe3f87e730ac0578b5c7f2cfbad6911ff6d3e9cce6ffd1a2",
+      "last_modified": 1751235198,
+      "size": 11343
+    },
+    "./boards/SPARKFUN_MICROMOD_STM32/board_init.c": {
+      "path": "./boards/SPARKFUN_MICROMOD_STM32/board_init.c",
+      "hash": "ad1d7a5d8d73b31525986cbfbd6930a14bc008fcba23190cce06a0b278400595",
+      "last_modified": 1751235198,
+      "size": 256
+    },
+    "./boards/B_L475E_IOT01A/pins.csv": {
+      "path": "./boards/B_L475E_IOT01A/pins.csv",
+      "hash": "88be7f0c74c2e56e534e24e68e757dfbfbaf3789931c911421477d590db88c08",
+      "last_modified": 1751235198,
+      "size": 716
+    },
+    "./boards/ARDUINO_GIGA/mpconfigboard.h": {
+      "path": "./boards/ARDUINO_GIGA/mpconfigboard.h",
+      "hash": "22b160e6fda60c1d7f3a42d0339fb9b900a1598fba093f894c99d49e2974b28c",
+      "last_modified": 1751235198,
+      "size": 13945
+    },
+    "./boards/NUCLEO_H563ZI/pins.csv": {
+      "path": "./boards/NUCLEO_H563ZI/pins.csv",
+      "hash": "d1547706ebf509f86a3496eeb5268a0575ab83d80919bec5260c00a3f1f0b750",
+      "last_modified": 1751235198,
+      "size": 865
+    },
+    "./boards/VCC_GND_F407VE/mpconfigboard.mk": {
+      "path": "./boards/VCC_GND_F407VE/mpconfigboard.mk",
+      "hash": "1fbe467ed5213bd2f91e79c0fa678889a61012994c9961eb692fd9df42baae1c",
+      "last_modified": 1751235198,
+      "size": 174
+    },
+    "./boards/VCC_GND_H743VI/stm32h7xx_hal_conf.h": {
+      "path": "./boards/VCC_GND_H743VI/stm32h7xx_hal_conf.h",
+      "hash": "a2137e39ec847c59b569cfccf311ed2c563450597e5da97db4cbfdd316479178",
+      "last_modified": 1751235198,
+      "size": 550
+    },
+    "./boards/B_L475E_IOT01A/stm32l4xx_hal_conf.h": {
+      "path": "./boards/B_L475E_IOT01A/stm32l4xx_hal_conf.h",
+      "hash": "87dfa054d2dd8da850e53ec404301df73b7afe5a2bccd1dd5e30f83c28a53b6b",
+      "last_modified": 1751235198,
+      "size": 592
+    },
+    "./usbdev/class/inc/usbd_cdc_msc_hid.h": {
+      "path": "./usbdev/class/inc/usbd_cdc_msc_hid.h",
+      "hash": "14990ff4163b3f0ec76849b77805997285e5c6fd92c2c2a9fa124b14b27e01c4",
+      "last_modified": 1751235198,
+      "size": 6940
+    },
+    "./boards/LEGO_HUB_NO6/spiflash.c": {
+      "path": "./boards/LEGO_HUB_NO6/spiflash.c",
+      "hash": "594a9495d03d1c0045f664dbb1f433c471e0bb9aad29c762e4d84788f772be6c",
+      "last_modified": 1751235198,
+      "size": 6170
+    },
+    "./boards/LEGO_HUB_NO7/hub_display.c": {
+      "path": "./boards/LEGO_HUB_NO7/hub_display.c",
+      "hash": "b54abc42f0da330f90aee888f55d14a14e408acef970c29bc83a9dab1f7a310f",
+      "last_modified": 1751235198,
+      "size": 6540
+    },
+    "./boards/NUCLEO_WL55/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_WL55/mpconfigboard.h",
+      "hash": "c4c5d81bd6031e3714aee5ea1499db0e00c56e55ddc8779ad9bb68109f034aff",
+      "last_modified": 1751235198,
+      "size": 3713
+    },
+    "./boards/PYBD_SF6/bdev.c": {
+      "path": "./boards/PYBD_SF6/bdev.c",
+      "hash": "324e0f96be7048aca77b7dc51b89f64375c0c9cc84b3121922c94825183834fa",
+      "last_modified": 1751235198,
+      "size": 34
+    },
+    "./usbdev/core/inc/usbd_def.h": {
+      "path": "./usbdev/core/inc/usbd_def.h",
+      "hash": "a54d64c4a3a6cd1ac7fadcb1cc5532e527d5d581bd91b2bc0da40a8f69415776",
+      "last_modified": 1751235198,
+      "size": 10573
+    },
+    "./can.c": {
+      "path": "./can.c",
+      "hash": "d88cc7d767ed94fa0329d61f3c05483c33de96991e23acc17ea2b01e5c3233b2",
+      "last_modified": 1751235198,
+      "size": 14700
+    },
+    "./boards/STM32F4DISC/board.json": {
+      "path": "./boards/STM32F4DISC/board.json",
+      "hash": "de049e297fa5003be14880eee57ec4a3867930855016b92216b3ad5e3cd6bd4f",
+      "last_modified": 1751235198,
+      "size": 260
+    },
+    "./servo.c": {
+      "path": "./servo.c",
+      "hash": "96d58b060fa89b75c1455ffc7412b24df99d0a571004781fc30d3247b39d3a7c",
+      "last_modified": 1751235198,
+      "size": 12859
+    },
+    "./boards/VCC_GND_F407ZG/board.json": {
+      "path": "./boards/VCC_GND_F407ZG/board.json",
+      "hash": "94b376781d27ca78037ec0616352e68d66fe72db4e151441a0aab24073a85193",
+      "last_modified": 1751235198,
+      "size": 270
+    },
+    "./boards/VCC_GND_F407ZG/manifest.py": {
+      "path": "./boards/VCC_GND_F407ZG/manifest.py",
+      "hash": "e82f478e1099486fea00aa8791f8bc3e71ad9c253a90f200f27d31e91a226dc9",
+      "last_modified": 1751235198,
+      "size": 71
+    },
+    "./boards/PYBLITEV10/mpconfigboard.h": {
+      "path": "./boards/PYBLITEV10/mpconfigboard.h",
+      "hash": "930a8600ef448b7f93dea326f1122a7cec56dcd414209161b25832ba98e5714d",
+      "last_modified": 1751235198,
+      "size": 3079
+    },
+    "./boards/MIKROE_QUAIL/mpconfigboard.h": {
+      "path": "./boards/MIKROE_QUAIL/mpconfigboard.h",
+      "hash": "43ea6c9bab097c8182b5917e8414fba7c02c530a00293be201cb77116b6695bd",
+      "last_modified": 1751235198,
+      "size": 4067
+    },
+    "./boards/PYBD_SF2/board.json": {
+      "path": "./boards/PYBD_SF2/board.json",
+      "hash": "767cbc5a889c889e256529e39dd2736214937db0088dac67bd2bfd8acac6a42c",
+      "last_modified": 1751235198,
+      "size": 479
+    },
+    "./boards/NUCLEO_G474RE/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_G474RE/mpconfigboard.h",
+      "hash": "f7ae9923989085364e7468719e18b40b4426ffdc174d2a27ce5aecdae712bb30",
+      "last_modified": 1751235198,
+      "size": 4271
+    },
+    "./boards/NUCLEO_F412ZG/board.json": {
+      "path": "./boards/NUCLEO_F412ZG/board.json",
+      "hash": "11cb740f0621fe4095ccc5410f197d2f759436f1b83e947c9c83e0c84dd6ddc2",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./accel.c": {
+      "path": "./accel.c",
+      "hash": "0f89c9b3e7e646b83b5012c9ffc273692b1ce1caaf0bb98ce40f3367e5500aa3",
+      "last_modified": 1751235198,
+      "size": 10001
+    },
+    "./boards/NUCLEO_H743ZI2/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_H743ZI2/mpconfigboard.mk",
+      "hash": "d2d6bd61d555ef00265614ae67050180f85d89201734f54885dd7aa59add23bb",
+      "last_modified": 1751235198,
+      "size": 99
+    },
+    "./boards/GARATRONIC_PYBSTICK26_F411/pins.csv": {
+      "path": "./boards/GARATRONIC_PYBSTICK26_F411/pins.csv",
+      "hash": "18dee1d81d5e30064e700f2c7d243840bf7dab8bf475c6c45bc791fd2d4db70e",
+      "last_modified": 1751235198,
+      "size": 555
+    },
+    "./boards/STM32L496GDISC/mpconfigboard.mk": {
+      "path": "./boards/STM32L496GDISC/mpconfigboard.mk",
+      "hash": "413c1ba78863337675305f554fe0de83f1f2769b0d956a957a4ca066e411e511",
+      "last_modified": 1751235198,
+      "size": 225
+    },
+    "./modmachine.c": {
+      "path": "./modmachine.c",
+      "hash": "fe18b6148b30fd3b065471a29e0580ab1e46e718d4ad84ae5b5bece78a16ae60",
+      "last_modified": 1761596812,
+      "size": 13443
+    },
+    "./mboot/main.c": {
+      "path": "./mboot/main.c",
+      "hash": "91108dc1589fe6f702233113b97f5edd232f153af679796b8cdc22d5af6bc74c",
+      "last_modified": 1751235198,
+      "size": 57369
+    },
+    "./lcd.c": {
+      "path": "./lcd.c",
+      "hash": "b23d1fe08340cdb03a98f0a6f3f4fc7e1bc1c04f1fc04d4199c9a17796580029",
+      "last_modified": 1751235198,
+      "size": 19754
+    },
+    "./boards/STM32L476DISC/bdev.c": {
+      "path": "./boards/STM32L476DISC/bdev.c",
+      "hash": "eb798d2d6246a22bd6e9d78d1d2d5d5ad2e749b2e3174f23b8c6ac8342ef240f",
+      "last_modified": 1751235198,
+      "size": 635
+    },
+    "./boards/stm32f401xe.ld": {
+      "path": "./boards/stm32f401xe.ld",
+      "hash": "3db5242759cd4a8dc6fcd432d3d2845b8b6e379add2941bc829ea5b03f9f8b15",
+      "last_modified": 1751235198,
+      "size": 1491
+    },
+    "./boards/common_isr_ram/common_isr.ld": {
+      "path": "./boards/common_isr_ram/common_isr.ld",
+      "hash": "9eddd2c210a61e5e4d9dd60e569a4b8e9160f6c038bef500be6c650a5b9f41a9",
+      "last_modified": 1751235198,
+      "size": 1047
+    },
+    "./can.h": {
+      "path": "./can.h",
+      "hash": "d30fffecfc07bc976ece636389c7e1870921540d265ca97080004917ef8ec4ff",
+      "last_modified": 1751235198,
+      "size": 4394
+    },
+    "./boards/common_blifs.ld": {
+      "path": "./boards/common_blifs.ld",
+      "hash": "6bada76c58b90688a52538ac88f447682c8f3174b3c81a27dd063dc546b75ff3",
+      "last_modified": 1751235198,
+      "size": 554
+    },
+    "./boards/ARDUINO_PORTENTA_H7/mbedtls_config_board.h": {
+      "path": "./boards/ARDUINO_PORTENTA_H7/mbedtls_config_board.h",
+      "hash": "335ca5f136cf245cef231979a13b87a54814d8cb402139d462db693a2eac7868",
+      "last_modified": 1751235198,
+      "size": 236
+    },
+    "./flashbdev.c": {
+      "path": "./flashbdev.c",
+      "hash": "b616a8909ac232b0a78dc296642a2f7cb5e05e4f3f4f5aac99ad36c9ab5be4be",
+      "last_modified": 1751235198,
+      "size": 9155
+    },
+    "./boards/stm32f091_af.csv": {
+      "path": "./boards/stm32f091_af.csv",
+      "hash": "75561faf00a35197c2dc35f4c68c5c2ac5f1a0725be96f8ff248fc8e444f733d",
+      "last_modified": 1751235198,
+      "size": 13550
+    },
+    "./modpyb.c": {
+      "path": "./modpyb.c",
+      "hash": "fe679ee8b8636f3de2ad75f5a709586682fa0bbf49b9b292204611b82eb6d29c",
+      "last_modified": 1751235198,
+      "size": 10068
+    },
+    "./boards/NUCLEO_F091RC/stm32f0xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_F091RC/stm32f0xx_hal_conf.h",
+      "hash": "bcc2b6dff3d5cb9ee5576806181b9f335ef4b88c2d43a46b7536e1a0cd75e827",
+      "last_modified": 1751235198,
+      "size": 508
+    },
+    "./modtime.c": {
+      "path": "./modtime.c",
+      "hash": "3102ea9065f29a64dfa921b010396833c8b737d68dac787eab483e17cd21612c",
+      "last_modified": 1751235198,
+      "size": 2670
+    },
+    "./sdcard.c": {
+      "path": "./sdcard.c",
+      "hash": "77ca6f2e25b358f17550b0f94a6bd630335feb1c974b442f91d2d7e88adcec0f",
+      "last_modified": 1751235198,
+      "size": 32585
+    },
+    "./boards/NUCLEO_L152RE/pins.csv": {
+      "path": "./boards/NUCLEO_L152RE/pins.csv",
+      "hash": "4f21a30e2452d6f9e61bacb4dd7f1ff5e59dfba70f73c861f3831e0911ff2b3d",
+      "last_modified": 1751235198,
+      "size": 648
+    },
+    "./qspi.h": {
+      "path": "./qspi.h",
+      "hash": "e977010715815b310b42d7574f5c0187001cb75c0a8e03f71f2d5b7b1f98761e",
+      "last_modified": 1751235198,
+      "size": 1743
+    },
+    "./boards/HYDRABUS/mpconfigboard.mk": {
+      "path": "./boards/HYDRABUS/mpconfigboard.mk",
+      "hash": "41a73e406f4164801709cfa71d23c160c7edd4441097b43985b054d50349724b",
+      "last_modified": 1751235198,
+      "size": 174
+    },
+    "./boards/NUCLEO_F722ZE/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_F722ZE/mpconfigboard.mk",
+      "hash": "ac9917435f055ed4cb850cb07918af31bdba5a09831243a02e2b0b2095323a24",
+      "last_modified": 1751235198,
+      "size": 225
+    },
+    "./boards/VCC_GND_F407VE/board_init.c": {
+      "path": "./boards/VCC_GND_F407VE/board_init.c",
+      "hash": "c5b8aacbc26051a44dd16814fa706f0bd1d0c1457a15d67a892f74148555f6bd",
+      "last_modified": 1751235198,
+      "size": 167
+    },
+    "./boards/NUCLEO_L152RE/stm32l1xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_L152RE/stm32l1xx_hal_conf.h",
+      "hash": "d023f8ae2c6964db7199f930a925a507d1b8b992ddff18e763e1e2c6ea012be3",
+      "last_modified": 1751235198,
+      "size": 327
+    },
+    "./usbdev/class/inc/usbd_cdc_msc_hid0.h": {
+      "path": "./usbdev/class/inc/usbd_cdc_msc_hid0.h",
+      "hash": "ebcdffbb2e4f01227fd01871bc0d0fe1d2301b064ce268d55db94784bf2eae5d",
+      "last_modified": 1751235198,
+      "size": 3372
+    },
+    "./boards/USBDONGLE_WB55/board.json": {
+      "path": "./boards/USBDONGLE_WB55/board.json",
+      "hash": "1dd7254b46e60795f8486bd5e2f478a3bf0513b90f56efc4ab59c4ab13e76567",
+      "last_modified": 1751235198,
+      "size": 265
+    },
+    "./subghz.h": {
+      "path": "./subghz.h",
+      "hash": "80212b2b2f2990e073c5ca566139576cd3c3f6508083dae5df59206d166f3d1f",
+      "last_modified": 1751235198,
+      "size": 1576
+    },
+    "./boards/ARDUINO_NICLA_VISION/stm32h7xx_hal_conf.h": {
+      "path": "./boards/ARDUINO_NICLA_VISION/stm32h7xx_hal_conf.h",
+      "hash": "b0d41ef04c7f8e50893e2d968e7e96470ebcab8a53ee8214b2b0bd9e33afb5ef",
+      "last_modified": 1751235198,
+      "size": 1361
+    },
+    "./zephyr_stm32.c": {
+      "path": "./zephyr_stm32.c",
+      "hash": "b05fc12a3675316579157dae2e7221216927c8c3feb7d792e8086f8636cd968f",
+      "last_modified": 1761523589,
+      "size": 568
+    },
+    "./boards/stm32l452xe.ld": {
+      "path": "./boards/stm32l452xe.ld",
+      "hash": "4adf31d2e92b1f435f878c2ac8da03ee9eecedb4a4d23c6f4bd654373c94fa43",
+      "last_modified": 1751235198,
+      "size": 1376
+    },
+    "./pybthread.h": {
+      "path": "./pybthread.h",
+      "hash": "78be986ace16893433a83e13992f1c9f00553d57833d6ee722ef6efabc453fe4",
+      "last_modified": 1751235198,
+      "size": 2816
+    },
+    "./boards/stm32f412_af.csv": {
+      "path": "./boards/stm32f412_af.csv",
+      "hash": "f46c17455e1257a1d26901ec1335164fe7d0d02239e8c10222071be9221f66ac",
+      "last_modified": 1751235198,
+      "size": 34592
+    },
+    "./boards/NUCLEO_H563ZI/stm32h5xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_H563ZI/stm32h5xx_hal_conf.h",
+      "hash": "a93ceb6812043b8e433a03089c0c82a91e706b3a6311e09db84d090779dfa0f4",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./build.log": {
+      "path": "./build.log",
+      "hash": "f41307d4a9e4ad4e227da6f1f94f49102eaeef2f873dfc9a7e83b6bb036efeda",
+      "last_modified": 1762428689,
+      "size": 48230
+    },
+    "./machine_wdt.c": {
+      "path": "./machine_wdt.c",
+      "hash": "fa47882e3a8d679b4d0b674db99033830b7484aaa941c7f149241fc3543c998f",
+      "last_modified": 1751235198,
+      "size": 2724
+    },
+    "./pin.c": {
+      "path": "./pin.c",
+      "hash": "9bacf174e9818b87fb0542d017c6c1e8f93f4d0927ce05f533202bfe7ee56fef",
+      "last_modified": 1751235198,
+      "size": 27545
+    },
+    "./boards/PYBD_SF6/board.json": {
+      "path": "./boards/PYBD_SF6/board.json",
+      "hash": "e33be3249221422aadbf772b1ff630795dc0b37c47ab6a3df5289bca257ef69c",
+      "last_modified": 1751235198,
+      "size": 526
+    },
+    "./mpnetworkport.c": {
+      "path": "./mpnetworkport.c",
+      "hash": "6415d8473f815a4bf76fbb4025f7828367abcd17107b93bc8a6e7a1850f679ab",
+      "last_modified": 1751235198,
+      "size": 2790
+    },
+    "./boards/PYBV4/mpconfigboard.h": {
+      "path": "./boards/PYBV4/mpconfigboard.h",
+      "hash": "dceeeb3c08010607fe10f6a0561699bbf1621a588d33aa41b67ec910a68b8cc1",
+      "last_modified": 1751235198,
+      "size": 3692
+    },
+    "./boards/SPARKFUN_MICROMOD_STM32/stm32f4xx_hal_conf.h": {
+      "path": "./boards/SPARKFUN_MICROMOD_STM32/stm32f4xx_hal_conf.h",
+      "hash": "bf72420db50fa123dc5653d8ba403f9ce9dfdf9f89d37583cf7ef4039578264f",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./usbd_hid_interface.h": {
+      "path": "./usbd_hid_interface.h",
+      "hash": "7b576fb2dc6d32c4b78798ae37b540a3b4145c65eeb38ccf83bd50bf224f6074",
+      "last_modified": 1751235198,
+      "size": 780
+    },
+    "./mboot/mboot.py": {
+      "path": "./mboot/mboot.py",
+      "hash": "86762704530b55f75b88add167c331e4ed447f1871a80f68883405c5748e6626",
+      "last_modified": 1751235198,
+      "size": 5952
+    },
+    "./boards/GARATRONIC_NADHAT_F405/mpconfigboard.h": {
+      "path": "./boards/GARATRONIC_NADHAT_F405/mpconfigboard.h",
+      "hash": "2cbcdea445ba3f302dcdc79a0ada09be0042b9466ab70731199024a876847665",
+      "last_modified": 1751235198,
+      "size": 4175
+    },
+    "./boards/PYBV11/mpconfigvariant_DP_THREAD.mk": {
+      "path": "./boards/PYBV11/mpconfigvariant_DP_THREAD.mk",
+      "hash": "8f01c21914816146d5135ece86abc96b1be2423f3e7fbcf52c59aa3355a3faf9",
+      "last_modified": 1751235198,
+      "size": 60
+    },
+    "./usbhost/Core/Src/usbh_ioreq.c": {
+      "path": "./usbhost/Core/Src/usbh_ioreq.c",
+      "hash": "6f7e6f3d17ff0d2382f151ae7a322265fd631609fc94b07a7a9179f28eefffeb",
+      "last_modified": 1751235198,
+      "size": 12442
+    },
+    "./usbhost/Class/HID/Inc/usbh_hid_keybd.h": {
+      "path": "./usbhost/Class/HID/Inc/usbh_hid_keybd.h",
+      "hash": "859a47eab758287a3861cf8537a062fae869a4e21372970dad6f1afa305fc085",
+      "last_modified": 1751235198,
+      "size": 14089
+    },
+    "./boards/NUCLEO_F767ZI/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_F767ZI/mpconfigboard.h",
+      "hash": "d76920ace227f3547287f1d7578c9e009728d1ed619556009ee5b750cb7b26c6",
+      "last_modified": 1751235198,
+      "size": 3645
+    },
+    "./boards/NUCLEO_L4A6ZG/pins.csv": {
+      "path": "./boards/NUCLEO_L4A6ZG/pins.csv",
+      "hash": "8a58aed17d64dff3ea3fffa1c23095b84c52819f446d8410caefc5d05722941f",
+      "last_modified": 1751235198,
+      "size": 664
+    },
+    "./boards/stm32wbxx_hal_conf_base.h": {
+      "path": "./boards/stm32wbxx_hal_conf_base.h",
+      "hash": "3ff87118b734a7b0acfd14e53ab0c21e16356a662ef6ac480f2e82ccfb20e9d4",
+      "last_modified": 1751235198,
+      "size": 4443
+    },
+    "./boards/ARDUINO_GIGA/board_init.c": {
+      "path": "./boards/ARDUINO_GIGA/board_init.c",
+      "hash": "23e5ca9eaf5a1c87c6fee41403bcefeb98d930bb435b502bad20fa58dbcd7ef1",
+      "last_modified": 1751235198,
+      "size": 3721
+    },
+    "./boards/NUCLEO_L073RZ/pins.csv": {
+      "path": "./boards/NUCLEO_L073RZ/pins.csv",
+      "hash": "4ae8743f3f08713df6059a43dff4eb6f364d3a448a3c29bc6ba4821ff609ccd3",
+      "last_modified": 1751235198,
+      "size": 550
+    },
+    "./boards/openocd_stm32f7.cfg": {
+      "path": "./boards/openocd_stm32f7.cfg",
+      "hash": "77e6e4c848974dffa69bef86db7641d918b8560f4ff98b0024fe6587bc3ab513",
+      "last_modified": 1751235198,
+      "size": 969
+    },
+    "./boards/NUCLEO_F722ZE/pins.csv": {
+      "path": "./boards/NUCLEO_F722ZE/pins.csv",
+      "hash": "a5492ec7bb85703f91382f06d4230ab828d45a9fad8252ef44a9228e088ddce3",
+      "last_modified": 1751235198,
+      "size": 952
+    },
+    "./boards/OLIMEX_E407/manifest.py": {
+      "path": "./boards/OLIMEX_E407/manifest.py",
+      "hash": "e82f478e1099486fea00aa8791f8bc3e71ad9c253a90f200f27d31e91a226dc9",
+      "last_modified": 1751235198,
+      "size": 71
+    },
+    "./powerctrlboot.c": {
+      "path": "./powerctrlboot.c",
+      "hash": "96946aa8f9c3c8477b2743c77a19471b75cb897b4e830f077c0f7493b19fb409",
+      "last_modified": 1751235198,
+      "size": 18385
+    },
+    "./boards/NUCLEO_F401RE/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_F401RE/mpconfigboard.h",
+      "hash": "92d87f86dd0b089b873c3c80dde9b18633622db1afd68b80fc7d4a6f84273825",
+      "last_modified": 1751235198,
+      "size": 2963
+    },
+    "./boards/STM32F7DISC/pins.csv": {
+      "path": "./boards/STM32F7DISC/pins.csv",
+      "hash": "55df1f12713c7936530dc6bb400869c95373c59d219b73b110d148e55809bfc3",
+      "last_modified": 1751235198,
+      "size": 1294
+    },
+    "./boards/STM32F7DISC/board.json": {
+      "path": "./boards/STM32F7DISC/board.json",
+      "hash": "48c5701556fe40467194dc9d05434f895b2777d2519060602a99eb26a77d590c",
+      "last_modified": 1751235198,
+      "size": 260
+    },
+    "./Makefile": {
+      "path": "./Makefile",
+      "hash": "93b3ea5c213a07343a90246c83792940c4f7b61d42f83fd32a4bfa37ff6de55c",
+      "last_modified": 1762306671,
+      "size": 22221
+    },
+    "./boards/common_extratext_data_in_flash.ld": {
+      "path": "./boards/common_extratext_data_in_flash.ld",
+      "hash": "41e7701d1c619fc3a47fdb5340d01f22afc846b8a1c2248cfe7e7a18c93b26ce",
+      "last_modified": 1751235198,
+      "size": 469
+    },
+    "./i2cslave.c": {
+      "path": "./i2cslave.c",
+      "hash": "965c23f8b6a8a829cfef514779eb020638d02c20c0dbbbf42415e5cb5bbd17ea",
+      "last_modified": 1751235198,
+      "size": 3522
+    },
+    "./boards/STM32H7B3I_DK/board.json": {
+      "path": "./boards/STM32H7B3I_DK/board.json",
+      "hash": "4368cfdcdb275f8029605ebfec153e8ea1c3168532d11a06a53e537b7b0ce667",
+      "last_modified": 1751235198,
+      "size": 266
+    },
+    "./uart.h": {
+      "path": "./uart.h",
+      "hash": "4e8fd92fc27eac1cbb06fb75eaae5f165c389d6cc898110e9beedd6e3ca318a4",
+      "last_modified": 1751235198,
+      "size": 4652
+    },
+    "./boards/PYBD_SF2/board_init.c": {
+      "path": "./boards/PYBD_SF2/board_init.c",
+      "hash": "02ec4144566611e59c5ffd6eb3534e89b3c9fbaffd7b06cce689a99dca4d389d",
+      "last_modified": 1751235198,
+      "size": 3411
+    },
+    "./boards/WEACT_F411_BLACKPILL/mpconfigvariant_V13_FLASH_4M.mk": {
+      "path": "./boards/WEACT_F411_BLACKPILL/mpconfigvariant_V13_FLASH_4M.mk",
+      "hash": "d421da676fcb72534d47590ba368572b8ede310dec653bac6c340c8263ba8e3f",
+      "last_modified": 1751235198,
+      "size": 41
+    },
+    "./usbhost/Class/MSC/Inc/usbh_msc.h": {
+      "path": "./usbhost/Class/MSC/Inc/usbh_msc.h",
+      "hash": "4a11315bca33c960dcd4e8219725acc2bd1fa8e5dc60cf01ed3e210283439876",
+      "last_modified": 1751235198,
+      "size": 5295
+    },
+    "./boards/B_L072Z_LRWAN1/mpconfigboard.mk": {
+      "path": "./boards/B_L072Z_LRWAN1/mpconfigboard.mk",
+      "hash": "3f5d19ec587206ca44388ad18a759fbc8f90e9ecc750625d1ec36219f026c87c",
+      "last_modified": 1751235198,
+      "size": 399
+    },
+    "./boards/MIKROE_QUAIL/pins.csv": {
+      "path": "./boards/MIKROE_QUAIL/pins.csv",
+      "hash": "d26f6d75b24acf755d61548f16370a140f48808b64deaf62dbde728dfa69691a",
+      "last_modified": 1751235198,
+      "size": 1257
+    },
+    "./usbhost/Class/MSC/Src/usbh_msc_bot.c": {
+      "path": "./usbhost/Class/MSC/Src/usbh_msc_bot.c",
+      "hash": "5b6c19364af2b40b0c4f94447fe4c2617d3fc075f1cc2ba98cbb89592c52c62f",
+      "last_modified": 1751235198,
+      "size": 18231
+    },
+    "./boards/OLIMEX_H407/mpconfigboard.mk": {
+      "path": "./boards/OLIMEX_H407/mpconfigboard.mk",
+      "hash": "f8822de216e31a0399df2a742e8a7dbf24f326f831b60ae2afc447f4a678baa1",
+      "last_modified": 1751235198,
+      "size": 225
+    },
+    "./usbd_hid_interface.c": {
+      "path": "./usbd_hid_interface.c",
+      "hash": "c08bdfb4288fe3bcd1f3512c176468f00df1346106c9348b27bd731725987520",
+      "last_modified": 1761596812,
+      "size": 2671
+    },
+    "./boards/ARDUINO_OPTA/stm32h7xx_hal_conf.h": {
+      "path": "./boards/ARDUINO_OPTA/stm32h7xx_hal_conf.h",
+      "hash": "b0d41ef04c7f8e50893e2d968e7e96470ebcab8a53ee8214b2b0bd9e33afb5ef",
+      "last_modified": 1751235198,
+      "size": 1361
+    },
+    "./boards/ARDUINO_OPTA/wifi_nvram_1dx.h": {
+      "path": "./boards/ARDUINO_OPTA/wifi_nvram_1dx.h",
+      "hash": "fb80efb90ed0487f3099caf2b268b428749aabb540d8fd26d8286c45812a65bd",
+      "last_modified": 1751235198,
+      "size": 1310
+    },
+    "./boards/NUCLEO_WL55/pins.csv": {
+      "path": "./boards/NUCLEO_WL55/pins.csv",
+      "hash": "6354aeff9368941d93904ca03a261eb76d89e995fd6919f1df78362b6a632ff8",
+      "last_modified": 1751235198,
+      "size": 397
+    },
+    "./boards/PYBV10/pins.csv": {
+      "path": "./boards/PYBV10/pins.csv",
+      "hash": "0a65a069d725dd2f74747f6c795bdafb75fd01bd64566e6433b77876a2d946e7",
+      "last_modified": 1751235198,
+      "size": 547
+    },
+    "./mboot/mboot.h": {
+      "path": "./mboot/mboot.h",
+      "hash": "93b858b18f89342bbc9043c70787d6d4a327715881ad4fc1b9dd5a709b470f23",
+      "last_modified": 1751235198,
+      "size": 7911
+    },
+    "./build-f429.log": {
+      "path": "./build-f429.log",
+      "hash": "07be3e4d0bd07e80dd70bdc6d154c60c64e3ec1b8e2617e66cd410ecde61ccfa",
+      "last_modified": 1761550306,
+      "size": 810462
+    },
+    "./boards/NUCLEO_H743ZI/manifest.py": {
+      "path": "./boards/NUCLEO_H743ZI/manifest.py",
+      "hash": "e82f478e1099486fea00aa8791f8bc3e71ad9c253a90f200f27d31e91a226dc9",
+      "last_modified": 1751235198,
+      "size": 71
+    },
+    "./boards/STM32F4DISC/mpconfigboard.mk": {
+      "path": "./boards/STM32F4DISC/mpconfigboard.mk",
+      "hash": "1fbe467ed5213bd2f91e79c0fa678889a61012994c9961eb692fd9df42baae1c",
+      "last_modified": 1751235198,
+      "size": 174
+    },
+    "./boards/NUCLEO_WB55/mpconfigvariant_ZEPHYR.mk": {
+      "path": "./boards/NUCLEO_WB55/mpconfigvariant_ZEPHYR.mk",
+      "hash": "21b1e61c0bddff90d4075c4cb90de0844ef13f25ef938fe35a6dfcc93ba4204b",
+      "last_modified": 1761520016,
+      "size": 222
+    },
+    "./i2c.c": {
+      "path": "./i2c.c",
+      "hash": "b4e0989ab73f90525f68ac07daa4f774f38dea6c661bc651f3010f64cc79abf7",
+      "last_modified": 1751235198,
+      "size": 16877
+    },
+    "./boards/ARDUINO_NICLA_VISION/manifest.py": {
+      "path": "./boards/ARDUINO_NICLA_VISION/manifest.py",
+      "hash": "942a257a8952bd5fe42c454041639f8b4fcfcdc759986c4e95910d7ae7126ee9",
+      "last_modified": 1751235198,
+      "size": 363
+    },
+    "./boards/PYBV3/pins.csv": {
+      "path": "./boards/PYBV3/pins.csv",
+      "hash": "f3a49c2e0198da8a4517c409b945801b1f82eb1e723779b8f7562a9861f269be",
+      "last_modified": 1751235198,
+      "size": 422
+    },
+    "./boards/GARATRONIC_PYBSTICK26_F411/mpconfigboard.h": {
+      "path": "./boards/GARATRONIC_PYBSTICK26_F411/mpconfigboard.h",
+      "hash": "f4c2e989f8fb50ede3d38f7a8e91a9371ae6ebbbb13bff4e83d4e57e9cf753c3",
+      "last_modified": 1751235198,
+      "size": 3106
+    },
+    "./mpbtstackport.h": {
+      "path": "./mpbtstackport.h",
+      "hash": "abc212ff1f8b64d37b201c3609fb5813471194293e0d440923df254cfc5acadc",
+      "last_modified": 1751235198,
+      "size": 1434
+    },
+    "./sdram.c": {
+      "path": "./sdram.c",
+      "hash": "5547870c1da56e266062b66fd70243982d1fb99dc5eb0d7117af91bc226add5b",
+      "last_modified": 1751235198,
+      "size": 22433
+    },
+    "./boards/NUCLEO_L432KC/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_L432KC/mpconfigboard.mk",
+      "hash": "79999819fee7bdd57345bb2e133ac844629179d2d2de629f9e8d794fdfca81b1",
+      "last_modified": 1751235198,
+      "size": 487
+    },
+    "./boards/HYDRABUS/board.json": {
+      "path": "./boards/HYDRABUS/board.json",
+      "hash": "906d86b782c7424cfdeef9517a394c47ddf5370684f0fde6c972137531f42f68",
+      "last_modified": 1751235198,
+      "size": 283
+    },
+    "./boards/common_ifs.ld": {
+      "path": "./boards/common_ifs.ld",
+      "hash": "30204540ec972fd7fbd13d74c14ecf0923e7feae6c4a90fb25b0c58744da3326",
+      "last_modified": 1751235198,
+      "size": 545
+    },
+    "./boards/GARATRONIC_NADHAT_F405/board.json": {
+      "path": "./boards/GARATRONIC_NADHAT_F405/board.json",
+      "hash": "dba26f48af3ecb5f1b824480a00645a6646e9206c1884957fa3c98ac3311e916",
+      "last_modified": 1751235198,
+      "size": 320
+    },
+    "./boards/NUCLEO_WB55/pins.csv": {
+      "path": "./boards/NUCLEO_WB55/pins.csv",
+      "hash": "617d2321e5028a7195df2d5be0becf2454046dd71ff92d19df603bbda68e86e8",
+      "last_modified": 1751235198,
+      "size": 348
+    },
+    "./boards/NUCLEO_H743ZI2/pins.csv": {
+      "path": "./boards/NUCLEO_H743ZI2/pins.csv",
+      "hash": "ef9be7a15c87076a504db2c061c1861764518943a4bf021c87569682bdb20ff8",
+      "last_modified": 1751235198,
+      "size": 1304
+    },
+    "./boards/stm32f405.ld": {
+      "path": "./boards/stm32f405.ld",
+      "hash": "5e524e8e377d6c7ded8a138faad891099ba56a91afedcffab37102b591a83827",
+      "last_modified": 1751235198,
+      "size": 1477
+    },
+    "./boards/PYBV3/mpconfigboard.mk": {
+      "path": "./boards/PYBV3/mpconfigboard.mk",
+      "hash": "41a73e406f4164801709cfa71d23c160c7edd4441097b43985b054d50349724b",
+      "last_modified": 1751235198,
+      "size": 174
+    },
+    "./boards/manifest_pyboard.py": {
+      "path": "./boards/manifest_pyboard.py",
+      "hash": "857d8d32b005d701625507871e5513c4a87327b96907c5fc3a36f9041f8ae565",
+      "last_modified": 1751235198,
+      "size": 20
+    },
+    "./qspi.c": {
+      "path": "./qspi.c",
+      "hash": "d1b4416d6a7acb8c98c0077c525090fa0ddff00cde01e00ed1ab18c34e6a80de",
+      "last_modified": 1751235198,
+      "size": 18438
+    },
+    "./boards/STM32F769DISC/pins.csv": {
+      "path": "./boards/STM32F769DISC/pins.csv",
+      "hash": "ec843e1bfc2f71596555cf28f0880df507351f0a566f5c052275fabd6d383afa",
+      "last_modified": 1751235198,
+      "size": 1706
+    },
+    "./extint.h": {
+      "path": "./extint.h",
+      "hash": "d80a6ac53f242c27a83bc0a406a0649db4d006c52e23fdbb2846029ccada1911",
+      "last_modified": 1751235198,
+      "size": 3110
+    },
+    "./flash.h": {
+      "path": "./flash.h",
+      "hash": "085bb29cf1ef9080366d241b93c8012beac4ed7942f01900f6b7a450e60bff64",
+      "last_modified": 1751235198,
+      "size": 1595
+    },
+    "./boards/NUCLEO_F767ZI/stm32f7xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_F767ZI/stm32f7xx_hal_conf.h",
+      "hash": "5cc64a6b6385ffff71b2fc39101226f8e5e42a613e3fce05c070487568cd08b4",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./boards/VCC_GND_H743VI/board.json": {
+      "path": "./boards/VCC_GND_H743VI/board.json",
+      "hash": "18f7afeb1a08f9ebc93c5776b2e2cc38621a410f4500ca5266d4b2c1be34509a",
+      "last_modified": 1751235198,
+      "size": 270
+    },
+    "./boards/stm32f746.ld": {
+      "path": "./boards/stm32f746.ld",
+      "hash": "3d11f240a660d0decfffa2926ca2b2846eaa6d6807603ab51f1a7a0f82b4c648",
+      "last_modified": 1751235198,
+      "size": 1540
+    },
+    "./boards/PYBV10/manifest.py": {
+      "path": "./boards/PYBV10/manifest.py",
+      "hash": "0c03547721e1e7b1d32c3e39848fb7335ad80411ffcc6d2828465adbd0095dbb",
+      "last_modified": 1751235198,
+      "size": 92
+    },
+    "./boards/OLIMEX_E407/mpconfigboard.h": {
+      "path": "./boards/OLIMEX_E407/mpconfigboard.h",
+      "hash": "fd3159698059197fd6f18351bb6b3e277690ced2b191a7a2aa575fa6e1f40b1b",
+      "last_modified": 1751235198,
+      "size": 3230
+    },
+    "./boards/HYDRABUS/stm32f4xx_hal_conf.h": {
+      "path": "./boards/HYDRABUS/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./boards/PYBD_SF6/mpconfigboard.mk": {
+      "path": "./boards/PYBD_SF6/mpconfigboard.mk",
+      "hash": "cdeec1136b702a4abb37c271adff4ea22aa719219173d113824f5e86633e7ae0",
+      "last_modified": 1751235198,
+      "size": 479
+    },
+    "./usbd_msc_interface.c": {
+      "path": "./usbd_msc_interface.c",
+      "hash": "a9bfda9ad1be96255e68e36e598fd7e8281cc12b82aebc24324322868ddd469e",
+      "last_modified": 1751235198,
+      "size": 11042
+    },
+    "./usbhost/Core/Src/usbh_conf_template.c": {
+      "path": "./usbhost/Core/Src/usbh_conf_template.c",
+      "hash": "01eb5c01e8623309fdbe4a3daebb7159f5bf229aa69d5ca7c718dd7a5d3776c8",
+      "last_modified": 1751235198,
+      "size": 7879
+    },
+    "./boards/ESPRUINO_PICO/deploy.md": {
+      "path": "./boards/ESPRUINO_PICO/deploy.md",
+      "hash": "32adf7356787e7ae3c855b66676252772b86d2098548b260c18eb92ef946e5eb",
+      "last_modified": 1751235198,
+      "size": 117
+    },
+    "./usrsw.h": {
+      "path": "./usrsw.h",
+      "hash": "e95db6f408f1cc0ce8f4b7e2958f3236bad4aa47ef6387b239d89d179aeb56ce",
+      "last_modified": 1751235198,
+      "size": 1444
+    },
+    "./boards/NUCLEO_F439ZI/pins.csv": {
+      "path": "./boards/NUCLEO_F439ZI/pins.csv",
+      "hash": "763ffa4b9c7e2a7359f441819ef6695123c2ddc6b72d38132560cad27f9ebbb1",
+      "last_modified": 1751235198,
+      "size": 859
+    },
+    "./boards/stm32l0xx_hal_conf_base.h": {
+      "path": "./boards/stm32l0xx_hal_conf_base.h",
+      "hash": "09e981568b378f612f033844d92de0ca227d1be683efac5960de50b811d5c80a",
+      "last_modified": 1751235198,
+      "size": 3310
+    },
+    "./boards/common_isr_ram/common_isr_extratext.ld": {
+      "path": "./boards/common_isr_ram/common_isr_extratext.ld",
+      "hash": "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+      "last_modified": 1751235198,
+      "size": 0
+    },
+    "./boards/stm32l432_af.csv": {
+      "path": "./boards/stm32l432_af.csv",
+      "hash": "a115964b2420f1f695dd9840d72ccb1a993dd865c74ddac09660d244d5aa7a6a",
+      "last_modified": 1751235198,
+      "size": 6783
+    },
+    "./boards/SPARKFUN_MICROMOD_STM32/mpconfigboard.mk": {
+      "path": "./boards/SPARKFUN_MICROMOD_STM32/mpconfigboard.mk",
+      "hash": "68623399934a56c18944404d3973c944b71d965b10cfe308fc12d0548dcf9963",
+      "last_modified": 1751235198,
+      "size": 480
+    },
+    "./boards/NUCLEO_WB55/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_WB55/mpconfigboard.mk",
+      "hash": "3fda199b1e08a3b727484f87008fd34ce3d5189d08f348b4f007a3ae52f3d6ae",
+      "last_modified": 1751235198,
+      "size": 625
+    },
+    "./boards/stm32wb55xg.ld": {
+      "path": "./boards/stm32wb55xg.ld",
+      "hash": "2e393781075cf849583b7866191c5fcf19ce909ebf055f50f4d20d4a554f0b64",
+      "last_modified": 1751235198,
+      "size": 1906
+    },
+    "./boards/OLIMEX_H407/board.json": {
+      "path": "./boards/OLIMEX_H407/board.json",
+      "hash": "01457e0afe4247996d7372ee7d555a3dd2467be5994e3c683487f03c97e5fe52",
+      "last_modified": 1751235198,
+      "size": 294
+    },
+    "./boards/NETDUINO_PLUS_2/mpconfigboard.mk": {
+      "path": "./boards/NETDUINO_PLUS_2/mpconfigboard.mk",
+      "hash": "41a73e406f4164801709cfa71d23c160c7edd4441097b43985b054d50349724b",
+      "last_modified": 1751235198,
+      "size": 174
+    },
+    "./boards/WEACT_F411_BLACKPILL/README.md": {
+      "path": "./boards/WEACT_F411_BLACKPILL/README.md",
+      "hash": "f29de3ad2d474901034696b5fe590320621d9cc9c0d7281f16b0c985d8d3d0d0",
+      "last_modified": 1751235198,
+      "size": 2445
+    },
+    "./boards/LEGO_HUB_NO7/board_init.c": {
+      "path": "./boards/LEGO_HUB_NO7/board_init.c",
+      "hash": "9ef19c371a137d6010b54723f5c3a4ec13b50f01a727364907f4d18358c344d7",
+      "last_modified": 1751235198,
+      "size": 7780
+    },
+    "./boards/NETDUINO_PLUS_2/board.json": {
+      "path": "./boards/NETDUINO_PLUS_2/board.json",
+      "hash": "001f78694dcbf11a584db9095b4ea4967537989b273619bb50efb374f2cff856",
+      "last_modified": 1751235198,
+      "size": 256
+    },
+    "./boards/PYBD_SF3/mpconfigboard.mk": {
+      "path": "./boards/PYBD_SF3/mpconfigboard.mk",
+      "hash": "af960a44ce8ce7d5dd05a1eedebcb4fc337141d4f9e4e50caf29d4e5f8ddc11b",
+      "last_modified": 1751235198,
+      "size": 581
+    },
+    "./boards/STM32F769DISC/manifest.py": {
+      "path": "./boards/STM32F769DISC/manifest.py",
+      "hash": "e82f478e1099486fea00aa8791f8bc3e71ad9c253a90f200f27d31e91a226dc9",
+      "last_modified": 1751235198,
+      "size": 71
+    },
+    "./boards/NUCLEO_L4A6ZG/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_L4A6ZG/mpconfigboard.mk",
+      "hash": "7c9ad22263f3b1ecbb871ecb42a3f1ccde5f5c7b6cfad357d90a727890d5e6ba",
+      "last_modified": 1751235198,
+      "size": 225
+    },
+    "./boards/NUCLEO_H743ZI/stm32h7xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_H743ZI/stm32h7xx_hal_conf.h",
+      "hash": "780fd064756f221fd447014489ca9050f98a8925a0c5a0cefd54cf16488afbe9",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./boards/NUCLEO_F413ZH/pins.csv": {
+      "path": "./boards/NUCLEO_F413ZH/pins.csv",
+      "hash": "e598592d92df010d354fee1f1257fce34bb8c5ec8ad71c19c3ce925abc86dd04",
+      "last_modified": 1751235198,
+      "size": 1044
+    },
+    "./boards/NUCLEO_H743ZI2/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_H743ZI2/mpconfigboard.h",
+      "hash": "03dd2b0123b61bdf1902d18451beb83834d88696d9100a134c3172ba2a02fc52",
+      "last_modified": 1751235198,
+      "size": 774
+    },
+    "./boards/ARDUINO_PORTENTA_H7/stm32h7xx_hal_conf.h": {
+      "path": "./boards/ARDUINO_PORTENTA_H7/stm32h7xx_hal_conf.h",
+      "hash": "b0d41ef04c7f8e50893e2d968e7e96470ebcab8a53ee8214b2b0bd9e33afb5ef",
+      "last_modified": 1751235198,
+      "size": 1361
+    },
+    "./boards/stm32f413xh.ld": {
+      "path": "./boards/stm32f413xh.ld",
+      "hash": "35b1d9989145dbf6fcda92e83e94be15422b7c3546004615ae3e675650df7b94",
+      "last_modified": 1751235198,
+      "size": 1857
+    },
+    "./usb.c": {
+      "path": "./usb.c",
+      "hash": "4deefaa489ab6750c7447f7524d50928af3e180c9d32f9ca26c48cfd3d34b0cf",
+      "last_modified": 1751235198,
+      "size": 40574
+    },
+    "./boards/stm32f427_af.csv": {
+      "path": "./boards/stm32f427_af.csv",
+      "hash": "9bfff0c06a18d41e0f87f7f19c8c85181220546c282b9ad5b1913b500da94089",
+      "last_modified": 1751235198,
+      "size": 44927
+    },
+    "./boards/NUCLEO_F446RE/board.json": {
+      "path": "./boards/NUCLEO_F446RE/board.json",
+      "hash": "73d4095e912782a383937375d901ed0cd3ec6035c90e5be4aee11759b9e88be9",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./boards/VCC_GND_F407ZG/mpconfigboard.mk": {
+      "path": "./boards/VCC_GND_F407ZG/mpconfigboard.mk",
+      "hash": "aaf1699e6b1b823e4b10b842cdd538358509ad5ee8b6dd8167d9c6dbaba41797",
+      "last_modified": 1751235198,
+      "size": 282
+    },
+    "./boards/WEACT_F411_BLACKPILL/mpconfigvariant_V31_FLASH_8M.mk": {
+      "path": "./boards/WEACT_F411_BLACKPILL/mpconfigvariant_V31_FLASH_8M.mk",
+      "hash": "2186d4f46154949ecfa84bd52bf8e85e7bd63becf59599fa92a18e1c74adfb4f",
+      "last_modified": 1751235198,
+      "size": 41
+    },
+    "./boards/PYBD_SF6/pins.csv": {
+      "path": "./boards/PYBD_SF6/pins.csv",
+      "hash": "6f56a12fe7d0f4071d88f50e31f9d406b13f978dbec0deece55d3a5c835abd22",
+      "last_modified": 1751235198,
+      "size": 1846
+    },
+    "./boards/WEACT_F411_BLACKPILL/mpconfigvariant_V20_FLASH_4M.mk": {
+      "path": "./boards/WEACT_F411_BLACKPILL/mpconfigvariant_V20_FLASH_4M.mk",
+      "hash": "35cb26616d392e24ec2fdde39f64a66c0b23f2f89381dfa16f9965fb8331dd8f",
+      "last_modified": 1751235198,
+      "size": 41
+    },
+    "./boards/NUCLEO_G0B1RE/stm32g0xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_G0B1RE/stm32g0xx_hal_conf.h",
+      "hash": "f2b88383501e4d11036de7ed8bdc4aafdec8f7629e90c7b5cea8010fcea0ab3c",
+      "last_modified": 1751235198,
+      "size": 672
+    },
+    "./boards/STM32F7DISC/board_init.c": {
+      "path": "./boards/STM32F7DISC/board_init.c",
+      "hash": "f46a18bd5ae275c13c7ccb4172054eef98df36fecce29c5fc760622223f99fb1",
+      "last_modified": 1751235198,
+      "size": 490
+    },
+    "./zephyr_arch_stm32.c": {
+      "path": "./zephyr_arch_stm32.c",
+      "hash": "3f3627ee8e3bcf5b34b88c9dc2ac9c2b0f32d7d90df8e9bff74fbce11df2ce91",
+      "last_modified": 1762338028,
+      "size": 14402
+    },
+    "./mboot/adc.c": {
+      "path": "./mboot/adc.c",
+      "hash": "9b27fd91493331eff407bc17193f5c2dff3f1f6e1676f56887daf786391c7331",
+      "last_modified": 1751235198,
+      "size": 141
+    },
+    "./mboot/mboot_pack_dfu.py": {
+      "path": "./mboot/mboot_pack_dfu.py",
+      "hash": "d31120bbea6dc4b7a9893a66ba522b2c331592a6c533b18b858bca1d7e0b51e1",
+      "last_modified": 1751235198,
+      "size": 9988
+    },
+    "./usbdev/core/src/usbd_core.c": {
+      "path": "./usbdev/core/src/usbd_core.c",
+      "hash": "7262243db74c2c525a0721e056e9c849182a19c6cabbdafa9b46799f63f762e7",
+      "last_modified": 1751235198,
+      "size": 11425
+    },
+    "./resethandler.s": {
+      "path": "./resethandler.s",
+      "hash": "0757e174ef03329859595660f8b429594381d5ac12243fa29c154e6580a1c2bc",
+      "last_modified": 1751235198,
+      "size": 2199
+    },
+    "./boards/stm32g474_af.csv": {
+      "path": "./boards/stm32g474_af.csv",
+      "hash": "abc86edd27c6b672954f34f49076a270302ff656cdbfff385e9b7344b02323b9",
+      "last_modified": 1751235198,
+      "size": 51870
+    },
+    "./boards/NUCLEO_L476RG/stm32l4xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_L476RG/stm32l4xx_hal_conf.h",
+      "hash": "87dfa054d2dd8da850e53ec404301df73b7afe5a2bccd1dd5e30f83c28a53b6b",
+      "last_modified": 1751235198,
+      "size": 592
+    },
+    "./storage.h": {
+      "path": "./storage.h",
+      "hash": "14b63509522d8e39a0dc048032adf6380cd6d482166ed5a4f77c90fd1aefa7cf",
+      "last_modified": 1751235198,
+      "size": 3709
+    },
+    "./boards/NUCLEO_H563ZI/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_H563ZI/mpconfigboard.mk",
+      "hash": "e7f55e8ef66efdf7990a0bc6f9fd26588ea4588346d6b6c10495adeaeeb616cc",
+      "last_modified": 1751235198,
+      "size": 597
+    },
+    "./pin_defs_stm32.c": {
+      "path": "./pin_defs_stm32.c",
+      "hash": "fdaea4834faa91d89c00307081258c98582ad7947d68499936dd9c0fb34b7f01",
+      "last_modified": 1751235198,
+      "size": 1038
+    },
+    "./boards/STM32H573I_DK/mpconfigboard.h": {
+      "path": "./boards/STM32H573I_DK/mpconfigboard.h",
+      "hash": "787ba4b57e9319de1e6b3858f972a67603674f4af29b86c56647bb4ca8fa0f18",
+      "last_modified": 1751235198,
+      "size": 6099
+    },
+    "./boards/stm32l152xe.ld": {
+      "path": "./boards/stm32l152xe.ld",
+      "hash": "41322ab01412aae85715015015898cf784d11a9b3613daef814a07a7f2770491",
+      "last_modified": 1751235198,
+      "size": 1418
+    },
+    "./boards/LEGO_HUB_NO7/board.json": {
+      "path": "./boards/LEGO_HUB_NO7/board.json",
+      "hash": "d0a0f4d1784c045d9c06940b4dbe0b2cfa78bde1f1e0ef66b9e4792fe5a65a00",
+      "last_modified": 1751235198,
+      "size": 240
+    },
+    "./boards/stm32f479_af.csv": {
+      "path": "./boards/stm32f479_af.csv",
+      "hash": "3cb4f4a62543859b55a0268db51a0b16d4ff86c9e5e3daa313e4c5591bc2eacf",
+      "last_modified": 1751235198,
+      "size": 46115
+    },
+    "./boards/stm32h7b3.ld": {
+      "path": "./boards/stm32h7b3.ld",
+      "hash": "8644c7bfb17297efa02139febd12df3ef4aec06c0409a88c9b4975e01880c7e2",
+      "last_modified": 1751235198,
+      "size": 1215
+    },
+    "./pyb_can.c": {
+      "path": "./pyb_can.c",
+      "hash": "ee074df3699523b709aedbd56cb47b6434c0568c84d90aef3fb8062319fa6651",
+      "last_modified": 1751235198,
+      "size": 43214
+    },
+    "./boards/PYBD_SF2/f722_qspi.ld": {
+      "path": "./boards/PYBD_SF2/f722_qspi.ld",
+      "hash": "f08566fd3f5a1f238c4fc9c68991d7b87a73c95f8a9e940461ee9458dda83991",
+      "last_modified": 1751235198,
+      "size": 1858
+    },
+    "./boards/ARDUINO_GIGA/mbedtls_config_board.h": {
+      "path": "./boards/ARDUINO_GIGA/mbedtls_config_board.h",
+      "hash": "335ca5f136cf245cef231979a13b87a54814d8cb402139d462db693a2eac7868",
+      "last_modified": 1751235198,
+      "size": 236
+    },
+    "./mbedtls/mbedtls_port.c": {
+      "path": "./mbedtls/mbedtls_port.c",
+      "hash": "eba99590dab2b4aec421ab67492d611aa115a26dd724c43ec5531ba210d0eb4a",
+      "last_modified": 1751235198,
+      "size": 2866
+    },
+    "./boards/PYBV10/mpconfigvariant_THREAD.mk": {
+      "path": "./boards/PYBV10/mpconfigvariant_THREAD.mk",
+      "hash": "c278e51784414c8c5e85862aa90326867b17850f559ba5e2e6667b07dbeb5adf",
+      "last_modified": 1751235198,
+      "size": 32
+    },
+    "./usbhost/Class/CDC/Inc/usbh_cdc.h": {
+      "path": "./usbhost/Class/CDC/Inc/usbh_cdc.h",
+      "hash": "061448cd549df0fde19dcf27b2fb1e66d7a0964f2f9f7bea0f22df55fdc5bbcc",
+      "last_modified": 1751235198,
+      "size": 18794
+    },
+    "./boards/NUCLEO_F091RC/pins.csv": {
+      "path": "./boards/NUCLEO_F091RC/pins.csv",
+      "hash": "eb530490bdc77e9ca5faaac9828879df72c8402aac1cc420d18d2a013f7e23ea",
+      "last_modified": 1751235198,
+      "size": 739
+    },
+    "./boards/CERB40/mpconfigboard.h": {
+      "path": "./boards/CERB40/mpconfigboard.h",
+      "hash": "ba68c932e64b7de447688dffbc25fdf93ec16d4af63c516118765238690cfea6",
+      "last_modified": 1751235198,
+      "size": 2052
+    },
+    "./flash.c": {
+      "path": "./flash.c",
+      "hash": "7e10ffe1dfd4651b98b261f3e4ff2742181000f9476675473ec72d563737a788",
+      "last_modified": 1751235198,
+      "size": 16761
+    },
+    "./usbd_desc.h": {
+      "path": "./usbd_desc.h",
+      "hash": "2e01fb83b75f4b2af5674f000ab05c7611738d43b14e226eb8f4bfe2d0f0a493",
+      "last_modified": 1751235198,
+      "size": 1588
+    },
+    "./boards/NUCLEO_G474RE/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_G474RE/mpconfigboard.mk",
+      "hash": "2838e01ad58bd411e9fcbe5e40480013408ede5df3965f913f3e350e7733c923",
+      "last_modified": 1751235198,
+      "size": 222
+    },
+    "./boards/ARDUINO_OPTA/bdev.c": {
+      "path": "./boards/ARDUINO_OPTA/bdev.c",
+      "hash": "108a0b2368eb4672f4c14550add7c7500e14a9653ccf040a0447d5442cc0a10a",
+      "last_modified": 1751235198,
+      "size": 1718
+    },
+    "./boards/B_L072Z_LRWAN1/board.json": {
+      "path": "./boards/B_L072Z_LRWAN1/board.json",
+      "hash": "bde0bc5b9786495c6e168621ac9a60a7b6e0142ed238f6e96f9aaf773c909763",
+      "last_modified": 1751235198,
+      "size": 265
+    },
+    "./usbhost/Core/Inc/usbh_pipes.h": {
+      "path": "./usbhost/Core/Inc/usbh_pipes.h",
+      "hash": "01875e6bcf82472e8e5d130180111796ff47ea6e46fe9b4466749fb632b7cec5",
+      "last_modified": 1751235198,
+      "size": 2851
+    },
+    "./boards/VCC_GND_F407ZG/board_init.c": {
+      "path": "./boards/VCC_GND_F407ZG/board_init.c",
+      "hash": "49dca5d0572a5a57029eaa58d3cce8a6a06e8814a30053b1845bb4392f656f8a",
+      "last_modified": 1751235198,
+      "size": 167
+    },
+    "./boards/PYBLITEV10/stm32f4xx_hal_conf.h": {
+      "path": "./boards/PYBLITEV10/stm32f4xx_hal_conf.h",
+      "hash": "bf72420db50fa123dc5653d8ba403f9ce9dfdf9f89d37583cf7ef4039578264f",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./boards/ARDUINO_NICLA_VISION/pins.csv": {
+      "path": "./boards/ARDUINO_NICLA_VISION/pins.csv",
+      "hash": "2088b35927357edb6582317c80826c5d83c362a6124169140dc4108af95faab8",
+      "last_modified": 1751235198,
+      "size": 2373
+    },
+    "./boards/NUCLEO_F746ZG/stm32f7xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_F746ZG/stm32f7xx_hal_conf.h",
+      "hash": "5cc64a6b6385ffff71b2fc39101226f8e5e42a613e3fce05c070487568cd08b4",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./mboot/mphalport.h": {
+      "path": "./mboot/mphalport.h",
+      "hash": "df18e7ecc7df22bed2004fb97707c245ef0e3eb1ea91593ef87b935b669dede9",
+      "last_modified": 1751235198,
+      "size": 8687
+    },
+    "./boards/stm32f429_af.csv": {
+      "path": "./boards/stm32f429_af.csv",
+      "hash": "e0995b3ae007321b233c9e23a8ea5265400bf0a1f21b7ef45feef26f0a49c05a",
+      "last_modified": 1751235198,
+      "size": 45777
+    },
+    "./boards/PYBLITEV10/mpconfigvariant_DP_THREAD.mk": {
+      "path": "./boards/PYBLITEV10/mpconfigvariant_DP_THREAD.mk",
+      "hash": "8f01c21914816146d5135ece86abc96b1be2423f3e7fbcf52c59aa3355a3faf9",
+      "last_modified": 1751235198,
+      "size": 60
+    },
+    "./boards/NUCLEO_F439ZI/board.json": {
+      "path": "./boards/NUCLEO_F439ZI/board.json",
+      "hash": "585a9209a3557ee6f17fcf4cb8aa9277c22831ae26e669e16106e12c5d4c8c0f",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./boards/PYBV11/stm32f4xx_hal_conf.h": {
+      "path": "./boards/PYBV11/stm32f4xx_hal_conf.h",
+      "hash": "bf72420db50fa123dc5653d8ba403f9ce9dfdf9f89d37583cf7ef4039578264f",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./boards/LEGO_HUB_NO6/pins.csv": {
+      "path": "./boards/LEGO_HUB_NO6/pins.csv",
+      "hash": "9e33ac64e909ca9016a8a60e8ac48f8c5ac4c46a98bba905aa41c9c09649f60d",
+      "last_modified": 1751235198,
+      "size": 1160
+    },
+    "./boards/ARDUINO_NICLA_VISION/board.json": {
+      "path": "./boards/ARDUINO_NICLA_VISION/board.json",
+      "hash": "3f43d8165ebf94f9d010fef9716e3cfec9ea52adee11be21a3b7bc684ccbdab6",
+      "last_modified": 1751235198,
+      "size": 429
+    },
+    "./boards/stm32h723.ld": {
+      "path": "./boards/stm32h723.ld",
+      "hash": "07a2dd684386d44964a66ded6fbab7dc5b04b8a828665179bb5b9cdbc0ff0791",
+      "last_modified": 1751235198,
+      "size": 1714
+    },
+    "./rng.c": {
+      "path": "./rng.c",
+      "hash": "cf14b9a672244213787f61a495cd0351f9e04cb5e7ea3658912e1f4162d5ee6a",
+      "last_modified": 1751235198,
+      "size": 3334
+    },
+    "./boards/PYBV10/mpconfigvariant_NETWORK.mk": {
+      "path": "./boards/PYBV10/mpconfigvariant_NETWORK.mk",
+      "hash": "ddabef7cdf5a6935d94f80adff9c65e0e36d10e91505ba6f5a890e810b3023e1",
+      "last_modified": 1751235198,
+      "size": 35
+    },
+    "./boards/ARDUINO_PORTENTA_H7/board.json": {
+      "path": "./boards/ARDUINO_PORTENTA_H7/board.json",
+      "hash": "8793d8fc21644b56d58cfa7f5e1068acd12d19d2d27c731d0ecef30c35e1579a",
+      "last_modified": 1751235198,
+      "size": 445
+    },
+    "./boards/STM32L476DISC/stm32l4xx_hal_conf.h": {
+      "path": "./boards/STM32L476DISC/stm32l4xx_hal_conf.h",
+      "hash": "87dfa054d2dd8da850e53ec404301df73b7afe5a2bccd1dd5e30f83c28a53b6b",
+      "last_modified": 1751235198,
+      "size": 592
+    },
+    "./boards/MIKROE_QUAIL/stm32f4xx_hal_conf.h": {
+      "path": "./boards/MIKROE_QUAIL/stm32f4xx_hal_conf.h",
+      "hash": "d233a9b9947da82d43d797d53be9e485993254bf6a6623ca5deacb0c5e5ec46d",
+      "last_modified": 1751235198,
+      "size": 523
+    },
+    "./boards/PYBV11/mpconfigvariant_DP.mk": {
+      "path": "./boards/PYBV11/mpconfigvariant_DP.mk",
+      "hash": "05c7aa6f5de1d03fbc466b349895a5705393018a8fd6a5bc8bb1d7701dba57dd",
+      "last_modified": 1751235198,
+      "size": 28
+    },
+    "./boards/B_L072Z_LRWAN1/stm32l0xx_hal_conf.h": {
+      "path": "./boards/B_L072Z_LRWAN1/stm32l0xx_hal_conf.h",
+      "hash": "53e140b86dd73c851112e5e9e19a01c03478879e523922a0aabf46641ea853a1",
+      "last_modified": 1751235198,
+      "size": 508
+    },
+    "./usbhost/Class/MTP/Inc/usbh_mtp_ptp.h": {
+      "path": "./usbhost/Class/MTP/Inc/usbh_mtp_ptp.h",
+      "hash": "336f5e1ff3a15381eeb723d747d44f369855ffdf61441e95a391c2b379545528",
+      "last_modified": 1751235198,
+      "size": 34607
+    },
+    "./boards/NUCLEO_L152RE/deploy.md": {
+      "path": "./boards/NUCLEO_L152RE/deploy.md",
+      "hash": "6de5f22b048c3f95468ff085cc168ee0424baa8fd81c35d164987e64c750f802",
+      "last_modified": 1751235198,
+      "size": 1018
+    },
+    "./boards/VCC_GND_H743VI/board_init.c": {
+      "path": "./boards/VCC_GND_H743VI/board_init.c",
+      "hash": "ba2fc7442bac3fce46a8e3cce853ce86c5f1828a97548e3093460b3f522ca1d7",
+      "last_modified": 1751235198,
+      "size": 251
+    },
+    "./boards/NUCLEO_L476RG/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_L476RG/mpconfigboard.mk",
+      "hash": "2793a0f705164e6f59f34fd0d2ecf4fbe349fd1fc7d42830a8552d8ef1a10a60",
+      "last_modified": 1751235198,
+      "size": 225
+    },
+    "./boards/ARDUINO_OPTA/deploy.md": {
+      "path": "./boards/ARDUINO_OPTA/deploy.md",
+      "hash": "d49ba0d87c95692ab3e94e7823e8ccf37e7a4b8503e66f09766cfc092e3bb331",
+      "last_modified": 1751235198,
+      "size": 680
+    },
+    "./boards/USBDONGLE_WB55/mpconfigboard.mk": {
+      "path": "./boards/USBDONGLE_WB55/mpconfigboard.mk",
+      "hash": "83007968bd71a8937446afb323a69237f26b03b1b6278440ab26c4002cd9a336",
+      "last_modified": 1751235198,
+      "size": 575
+    },
+    "./boards/ARDUINO_OPTA/stm32h747.ld": {
+      "path": "./boards/ARDUINO_OPTA/stm32h747.ld",
+      "hash": "5a400e40c991506cd1864ba9df0b2e1b0a3267a1ec51be6fb4a69589845cf164",
+      "last_modified": 1751235198,
+      "size": 2313
+    },
+    "./boards/stm32f0xx_hal_conf_base.h": {
+      "path": "./boards/stm32f0xx_hal_conf_base.h",
+      "hash": "a1f148f112ba90fc91ee32cb624b1cb44eda0bd3b6409b73741e2da207ce0f6d",
+      "last_modified": 1751235198,
+      "size": 3216
+    },
+    "./boards/ARDUINO_GIGA/board.json": {
+      "path": "./boards/ARDUINO_GIGA/board.json",
+      "hash": "2edfbf12351cff8c29ffe7375ccc9e6b9a3f3a7da44a0be4d46aa8c1253cd6f8",
+      "last_modified": 1751235198,
+      "size": 421
+    },
+    "./usb.h": {
+      "path": "./usb.h",
+      "hash": "9d46ecb0c00b6d5bd87da26a4e8b2851ae49980ad024752dfd605587c4e27ece",
+      "last_modified": 1751235198,
+      "size": 2800
+    },
+    "./boards/ARDUINO_OPTA/manifest.py": {
+      "path": "./boards/ARDUINO_OPTA/manifest.py",
+      "hash": "40f048de1e457ea85a3e6a71243a1ac00799ba833e6ed7f6bba84bf80600a00f",
+      "last_modified": 1751235198,
+      "size": 363
+    },
+    "./boards/SPARKFUN_MICROMOD_STM32/mpconfigboard.h": {
+      "path": "./boards/SPARKFUN_MICROMOD_STM32/mpconfigboard.h",
+      "hash": "d3f396da759444ee5d07f621f8bca3b56857c4488f6a0864cde346f183075a9a",
+      "last_modified": 1751235198,
+      "size": 3288
+    },
+    "./boards/STM32F429DISC/pins.csv": {
+      "path": "./boards/STM32F429DISC/pins.csv",
+      "hash": "c2c345fdd16fac948d76e064673c3fa18a94425f15f2d851f2516683a1b2867b",
+      "last_modified": 1751235198,
+      "size": 1031
+    },
+    "./boards/PYBV11/board.json": {
+      "path": "./boards/PYBV11/board.json",
+      "hash": "42ab0075143b6aa9a1033fc32d9cf66c8ef484b68e72f2cc208b502328e350f1",
+      "last_modified": 1751235198,
+      "size": 547
+    },
+    "./fresh_build.log": {
+      "path": "./fresh_build.log",
+      "hash": "1a3da9c36757216295101f2d28b942b45e312f56c23dc066c7c74d71e751872c",
+      "last_modified": 1761543104,
+      "size": 1188458
+    },
+    "./mboot/fwupdate.py": {
+      "path": "./mboot/fwupdate.py",
+      "hash": "4d64cd5b35e7fe1baa730a1578600b806f2eb9869265ad8613a02764e70d4768",
+      "last_modified": 1751235198,
+      "size": 9541
+    },
+    "./mboot/stm32_sections.ld": {
+      "path": "./mboot/stm32_sections.ld",
+      "hash": "0bbe455f3034cf9676fbfa8d529a4080861de156c3aa0b224c02828f7c94ffc7",
+      "last_modified": 1751235198,
+      "size": 1897
+    },
+    "./make-stmconst.py": {
+      "path": "./make-stmconst.py",
+      "hash": "56bee7a8751c0b836cda590fd5141acd186426e3961dfd0185ff67baeead77f3",
+      "last_modified": 1751235198,
+      "size": 9815
+    },
+    "./boards/MIKROE_CLICKER2_STM32/pins.csv": {
+      "path": "./boards/MIKROE_CLICKER2_STM32/pins.csv",
+      "hash": "7a7fabd9025c9e57957bf63d04037b39ff4c2218cf96c55009af1efcf177ec8e",
+      "last_modified": 1751235198,
+      "size": 964
+    },
+    "./boards/NUCLEO_F429ZI/pins.csv": {
+      "path": "./boards/NUCLEO_F429ZI/pins.csv",
+      "hash": "1f8997615491a640285daabda5feb581b9909511040675d1de68a6f3ceae2629",
+      "last_modified": 1751235198,
+      "size": 1191
+    },
+    "./boards/STM32L476DISC/mpconfigboard.mk": {
+      "path": "./boards/STM32L476DISC/mpconfigboard.mk",
+      "hash": "d8f6356335a53d4865add486a98504e0a1921ba8afd1bcbfbbb4ee6aa0845304",
+      "last_modified": 1751235198,
+      "size": 174
+    },
+    "./boards/USBDONGLE_WB55/pins.csv": {
+      "path": "./boards/USBDONGLE_WB55/pins.csv",
+      "hash": "a6a635c3b414231965b8321abaa86de7ce60cf371615157b3671db21848a24f3",
+      "last_modified": 1751235198,
+      "size": 207
+    },
+    "./machine_spi.c": {
+      "path": "./machine_spi.c",
+      "hash": "e64cb935287f1cf5820ab971563f530d7d684cfa87e7f93ea4e7be54a33a9b25",
+      "last_modified": 1751235198,
+      "size": 6512
+    },
+    "./boards/NUCLEO_F429ZI/stm32f4xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_F429ZI/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./boards/B_L072Z_LRWAN1/mpconfigboard.h": {
+      "path": "./boards/B_L072Z_LRWAN1/mpconfigboard.h",
+      "hash": "abfbc03c2087f74244dd5fc8571149aa1a32e6dd2c384608719ed4f0fda3091d",
+      "last_modified": 1751235198,
+      "size": 3024
+    },
+    "./boards/NUCLEO_H563ZI/board.json": {
+      "path": "./boards/NUCLEO_H563ZI/board.json",
+      "hash": "2db5d7b1d3897b5968c530722d28ab3de236db2b80d09f68f3565421d13781ae",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./boards/deploy.md": {
+      "path": "./boards/deploy.md",
+      "hash": "1fba9e5a3a824cf33450122af629bed7f127555ce92fa69b1e0af54321f59a12",
+      "last_modified": 1751235198,
+      "size": 1002
+    },
+    "./fatfs_port.c": {
+      "path": "./fatfs_port.c",
+      "hash": "171b0697074a912f55a32abea2682f08df0727a511ccbf92368cbfcb99604786",
+      "last_modified": 1751235198,
+      "size": 1894
+    },
+    "./boards/WEACT_F411_BLACKPILL/board.json": {
+      "path": "./boards/WEACT_F411_BLACKPILL/board.json",
+      "hash": "187da70a37775e80297a36fa36af52298abc634dc149f49c1f23ecc864abcd7b",
+      "last_modified": 1751235198,
+      "size": 671
+    },
+    "./boards/NUCLEO_WB55/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_WB55/mpconfigboard.h",
+      "hash": "45a637014d7d671ca862f4271131224e056ec046895b1f4f33034814e1f2e687",
+      "last_modified": 1751235198,
+      "size": 2793
+    },
+    "./boards/LIMIFROG/mpconfigboard.mk": {
+      "path": "./boards/LIMIFROG/mpconfigboard.mk",
+      "hash": "82df82028c337862919db3f4a2096e5fa4d4afa9f62ceeb63f5a574c103cb3db",
+      "last_modified": 1751235198,
+      "size": 130
+    },
+    "./usbhost/Class/AUDIO/Inc/usbh_audio.h": {
+      "path": "./usbhost/Class/AUDIO/Inc/usbh_audio.h",
+      "hash": "737c4d8ee80f381ccaeedd566c2ba7f1d65a93c9c89e13154f691644ced0b956",
+      "last_modified": 1751235198,
+      "size": 16217
+    },
+    "./boards/stm32f401xd.ld": {
+      "path": "./boards/stm32f401xd.ld",
+      "hash": "5c916f6a8a2f9a9be116debfdba29a7beb3d8223c2c51140ef06a4cfacb81140",
+      "last_modified": 1751235198,
+      "size": 1489
+    },
+    "./boards/STM32F7DISC/mpconfigboard.mk": {
+      "path": "./boards/STM32F7DISC/mpconfigboard.mk",
+      "hash": "3632ac1f5b88ddc1c774de917f194ad8746aec7cb9c3b8474076a69f4846523c",
+      "last_modified": 1751235198,
+      "size": 355
+    },
+    "./dac.c": {
+      "path": "./dac.c",
+      "hash": "f0343dc841c637d13f91913e2627c49b6ac3c21adc0095bb4f39f99872d81999",
+      "last_modified": 1751235198,
+      "size": 18489
+    },
+    "./boards/OLIMEX_H407/stm32f4xx_hal_conf.h": {
+      "path": "./boards/OLIMEX_H407/stm32f4xx_hal_conf.h",
+      "hash": "bf72420db50fa123dc5653d8ba403f9ce9dfdf9f89d37583cf7ef4039578264f",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./boards/stm32l4xx_hal_conf_base.h": {
+      "path": "./boards/stm32l4xx_hal_conf_base.h",
+      "hash": "ef8c1031e0babd611a12856e61825b85aa29aa9d3676070a00db6ae10f6e5389",
+      "last_modified": 1751235198,
+      "size": 3631
+    },
+    "./usbd_msc_interface.h": {
+      "path": "./usbd_msc_interface.h",
+      "hash": "5073bd99f381a27a895cd352eb3209622591492fed9d6c71489d179c4b36dda2",
+      "last_modified": 1751235198,
+      "size": 1497
+    },
+    "./boards/VCC_GND_F407ZG/bdev.c": {
+      "path": "./boards/VCC_GND_F407ZG/bdev.c",
+      "hash": "797e5df8d2fb1f33c6f4031af9a73d1b4def54cce1fceb29ca92e8445ee652ef",
+      "last_modified": 1751235198,
+      "size": 690
+    },
+    "./rfcore.h": {
+      "path": "./rfcore.h",
+      "hash": "f3302edb0e08a2df31bb0e9dcd561566d4bec3ff706f4f9a02b53079156e4245",
+      "last_modified": 1751235198,
+      "size": 1930
+    },
+    "./boards/manifest.py": {
+      "path": "./boards/manifest.py",
+      "hash": "3697cbf45f478931eb6e53dfe9f170fc2559398bc5739298cba07adcc047046b",
+      "last_modified": 1751235198,
+      "size": 72
+    },
+    "./boards/stm32l452_af.csv": {
+      "path": "./boards/stm32l452_af.csv",
+      "hash": "dae945c9fa1a6180118182beddac2bc93afa1f693213ef81e03a6ffe420b4953",
+      "last_modified": 1751235198,
+      "size": 23791
+    },
+    "./boards/PYBD_SF6/stm32f7xx_hal_conf.h": {
+      "path": "./boards/PYBD_SF6/stm32f7xx_hal_conf.h",
+      "hash": "ad7a4359c9d9b0eef9799bf7389d5d0fe964ce2a3c5e43e160438f3263620ac0",
+      "last_modified": 1751235198,
+      "size": 48
+    },
+    "./boards/ARDUINO_NICLA_VISION/mpconfigboard.mk": {
+      "path": "./boards/ARDUINO_NICLA_VISION/mpconfigboard.mk",
+      "hash": "96adab51b64f805b8899b3ea6a4cd6d270c19351492bc7cc2a304b766dce0851",
+      "last_modified": 1751235198,
+      "size": 893
+    },
+    "./pin_defs_stm32.h": {
+      "path": "./pin_defs_stm32.h",
+      "hash": "fdae524acf152f31187f6e4802d93ecd95a4f00a7b37a8e3694c6d0950141431",
+      "last_modified": 1751235198,
+      "size": 3942
+    },
+    "./boards/NUCLEO_F413ZH/stm32f4xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_F413ZH/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./boards/PYBV11/mpconfigvariant_NETWORK.mk": {
+      "path": "./boards/PYBV11/mpconfigvariant_NETWORK.mk",
+      "hash": "ddabef7cdf5a6935d94f80adff9c65e0e36d10e91505ba6f5a890e810b3023e1",
+      "last_modified": 1751235198,
+      "size": 35
+    },
+    "./boards/GARATRONIC_PYBSTICK26_F411/board.json": {
+      "path": "./boards/GARATRONIC_PYBSTICK26_F411/board.json",
+      "hash": "11cc7230733d623a27e39bc92734da3ae316724bc600367f421beaa358386051",
+      "last_modified": 1751235198,
+      "size": 317
+    },
+    "./mboot/sdcard.c": {
+      "path": "./mboot/sdcard.c",
+      "hash": "190fa2a903cb6e9c6f0c613f8e59b307323118399151cf1db205177568c4d6c1",
+      "last_modified": 1751235198,
+      "size": 299
+    },
+    "./boards/STM32H573I_DK/stm32h5xx_hal_conf.h": {
+      "path": "./boards/STM32H573I_DK/stm32h5xx_hal_conf.h",
+      "hash": "6b5a27914de33d27d11cae1a6732f57995167acf4e0cb03649f80616cbce9ab8",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./boards/STM32F439/board.json": {
+      "path": "./boards/STM32F439/board.json",
+      "hash": "21385cf38e2901aaf6a8acec75fe24aa8f36d10ece5149f5e618db19109331e6",
+      "last_modified": 1751235198,
+      "size": 255
+    },
+    "./led.c": {
+      "path": "./led.c",
+      "hash": "a7d4920307b79a751d8a673fea516209b21e8bdb825dd4c150bb7b1a17eaa45b",
+      "last_modified": 1751235198,
+      "size": 12537
+    },
+    "./boards/NUCLEO_WB55/rfcore_debug.py": {
+      "path": "./boards/NUCLEO_WB55/rfcore_debug.py",
+      "hash": "3d5e691f16b234a98c4971cd892b97f1c796f75975383ccd15d1d6052e09e0b3",
+      "last_modified": 1751235198,
+      "size": 9156
+    },
+    "./boards/NUCLEO_F756ZG/pins.csv": {
+      "path": "./boards/NUCLEO_F756ZG/pins.csv",
+      "hash": "86416f2d20db086cbaa0abf348806d205ded6c89e0bd42c689e7ed7635fc3752",
+      "last_modified": 1751235198,
+      "size": 877
+    },
+    "./boards/stm32f7xx_hal_conf_base.h": {
+      "path": "./boards/stm32f7xx_hal_conf_base.h",
+      "hash": "430c90352dc0cfd3d7840cf0f9029815cb1db6cb7a791360ded1648febba25a3",
+      "last_modified": 1751235198,
+      "size": 3553
+    },
+    "./boards/PYBLITEV10/pins.csv": {
+      "path": "./boards/PYBLITEV10/pins.csv",
+      "hash": "ae7c51e7cb9ab39540770d7907992e80d0b43c41cc136dd588635b73db63c00c",
+      "last_modified": 1751235198,
+      "size": 569
+    },
+    "./boards/SPARKFUN_MICROMOD_STM32/pins.csv": {
+      "path": "./boards/SPARKFUN_MICROMOD_STM32/pins.csv",
+      "hash": "756e5229719d7c78e1773a2ba33a5e5404da0c51688152f6be07ef93347ea2f8",
+      "last_modified": 1751235198,
+      "size": 667
+    },
+    "./subghz.c": {
+      "path": "./subghz.c",
+      "hash": "ffdb95c9f2349908868ad50f8b8645752cea85b99b9ea02622079e8de4fd79d3",
+      "last_modified": 1751235198,
+      "size": 4770
+    },
+    "./boards/OLIMEX_E407/mpconfigboard.mk": {
+      "path": "./boards/OLIMEX_E407/mpconfigboard.mk",
+      "hash": "d306197bebace519465c404c06aa20220ad2264ed11a5dd2e61e22a4b8b1c823",
+      "last_modified": 1751235198,
+      "size": 261
+    },
+    "./boards/PYBV10/mpconfigvariant_DP.mk": {
+      "path": "./boards/PYBV10/mpconfigvariant_DP.mk",
+      "hash": "05c7aa6f5de1d03fbc466b349895a5705393018a8fd6a5bc8bb1d7701dba57dd",
+      "last_modified": 1751235198,
+      "size": 28
+    },
+    "./boards/VCC_GND_F407VE/pins.csv": {
+      "path": "./boards/VCC_GND_F407VE/pins.csv",
+      "hash": "aa32e5c19ceba15d9f13240deb60b9f7dc396aab46c155f4e8431ad2790389da",
+      "last_modified": 1751235198,
+      "size": 1176
+    },
+    "./boards/NUCLEO_WL55/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_WL55/mpconfigboard.mk",
+      "hash": "d3cfeea294c72a9341e973763e251aa22c3224e17bd9493fd2bc386b570b8519",
+      "last_modified": 1751235198,
+      "size": 478
+    },
+    "./boards/STM32F769DISC/board.json": {
+      "path": "./boards/STM32F769DISC/board.json",
+      "hash": "663ab01da341279555151a8e8a829dd9cd75f44daf176c4bc02cf93d8dd02e0b",
+      "last_modified": 1751235198,
+      "size": 264
+    },
+    "./boards/ARDUINO_PORTENTA_H7/stm32h747.ld": {
+      "path": "./boards/ARDUINO_PORTENTA_H7/stm32h747.ld",
+      "hash": "f51deaf455b90a4521ae629b9929de682d2bb37a8f9427b77128cd92aab06f90",
+      "last_modified": 1751235198,
+      "size": 2459
+    },
+    "./boards/NUCLEO_WL55/stm32wlxx_hal_conf.h": {
+      "path": "./boards/NUCLEO_WL55/stm32wlxx_hal_conf.h",
+      "hash": "21a96468bf56964ca2ba84f63464331324131be17d265d061ae51f3946af5384",
+      "last_modified": 1751235198,
+      "size": 510
+    },
+    "./boards/CERB40/mpconfigboard.mk": {
+      "path": "./boards/CERB40/mpconfigboard.mk",
+      "hash": "41a73e406f4164801709cfa71d23c160c7edd4441097b43985b054d50349724b",
+      "last_modified": 1751235198,
+      "size": 174
+    },
+    "./boards/NUCLEO_F411RE/board.json": {
+      "path": "./boards/NUCLEO_F411RE/board.json",
+      "hash": "f6d47ac4df4513276aa830b90f1718d9d381398f66243721258ab362013b3874",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./boards/stm32f411.ld": {
+      "path": "./boards/stm32f411.ld",
+      "hash": "9b0d364a850d2e832c6b195a3197fc2a9a280ea8c9d4cc2be1d9fb4b9de25272",
+      "last_modified": 1751235198,
+      "size": 1490
+    },
+    "./boards/PYBD_SF3/stm32f7xx_hal_conf.h": {
+      "path": "./boards/PYBD_SF3/stm32f7xx_hal_conf.h",
+      "hash": "ad7a4359c9d9b0eef9799bf7389d5d0fe964ce2a3c5e43e160438f3263620ac0",
+      "last_modified": 1751235198,
+      "size": 48
+    },
+    "./boards/stm32f427xi.ld": {
+      "path": "./boards/stm32f427xi.ld",
+      "hash": "764dcc536b75af35431c484babdc7234dbf7616a9a0e6b75e40199cfe19874a4",
+      "last_modified": 1751235198,
+      "size": 1480
+    },
+    "./boards/PYBD_SF2/deploy.md": {
+      "path": "./boards/PYBD_SF2/deploy.md",
+      "hash": "b007db0bbbaf33b58df2d21cae3ce79a9dd67c9518f10c4edaed083f83b347ae",
+      "last_modified": 1751235198,
+      "size": 646
+    },
+    "./pybthread.c": {
+      "path": "./pybthread.c",
+      "hash": "4efa8397aaad21967febccbacb5ba1edbc75c051306a4e1bc583056bbec9763f",
+      "last_modified": 1751235198,
+      "size": 8080
+    },
+    "./boards/NUCLEO_F091RC/board.json": {
+      "path": "./boards/NUCLEO_F091RC/board.json",
+      "hash": "e82a79905828a6e4aa3d679f1274557bfeebab3a6336a3be3fe4f8793c28d4aa",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./mpbthciport.c": {
+      "path": "./mpbthciport.c",
+      "hash": "2a65158191b0259c9eb10c70df9a7009bf994d301a890086898a10bb02176d54",
+      "last_modified": 1751235198,
+      "size": 9212
+    },
+    "./octospi.h": {
+      "path": "./octospi.h",
+      "hash": "cc347ac39d7d884ba5fedb71f625ec5b381e130243bd230ba14d1aaa922d2277",
+      "last_modified": 1751235198,
+      "size": 1427
+    },
+    "./adc.h": {
+      "path": "./adc.h",
+      "hash": "4f3244b4b814635a930b0aa12541eeb0b23c595d3f7862245ea0dcaaadbf212e",
+      "last_modified": 1751235198,
+      "size": 2726
+    },
+    "./machine_bitstream.c": {
+      "path": "./machine_bitstream.c",
+      "hash": "a6af2a978d711ab819dda75b1f0de5fa542bd988e990675a8e622f341a223797",
+      "last_modified": 1751235198,
+      "size": 6456
+    },
+    "./boards/NUCLEO_G0B1RE/board.json": {
+      "path": "./boards/NUCLEO_G0B1RE/board.json",
+      "hash": "b52125749feb55d86ab63cac1537325bd1070bea6f68640b7eedb7d7ef723292",
+      "last_modified": 1751235198,
+      "size": 320
+    },
+    "./usbd_conf.c": {
+      "path": "./usbd_conf.c",
+      "hash": "5ea17991e30246b644163dcd47ee020826541e55246a3ec07ef2b91623f7c307",
+      "last_modified": 1751235198,
+      "size": 23367
+    },
+    "./boards/STM32F439/stm32f4xx_hal_conf.h": {
+      "path": "./boards/STM32F439/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./boards/GARATRONIC_NADHAT_F405/pins.csv": {
+      "path": "./boards/GARATRONIC_NADHAT_F405/pins.csv",
+      "hash": "dd4cbc484fe9a02b351017f47cc3e97454781b49a586ac9ede933feceb44f6cf",
+      "last_modified": 1751235198,
+      "size": 526
+    },
+    "./factoryreset.c": {
+      "path": "./factoryreset.c",
+      "hash": "564a212a64920f78796da477de89eca500bfa913cd9c0604ddad989e990fe843",
+      "last_modified": 1751235198,
+      "size": 4866
+    },
+    "./pyb_spi.c": {
+      "path": "./pyb_spi.c",
+      "hash": "f514599b43fe28bafebba17df1f723431cc5afd9ab2ce642623585742322cbbf",
+      "last_modified": 1751235198,
+      "size": 15137
+    },
+    "./boards/NUCLEO_G0B1RE/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_G0B1RE/mpconfigboard.h",
+      "hash": "88a408f135fc0a44f42f9f1f8163d85b7eae1552922520a48b0b4e26758c12bb",
+      "last_modified": 1751235198,
+      "size": 3422
+    },
+    "./dma.h": {
+      "path": "./dma.h",
+      "hash": "cf1e95ba6de706925006fbcaec7544f5016bbf9c33aee124822ad4449d8d0527",
+      "last_modified": 1751235198,
+      "size": 7884
+    },
+    "./boards/PYBV10/mpconfigvariant_DP_THREAD.mk": {
+      "path": "./boards/PYBV10/mpconfigvariant_DP_THREAD.mk",
+      "hash": "8f01c21914816146d5135ece86abc96b1be2423f3e7fbcf52c59aa3355a3faf9",
+      "last_modified": 1751235198,
+      "size": 60
+    },
+    "./boards/LEGO_HUB_NO7/hub_display.h": {
+      "path": "./boards/LEGO_HUB_NO7/hub_display.h",
+      "hash": "e592cb817231b31641caaf0281b3668ac078e3e56aa9edb0605091ccb8989619",
+      "last_modified": 1751235198,
+      "size": 137
+    },
+    "./boards/STM32L476DISC/board_init.c": {
+      "path": "./boards/STM32L476DISC/board_init.c",
+      "hash": "67ac0b889b88281283f5512bd8a266615cc2d85bd21dd981caa01378253b769c",
+      "last_modified": 1751235198,
+      "size": 244
+    },
+    "./boards/STM32F4DISC/pins.csv": {
+      "path": "./boards/STM32F4DISC/pins.csv",
+      "hash": "557e4747321dbb921520e62b9567ad6d5c5990aebc6526b6a46fae98f7e95653",
+      "last_modified": 1751235198,
+      "size": 777
+    },
+    "./mpnimbleport.h": {
+      "path": "./mpnimbleport.h",
+      "hash": "73b66220ae811a437678bcfcfd7cd1663dcae358ea8ff2634a9a524c6e72f72f",
+      "last_modified": 1751235198,
+      "size": 1431
+    },
+    "./mboot/ffconf.h": {
+      "path": "./mboot/ffconf.h",
+      "hash": "2436c718c86c78204dcf3c96bda008ba542cdb65c63f01266f29087202afb892",
+      "last_modified": 1751235198,
+      "size": 2260
+    },
+    "./usbdev/core/inc/usbd_core.h": {
+      "path": "./usbdev/core/inc/usbd_core.h",
+      "hash": "040e0e4f454c53779d4bb8fa55a5d30e0e4e39d54a15736f78db4d9773b44426",
+      "last_modified": 1751235198,
+      "size": 5290
+    },
+    "./boards/NUCLEO_G474RE/board.json": {
+      "path": "./boards/NUCLEO_G474RE/board.json",
+      "hash": "d3c8ed15be17617f28007bbd5b9b4fadc26a322c648effe58741a3177df2d6f2",
+      "last_modified": 1751235198,
+      "size": 320
+    },
+    "./boards/NUCLEO_H743ZI/board.json": {
+      "path": "./boards/NUCLEO_H743ZI/board.json",
+      "hash": "05c0cd2c169289a8c3e1c45b85da7f23372c1f9f69f735184d4a1a38926d425e",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./boards/PYBV3/mpconfigboard.h": {
+      "path": "./boards/PYBV3/mpconfigboard.h",
+      "hash": "5ec9449ea4973db8279ea52bf77e0b77c9501c1b5290533556daba80d49f58ee",
+      "last_modified": 1751235198,
+      "size": 3403
+    },
+    "./boards/stm32h7b3_af.csv": {
+      "path": "./boards/stm32h7b3_af.csv",
+      "hash": "81d317ba9fbe64d1344e3a02b50f64cb84033b47230a4377ea8bc4d0a4f421aa",
+      "last_modified": 1751235198,
+      "size": 112603
+    },
+    "./boards/NUCLEO_F439ZI/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_F439ZI/mpconfigboard.mk",
+      "hash": "3832d78728b2603c4b65ed880ec5f043c8e736611e39ab37527053d8b786d154",
+      "last_modified": 1751235198,
+      "size": 355
+    },
+    "./lwip_inc/lwipopts.h": {
+      "path": "./lwip_inc/lwipopts.h",
+      "hash": "900b4f93c1a0f1375b9cbcc58f2135e3e1075f2feb64d7cc6ad19b3e9d8b5a08",
+      "last_modified": 1751235198,
+      "size": 466
+    },
+    "./boards/ARDUINO_NICLA_VISION/mpconfigboard.h": {
+      "path": "./boards/ARDUINO_NICLA_VISION/mpconfigboard.h",
+      "hash": "1870ff951f9d7102909da5bee70e9a3b269c6cbbcd542a3a441c22be7b92c924",
+      "last_modified": 1751235198,
+      "size": 10698
+    },
+    "./mboot/pack.c": {
+      "path": "./mboot/pack.c",
+      "hash": "21ca6fde7097d891659178d5bfe0b3f0db6fad1ee4e8a61f5ef68e76250dcaba",
+      "last_modified": 1751235198,
+      "size": 11430
+    },
+    "./usbdev/class/src/usbd_msc_scsi.c": {
+      "path": "./usbdev/class/src/usbd_msc_scsi.c",
+      "hash": "5f50114ee9942766bbf848dd3008d09da9f6688baa0aaa9650e3d1ecd5f6bb7d",
+      "last_modified": 1751235198,
+      "size": 21152
+    },
+    "./dac.h": {
+      "path": "./dac.h",
+      "hash": "06fd0a76469a372623c4c85b2101118bef32c37a2bf1dd2af789a2944c435a01",
+      "last_modified": 1751235198,
+      "size": 1415
+    },
+    "./boards/NUCLEO_G474RE/pins.csv": {
+      "path": "./boards/NUCLEO_G474RE/pins.csv",
+      "hash": "41bcec12946549327ac3d8fe0b3a3c8c6ffe25d17eb9b57c8f31014c99e5b7da",
+      "last_modified": 1751235198,
+      "size": 917
+    },
+    "./boards/NUCLEO_F439ZI/stm32f4xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_F439ZI/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./boards/NUCLEO_L476RG/board.json": {
+      "path": "./boards/NUCLEO_L476RG/board.json",
+      "hash": "ae6fa619be41ab9293b240a54a83383eb126b2bd9bd1125cfab3df507cfb0ffa",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./boards/stm32h743.ld": {
+      "path": "./boards/stm32h743.ld",
+      "hash": "0f347d44b2a6e6c5b08e1dd9c8a612dd9a1a0a1729d2422929b9c3bb3761c234",
+      "last_modified": 1751235198,
+      "size": 1692
+    },
+    "./boards/PYBD_SF3/mpconfigboard.h": {
+      "path": "./boards/PYBD_SF3/mpconfigboard.h",
+      "hash": "337fde1a94c29e37f89581f8d681d509d5f858457c6f6cb0676576dd964a193d",
+      "last_modified": 1751235198,
+      "size": 1470
+    },
+    "./resethandler_m3.s": {
+      "path": "./resethandler_m3.s",
+      "hash": "2cf6248d7b6e3ca75da9a397cce9a45b40da372283f58509d607a57bff8504f7",
+      "last_modified": 1751235198,
+      "size": 2164
+    },
+    "./mpmetalport.h": {
+      "path": "./mpmetalport.h",
+      "hash": "af41b263cc356db86461602fb63ab1e24d89e3fbf713f3ab20561d06f149a91a",
+      "last_modified": 1751235198,
+      "size": 2808
+    },
+    "./boards/NUCLEO_WL55/manifest.py": {
+      "path": "./boards/NUCLEO_WL55/manifest.py",
+      "hash": "a704b7447d7c768912144b57a917192914f9accb8e1f583a64dba7725de23ab7",
+      "last_modified": 1751235198,
+      "size": 228
+    },
+    "./gccollect.h": {
+      "path": "./gccollect.h",
+      "hash": "c4685701bd8b59ad41a69f29b5c1e2e908fb9abd99d3c492c4c603889460e2e0",
+      "last_modified": 1751235198,
+      "size": 1748
+    },
+    "./usbd_cdc_interface.c": {
+      "path": "./usbd_cdc_interface.c",
+      "hash": "45aac069e005f0907bc24bc9d761e2b480d49a668088d8a7dc3f6c9f9c0cb2a7",
+      "last_modified": 1751235198,
+      "size": 17581
+    },
+    "./machine_i2c.c": {
+      "path": "./machine_i2c.c",
+      "hash": "d7914803817f1c9986b81ea07a26c75aab01c01f71b79d608fc1de47d42910bf",
+      "last_modified": 1751235198,
+      "size": 8945
+    },
+    "./boards/stm32f091xc.ld": {
+      "path": "./boards/stm32f091xc.ld",
+      "hash": "59be270642e8469d5d92c892200031e0b19d942d1a2567808900784fee998fb1",
+      "last_modified": 1751235198,
+      "size": 1280
+    },
+    "./mboot/vfs_raw.c": {
+      "path": "./mboot/vfs_raw.c",
+      "hash": "e9208aed5189129128ac22092a529357275dee7d1ffe6414c5c23f3013671fa0",
+      "last_modified": 1751235198,
+      "size": 3127
+    },
+    "./boards/NUCLEO_F722ZE/stm32f7xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_F722ZE/stm32f7xx_hal_conf.h",
+      "hash": "1ec8225b6e9bb515c3a407ed45c633477f504931956a551e3669f80640051e7c",
+      "last_modified": 1751235198,
+      "size": 537
+    },
+    "./boards/stm32g0xx_hal_conf_base.h": {
+      "path": "./boards/stm32g0xx_hal_conf_base.h",
+      "hash": "533ccfd17150951c9066104b81c2f0e6b40337c1fe8f90f521ffc09284abfe49",
+      "last_modified": 1751235198,
+      "size": 3629
+    },
+    "./portmodules.h": {
+      "path": "./portmodules.h",
+      "hash": "2ccbbc74fc6f4d0b2bfc8fb8f3787b90b592775327e8da4e01bb078fab9b1031",
+      "last_modified": 1751235198,
+      "size": 1695
+    },
+    "./boards/PYBD_SF6/mpconfigboard.h": {
+      "path": "./boards/PYBD_SF6/mpconfigboard.h",
+      "hash": "3c6a13053fd64d93c6356a051747515e4a45aae18d9ea5baae1325859f816363",
+      "last_modified": 1751235198,
+      "size": 5274
+    },
+    "./boards/NUCLEO_H723ZG/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_H723ZG/mpconfigboard.h",
+      "hash": "085cbeb8bba23b7364401235bf45852d581fc15e19a05a5cc730507dceb08b7b",
+      "last_modified": 1751235198,
+      "size": 5041
+    },
+    "./boards/NUCLEO_L432KC/board.json": {
+      "path": "./boards/NUCLEO_L432KC/board.json",
+      "hash": "2b97002d91a6581092e7473da1263ebdfcbcc2e3af28030d879748d84b5c9d82",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./boards/LIMIFROG/stm32l4xx_hal_conf.h": {
+      "path": "./boards/LIMIFROG/stm32l4xx_hal_conf.h",
+      "hash": "87dfa054d2dd8da850e53ec404301df73b7afe5a2bccd1dd5e30f83c28a53b6b",
+      "last_modified": 1751235198,
+      "size": 592
+    },
+    "./usbhost/Class/MSC/Src/usbh_msc_scsi.c": {
+      "path": "./usbhost/Class/MSC/Src/usbh_msc_scsi.c",
+      "hash": "326b7a245f106b07ff06e25bc1d49e7a26379b62da0c3d55c4425f394f787c0d",
+      "last_modified": 1751235198,
+      "size": 13095
+    },
+    "./boards/STM32F769DISC/stm32f7xx_hal_conf.h": {
+      "path": "./boards/STM32F769DISC/stm32f7xx_hal_conf.h",
+      "hash": "673e690c02110f0d4a2b766ec97307fbebe67b7b0bd3b323b93031e013d4eb44",
+      "last_modified": 1751235198,
+      "size": 550
+    },
+    "./boards/NUCLEO_F413ZH/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_F413ZH/mpconfigboard.mk",
+      "hash": "e3287456fa9f7f29477d3fb010874ea29888da59e3cd502b095d5bfd96edd3de",
+      "last_modified": 1751235198,
+      "size": 227
+    },
+    "./boards/NUCLEO_L4A6ZG/board.json": {
+      "path": "./boards/NUCLEO_L4A6ZG/board.json",
+      "hash": "2d6f1734b04a32a7fb9eb21d0257e77dc159d9f3b6a831b16ad192413e688a33",
+      "last_modified": 1751235198,
+      "size": 320
+    },
+    "./boards/ARDUINO_PORTENTA_H7/mpconfigboard.h": {
+      "path": "./boards/ARDUINO_PORTENTA_H7/mpconfigboard.h",
+      "hash": "9794102bb785a8ed0076d76a88fde4e021ea936deb20851795259f390db49dd0",
+      "last_modified": 1751235198,
+      "size": 14851
+    },
+    "./spibdev.c": {
+      "path": "./spibdev.c",
+      "hash": "7897de9a9307d6482a3b01252e4a6773f352a876baa35bc828c2abc845d5cdbe",
+      "last_modified": 1751235198,
+      "size": 4988
+    },
+    "./boards/STM32H573I_DK/bdev.c": {
+      "path": "./boards/STM32H573I_DK/bdev.c",
+      "hash": "3ff5a1c6d669d6d7a8600d0ad3df8d12c259ad03e56f2ca576b23a54457c8682",
+      "last_modified": 1751235198,
+      "size": 1735
+    },
+    "./boards/NUCLEO_L073RZ/board.json": {
+      "path": "./boards/NUCLEO_L073RZ/board.json",
+      "hash": "ce13f6f2f642caa1644bcdd550cb11a29ea92099986c0889ca9dfa6c55dbc252",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./boards/MIKROE_CLICKER2_STM32/stm32f4xx_hal_conf.h": {
+      "path": "./boards/MIKROE_CLICKER2_STM32/stm32f4xx_hal_conf.h",
+      "hash": "2dbdc170d486db1499d12786b8646cf41fe0db084e540d9b40f1a5e78cf6382e",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./pin_static_af.h": {
+      "path": "./pin_static_af.h",
+      "hash": "d5a6d05634f0d1b7d3c0d9d81518e8248b062483100516736bda0725443b7fe3",
+      "last_modified": 1751235198,
+      "size": 2277
+    },
+    "./boards/WEACT_F411_BLACKPILL/mpconfigboard.h": {
+      "path": "./boards/WEACT_F411_BLACKPILL/mpconfigboard.h",
+      "hash": "c24033121d4f0b995b5dfe7cdcf0559eb56f534f8dc8375cdba20e490a08f5a7",
+      "last_modified": 1751235198,
+      "size": 3981
+    },
+    "./boards/stm32f412zx.ld": {
+      "path": "./boards/stm32f412zx.ld",
+      "hash": "6e155729912ff23bbc77bfc3d0373d4fce525eaaeaafb6bb27d9d19bbe4d75d1",
+      "last_modified": 1751235198,
+      "size": 1526
+    },
+    "./boards/NUCLEO_F446RE/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_F446RE/mpconfigboard.mk",
+      "hash": "affd2632cebaa6bc923d147d901c79127ef8765e6c7ceade9c3488e295f0a77b",
+      "last_modified": 1751235198,
+      "size": 225
+    },
+    "./pin.h": {
+      "path": "./pin.h",
+      "hash": "9971849eaf88438c07f156c29379f18526629e70f195f9152b1c10b4c77723a7",
+      "last_modified": 1751235198,
+      "size": 3220
+    },
+    "./boards/NUCLEO_L432KC/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_L432KC/mpconfigboard.h",
+      "hash": "99024f323ef114182ed3fdf757e5041d81442b820a5e12640ccd348d4bc8fd46",
+      "last_modified": 1751235198,
+      "size": 2405
+    },
+    "./usbhost/Core/Inc/usbh_def.h": {
+      "path": "./usbhost/Core/Inc/usbh_def.h",
+      "hash": "cbf1ff65b951aab73805cf2c5988a308da2cf1a98fa02f7c3c34323c351a8fc1",
+      "last_modified": 1751235198,
+      "size": 16666
+    },
+    "./boards/common_bss_heap_stack.ld": {
+      "path": "./boards/common_bss_heap_stack.ld",
+      "hash": "e3d0ddf1dbe043ca1eeff2d6c9c0ab61f942c04393e11b8b6e3817e5f85e03ea",
+      "last_modified": 1762338028,
+      "size": 693
+    },
+    "./boards/SPARKFUN_MICROMOD_STM32/bdev.c": {
+      "path": "./boards/SPARKFUN_MICROMOD_STM32/bdev.c",
+      "hash": "797e5df8d2fb1f33c6f4031af9a73d1b4def54cce1fceb29ca92e8445ee652ef",
+      "last_modified": 1751235198,
+      "size": 690
+    },
+    "./irq.h": {
+      "path": "./irq.h",
+      "hash": "5c4cd2556715dc5d7ff81b16a9e825823477d65e09c5ef00ffd4ea64557e2205",
+      "last_modified": 1761825186,
+      "size": 8223
+    },
+    "./boards/NUCLEO_F412ZG/stm32f4xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_F412ZG/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./pybcdc.inf_template": {
+      "path": "./pybcdc.inf_template",
+      "hash": "407a4aaf873e8de824b2282ab1b0a715380bffd5945739d95b56a145ba6bae60",
+      "last_modified": 1751235198,
+      "size": 2789
+    },
+    "./boards/common_text.ld": {
+      "path": "./boards/common_text.ld",
+      "hash": "f7fe064b07437eeda2ded88a2234cc11d738a9adcca06b2ae09dfdc384d04f67",
+      "last_modified": 1751235198,
+      "size": 489
+    },
+    "./boards/NETDUINO_PLUS_2/stm32f4xx_hal_conf.h": {
+      "path": "./boards/NETDUINO_PLUS_2/stm32f4xx_hal_conf.h",
+      "hash": "2dbdc170d486db1499d12786b8646cf41fe0db084e540d9b40f1a5e78cf6382e",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./boards/HYDRABUS/mpconfigboard.h": {
+      "path": "./boards/HYDRABUS/mpconfigboard.h",
+      "hash": "899bdaba332adda2e96ed25766498e5cceda8553c31eade40143a833ec9931c6",
+      "last_modified": 1751235198,
+      "size": 2723
+    },
+    "./boards/ARDUINO_NICLA_VISION/stm32h747.ld": {
+      "path": "./boards/ARDUINO_NICLA_VISION/stm32h747.ld",
+      "hash": "8dc57f359566d2c5b439e2a6d46bfa4de0fdbca5f45f8d878c6efe0cd762c1dc",
+      "last_modified": 1751235198,
+      "size": 2492
+    },
+    "./boards/MIKROE_QUAIL/mpconfigboard.mk": {
+      "path": "./boards/MIKROE_QUAIL/mpconfigboard.mk",
+      "hash": "b4e2c2535dd14cb163907856e17b4b2221be53aa7ff2116a8df32835efc6671b",
+      "last_modified": 1751235198,
+      "size": 369
+    },
+    "./boards/PYBD_SF2/mpconfigboard.mk": {
+      "path": "./boards/PYBD_SF2/mpconfigboard.mk",
+      "hash": "5e151722dff3c9660529341198b5e9588c90c1169bdd7b04bca331106297b68c",
+      "last_modified": 1751235198,
+      "size": 578
+    },
+    "./sdcard.h": {
+      "path": "./sdcard.h",
+      "hash": "006ecf261a12b62a2035ef3ebbe2696ab9719d38252194190f19d24e6ef66ff1",
+      "last_modified": 1751235198,
+      "size": 2124
+    },
+    "./boards/STM32F429DISC/board.json": {
+      "path": "./boards/STM32F429DISC/board.json",
+      "hash": "f5db76db936b0a628fa28980ad11e6a9e88a2b6f9017f7ab4bb695552bd1fe7e",
+      "last_modified": 1751235198,
+      "size": 264
+    },
+    "./i2cslave.h": {
+      "path": "./i2cslave.h",
+      "hash": "a7e88b0d32cf279f7fb62c688a2f55ca8b7ba10e0a2b03ede0a5bf891c3f379b",
+      "last_modified": 1751235198,
+      "size": 3147
+    },
+    "./boards/NUCLEO_F413ZH/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_F413ZH/mpconfigboard.h",
+      "hash": "e6706d8eb44aeb37a0e9927da83dca43c30e216756cffb4833061c5b12fe6f3a",
+      "last_modified": 1751235198,
+      "size": 4094
+    },
+    "./boards/VCC_GND_F407VE/stm32f4xx_hal_conf.h": {
+      "path": "./boards/VCC_GND_F407VE/stm32f4xx_hal_conf.h",
+      "hash": "e161ca98cdba50daed4ff26d46641eaaece70361a0b644e2871845ed22dc788f",
+      "last_modified": 1751235198,
+      "size": 408
+    },
+    "./boards/MIKROE_QUAIL/deploy.md": {
+      "path": "./boards/MIKROE_QUAIL/deploy.md",
+      "hash": "e1ee571020e2c2064600c0c599652da11bd7c4386bae40a2eb7c365f26b73bb0",
+      "last_modified": 1751235198,
+      "size": 436
+    },
+    "./modmachine.h": {
+      "path": "./modmachine.h",
+      "hash": "c5e2f2ab0d5dfe11762baa4734ab1bd0b8a8cea4a2c20d702ccc7aca262109ab",
+      "last_modified": 1751235198,
+      "size": 1686
+    },
+    "./boards/NUCLEO_L073RZ/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_L073RZ/mpconfigboard.h",
+      "hash": "db2f1dd6b159caf49d696e1a0766df845952e1f6eaf69b5069383644b56c90db",
+      "last_modified": 1751235198,
+      "size": 2230
+    },
+    "./irq.c": {
+      "path": "./irq.c",
+      "hash": "f638b4938d5a84953721c85f575fead6730ac495625d480f8bf7ac88c93449c6",
+      "last_modified": 1751235198,
+      "size": 2392
+    },
+    "./boards/ESPRUINO_PICO/board.json": {
+      "path": "./boards/ESPRUINO_PICO/board.json",
+      "hash": "b65dd5cba3f12609c8df307e30a73d628494f477c791224f40e74cdcd560498b",
+      "last_modified": 1751235198,
+      "size": 267
+    },
+    "./usbhost/Core/Inc/usbh_ctlreq.h": {
+      "path": "./usbhost/Core/Inc/usbh_ctlreq.h",
+      "hash": "56407b84706f03975b793586e37581383fbaed3f2bc3a146e56b6f4cd446977a",
+      "last_modified": 1751235198,
+      "size": 4104
+    },
+    "./systick.c": {
+      "path": "./systick.c",
+      "hash": "37459dadfbee6cc861f15f832068a32ecacf2b7016258c2208cbb0285578c017",
+      "last_modified": 1762338028,
+      "size": 7748
+    },
+    "./pin_named_pins.c": {
+      "path": "./pin_named_pins.c",
+      "hash": "4cebbba46a1dde3b143608a151b05786a4f4b1bec85f304b3ae1a1a657d616bf",
+      "last_modified": 1751235198,
+      "size": 2898
+    },
+    "./boards/STM32L476DISC/pins.csv": {
+      "path": "./boards/STM32L476DISC/pins.csv",
+      "hash": "db4a753c53b07f1d86cc7b04f74d4e993a5d3309aa9982d5fba35306c9baa500",
+      "last_modified": 1751235198,
+      "size": 996
+    },
+    "./eth.h": {
+      "path": "./eth.h",
+      "hash": "87ce7e7c01e0b0bfdfa8ec7b06ab56fa113df04d0d3d35a9944ae8764b58b706",
+      "last_modified": 1751235198,
+      "size": 1795
+    },
+    "./usbhost/Class/MSC/Inc/usbh_msc_bot.h": {
+      "path": "./usbhost/Class/MSC/Inc/usbh_msc_bot.h",
+      "hash": "3ead8977979aa43e72a4d90ef368b7c8171c326cb53e861417bbea487f08616c",
+      "last_modified": 1751235198,
+      "size": 5241
+    },
+    "./mpu.h": {
+      "path": "./mpu.h",
+      "hash": "08a321e0c843e2108edab4d80c69ba650ae7c1b81bf58b499ffe38fbde53c500",
+      "last_modified": 1751235198,
+      "size": 8362
+    },
+    "./boards/CERB40/pins.csv": {
+      "path": "./boards/CERB40/pins.csv",
+      "hash": "856db895bdffb00ff9846752cbd48ce0fc9d705ace2975e49d041ce7de287a10",
+      "last_modified": 1751235198,
+      "size": 507
+    },
+    "./boards/NUCLEO_F429ZI/board.json": {
+      "path": "./boards/NUCLEO_F429ZI/board.json",
+      "hash": "bd4bce940cbf4a5d21e09e70fa7d1037a0e45a325fe7ec455f6b151bbfc2d491",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./boards/WEACT_F411_BLACKPILL/mpconfigboard.mk": {
+      "path": "./boards/WEACT_F411_BLACKPILL/mpconfigboard.mk",
+      "hash": "331d30e9e55a7a9d808e7500f70f7d360fb1a5de6dd9770e5ac6380de50ebd04",
+      "last_modified": 1751235198,
+      "size": 1068
+    },
+    "./boards/LEGO_HUB_NO7/bluetooth_init_cc2564C_1.5.c": {
+      "path": "./boards/LEGO_HUB_NO7/bluetooth_init_cc2564C_1.5.c",
+      "hash": "a1b5fb984a203afe7964c2b0d1b9e12f52e34ab9430e669f0a96e412cb48318b",
+      "last_modified": 1751235198,
+      "size": 118
+    },
+    "./boards/PYBD_SF3/board.json": {
+      "path": "./boards/PYBD_SF3/board.json",
+      "hash": "2b39681bf3e9f3e7c098ab44bb909544a70244b1adb670decd3b850b00828e60",
+      "last_modified": 1751235198,
+      "size": 491
+    },
+    "./boards/LIMIFROG/mpconfigboard.h": {
+      "path": "./boards/LIMIFROG/mpconfigboard.h",
+      "hash": "cb9b4ca3cf5025686a45631a6b11d0e4ea0d29b4fe3b1ed363a107cdb085294f",
+      "last_modified": 1751235198,
+      "size": 1885
+    },
+    "./mboot/vfs.h": {
+      "path": "./mboot/vfs.h",
+      "hash": "a04d1e474b9648b31d84d799a68d186b48faf20692e9e52527857e7067c2684f",
+      "last_modified": 1751235198,
+      "size": 3447
+    },
+    "./boards/stm32h743_af.csv": {
+      "path": "./boards/stm32h743_af.csv",
+      "hash": "c9310e40c8bbd3aa983cce862c494690e98271d564a99929e314312ef4f5ff95",
+      "last_modified": 1751235198,
+      "size": 88953
+    },
+    "./nucleo_wb55_gdb.sh": {
+      "path": "./nucleo_wb55_gdb.sh",
+      "hash": "89a57c371f1166e7564b0732cb97293c14b06564bb195e8a79da14d40c24e293",
+      "last_modified": 1761533972,
+      "size": 2462
+    },
+    "./boards/STM32F411DISC/mpconfigboard.h": {
+      "path": "./boards/STM32F411DISC/mpconfigboard.h",
+      "hash": "4e663e3582eb35b6e10dc371525273204a1ae3c044ec846d5bb61012a728253c",
+      "last_modified": 1751235198,
+      "size": 2201
+    },
+    "./usbdev/class/inc/usbd_msc_bot.h": {
+      "path": "./usbdev/class/inc/usbd_msc_bot.h",
+      "hash": "e4aeff73fdfca8a63da04095f7d3165f4af2486476130de1b653db8fbba02f6a",
+      "last_modified": 1751235198,
+      "size": 3974
+    },
+    "./boards/stm32g0b1xe.ld": {
+      "path": "./boards/stm32g0b1xe.ld",
+      "hash": "17e90f8d91042506d0670a5f57e14a5b940945c98eb839f2cf0d4600d24e7cc4",
+      "last_modified": 1751235198,
+      "size": 1279
+    },
+    "./boards/VCC_GND_H743VI/mpconfigboard.h": {
+      "path": "./boards/VCC_GND_H743VI/mpconfigboard.h",
+      "hash": "89e9f6769111ae6e99e450742414d1ba1b33222f303138e5b88179960f33b44c",
+      "last_modified": 1751235198,
+      "size": 4142
+    },
+    "./boards/LIMIFROG/board.json": {
+      "path": "./boards/LIMIFROG/board.json",
+      "hash": "cf2ae90934ee8d786db5d8279d1925c8768231c72ee7bbfe3f920cc38da94d8c",
+      "last_modified": 1751235198,
+      "size": 269
+    },
+    "./boards/stm32l152_af.csv": {
+      "path": "./boards/stm32l152_af.csv",
+      "hash": "6f6ac08536d69cc95392b14d78d299ed32ce8ac6e2f8478d997eb04bc68cb8e5",
+      "last_modified": 1751235198,
+      "size": 21821
+    },
+    "./servo.h": {
+      "path": "./servo.h",
+      "hash": "7e7fa5b96c805d6680501da9aa014c3b6d3b869877f804e0d1d72acfe33d1bc3",
+      "last_modified": 1751235198,
+      "size": 1549
+    },
+    "./boards/stm32f4xx_prefix.c": {
+      "path": "./boards/stm32f4xx_prefix.c",
+      "hash": "6918169e4a5d3554ea9ce00f7a84d63f76054b56f30a23fc260540a0b5f067ea",
+      "last_modified": 1751235198,
+      "size": 1505
+    },
+    "./boards/STM32L476DISC/mpconfigboard.h": {
+      "path": "./boards/STM32L476DISC/mpconfigboard.h",
+      "hash": "6d1ada52eea2aa15930ede5c469bcbc7a08d01ebaff6be907d432a6a1d2f1550",
+      "last_modified": 1751235198,
+      "size": 2841
+    },
+    "./boards/stm32f767_af.csv": {
+      "path": "./boards/stm32f767_af.csv",
+      "hash": "f300a1703cecf20c8d245ee7abc5a002a73b476a8557013476609c2b55f728de",
+      "last_modified": 1751235198,
+      "size": 78770
+    },
+    "./usbhost/Class/HID/Src/usbh_hid_parser.c": {
+      "path": "./usbhost/Class/HID/Src/usbh_hid_parser.c",
+      "hash": "16995749404271843f4b6b66cb0dd8ee406afd9c2c8479e250ac284adea6f1a9",
+      "last_modified": 1751235198,
+      "size": 5220
+    },
+    "./usbhost/Core/Src/usbh_ctlreq.c": {
+      "path": "./usbhost/Core/Src/usbh_ctlreq.c",
+      "hash": "5c47113c6e1ce65a9611cc2aa5e936240d9ccf1dc0f159aa009b5b8636c97065",
+      "last_modified": 1751235198,
+      "size": 27243
+    },
+    "./usbdev/core/src/usbd_ioreq.c": {
+      "path": "./usbdev/core/src/usbd_ioreq.c",
+      "hash": "8703673a65faceb4fa6a9c44a5154692ff4f75aafa89f6523eb1a3e54486b6a8",
+      "last_modified": 1751235198,
+      "size": 5375
+    },
+    "./boards/ARDUINO_GIGA/manifest.py": {
+      "path": "./boards/ARDUINO_GIGA/manifest.py",
+      "hash": "c421b6f6a4a7bc3ea758e581c1fc3461286ee92b9b4c75bb89bf48d9080cfe42",
+      "last_modified": 1751235198,
+      "size": 307
+    },
+    "./boards/STM32L476DISC/board.json": {
+      "path": "./boards/STM32L476DISC/board.json",
+      "hash": "508dce90f2508c2629ab1beb01059cdcc8a3bd17953fcf57901b69324be7618a",
+      "last_modified": 1751235198,
+      "size": 264
+    },
+    "./boards/NUCLEO_H743ZI/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_H743ZI/mpconfigboard.mk",
+      "hash": "86e32fa9ad135a6dcd0985019b378b73492eadd10332c02a64c15258ba4f13ff",
+      "last_modified": 1751235198,
+      "size": 640
+    },
+    "./boards/STM32F769DISC/mpconfigboard.h": {
+      "path": "./boards/STM32F769DISC/mpconfigboard.h",
+      "hash": "6cc896573f26ad585161d3fb503ba4b7bb9a7c3c551cc306f0306da888d8ddae",
+      "last_modified": 1751235198,
+      "size": 9631
+    },
+    "./mpthreadport.h": {
+      "path": "./mpthreadport.h",
+      "hash": "5ad4bd901a998cd12a69c8e2df3588c54ad84fd64fcabd24ac2e6e10d1e9eae6",
+      "last_modified": 1761531765,
+      "size": 2082
+    },
+    "./boards/GARATRONIC_NADHAT_F405/mpconfigboard.mk": {
+      "path": "./boards/GARATRONIC_NADHAT_F405/mpconfigboard.mk",
+      "hash": "c36f95bdc4de7921c091c3f9b740db0fff07cd6d7e180cabdf73b1fa5ca6d435",
+      "last_modified": 1751235198,
+      "size": 435
+    },
+    "./boards/NUCLEO_G474RE/stm32g4xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_G474RE/stm32g4xx_hal_conf.h",
+      "hash": "4800183005badf20394c25c828d1e5a8407440f14100cb15e6940bd8713e4e6f",
+      "last_modified": 1751235198,
+      "size": 585
+    },
+    "./stm32_it.h": {
+      "path": "./stm32_it.h",
+      "hash": "bdd943989db2bc561cc0fb8c0dd695b0b46132985053a968c7d955b07c5f2cb1",
+      "last_modified": 1751235198,
+      "size": 3864
+    },
+    "./qstrdefsport.h": {
+      "path": "./qstrdefsport.h",
+      "hash": "958967e87465a9c5007367a3f1cc79f77922e3af18bd57053404b8ed62a43230",
+      "last_modified": 1751235198,
+      "size": 1624
+    },
+    "./sdram.h": {
+      "path": "./sdram.h",
+      "hash": "d0a1ea4e732658ee77166c42c18808e7168e222d2952d2d7656a7d5c4854f701",
+      "last_modified": 1751235198,
+      "size": 497
+    },
+    "./boards/STM32H7B3I_DK/stm32h7xx_hal_conf.h": {
+      "path": "./boards/STM32H7B3I_DK/stm32h7xx_hal_conf.h",
+      "hash": "9af2b5ce3dab6a3e5db7d6e287420e08b3277b4581f65b375a3eae7019d5efb6",
+      "last_modified": 1751235198,
+      "size": 550
+    },
+    "./boards/ESPRUINO_PICO/mpconfigboard.h": {
+      "path": "./boards/ESPRUINO_PICO/mpconfigboard.h",
+      "hash": "7350491875a7b0b3bb5d927d302dec4381e411f3d8bf75a2d49f28655b8f1bae",
+      "last_modified": 1751235198,
+      "size": 2357
+    },
+    "./boards/PYBV3/stm32f4xx_hal_conf.h": {
+      "path": "./boards/PYBV3/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./boards/PYBD_SF6/board.md": {
+      "path": "./boards/PYBD_SF6/board.md",
+      "hash": "e633bd44ab1ccf1f5446e62e5fcdd6e557bd237afd3fc8bea872a5b97a202100",
+      "last_modified": 1751235198,
+      "size": 168
+    },
+    "./boards/NUCLEO_F446RE/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_F446RE/mpconfigboard.h",
+      "hash": "8f39817d4ccbcaa453b322c1df367e93ff3192d40764ec9d06329bf3248cc095",
+      "last_modified": 1751235198,
+      "size": 4339
+    },
+    "./boards/ARDUINO_GIGA/deploy.md": {
+      "path": "./boards/ARDUINO_GIGA/deploy.md",
+      "hash": "e57756b36a47006f029e6425ee190d6d032a1a19923de26db6e57d3b609808f3",
+      "last_modified": 1751235198,
+      "size": 413
+    },
+    "./boards/NUCLEO_F746ZG/pins.csv": {
+      "path": "./boards/NUCLEO_F746ZG/pins.csv",
+      "hash": "86416f2d20db086cbaa0abf348806d205ded6c89e0bd42c689e7ed7635fc3752",
+      "last_modified": 1751235198,
+      "size": 877
+    },
+    "./boardctrl.c": {
+      "path": "./boardctrl.c",
+      "hash": "84285d33556f4db0b4f54b03b130c5ac3c5e12538e1554fb91f4fe88e63ba68e",
+      "last_modified": 1751235198,
+      "size": 8291
+    },
+    "./boards/LEGO_HUB_NO6/manifest.py": {
+      "path": "./boards/LEGO_HUB_NO6/manifest.py",
+      "hash": "79387b0be9f6018c9cb07ee5f3a66e3d1286e7cfbed57d3812f6543a5e686a63",
+      "last_modified": 1751235198,
+      "size": 228
+    },
+    "./usbdev/class/src/usbd_cdc_msc_hid.c": {
+      "path": "./usbdev/class/src/usbd_cdc_msc_hid.c",
+      "hash": "e3a821f4c610c6dd4437ee9003fc4422fd7b8c99b546cba6b1e64170181b7cc7",
+      "last_modified": 1751235198,
+      "size": 50035
+    },
+    "./boards/stm32h573_af.csv": {
+      "path": "./boards/stm32h573_af.csv",
+      "hash": "a58ffb876714e55251b6446e9f020dba350662a76733d9cb14c7ba3c291acf89",
+      "last_modified": 1751235198,
+      "size": 98302
+    },
+    "./boards/LEGO_HUB_NO7/mpconfigboard.h": {
+      "path": "./boards/LEGO_HUB_NO7/mpconfigboard.h",
+      "hash": "882129afee8f9cabf0fb3703d0420ee9c88a3c93db721ee7cfee414f77e6585e",
+      "last_modified": 1751235198,
+      "size": 7569
+    },
+    "./usbhost/Class/MSC/Src/usbh_msc.c": {
+      "path": "./usbhost/Class/MSC/Src/usbh_msc.c",
+      "hash": "a64c553beb3eb6398284866040bac687ef42486e0e01edffe3496b392623f780",
+      "last_modified": 1751235198,
+      "size": 24491
+    },
+    "./boards/LEGO_HUB_NO7/bdev.c": {
+      "path": "./boards/LEGO_HUB_NO7/bdev.c",
+      "hash": "c114470d2429e14b994899cebaad0829002bf69f3d3999ff6e565100c9661c06",
+      "last_modified": 1751235198,
+      "size": 96
+    },
+    "./boards/LIMIFROG/pins.csv": {
+      "path": "./boards/LIMIFROG/pins.csv",
+      "hash": "db4a753c53b07f1d86cc7b04f74d4e993a5d3309aa9982d5fba35306c9baa500",
+      "last_modified": 1751235198,
+      "size": 996
+    },
+    "./pendsv.h": {
+      "path": "./pendsv.h",
+      "hash": "66642f3276cb3047f80aeac90b32a8b73482de779490306aedb174f24901e501",
+      "last_modified": 1751235198,
+      "size": 2010
+    },
+    "./boards/PYBD_SF3/pins.csv": {
+      "path": "./boards/PYBD_SF3/pins.csv",
+      "hash": "6f56a12fe7d0f4071d88f50e31f9d406b13f978dbec0deece55d3a5c835abd22",
+      "last_modified": 1751235198,
+      "size": 1846
+    },
+    "./boards/NUCLEO_F439ZI/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_F439ZI/mpconfigboard.h",
+      "hash": "cfb8ef39a992606a2923e7e3e71aef6967db3087b14ad234d07222f5aa1e7aa7",
+      "last_modified": 1751235198,
+      "size": 3212
+    },
+    "./boards/NUCLEO_H743ZI2/stm32h7xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_H743ZI2/stm32h7xx_hal_conf.h",
+      "hash": "33b975986a9bcfba09161f6db2f1e53dc851147034fabac704016fa975c49d7f",
+      "last_modified": 1751235198,
+      "size": 53
+    },
+    "./boards/NUCLEO_WB55/board.json": {
+      "path": "./boards/NUCLEO_WB55/board.json",
+      "hash": "d6f8c8920812e1a497c82b5df8e73ff3df9cb5bcdb2d599e474bae7022f8d55c",
+      "last_modified": 1751235198,
+      "size": 259
+    },
+    "./mpconfigport_nanbox.h": {
+      "path": "./mpconfigport_nanbox.h",
+      "hash": "68cae29fc741e3c20b6e504875beccaa0466970a6169e0db33fb40576edcaa2b",
+      "last_modified": 1751235198,
+      "size": 1664
+    },
+    "./system_stm32.c": {
+      "path": "./system_stm32.c",
+      "hash": "d0805f43c39d86129e394d4aec5f29404148ff67209ba447c6dd4adefe0956dc",
+      "last_modified": 1761902792,
+      "size": 25638
+    },
+    "./mpthreadport.c": {
+      "path": "./mpthreadport.c",
+      "hash": "d399a3a523eea03b7def91a440383d010ced98e838bca3ad5f2981e27a6e7c6f",
+      "last_modified": 1751235198,
+      "size": 3209
+    },
+    "./boards/LEGO_HUB_NO6/mpconfigboard.mk": {
+      "path": "./boards/LEGO_HUB_NO6/mpconfigboard.mk",
+      "hash": "f266a6db864bf077ca4462d78966bb55d5cb48769059a7eb370284fe2943cdae",
+      "last_modified": 1751235198,
+      "size": 1345
+    },
+    "./boards/make-pins.py": {
+      "path": "./boards/make-pins.py",
+      "hash": "0933c200e4c136da80c59ee700fb666bc61454766f40f47522c261cc5c3d9e3e",
+      "last_modified": 1751235198,
+      "size": 15674
+    },
+    "./boards/NUCLEO_F412ZG/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_F412ZG/mpconfigboard.h",
+      "hash": "9df62708db2bd88fa2cba6be33fdd8a0262a837107b7e938c05143e98b489797",
+      "last_modified": 1751235198,
+      "size": 3405
+    },
+    "./boards/STM32F769DISC/board_init.c": {
+      "path": "./boards/STM32F769DISC/board_init.c",
+      "hash": "f573a4f8cdd1d62d168940c3d5d0466c652f02a31db08cf808545726afa3799d",
+      "last_modified": 1751235198,
+      "size": 691
+    },
+    "./boards/STM32F7DISC/stm32f7xx_hal_conf.h": {
+      "path": "./boards/STM32F7DISC/stm32f7xx_hal_conf.h",
+      "hash": "673e690c02110f0d4a2b766ec97307fbebe67b7b0bd3b323b93031e013d4eb44",
+      "last_modified": 1751235198,
+      "size": 550
+    },
+    "./boards/openocd_stm32l4.cfg": {
+      "path": "./boards/openocd_stm32l4.cfg",
+      "hash": "c68aa9a8e5b956988020aad25f29fb59919b1edb6d3fbdd06fa78acfcc999eea",
+      "last_modified": 1751235198,
+      "size": 969
+    },
+    "./boards/stm32h723_af.csv": {
+      "path": "./boards/stm32h723_af.csv",
+      "hash": "5dfea51a6c62b446d9ec2a74074243471c6a2e5283f2d8f3ee8fbee5358dba21",
+      "last_modified": 1751235198,
+      "size": 83421
+    },
+    "./spi.h": {
+      "path": "./spi.h",
+      "hash": "5c6f64ffb226bb93c2083d8f3547d10d10b3d87b3f7dbde23ce82136d3c50930",
+      "last_modified": 1751235198,
+      "size": 2856
+    },
+    "./resethandler_m0.s": {
+      "path": "./resethandler_m0.s",
+      "hash": "82f277f46b5ea65cb1338cf70a35ea83b8f0961ea0a2a5606176c0bffe08db20",
+      "last_modified": 1751235198,
+      "size": 2147
+    },
+    "./usbdev/class/inc/usbd_msc_scsi.h": {
+      "path": "./usbdev/class/inc/usbd_msc_scsi.h",
+      "hash": "6225c4ed3f8488b0dd31603d402196c4af2d7ac2297ee140e21750a64f1fcde8",
+      "last_modified": 1751235198,
+      "size": 6162
+    },
+    "./boards/STM32H573I_DK/manifest.py": {
+      "path": "./boards/STM32H573I_DK/manifest.py",
+      "hash": "e82f478e1099486fea00aa8791f8bc3e71ad9c253a90f200f27d31e91a226dc9",
+      "last_modified": 1751235198,
+      "size": 71
+    },
+    "./boards/ESPRUINO_PICO/pins.csv": {
+      "path": "./boards/ESPRUINO_PICO/pins.csv",
+      "hash": "d580832a80e248eb3ef77c6bf8e632b1bfc896368a404390e5314d14e5381682",
+      "last_modified": 1751235198,
+      "size": 299
+    },
+    "./boards/NUCLEO_F446RE/stm32f4xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_F446RE/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./boards/LEGO_HUB_NO6/README.md": {
+      "path": "./boards/LEGO_HUB_NO6/README.md",
+      "hash": "dc3e7d2b04f2b14327eb92c2bae1088dd5d0bc52b5174827920db1f5b43e9ec0",
+      "last_modified": 1751235198,
+      "size": 5268
+    },
+    "./boards/STM32F411DISC/mpconfigboard.mk": {
+      "path": "./boards/STM32F411DISC/mpconfigboard.mk",
+      "hash": "1f91348d5e4d10976c59c424f9a1a99e037bbd23f8d37188c31f95d0bc3cf6d9",
+      "last_modified": 1751235198,
+      "size": 174
+    },
+    "./boards/STM32F7DISC/mpconfigboard.h": {
+      "path": "./boards/STM32F7DISC/mpconfigboard.h",
+      "hash": "f5e60b378de1f9887e95090004739f7d8c3c0506822f082716a95fabf6efc849",
+      "last_modified": 1751235198,
+      "size": 6510
+    },
+    "./mpthreadport_zephyr.h": {
+      "path": "./mpthreadport_zephyr.h",
+      "hash": "fb79d90c4e86a7f42acd03b01696916960274fb3c8de10c1cf45dbf64d69fb83",
+      "last_modified": 1762157860,
+      "size": 2377
+    },
+    "./boards/NUCLEO_F756ZG/stm32f7xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_F756ZG/stm32f7xx_hal_conf.h",
+      "hash": "5cc64a6b6385ffff71b2fc39101226f8e5e42a613e3fce05c070487568cd08b4",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./lwip_inc/arch/sys_arch.h": {
+      "path": "./lwip_inc/arch/sys_arch.h",
+      "hash": "274157d60fc0ac559def4162bf373411116ed556fe50f35267b5285a3e28f873",
+      "last_modified": 1751235198,
+      "size": 9
+    },
+    "./boards/NETDUINO_PLUS_2/mpconfigboard.h": {
+      "path": "./boards/NETDUINO_PLUS_2/mpconfigboard.h",
+      "hash": "d178df5f9f3e3e5413d47da166b53131da6176222034aabaeeef80ecab3cc6b6",
+      "last_modified": 1751235198,
+      "size": 2469
+    },
+    "./boards/VCC_GND_F407ZG/pins.csv": {
+      "path": "./boards/VCC_GND_F407ZG/pins.csv",
+      "hash": "9c7ad7e301f51645c31f562c67088bf33bce42cc12bf36e2afae613d6cce9bbd",
+      "last_modified": 1751235198,
+      "size": 1708
+    },
+    "./boards/NUCLEO_F401RE/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_F401RE/mpconfigboard.mk",
+      "hash": "3f87096b79e5834dfd90b1b8ac92ce35407fb276b36b2129cbbbce835051ded5",
+      "last_modified": 1751235198,
+      "size": 227
+    },
+    "./boards/stm32h573xi.ld": {
+      "path": "./boards/stm32h573xi.ld",
+      "hash": "a504e5effad01de575301fd5276386615f16f0c85e73224688d0eab5413b7b6c",
+      "last_modified": 1751235198,
+      "size": 1494
+    },
+    "./boards/common_bl.ld": {
+      "path": "./boards/common_bl.ld",
+      "hash": "63b6569e536e8e0057d2676ecc2627779af6ca862d58298998030c8bc8482a69",
+      "last_modified": 1751235198,
+      "size": 528
+    },
+    "./boards/HYDRABUS/pins.csv": {
+      "path": "./boards/HYDRABUS/pins.csv",
+      "hash": "00e0892275bd4ae75d92a06d6fa0ff40fad39ec6caf0d93ab0986db8d714666e",
+      "last_modified": 1751235198,
+      "size": 483
+    },
+    "./boards/ARDUINO_NICLA_VISION/board_init.c": {
+      "path": "./boards/ARDUINO_NICLA_VISION/board_init.c",
+      "hash": "ffe9c481e2d9b865c93b72094f5703b0187ca1fd6ce4ba5128ef2131a1dc7329",
+      "last_modified": 1751235198,
+      "size": 7948
+    },
+    "./boards/NUCLEO_F411RE/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_F411RE/mpconfigboard.h",
+      "hash": "b5a80b8803c302afae2a7b50d02ea7fb7c8c5f72fed0e8b3860e3c265b9eed5b",
+      "last_modified": 1751235198,
+      "size": 3264
+    },
+    "./boards/NUCLEO_WL55/board.json": {
+      "path": "./boards/NUCLEO_WL55/board.json",
+      "hash": "0093f14b772a16f18bd2587e7673506f4ead50d4462ba9d92bb594926adb1ad5",
+      "last_modified": 1751235198,
+      "size": 316
+    },
+    "./boards/B_L475E_IOT01A/mpconfigboard.h": {
+      "path": "./boards/B_L475E_IOT01A/mpconfigboard.h",
+      "hash": "443b0713fb6f44a8089f1502b4c78a80c3838e948ae7607aa3c4aacfd08d30e2",
+      "last_modified": 1751235198,
+      "size": 2579
+    },
+    "./boards/PYBV11/pins.csv": {
+      "path": "./boards/PYBV11/pins.csv",
+      "hash": "0a65a069d725dd2f74747f6c795bdafb75fd01bd64566e6433b77876a2d946e7",
+      "last_modified": 1751235198,
+      "size": 547
+    },
+    "./boards/NUCLEO_F411RE/pins.csv": {
+      "path": "./boards/NUCLEO_F411RE/pins.csv",
+      "hash": "afe47d2c0db595f5e1055eb6100e1ef1ec2e5c85b536520874be66f458984599",
+      "last_modified": 1751235198,
+      "size": 638
+    },
+    "./boards/OLIMEX_H407/pins.csv": {
+      "path": "./boards/OLIMEX_H407/pins.csv",
+      "hash": "56f88f9f99f41cc92ee0357d21862e18f0806a9fcb712e7d89d109e2c1c86bbf",
+      "last_modified": 1751235198,
+      "size": 795
+    },
+    "./boards/NUCLEO_L432KC/stm32l4xx_hal_conf.h": {
+      "path": "./boards/NUCLEO_L432KC/stm32l4xx_hal_conf.h",
+      "hash": "87dfa054d2dd8da850e53ec404301df73b7afe5a2bccd1dd5e30f83c28a53b6b",
+      "last_modified": 1751235198,
+      "size": 592
+    },
+    "./usbd_cdc_interface.h": {
+      "path": "./usbd_cdc_interface.h",
+      "hash": "309e35be21f95d91bd5c5aabf427af97598d70883e610ac33e8a17229939fd50",
+      "last_modified": 1751235198,
+      "size": 3782
+    },
+    "./rtc.c": {
+      "path": "./rtc.c",
+      "hash": "46104986c4a51d0b4ed5b12bf9cc1d6da0d6438dfd98ae795cc8d75a8c645aed",
+      "last_modified": 1751235198,
+      "size": 31723
+    },
+    "./boards/ARDUINO_PORTENTA_H7/bdev.c": {
+      "path": "./boards/ARDUINO_PORTENTA_H7/bdev.c",
+      "hash": "d5d61a9157e72c6993e156b9f3247615dfb463cb5b7643029f4b47cc4625a1ac",
+      "last_modified": 1751235198,
+      "size": 1718
+    },
+    "./README.md": {
+      "path": "./README.md",
+      "hash": "d474e3cc32f95db5a52aed0aed3b797dc4ed6d7edd49fa7bbb820d308912c082",
+      "last_modified": 1751235198,
+      "size": 7005
+    },
+    "./boards/stm32wl55_af.csv": {
+      "path": "./boards/stm32wl55_af.csv",
+      "hash": "a16ecc816591b4de7c4635f2b38688cb8a7972be317e3a133454e1b081fd3467",
+      "last_modified": 1751235198,
+      "size": 10559
+    },
+    "./boards/NUCLEO_F767ZI/board.json": {
+      "path": "./boards/NUCLEO_F767ZI/board.json",
+      "hash": "aeb7b8e3f27641110a075b634aa9c7d9da947951f1b7452ced1bf13fe457fd10",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./timer.h": {
+      "path": "./timer.h",
+      "hash": "87bb212c853f95fc40cf03219749e5bb9f4e9115e493effe3d93dc41cee28815",
+      "last_modified": 1751235198,
+      "size": 1703
+    },
+    "./main.c": {
+      "path": "./main.c",
+      "hash": "3662d7086680c9724360a76e94c4426cf2fe2cdbc1392f3e69a06a504cd479c4",
+      "last_modified": 1762731650,
+      "size": 27461
+    },
+    "./boards/ARDUINO_PORTENTA_H7/mpconfigboard.mk": {
+      "path": "./boards/ARDUINO_PORTENTA_H7/mpconfigboard.mk",
+      "hash": "5d57d51f3be2365492d490e1bd4d6fc7e48f7a1a1b5bf340d9211fda4eca1fc8",
+      "last_modified": 1751235198,
+      "size": 892
+    },
+    "./boards/PYBD_SF6/f767.ld": {
+      "path": "./boards/PYBD_SF6/f767.ld",
+      "hash": "7c08220ff6d93386d3b046eeac46d21c1395ee0251e52d4081ef42c84ae36e72",
+      "last_modified": 1751235198,
+      "size": 1367
+    },
+    "./boards/ARDUINO_NICLA_VISION/bdev.c": {
+      "path": "./boards/ARDUINO_NICLA_VISION/bdev.c",
+      "hash": "b9a2929fade5d43ec1641b4d022ff0ba0cb38a531ad0de9ea7494af86510668a",
+      "last_modified": 1751235198,
+      "size": 1718
+    },
+    "./boards/B_L475E_IOT01A/mpconfigboard.mk": {
+      "path": "./boards/B_L475E_IOT01A/mpconfigboard.mk",
+      "hash": "59360439d10509b69d7f8a86209c72bc00f8bf0de5cfa3d51c66dac989c2b696",
+      "last_modified": 1751235198,
+      "size": 343
+    },
+    "./usbhost/Class/HID/Src/usbh_hid.c": {
+      "path": "./usbhost/Class/HID/Src/usbh_hid.c",
+      "hash": "c2e75b7ed22d4337f137f633d17ec9cd292e2e1022d13525fa2bee4db046013a",
+      "last_modified": 1751235198,
+      "size": 22571
+    },
+    "./boards/stm32g4xx_hal_conf_base.h": {
+      "path": "./boards/stm32g4xx_hal_conf_base.h",
+      "hash": "bfc80c6566a8cd9d39a621f85d38af3fabff53ac9cb914d596cfe85922f5cd3f",
+      "last_modified": 1751235198,
+      "size": 4427
+    },
+    "./mbedtls/mbedtls_config_port.h": {
+      "path": "./mbedtls/mbedtls_config_port.h",
+      "hash": "f20fa07f72c74f53f82ed06b06b0de1c31eccc813d048259d552b87a4f23d14e",
+      "last_modified": 1751235198,
+      "size": 1734
+    },
+    "./mboot/Makefile": {
+      "path": "./mboot/Makefile",
+      "hash": "172cd42d9581d1d5e00d0f83e07e27a37c64f765df615087f02f9de8bd605828",
+      "last_modified": 1751235198,
+      "size": 9550
+    },
+    "./boards/WEACT_F411_BLACKPILL/bdev.c": {
+      "path": "./boards/WEACT_F411_BLACKPILL/bdev.c",
+      "hash": "91ec2f4fdb684cc1fde0c7deb4a0048383dfed8aa10c27bff22b81d617d82e4b",
+      "last_modified": 1751235198,
+      "size": 1086
+    },
+    "./boards/stm32l072_af.csv": {
+      "path": "./boards/stm32l072_af.csv",
+      "hash": "4604d9ce186316afdcad044e46c107c97e7e86edaa79aa615c5090a6ea943d8e",
+      "last_modified": 1751235198,
+      "size": 29204
+    },
+    "./fdcan.c": {
+      "path": "./fdcan.c",
+      "hash": "1ece52e990ac8cb511f76162165cc3f9321c76e641539eecf114d16d630ed23c",
+      "last_modified": 1751235198,
+      "size": 17338
+    },
+    "./extint.c": {
+      "path": "./extint.c",
+      "hash": "e750b1e95cde525fadca3844f2aef8cae4cc0cb33377c684ea9e30cd999acf56",
+      "last_modified": 1751235198,
+      "size": 31421
+    },
+    "./usbhost/Core/Inc/usbh_core.h": {
+      "path": "./usbhost/Core/Inc/usbh_core.h",
+      "hash": "bb3787eab1fc22524093d47425b0bd8c7ef89f41aa4cf2791bfc99290141ef36",
+      "last_modified": 1751235198,
+      "size": 5381
+    },
+    "./boards/STM32F4DISC/stm32f4xx_hal_conf.h": {
+      "path": "./boards/STM32F4DISC/stm32f4xx_hal_conf.h",
+      "hash": "a6d7bb641cf8333a449ede16a521fe61f0bee70c5ef23df1b988498505303d65",
+      "last_modified": 1751235198,
+      "size": 548
+    },
+    "./usbhost/Class/MTP/Inc/usbh_mtp.h": {
+      "path": "./usbhost/Class/MTP/Inc/usbh_mtp.h",
+      "hash": "daf26bd900b28d7d0b37822bc5d3f65bc5b1413edd871558bf22a93ca423f4ef",
+      "last_modified": 1751235198,
+      "size": 8041
+    },
+    "./boards/STM32L496GDISC/board.json": {
+      "path": "./boards/STM32L496GDISC/board.json",
+      "hash": "36df7fcaaf481af39fddd92febf8b6b638670065a23637652159cce9a35f8096",
+      "last_modified": 1751235198,
+      "size": 330
+    },
+    "./boards/stm32f722.ld": {
+      "path": "./boards/stm32f722.ld",
+      "hash": "9da7b9c719809a75b6865a72f7af100a9659bc171447b6d7e64a07707096430a",
+      "last_modified": 1751235198,
+      "size": 1563
+    },
+    "./boards/NUCLEO_F756ZG/manifest.py": {
+      "path": "./boards/NUCLEO_F756ZG/manifest.py",
+      "hash": "e82f478e1099486fea00aa8791f8bc3e71ad9c253a90f200f27d31e91a226dc9",
+      "last_modified": 1751235198,
+      "size": 71
+    },
+    "./boards/PYBD_SF2/bdev.c": {
+      "path": "./boards/PYBD_SF2/bdev.c",
+      "hash": "9c440578d1b028cf8c724a1c60d328a150590481af87e4d8b8dfa6558f613f98",
+      "last_modified": 1751235198,
+      "size": 2344
+    },
+    "./boards/stm32f722_af.csv": {
+      "path": "./boards/stm32f722_af.csv",
+      "hash": "1067fc512e372d48f3520ccb888940ea41ec473da335499339984b16c710c052",
+      "last_modified": 1751235198,
+      "size": 53374
+    },
+    "./mboot/fsload.c": {
+      "path": "./mboot/fsload.c",
+      "hash": "a40a1e9733f109d2f8c5a3ec9712e0a5c1305be3c1dbfba9affc2f7a9d213e4e",
+      "last_modified": 1751235198,
+      "size": 11324
+    },
+    "./boards/PYBV10/mpconfigboard.mk": {
+      "path": "./boards/PYBV10/mpconfigboard.mk",
+      "hash": "3b8fb22ca526a8ca806414a669f631061cdc91ad0c1ca6367a8629577a003d9c",
+      "last_modified": 1751235198,
+      "size": 555
+    },
+    "./modstm.c": {
+      "path": "./modstm.c",
+      "hash": "2da0fc442107cfdbbd2ebe31a01f36c5bbdcf562e42c76feffdfea8de4989e39",
+      "last_modified": 1751235198,
+      "size": 2678
+    },
+    "./storage.c": {
+      "path": "./storage.c",
+      "hash": "5a043fbd409029fc754fd2f3d9b3a62fd49e1f73b372c378fa72089baabda8f9",
+      "last_modified": 1751235198,
+      "size": 18214
+    },
+    "./boards/ARDUINO_GIGA/mpconfigboard.mk": {
+      "path": "./boards/ARDUINO_GIGA/mpconfigboard.mk",
+      "hash": "a6db451c1821fe2debd0d67d765c2250b9b98bf3e18575c6ac46332e7f221bca",
+      "last_modified": 1751235198,
+      "size": 853
+    },
+    "./boards/ADAFRUIT_F405_EXPRESS/bdev.c": {
+      "path": "./boards/ADAFRUIT_F405_EXPRESS/bdev.c",
+      "hash": "759190ffa7d9a8cd01cc8c99486bec554036c1da3959992bb6595bbf8a5c3272",
+      "last_modified": 1751235198,
+      "size": 603
+    },
+    "./adc.c": {
+      "path": "./adc.c",
+      "hash": "1b83d90478be47efc8502da9ddc9ad053940d551c8971fdf8a0d184adcf8882b",
+      "last_modified": 1751235198,
+      "size": 39723
+    },
+    "./ulpi.c": {
+      "path": "./ulpi.c",
+      "hash": "aa019fc1033b19272560db137ff1cc6bbeb84096aa830741ff2e46593bbdac46",
+      "last_modified": 1751235198,
+      "size": 6000
+    },
+    "./mphalport.c": {
+      "path": "./mphalport.c",
+      "hash": "78027733a51c38fdb749d82de522fae562759e43cdba79f43dc3e84169a05f6c",
+      "last_modified": 1761849127,
+      "size": 6761
+    },
+    "./boards/NUCLEO_H723ZG/board.json": {
+      "path": "./boards/NUCLEO_H723ZG/board.json",
+      "hash": "6aa265fb2b32c19467a482154392d071f2d7f8630aa318606e0a8b1a2a5915e1",
+      "last_modified": 1751235198,
+      "size": 320
+    },
+    "./boards/stm32wl55xc.ld": {
+      "path": "./boards/stm32wl55xc.ld",
+      "hash": "4c4a4fe312366c0477aeb7d720f952c2d90bb2552bfcad0c940213796b787057",
+      "last_modified": 1751235198,
+      "size": 1353
+    },
+    "./boards/stm32f429.ld": {
+      "path": "./boards/stm32f429.ld",
+      "hash": "0009e0cba6bc9197752b03bb9b79c872fec6a460d2bd808025316a0cf43dd8cb",
+      "last_modified": 1762338028,
+      "size": 1571
+    },
+    "./boards/PYBV10/mpconfigboard.h": {
+      "path": "./boards/PYBV10/mpconfigboard.h",
+      "hash": "e934091b9d43cf21e93572401cd80bd512138708ea3e4719fb7dc123c3e20490",
+      "last_modified": 1751235198,
+      "size": 3980
+    },
+    "./usbhost/Class/CDC/Src/usbh_cdc.c": {
+      "path": "./usbhost/Class/CDC/Src/usbh_cdc.c",
+      "hash": "0cd10a3c1ef13b4bc22b76072a8cb7c6bed676bd878383244b3995e9407a7998",
+      "last_modified": 1751235198,
+      "size": 21934
+    },
+    "./usbhost/Core/Src/usbh_core.c": {
+      "path": "./usbhost/Core/Src/usbh_core.c",
+      "hash": "5d06660af46ac446071412c3b93fc050b544b7e979c969cd54e22f395081d00c",
+      "last_modified": 1751235198,
+      "size": 25165
+    },
+    "./boards/ADAFRUIT_F405_EXPRESS/mpconfigboard.mk": {
+      "path": "./boards/ADAFRUIT_F405_EXPRESS/mpconfigboard.mk",
+      "hash": "c36f95bdc4de7921c091c3f9b740db0fff07cd6d7e180cabdf73b1fa5ca6d435",
+      "last_modified": 1751235198,
+      "size": 435
+    },
+    "./boards/PYBD_SF3/board_init.c": {
+      "path": "./boards/PYBD_SF3/board_init.c",
+      "hash": "1fc9f96909c5afe4e1b89cfc2852bc9340263c671638d418ce6f5dca6d14f51d",
+      "last_modified": 1751235198,
+      "size": 40
+    },
+    "./factoryreset.h": {
+      "path": "./factoryreset.h",
+      "hash": "5781d04312cfc5616052d3e89e1577429fa4450d3b848faa153346e357dd80bf",
+      "last_modified": 1751235198,
+      "size": 1484
+    },
+    "./boards/LEGO_HUB_NO6/stm32f4xx_hal_conf.h": {
+      "path": "./boards/LEGO_HUB_NO6/stm32f4xx_hal_conf.h",
+      "hash": "22a263ec8406cfb1f74d535a48a66514680e11b755c1e0a87519266524ef5fbf",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./mboot/stm32_memory.ld": {
+      "path": "./mboot/stm32_memory.ld",
+      "hash": "df44b0e9bafa6e6f4a627d8a62778b6d7ff2260ead375cd02980e4e0b7c2e078",
+      "last_modified": 1751235198,
+      "size": 472
+    },
+    "./usbhost/Class/HID/Src/usbh_hid_mouse.c": {
+      "path": "./usbhost/Class/HID/Src/usbh_hid_mouse.c",
+      "hash": "67d02dcf1c2d4d295e76016b223c6fdcc21f7762c11bbd3aee272d1cc49235a9",
+      "last_modified": 1751235198,
+      "size": 6743
+    },
+    "./boards/PYBV11/mpconfigvariant_THREAD.mk": {
+      "path": "./boards/PYBV11/mpconfigvariant_THREAD.mk",
+      "hash": "c278e51784414c8c5e85862aa90326867b17850f559ba5e2e6667b07dbeb5adf",
+      "last_modified": 1751235198,
+      "size": 32
+    },
+    "./usbhost/Class/MTP/Src/usbh_mtp_ptp.c": {
+      "path": "./usbhost/Class/MTP/Src/usbh_mtp_ptp.c",
+      "hash": "e7cb9b7d80d688223f87b42cb470b0c66087b8cad6c4304de052e73cdb7f2f16",
+      "last_modified": 1751235198,
+      "size": 56267
+    },
+    "./boards/stm32f769.ld": {
+      "path": "./boards/stm32f769.ld",
+      "hash": "23a2f9645c16fa19101ce6e88e1c64f5f44e69d23bda6fb119f368d1f19fca93",
+      "last_modified": 1751235198,
+      "size": 1540
+    },
+    "./boards/NUCLEO_H723ZG/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_H723ZG/mpconfigboard.mk",
+      "hash": "9601880cb848f68688236989557767624282347687dd900ba9435aefb0e4db01",
+      "last_modified": 1751235198,
+      "size": 640
+    },
+    "./boards/STM32L496GDISC/mpconfigboard.h": {
+      "path": "./boards/STM32L496GDISC/mpconfigboard.h",
+      "hash": "58567c3bf948e1c2905109577534f6db361a8806e4a8248176942779c561fcab",
+      "last_modified": 1751235198,
+      "size": 1891
+    },
+    "./mboot/Particle.h": {
+      "path": "./mboot/Particle.h",
+      "hash": "5be30403efdff3487fb9bb70a87ede6fa365ce6ba02c0c111e9950069c82b52a",
+      "last_modified": 1751235198,
+      "size": 351
+    },
+    "./boards/pllvalues.py": {
+      "path": "./boards/pllvalues.py",
+      "hash": "7b59d7480f070ae8ae66d2641acdab4dc64e29c90c65fb577319fc658db6cbf5",
+      "last_modified": 1751235198,
+      "size": 9921
+    },
+    "./boards/OLIMEX_E407/stm32f4xx_hal_conf.h": {
+      "path": "./boards/OLIMEX_E407/stm32f4xx_hal_conf.h",
+      "hash": "bf72420db50fa123dc5653d8ba403f9ce9dfdf9f89d37583cf7ef4039578264f",
+      "last_modified": 1751235198,
+      "size": 549
+    },
+    "./boards/NUCLEO_L452RE/pins.csv": {
+      "path": "./boards/NUCLEO_L452RE/pins.csv",
+      "hash": "412262d0d6aeba6ce52556f38db9a9620f6107313b3829434dbec9c8b719c49d",
+      "last_modified": 1751235198,
+      "size": 1003
+    },
+    "./boards/stm32h7xx_hal_conf_base.h": {
+      "path": "./boards/stm32h7xx_hal_conf_base.h",
+      "hash": "33d27dd9d8f63d57d4d0ae3b86c77037f3ba3718a89f9de5846e644f3199cbbc",
+      "last_modified": 1751235198,
+      "size": 3793
+    },
+    "./boards/ARDUINO_OPTA/mpconfigboard.h": {
+      "path": "./boards/ARDUINO_OPTA/mpconfigboard.h",
+      "hash": "e12274700d0573056e2851c49f037a826d2355f8cba3d203e6c830b720eb2d08",
+      "last_modified": 1751235198,
+      "size": 10304
+    },
+    "./cyw43_configport.h": {
+      "path": "./cyw43_configport.h",
+      "hash": "56e42b09c60d7e9f1b10d0c94b813c0e90bb8a34bb4a97687af26236eefd237b",
+      "last_modified": 1751235198,
+      "size": 4826
+    },
+    "./pyb_i2c.c": {
+      "path": "./pyb_i2c.c",
+      "hash": "8fedc3e8f009dfe5eafebe335162429f4cfec45fcde10b752228fa54e5b54117",
+      "last_modified": 1751235198,
+      "size": 39689
+    },
+    "./bufhelper.h": {
+      "path": "./bufhelper.h",
+      "hash": "c85c83f0276b1534a227e5a87d3709a9e3cc9ed1909945173716553b9675c1c8",
+      "last_modified": 1751235198,
+      "size": 1503
+    },
+    "./bufhelper.c": {
+      "path": "./bufhelper.c",
+      "hash": "753fee9b5646fec07a660362aa563e474ac5a5dd25164640603b4b79ade92fe7",
+      "last_modified": 1751235198,
+      "size": 2046
+    },
+    "./mboot/vfs_lfs.c": {
+      "path": "./mboot/vfs_lfs.c",
+      "hash": "c6fe456406c1176b3df10b3f95a39206a887c5f7c4784ae36d973cf9fc877335",
+      "last_modified": 1751235198,
+      "size": 5562
+    },
+    "./boards/stm32f446_af.csv": {
+      "path": "./boards/stm32f446_af.csv",
+      "hash": "ed36b7819232ffc2acd8ddccc369c6de67cd3be0f07909af06dfcb867b98be78",
+      "last_modified": 1751235198,
+      "size": 33519
+    },
+    "./boards/stm32wlxx_hal_conf_base.h": {
+      "path": "./boards/stm32wlxx_hal_conf_base.h",
+      "hash": "e401741981bd0d1700a4e49039a05adb66a6f7c10f2e305a48ca82ce6a9a81da",
+      "last_modified": 1751235198,
+      "size": 2800
+    },
+    "./boards/openocd_stm32f4.cfg": {
+      "path": "./boards/openocd_stm32f4.cfg",
+      "hash": "ca7b49ebfc18b64242da4f784629eb7c81d91f606a2b2a5c59477b0882eb46f2",
+      "last_modified": 1751235198,
+      "size": 967
+    },
+    "./usbhost/Class/HID/Src/usbh_hid_keybd.c": {
+      "path": "./usbhost/Class/HID/Src/usbh_hid_keybd.c",
+      "hash": "f0ea7040ce42ccdcfa71b07c7550e170a760c8c37a199d79592781b60da61654",
+      "last_modified": 1751235198,
+      "size": 15096
+    },
+    "./boards/NUCLEO_F722ZE/board.json": {
+      "path": "./boards/NUCLEO_F722ZE/board.json",
+      "hash": "5fb704e1f9078068dc9898b0b60e4a38a04d6686ddbc53b8ce546dac9fd1b5b9",
+      "last_modified": 1751235198,
+      "size": 263
+    },
+    "./boards/stm32h5xx_hal_conf_base.h": {
+      "path": "./boards/stm32h5xx_hal_conf_base.h",
+      "hash": "ca75f06de3e737384a816713729e8ea7d6aad0facbd1391def2b3da21f1fa13a",
+      "last_modified": 1751235198,
+      "size": 3704
+    },
+    "./boards/LEGO_HUB_NO7/stm32f4xx_hal_conf.h": {
+      "path": "./boards/LEGO_HUB_NO7/stm32f4xx_hal_conf.h",
+      "hash": "36d5da65450719131f555ea6cb4da2b82f4aa90b9d2e4694f39c5e6eb2637aa2",
+      "last_modified": 1751235198,
+      "size": 618
+    },
+    "./boards/NUCLEO_F412ZG/mpconfigboard.mk": {
+      "path": "./boards/NUCLEO_F412ZG/mpconfigboard.mk",
+      "hash": "ae048745a71fe42858957f1f119819a8ca2d1031485242a9f3e9596af10a6c8d",
+      "last_modified": 1751235198,
+      "size": 227
+    },
+    "./boards/ARDUINO_OPTA/pins.csv": {
+      "path": "./boards/ARDUINO_OPTA/pins.csv",
+      "hash": "76b14ba36f26c14c3639670750e8bc54c8609ba1c5aa190f489be4082533d2b8",
+      "last_modified": 1751235198,
+      "size": 1251
+    },
+    "./boards/NUCLEO_L476RG/mpconfigboard.h": {
+      "path": "./boards/NUCLEO_L476RG/mpconfigboard.h",
+      "hash": "b0811077a4529e4291c80292dc6ba0aa2fb1774766a7945abe0e5d08699cbd6b",
+      "last_modified": 1751235198,
+      "size": 3028
+    },
+    "./boards/NUCLEO_F767ZI/board_init.c": {
+      "path": "./boards/NUCLEO_F767ZI/board_init.c",
+      "hash": "f04ea123327f91cf37214c39044cd3d0c2db9f6c048479bc307e7f2d00301189",
+      "last_modified": 1751235198,
+      "size": 218
+    }
+  },
+  "embedding_model": "BAAI/bge-small-en-v1.5",
+  "embedding_dimensions": 384,
+  "chunk_hash_version": 2
+}

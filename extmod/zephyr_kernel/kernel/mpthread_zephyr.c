@@ -173,6 +173,35 @@ static mp_thread_stack_slot_t stack_slot[MP_THREAD_MAXIMUM_USER_THREADS];
 // Pre-allocated stack pool
 K_THREAD_STACK_ARRAY_DEFINE(mp_thread_stack_array, MP_THREAD_MAXIMUM_USER_THREADS, MP_THREAD_DEFAULT_STACK_SIZE);
 
+// Static thread pool (main + user threads) - CRITICAL for GC safety
+// Thread structures MUST be outside GC heap to avoid corruption during concurrent gc.collect()
+// When thread A runs GC and scans thread B's structure, heap allocation could move B mid-scan
+#define MP_THREAD_POOL_SIZE (MP_THREAD_MAXIMUM_USER_THREADS + 1)
+static mp_thread_protected_t thread_pool[MP_THREAD_POOL_SIZE];
+static uint32_t thread_pool_bitmap = 0;  // Bit N set = slot N allocated
+
+// Allocate thread from static pool (thread_mutex must be held by caller)
+static mp_thread_protected_t *thread_pool_alloc(void) {
+    for (int i = 0; i < MP_THREAD_POOL_SIZE; i++) {
+        if (!(thread_pool_bitmap & (1U << i))) {
+            thread_pool_bitmap |= (1U << i);
+            memset(&thread_pool[i], 0, sizeof(mp_thread_protected_t));
+            thread_pool[i].canary_before = CANARY_BEFORE;
+            thread_pool[i].canary_after = CANARY_AFTER;
+            return &thread_pool[i];
+        }
+    }
+    return NULL;  // Pool exhausted
+}
+
+// Free thread back to static pool (thread_mutex must be held by caller)
+static void thread_pool_free(mp_thread_protected_t *protected) {
+    if (protected >= thread_pool && protected < thread_pool + MP_THREAD_POOL_SIZE) {
+        int index = protected - thread_pool;
+        thread_pool_bitmap &= ~(1U << index);
+    }
+}
+
 // Forward declarations
 static void mp_thread_iterate_threads_cb(const struct k_thread *thread, void *user_data);
 static int32_t mp_thread_find_stack_slot(void);
@@ -195,13 +224,14 @@ bool mp_thread_init_early(void) {
 bool mp_thread_init(void *stack) {
     // Note: mp_zephyr_kernel_init() must be called by main() BEFORE mp_thread_init_early()
     // to properly initialize the Zephyr kernel and bootstrap thread.
-    // GC must be initialized BEFORE calling this function (heap allocation required)
     // mp_thread_init_early() must be called BEFORE gc_init() to set thread-local state
 
-    // Allocate main thread with canary protection (same as all other threads)
-    mp_thread_protected_t *protected = m_new_obj(mp_thread_protected_t);
-    protected->canary_before = CANARY_BEFORE;
-    protected->canary_after = CANARY_AFTER;
+    // Allocate main thread from static pool (GC-safe, no heap allocation)
+    // mutex not yet initialized, but this is single-threaded during init
+    mp_thread_protected_t *protected = thread_pool_alloc();
+    if (protected == NULL) {
+        return false;  // Should never happen for main thread
+    }
     mp_thread_t *th = &protected->thread;
 
     // Initialize main thread entry in linked list
@@ -290,7 +320,8 @@ void mp_thread_gc_others(void) {
             }
             mp_thread_counter--;
             DEBUG_printf("GC: Collected thread %s\n", k_thread_name_get(th->id));
-            // The "th" memory will eventually be reclaimed by the GC
+            // Free thread back to static pool (GC-safe, no heap involved)
+            thread_pool_free(th->protected);
             // Don't update prev - we removed this node
         } else {
             th->alive = 0;  // Reset for next GC cycle
@@ -331,40 +362,45 @@ void mp_thread_gc_others(void) {
             }
         }
 
-        gc_collect_root((void **)&th, 1);
-        gc_collect_root(&th->arg, 1);
-        gc_collect_root((void **)&th->protected, 1);  // Mark full protected structure
-
+        // Skip current thread - its stack is scanned separately via gc_helper_collect_regs_and_stack()
         if (th->id == k_current_get()) {
-            continue;  // Don't scan current thread's stack (done separately)
+            // Still need to mark thread structure and arg as roots
+            gc_collect_root((void **)&th, 1);
+            gc_collect_root(&th->arg, 1);
+            gc_collect_root((void **)&th->protected, 1);
+            continue;
         }
 
         if (th->status != MP_THREAD_STATUS_READY) {
             continue;  // Thread not running
         }
 
+        // Mark thread structure, arg, and protected as GC roots
+        gc_collect_root((void **)&th, 1);
+        gc_collect_root(&th->arg, 1);
+        gc_collect_root((void **)&th->protected, 1);
+
         // Validate stack_len matches Zephyr's reported stack size
-        // This catches corruption where stack_len is modified or uninitialized
-        // Query actual allocated stack size from Zephyr
         size_t actual_stack_size = th->id->stack_info.size / sizeof(uintptr_t);
         const size_t min_stack_words = 256;  // Minimum 1KB
 
         if (th->stack_len < min_stack_words) {
             mp_printf(&mp_plat_print,
-                      "WARNING: stack_len=0x%x too small (th=%p id=%p status=%d)\r\n",
-                      (unsigned int)th->stack_len, th, th->id, th->status);
-            continue;  // Skip corrupted stack_len values
+                      "WARNING: stack_len=0x%x too small (th=%s)\r\n",
+                      (unsigned int)th->stack_len, k_thread_name_get(th->id));
+            continue;
         }
 
         if (th->stack_len != actual_stack_size) {
             mp_printf(&mp_plat_print,
-                      "WARNING: stack_len=0x%x mismatch (th=%p actual=0x%x)\r\n",
-                      (unsigned int)th->stack_len, th, (unsigned int)actual_stack_size);
-            // Use actual size from Zephyr for safety
+                      "WARNING: stack_len mismatch (th=%s expected=0x%x actual=0x%x)\r\n",
+                      k_thread_name_get(th->id),
+                      (unsigned int)th->stack_len, (unsigned int)actual_stack_size);
             th->stack_len = actual_stack_size;
         }
 
-        // Scan the thread's stack
+        // Scan the full stack (conservative approach matching ports/zephyr)
+        // This may scan some stale data below the current SP, but ensures all live references are found
         gc_collect_root(th->stack, th->stack_len);
     }
 
@@ -431,12 +467,16 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     // trying to lock thread_mutex while main thread was in gc_collect(). The normal GC
     // cycles will clean up finished threads anyway.
 
-    // Heap allocation with canary protection for memory corruption detection
-    // Allocate mp_thread_protected_t (contains canaries before/after mp_thread_t)
-    // Static pool testing showed: 25/42 pass (worse than 26/40 with heap)
-    mp_thread_protected_t *protected = m_new_obj(mp_thread_protected_t);
-    protected->canary_before = CANARY_BEFORE;
-    protected->canary_after = CANARY_AFTER;
+    // Allocate thread from static pool (GC-safe, outside GC heap)
+    // CRITICAL: Thread structures in GC heap cause corruption during concurrent gc.collect()
+    // When thread A scans thread B's structure, heap compaction can move B mid-scan
+    mp_thread_mutex_lock(&thread_mutex, 1);
+    mp_thread_protected_t *protected = thread_pool_alloc();
+    mp_thread_mutex_unlock(&thread_mutex);
+
+    if (protected == NULL) {
+        mp_raise_OSError(ENOMEM);  // Thread pool exhausted
+    }
     mp_thread_t *th = &protected->thread;
 
     // Initialize ALL fields to safe values before adding to list
