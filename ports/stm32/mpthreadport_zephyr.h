@@ -49,7 +49,8 @@ typedef struct _mp_thread_recursive_mutex_t {
 // Threading functions (implemented in extmod/zephyr_kernel/mpthread_zephyr.c)
 struct _mp_state_thread_t *mp_thread_get_state(void);
 void mp_thread_set_state(struct _mp_state_thread_t *state);
-bool mp_thread_init(void *stack);
+bool mp_thread_init_early(void);  // Phase 1: Set thread-local state (before gc_init)
+bool mp_thread_init(void *stack);  // Phase 2: Allocate main thread on heap (after gc_init)
 void mp_thread_deinit(void);
 void mp_thread_gc_others(void);
 

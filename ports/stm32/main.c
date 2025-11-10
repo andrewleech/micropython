@@ -327,19 +327,6 @@ void micropython_main_thread_entry(void *p1, void *p2, void *p3) {
     // NOTE: We're now running in z_main_thread context, not boot/dummy context
     // This means k_thread_create() and other threading operations are safe
 
-    // Initialize MicroPython threading FIRST (before enabling SysTick)
-    // This ensures the main thread is properly registered before timer interrupts start
-    char stack_dummy;
-    if (!mp_thread_init(&stack_dummy)) {
-        mp_printf(&mp_plat_print, "Failed to initialize threading\n");
-        // In thread context, can't return - just loop forever
-        for (;;) {}
-    }
-
-    // THEN enable SysTick interrupt now that threading is fully initialized
-    extern void mp_zephyr_arch_enable_systick_interrupt(void);
-    mp_zephyr_arch_enable_systick_interrupt();
-
     // Initialize board state for main loop
     boardctrl_state_t state;
     state.reset_mode = 1;  // Normal boot for Zephyr entry
@@ -355,11 +342,32 @@ void micropython_main_thread_entry(void *p1, void *p2, void *p3) {
 micropython_soft_reset:
     MICROPY_BOARD_TOP_SOFT_RESET_LOOP(&state);
 
+    // Threading early init - Phase 1 (set thread-local state FIRST)
+    // Must be called before ANY code that accesses MP_STATE_THREAD()
+    // This includes mp_cstack_init_with_top() and gc_init()
+    if (!mp_thread_init_early()) {
+        mp_printf(&mp_plat_print, "Failed to initialize threading (early phase)\n");
+        for (;;) {}
+    }
+
     // Stack limit init (symbols declared in gccollect.h)
+    // Requires thread-local state to be set (accesses MP_STATE_THREAD)
     mp_cstack_init_with_top(&_estack, (char *)&_estack - (char *)&_sstack);
 
     // GC init with static heap (avoids overlap with thread stacks in .noinit section)
     gc_init(heap, heap + sizeof(heap));
+
+    // Threading init - Phase 2 (allocate main thread on GC heap)
+    // Requires GC to be initialized for m_new_obj() heap allocation
+    char stack_dummy;
+    if (!mp_thread_init(&stack_dummy)) {
+        mp_printf(&mp_plat_print, "Failed to initialize threading (phase 2)\n");
+        for (;;) {}
+    }
+
+    // THEN enable SysTick interrupt now that threading is fully initialized
+    extern void mp_zephyr_arch_enable_systick_interrupt(void);
+    mp_zephyr_arch_enable_systick_interrupt();
 
     #if MICROPY_ENABLE_PYSTACK
     static mp_obj_t pystack[384];

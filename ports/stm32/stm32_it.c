@@ -139,7 +139,7 @@ typedef struct {
     uint32_t r0, r1, r2, r3, r12, lr, pc, xpsr;
 } ExceptionRegisters_t;
 
-int pyb_hard_fault_debug = 0;
+int pyb_hard_fault_debug = 1;
 
 void HardFault_C_Handler(ExceptionRegisters_t *regs) {
     if (!pyb_hard_fault_debug) {
@@ -239,38 +239,188 @@ void NMI_Handler(void) {
 
 /**
   * @brief  This function handles Memory Manage exception.
-  * @param  None
+  * @param  regs - exception frame
   * @retval None
   */
-void MemManage_Handler(void) {
-    /* Go to infinite loop when Memory Manage exception occurs */
+void MemManage_C_Handler(ExceptionRegisters_t *regs) {
+    if (!pyb_hard_fault_debug) {
+        powerctrl_mcu_reset();
+    }
+
+    #if MICROPY_HW_ENABLE_USB
+    pyb_usb_flags = 0;
+    #endif
+
+    mp_hal_stdout_tx_str("\r\nMemManage fault!\r\n");
+
+    print_reg("R0    ", regs->r0);
+    print_reg("R1    ", regs->r1);
+    print_reg("R2    ", regs->r2);
+    print_reg("R3    ", regs->r3);
+    print_reg("R12   ", regs->r12);
+    print_reg("SP    ", (uint32_t)regs);
+    print_reg("LR    ", regs->lr);
+    print_reg("PC    ", regs->pc);
+    print_reg("XPSR  ", regs->xpsr);
+
+    #if __CORTEX_M >= 3
+    uint32_t cfsr = SCB->CFSR;
+    print_reg("CFSR  ", cfsr);
+    if (cfsr & 0x80) {
+        print_reg("MMFAR ", SCB->MMFAR);
+    }
+    #endif
+
+    /* Go to infinite loop for GDB attachment */
     while (1) {
         MICROPY_BOARD_FATAL_ERROR("MemManage");
     }
 }
 
+__attribute__((naked))
+void MemManage_Handler(void) {
+    #if __CORTEX_M == 0
+    __asm volatile (
+        " mov r0, lr    \n"
+        " lsr r0, r0, #3 \n"
+        " mrs r0, msp   \n"
+        " bcc .use_msp_mm  \n"
+        " mrs r0, psp   \n"
+        " .use_msp_mm:     \n"
+        " b MemManage_C_Handler \n"
+        );
+    #else
+    __asm volatile (
+        " tst lr, #4    \n"
+        " ite eq        \n"
+        " mrseq r0, msp \n"
+        " mrsne r0, psp \n"
+        " b MemManage_C_Handler \n"
+        );
+    #endif
+}
+
 /**
   * @brief  This function handles Bus Fault exception.
-  * @param  None
+  * @param  regs - exception frame
   * @retval None
   */
-void BusFault_Handler(void) {
-    /* Go to infinite loop when Bus Fault exception occurs */
+void BusFault_C_Handler(ExceptionRegisters_t *regs) {
+    if (!pyb_hard_fault_debug) {
+        powerctrl_mcu_reset();
+    }
+
+    #if MICROPY_HW_ENABLE_USB
+    pyb_usb_flags = 0;
+    #endif
+
+    mp_hal_stdout_tx_str("\r\nBusFault!\r\n");
+
+    print_reg("R0    ", regs->r0);
+    print_reg("R1    ", regs->r1);
+    print_reg("R2    ", regs->r2);
+    print_reg("R3    ", regs->r3);
+    print_reg("R12   ", regs->r12);
+    print_reg("SP    ", (uint32_t)regs);
+    print_reg("LR    ", regs->lr);
+    print_reg("PC    ", regs->pc);
+    print_reg("XPSR  ", regs->xpsr);
+
+    #if __CORTEX_M >= 3
+    uint32_t cfsr = SCB->CFSR;
+    print_reg("CFSR  ", cfsr);
+    if (cfsr & 0x8000) {
+        print_reg("BFAR  ", SCB->BFAR);
+    }
+    #endif
+
+    /* Go to infinite loop for GDB attachment */
     while (1) {
         MICROPY_BOARD_FATAL_ERROR("BusFault");
     }
 }
 
+__attribute__((naked))
+void BusFault_Handler(void) {
+    #if __CORTEX_M == 0
+    __asm volatile (
+        " mov r0, lr    \n"
+        " lsr r0, r0, #3 \n"
+        " mrs r0, msp   \n"
+        " bcc .use_msp_bf  \n"
+        " mrs r0, psp   \n"
+        " .use_msp_bf:     \n"
+        " b BusFault_C_Handler \n"
+        );
+    #else
+    __asm volatile (
+        " tst lr, #4    \n"
+        " ite eq        \n"
+        " mrseq r0, msp \n"
+        " mrsne r0, psp \n"
+        " b BusFault_C_Handler \n"
+        );
+    #endif
+}
+
 /**
   * @brief  This function handles Usage Fault exception.
-  * @param  None
+  * @param  regs - exception frame
   * @retval None
   */
-void UsageFault_Handler(void) {
-    /* Go to infinite loop when Usage Fault exception occurs */
+void UsageFault_C_Handler(ExceptionRegisters_t *regs) {
+    if (!pyb_hard_fault_debug) {
+        powerctrl_mcu_reset();
+    }
+
+    #if MICROPY_HW_ENABLE_USB
+    pyb_usb_flags = 0;
+    #endif
+
+    mp_hal_stdout_tx_str("\r\nUsageFault!\r\n");
+
+    print_reg("R0    ", regs->r0);
+    print_reg("R1    ", regs->r1);
+    print_reg("R2    ", regs->r2);
+    print_reg("R3    ", regs->r3);
+    print_reg("R12   ", regs->r12);
+    print_reg("SP    ", (uint32_t)regs);
+    print_reg("LR    ", regs->lr);
+    print_reg("PC    ", regs->pc);
+    print_reg("XPSR  ", regs->xpsr);
+
+    #if __CORTEX_M >= 3
+    uint32_t cfsr = SCB->CFSR;
+    print_reg("CFSR  ", cfsr);
+    #endif
+
+    /* Go to infinite loop for GDB attachment */
     while (1) {
         MICROPY_BOARD_FATAL_ERROR("UsageFault");
     }
+}
+
+__attribute__((naked))
+void UsageFault_Handler(void) {
+    #if __CORTEX_M == 0
+    __asm volatile (
+        " mov r0, lr    \n"
+        " lsr r0, r0, #3 \n"
+        " mrs r0, msp   \n"
+        " bcc .use_msp_uf  \n"
+        " mrs r0, psp   \n"
+        " .use_msp_uf:     \n"
+        " b UsageFault_C_Handler \n"
+        );
+    #else
+    __asm volatile (
+        " tst lr, #4    \n"
+        " ite eq        \n"
+        " mrseq r0, msp \n"
+        " mrsne r0, psp \n"
+        " b UsageFault_C_Handler \n"
+        );
+    #endif
 }
 
 /**
