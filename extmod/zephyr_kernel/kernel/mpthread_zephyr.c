@@ -205,8 +205,12 @@ bool mp_thread_init(void *stack) {
     th->status = MP_THREAD_STATUS_READY;
     th->alive = 1;
     th->arg = NULL;
-    th->stack = stack;
-    th->stack_len = 0;  // Bootstrap thread uses C runtime stack, size unknown
+
+    // Get main thread's stack info from Zephyr (matches ports/zephyr pattern)
+    // The main thread was created by Zephyr before mp_thread_init(), so we
+    // query its existing stack_info rather than setting it ourselves
+    th->stack = (void *)th->id->stack_info.start;
+    th->stack_len = th->id->stack_info.size / sizeof(uintptr_t);
     th->next = NULL;
 
     k_thread_name_set(th->id, "mp_main");
@@ -333,17 +337,25 @@ void mp_thread_gc_others(void) {
             continue;  // Thread not running
         }
 
-        // Validate stack_len before GC scanning to prevent corruption
-        // Minimum: 1KB = 256 words, Maximum: default stack size
-        const size_t min_stack_words = 256;
-        const size_t max_stack_words = MP_THREAD_DEFAULT_STACK_SIZE / sizeof(uintptr_t);
+        // Validate stack_len matches Zephyr's reported stack size
+        // This catches corruption where stack_len is modified or uninitialized
+        // Query actual allocated stack size from Zephyr
+        size_t actual_stack_size = th->id->stack_info.size / sizeof(uintptr_t);
+        const size_t min_stack_words = 256;  // Minimum 1KB
 
-        if (th->stack_len < min_stack_words || th->stack_len > max_stack_words) {
+        if (th->stack_len < min_stack_words) {
             mp_printf(&mp_plat_print,
-                      "WARNING: Invalid stack_len %zu words for thread %s (min=%zu, max=%zu)\r\n"
-                      "  Skipping GC stack scan to prevent corruption\r\n",
-                      th->stack_len, k_thread_name_get(th->id), min_stack_words, max_stack_words);
+                      "WARNING: stack_len=0x%x too small (th=%p id=%p status=%d)\r\n",
+                      (unsigned int)th->stack_len, th, th->id, th->status);
             continue;  // Skip corrupted stack_len values
+        }
+
+        if (th->stack_len != actual_stack_size) {
+            mp_printf(&mp_plat_print,
+                      "WARNING: stack_len=0x%x mismatch (th=%p actual=0x%x)\r\n",
+                      (unsigned int)th->stack_len, th, (unsigned int)actual_stack_size);
+            // Use actual size from Zephyr for safety
+            th->stack_len = actual_stack_size;
         }
 
         // Scan the thread's stack
