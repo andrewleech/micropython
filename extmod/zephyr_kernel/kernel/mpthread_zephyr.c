@@ -333,6 +333,19 @@ void mp_thread_gc_others(void) {
             continue;  // Thread not running
         }
 
+        // Validate stack_len before GC scanning to prevent corruption
+        // Minimum: 1KB = 256 words, Maximum: default stack size
+        const size_t min_stack_words = 256;
+        const size_t max_stack_words = MP_THREAD_DEFAULT_STACK_SIZE / sizeof(uintptr_t);
+
+        if (th->stack_len < min_stack_words || th->stack_len > max_stack_words) {
+            mp_printf(&mp_plat_print,
+                      "WARNING: Invalid stack_len %zu words for thread %s (min=%zu, max=%zu)\r\n"
+                      "  Skipping GC stack scan to prevent corruption\r\n",
+                      th->stack_len, k_thread_name_get(th->id), min_stack_words, max_stack_words);
+            continue;  // Skip corrupted stack_len values
+        }
+
         // Scan the thread's stack
         gc_collect_root(th->stack, th->stack_len);
     }
@@ -416,12 +429,15 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("maximum number of threads reached"));
     }
 
+    // Store allocated stack size for validation
+    size_t allocated_stack_size = K_THREAD_STACK_SIZEOF(mp_thread_stack_array[_slot]);
+
     // Create Zephyr thread with K_NO_WAIT to start immediately
     // This matches the ports/zephyr pattern
     th->id = k_thread_create(
         &th->z_thread,
         mp_thread_stack_array[_slot],
-        K_THREAD_STACK_SIZEOF(mp_thread_stack_array[_slot]),
+        allocated_stack_size,
         zephyr_entry,
         entry, arg, NULL,
         priority, 0, K_NO_WAIT
@@ -435,21 +451,33 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
 
     k_thread_name_set(th->id, (const char *)name);
 
+    // Validate that Zephyr's stack_info matches our allocation
+    // This detects if stack_info.size is unreliable (as suspected in 0x1d corruption investigation)
+    if (th->z_thread.stack_info.size != allocated_stack_size) {
+        mp_printf(&mp_plat_print,
+                  "WARNING: stack_info.size mismatch for thread %s\r\n"
+                  "  Allocated: %zu bytes\r\n"
+                  "  Reported:  %zu bytes\r\n"
+                  "  Using allocated size for safety\r\n",
+                  name, allocated_stack_size, th->z_thread.stack_info.size);
+    }
+
     // Add to linked list
     th->status = MP_THREAD_STATUS_CREATED;
     th->alive = 0;
     th->slot = _slot;
     th->arg = arg;
     th->stack = (void *)th->z_thread.stack_info.start;
-    th->stack_len = th->z_thread.stack_info.size / sizeof(uintptr_t);
+    // Use allocated size (validated against stack_info above)
+    th->stack_len = allocated_stack_size / sizeof(uintptr_t);
     th->next = MP_STATE_VM(mp_thread_list_head);
     MP_STATE_VM(mp_thread_list_head) = th;
 
     stack_slot[_slot].used = true;
     mp_thread_counter++;
 
-    // Adjust stack size to leave margin
-    *stack_size = th->z_thread.stack_info.size - 1024;
+    // Adjust stack size to leave margin (use validated allocated size)
+    *stack_size = allocated_stack_size - 1024;
 
     DEBUG_printf("Created thread %s (id=%p)\n", name, th->id);
 
