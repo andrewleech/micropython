@@ -48,7 +48,7 @@
 #define Q_HASH_MASK (0xffff)
 #endif
 
-#if MICROPY_PY_THREAD && !MICROPY_PY_THREAD_GIL
+#if MICROPY_PY_THREAD
 #define QSTR_ENTER() mp_thread_mutex_lock(&MP_STATE_VM(qstr_mutex), 1)
 #define QSTR_EXIT() mp_thread_mutex_unlock(&MP_STATE_VM(qstr_mutex))
 #else
@@ -182,7 +182,7 @@ void qstr_init(void) {
     MP_STATE_VM(last_pool) = (qstr_pool_t *)&CONST_POOL; // we won't modify the const_pool since it has no allocated room left
     MP_STATE_VM(qstr_last_chunk) = NULL;
 
-    #if MICROPY_PY_THREAD && !MICROPY_PY_THREAD_GIL
+    #if MICROPY_PY_THREAD
     mp_thread_mutex_init(&MP_STATE_VM(qstr_mutex));
     #endif
 }

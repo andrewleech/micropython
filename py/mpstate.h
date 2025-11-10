@@ -212,7 +212,7 @@ typedef struct _mp_state_vm_t {
     size_t qstr_last_alloc;
     size_t qstr_last_used;
 
-    #if MICROPY_PY_THREAD && !MICROPY_PY_THREAD_GIL
+    #if MICROPY_PY_THREAD
     // This is a global mutex used to make qstr interning thread-safe.
     mp_thread_mutex_t qstr_mutex;
     #endif
