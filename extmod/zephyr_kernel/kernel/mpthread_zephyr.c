@@ -70,6 +70,9 @@ typedef struct _mp_thread_stack_slot_t {
     bool used;
 } mp_thread_stack_slot_t;
 
+// Forward declaration for circular reference
+typedef struct _mp_thread_protected_t mp_thread_protected_t;
+
 // Linked list node per active thread
 typedef struct _mp_thread_t {
     k_tid_t id;                     // Zephyr thread ID
@@ -80,6 +83,7 @@ typedef struct _mp_thread_t {
     void *arg;                      // Python args (GC root pointer)
     void *stack;                    // Stack pointer
     size_t stack_len;               // Stack size in words
+    mp_thread_protected_t *protected; // Back-reference to protected structure (GC root)
     struct _mp_thread_t *next;      // Next in linked list
 } mp_thread_t;
 
@@ -205,6 +209,7 @@ bool mp_thread_init(void *stack) {
     th->status = MP_THREAD_STATUS_READY;
     th->alive = 1;
     th->arg = NULL;
+    th->protected = protected;  // Back-reference for GC
 
     // Get main thread's stack info from Zephyr (matches ports/zephyr pattern)
     // The main thread was created by Zephyr before mp_thread_init(), so we
@@ -328,6 +333,7 @@ void mp_thread_gc_others(void) {
 
         gc_collect_root((void **)&th, 1);
         gc_collect_root(&th->arg, 1);
+        gc_collect_root((void **)&th->protected, 1);  // Mark full protected structure
 
         if (th->id == k_current_get()) {
             continue;  // Don't scan current thread's stack (done separately)
@@ -433,10 +439,30 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     protected->canary_after = CANARY_AFTER;
     mp_thread_t *th = &protected->thread;
 
+    // Initialize ALL fields to safe values before adding to list
+    // This prevents GC from scanning uninitialized memory as pointers
+    th->id = NULL;
+    th->status = 0;  // Will be set to MP_THREAD_STATUS_CREATED later
+    th->alive = 0;
+    th->slot = -1;  // Will be set to actual slot later
+    th->arg = NULL;  // CRITICAL: GC scans this, must not be garbage
+    th->stack = NULL;
+    th->stack_len = 0;  // GC will skip stack scan until this is set
+    th->protected = protected;  // Back-reference for GC (CRITICAL)
+    th->next = NULL;
+
     mp_thread_mutex_lock(&thread_mutex, 1);
+
+    // Add to list IMMEDIATELY after allocation and before full initialization
+    // This protects the thread from being collected as garbage if gc_collect()
+    // is triggered during the rest of initialization (e.g., in k_thread_create)
+    th->next = MP_STATE_VM(mp_thread_list_head);
+    MP_STATE_VM(mp_thread_list_head) = th;
 
     int32_t _slot = mp_thread_find_stack_slot();
     if (_slot < 0) {
+        // Remove from list before failing
+        MP_STATE_VM(mp_thread_list_head) = th->next;
         mp_thread_mutex_unlock(&thread_mutex);
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("maximum number of threads reached"));
     }
@@ -456,6 +482,8 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
         );
 
     if (th->id == NULL) {
+        // Remove from list before failing
+        MP_STATE_VM(mp_thread_list_head) = th->next;
         mp_thread_mutex_unlock(&thread_mutex);
         // Memory will be reclaimed by GC
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("can't create thread"));
@@ -474,7 +502,7 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
                   name, allocated_stack_size, th->z_thread.stack_info.size);
     }
 
-    // Add to linked list
+    // Complete initialization (thread already in list from earlier)
     th->status = MP_THREAD_STATUS_CREATED;
     th->alive = 0;
     th->slot = _slot;
@@ -482,8 +510,7 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     th->stack = (void *)th->z_thread.stack_info.start;
     // Use allocated size (validated against stack_info above)
     th->stack_len = allocated_stack_size / sizeof(uintptr_t);
-    th->next = MP_STATE_VM(mp_thread_list_head);
-    MP_STATE_VM(mp_thread_list_head) = th;
+    // Note: th->next already set when added to list earlier
 
     stack_slot[_slot].used = true;
     mp_thread_counter++;
