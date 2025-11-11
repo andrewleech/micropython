@@ -28,3 +28,6 @@ MICROPY_VFS_LFS2 ?= 1
 
 # Board specific frozen modules
 FROZEN_MANIFEST ?= $(BOARD_DIR)/manifest.py
+
+# User C modules
+USER_C_MODULES = $(TOP)/examples/usercmodule
