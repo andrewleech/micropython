@@ -780,8 +780,7 @@ int eth_tx_buf_get(size_t len, uint8_t **buf) {
     #if defined(STM32H5) || defined(STM32H7) || defined(STM32N6)
     // Update TX descriptor with length and buffer pointer
     *buf = &eth_dma.tx_buf[eth_dma_tx_descr_idx * TX_BUF_SIZE];
-    tx_descr->tdes2 = (len & TX_DESCR_2_B1L_Msk)
-            | (1 << TX_DESCR_2_IOC_Pos); // Interrupt Enabled on Completion
+    tx_descr->tdes2 = len & TX_DESCR_2_B1L_Msk;
     tx_descr->tdes0 = (uint32_t)*buf;
     #else
     // Update TX descriptor with length, buffer pointer and linked list pointer
