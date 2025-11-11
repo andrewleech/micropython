@@ -36,6 +36,11 @@
 // External SPI flash.
 #define MICROPY_HW_XSPIFLASH_SIZE_BITS_LOG2 (28) // 256Mbit
 
+// OpenMV bootloader compatibility: configure XSPI at 200 MHz DDR mode.
+#if defined(OPENMV_BOOTLOADER)
+#define MICROPY_HW_XSPI_PRESCALER       (2) // F_CLK = F_AHB/2 = 400MHz/2 = 200MHz
+#endif
+
 // ROMFS config
 #define MICROPY_HW_ROMFS_ENABLE_EXTERNAL_XSPI (1)
 #define MICROPY_HW_ROMFS_XSPI_SPIBDEV_OBJ (&spi_bdev)
@@ -78,7 +83,7 @@
 #define MICROPY_HW_SPI4_MOSI        (pyb_pin_SPI4_MOSI)
 
 // USER is pulled high, and pressing the button makes the input go low.
-#define MICROPY_HW_USRSW_PIN        (pyb_pin_BUTTON)
+#define MICROPY_HW_USRSW_PIN        (pyb_pin_SW)
 #define MICROPY_HW_USRSW_PULL       (GPIO_NOPULL)
 #define MICROPY_HW_USRSW_EXTI_MODE  (GPIO_MODE_IT_FALLING)
 #define MICROPY_HW_USRSW_PRESSED    (0)
