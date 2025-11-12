@@ -1245,6 +1245,91 @@ static void type_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     }
 }
 
+static mp_obj_t type_unary_op(mp_unary_op_t op, mp_obj_t self_in) {
+    // Handle unary operations on type objects (e.g., len(EnumClass))
+    // by looking up special methods in the metaclass
+    mp_obj_type_t *self = MP_OBJ_TO_PTR(self_in);
+    qstr op_name = mp_unary_op_method_name[op];
+
+    if (op_name == 0) {
+        return MP_OBJ_NULL; // op not supported
+    }
+
+    // Look up the special method in the metaclass
+    mp_obj_t member[2] = {MP_OBJ_NULL};
+    struct class_lookup_data lookup = {
+        .obj = NULL,  // We're looking up on the type itself, not an instance
+        .attr = op_name,
+        .slot_offset = 0,
+        .dest = member,
+        .is_type = true,
+    };
+    mp_obj_class_lookup(&lookup, self->base.type);
+
+    if (member[0] != MP_OBJ_NULL) {
+        // Found the method in metaclass, call it with the class as argument
+        mp_obj_t val = mp_call_function_1(member[0], self_in);
+
+        // Post-process return value for specific operations
+        switch (op) {
+            case MP_UNARY_OP_HASH:
+                // __hash__ must return a small int
+                val = MP_OBJ_NEW_SMALL_INT(mp_obj_get_int_truncated(val));
+                break;
+            default:
+                break;
+        }
+
+        return val;
+    }
+
+    return MP_OBJ_NULL; // op not supported
+}
+
+static mp_obj_t type_binary_op(mp_binary_op_t op, mp_obj_t lhs_in, mp_obj_t rhs_in) {
+    // Handle binary operations on type objects (e.g., member in EnumClass)
+    // by looking up special methods in the metaclass
+    mp_obj_type_t *lhs = MP_OBJ_TO_PTR(lhs_in);
+    qstr op_name = mp_binary_op_method_name[op];
+
+    if (op_name == 0) {
+        return MP_OBJ_NULL; // op not supported
+    }
+
+    // Look up the special method in the metaclass
+    mp_obj_t dest[3] = {MP_OBJ_NULL};
+    struct class_lookup_data lookup = {
+        .obj = NULL,  // We're looking up on the type itself, not an instance
+        .attr = op_name,
+        .slot_offset = 0,
+        .dest = dest,
+        .is_type = true,
+    };
+    mp_obj_class_lookup(&lookup, lhs->base.type);
+
+    if (dest[0] != MP_OBJ_NULL) {
+        // Found the method in metaclass, call it with the class and rhs as arguments
+        mp_obj_t args[2] = {lhs_in, rhs_in};
+        mp_obj_t res = mp_call_function_n_kw(dest[0], 2, 0, args);
+
+        // Post-process return value for specific operations
+        if (op == MP_BINARY_OP_CONTAINS) {
+            res = mp_obj_new_bool(mp_obj_is_true(res));
+        }
+
+        #if MICROPY_PY_BUILTINS_NOTIMPLEMENTED
+        // NotImplemented means try other fallbacks
+        if (res == mp_const_notimplemented) {
+            return MP_OBJ_NULL; // op not supported
+        }
+        #endif
+
+        return res;
+    }
+
+    return MP_OBJ_NULL; // op not supported
+}
+
 MP_DEFINE_CONST_OBJ_TYPE(
     mp_type_type,
     MP_QSTR_type,
@@ -1252,6 +1337,8 @@ MP_DEFINE_CONST_OBJ_TYPE(
     make_new, type_make_new,
     print, type_print,
     call, type_call,
+    unary_op, type_unary_op,
+    binary_op, type_binary_op,
     attr, type_attr
     );
 
@@ -1600,7 +1687,16 @@ bool mp_obj_is_subclass_fast(mp_const_obj_t object, mp_const_obj_t classinfo) {
 static mp_obj_t mp_obj_is_subclass(mp_obj_t object, mp_obj_t classinfo) {
     size_t len;
     mp_obj_t *items;
-    if (mp_obj_is_type(classinfo, &mp_type_type)) {
+    // Check if classinfo is a type (either mp_type_type or instance of a metaclass)
+    bool is_class = mp_obj_is_type(classinfo, &mp_type_type);
+    if (!is_class && mp_obj_is_obj(classinfo)) {
+        // Check if it's an instance of a metaclass (i.e., its type is a subclass of type)
+        const mp_obj_type_t *classinfo_type = mp_obj_get_type(classinfo);
+        is_class = mp_obj_is_instance_type(classinfo_type) &&
+            mp_obj_is_subclass_fast(MP_OBJ_FROM_PTR(classinfo_type), MP_OBJ_FROM_PTR(&mp_type_type));
+    }
+
+    if (is_class) {
         len = 1;
         items = &classinfo;
     } else if (mp_obj_is_type(classinfo, &mp_type_tuple)) {
