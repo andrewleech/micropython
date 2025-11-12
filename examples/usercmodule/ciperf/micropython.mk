@@ -6,8 +6,7 @@ SRC_USERMOD += $(CIPERF_MOD_DIR)/ciperf.c
 # Include paths
 CFLAGS_USERMOD += -I$(CIPERF_MOD_DIR)
 
-# Performance optimization flags
-# -O3: Maximum optimization for speed
-# -funroll-loops: Unroll loops for better performance
-# -finline-functions: Inline functions aggressively
-CFLAGS_USERMOD += -O3 -funroll-loops -finline-functions
+# Optimize for size instead of aggressive optimization.
+# Aggressive flags (-O3, -funroll-loops, -finline-functions) can cause issues
+# with static buffers on memory-constrained embedded systems.
+CFLAGS_USERMOD += -Os  # Optimize for size, safe for embedded

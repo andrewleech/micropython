@@ -32,10 +32,10 @@
 // Port number (5201 is standard iperf3)
 #define CIPERF_DEFAULT_PORT (5201)
 
-// Performance-critical: static buffer to avoid malloc overhead during test
-// CRITICAL REVIEW: Using static buffer is thread-unsafe but provides best performance
-// Acceptable trade-off since only one test runs at a time
-static uint8_t ciperf_tx_buffer[CIPERF_BUFFER_SIZE];
+// Performance-critical: heap-allocated buffer to avoid BSS bloat
+// CRITICAL FIX: Changed from static array to heap allocation
+// Static 16KB buffer in BSS was preventing boot on STM32N6
+static uint8_t *ciperf_tx_buffer = NULL;
 
 typedef struct {
     struct tcp_pcb *pcb;
@@ -206,6 +206,7 @@ static err_t ciperf_tcp_connected_cb(void *arg, struct tcp_pcb *pcb, err_t err) 
 /*
  * Initialize transmit buffer with pattern
  * PERFORMANCE: Lazy initialization on first use
+ * CRITICAL FIX: Heap-allocate buffer to avoid BSS bloat
  */
 static bool ciperf_buffers_initialized = false;
 
@@ -213,6 +214,15 @@ static void ciperf_init_buffers(void) {
     if (ciperf_buffers_initialized) {
         return;
     }
+
+    // Allocate buffer on heap
+    if (ciperf_tx_buffer == NULL) {
+        ciperf_tx_buffer = m_malloc(CIPERF_BUFFER_SIZE);
+        if (ciperf_tx_buffer == NULL) {
+            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Failed to allocate buffer"));
+        }
+    }
+
     // Fill with incrementing pattern for easy debugging
     for (int i = 0; i < CIPERF_BUFFER_SIZE; i++) {
         ciperf_tx_buffer[i] = (uint8_t)i;
