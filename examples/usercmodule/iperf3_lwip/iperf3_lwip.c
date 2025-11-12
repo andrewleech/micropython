@@ -83,7 +83,7 @@ static err_t iperf3_tcp_sent_cb(void *arg, struct tcp_pcb *pcb, u16_t len) {
         // PERFORMANCE: TCP_WRITE_FLAG_MORE hints that more data is coming
         // This allows lwIP to coalesce segments for efficiency
         err_t err = tcp_write(pcb, iperf3_tx_buffer, to_send,
-                             TCP_WRITE_FLAG_MORE | TCP_WRITE_FLAG_COPY);
+            TCP_WRITE_FLAG_MORE | TCP_WRITE_FLAG_COPY);
 
         if (err == ERR_OK) {
             state->bytes_transferred += to_send;
@@ -293,7 +293,7 @@ static mp_obj_t iperf3_lwip_server(size_t n_args, const mp_obj_t *args) {
     float mbits_per_sec = (iperf3_state.bytes_transferred * 8.0f) / (elapsed_sec * 1000000.0f);
 
     mp_printf(&mp_plat_print, "\nReceived %.2f MB in %.2f sec = %.2f Mbits/sec\n",
-              (double)mbytes, (double)elapsed_sec, (double)mbits_per_sec);
+        (double)mbytes, (double)elapsed_sec, (double)mbits_per_sec);
 
     // Cleanup - close connection if still open
     if (iperf3_state.pcb != NULL) {
@@ -397,7 +397,7 @@ static mp_obj_t iperf3_lwip_client(size_t n_args, const mp_obj_t *args) {
     float mbits_per_sec = (iperf3_state.bytes_transferred * 8.0f) / (elapsed_sec * 1000000.0f);
 
     mp_printf(&mp_plat_print, "\nSent %.2f MB in %.2f sec = %.2f Mbits/sec\n",
-              (double)mbytes, (double)elapsed_sec, (double)mbits_per_sec);
+        (double)mbytes, (double)elapsed_sec, (double)mbits_per_sec);
 
     // Cleanup - close connection if still open
     if (iperf3_state.pcb != NULL) {
