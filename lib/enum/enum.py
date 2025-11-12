@@ -3,12 +3,55 @@ Minimal Enum implementation for MicroPython
 Compatible with CPython's enum module (basic features only)
 
 Size: ~320 lines
-Features: Basic Enum, IntEnum, iteration, value lookup, aliases
+Features: Basic Enum, IntEnum, iteration, value lookup, aliases, auto()
 
 Note: IntEnum members support all integer operations but isinstance(member, int)
 may return False due to MicroPython metaclass limitations. All arithmetic and
 comparison operations work correctly.
 """
+
+try:
+    # Check if __prepare__ is supported
+    import sys
+    _prepare_supported = hasattr(type, '__prepare__') or sys.implementation.name == 'micropython'
+except:
+    _prepare_supported = False
+
+
+# Global counter for auto() to track creation order
+_auto_counter = 0
+# Track the current enum class being created (for context)
+_current_enum_generation = 0
+
+class auto:
+    """
+    Instances are replaced with an appropriate value for Enum members.
+    By default, the initial value starts at 1 and increments by 1.
+
+    Note: In MicroPython, when mixing auto() with explicit values, all auto()
+    values are assigned after considering ALL explicit values in the enum.
+    This differs from CPython which processes members in definition order.
+    """
+    def __init__(self):
+        global _auto_counter
+        # Track creation order via a global counter
+        self._order = _auto_counter
+        _auto_counter += 1
+        self._value = None
+        self._generation = _current_enum_generation
+
+    def __repr__(self):
+        return 'auto()'
+
+
+class _EnumDict(dict):
+    """
+    Track enum members as they are defined.
+
+    Note: MicroPython's __prepare__ implementation doesn't call __setitem__ during
+    class body execution, so this is just a placeholder.
+    """
+    pass
 
 
 def _create_int_member(enum_class, value, enum_name, member_name):
@@ -35,12 +78,54 @@ def _create_int_member(enum_class, value, enum_name, member_name):
 class EnumMeta(type):
     """Metaclass for Enum"""
 
+    if _prepare_supported:
+        @classmethod
+        def __prepare__(mcs, name, bases):
+            """
+            Return a plain dict for the class namespace.
+            We can't use a dict subclass because MicroPython's __build_class__
+            implementation casts the namespace to mp_obj_dict_t*.
+            """
+            return {}
+
     def __new__(mcs, name, bases, namespace):
+        # Process auto() values if __prepare__ is supported
+        if _prepare_supported:
+            # Collect all members with auto() instances
+            auto_members = []
+            explicit_values = []
+
+            for key in namespace.keys():
+                if not key.startswith("_"):
+                    value = namespace[key]
+                    if not callable(value):
+                        if isinstance(value, auto):
+                            auto_members.append((key, value))
+                        elif isinstance(value, int):
+                            explicit_values.append(value)
+
+            if auto_members:
+                # Sort auto() members by their creation order
+                auto_members.sort(key=lambda x: x[1]._order)
+
+                # Determine starting value for auto()
+                # In MicroPython, without dict insertion order, we take a simplified approach:
+                # auto() starts at 1, or at max(explicit_values) + 1 if there are explicit values
+                if explicit_values:
+                    auto_value = max(explicit_values) + 1
+                else:
+                    auto_value = 1
+
+                # Assign sequential values to auto() members
+                for key, value in auto_members:
+                    namespace[key] = auto_value
+                    auto_value += 1
+
         # Extract enum members (non-callable, non-dunder attributes)
         member_names = []
         member_values = {}
 
-        # Identify members (keep them in namespace for now)
+        # Identify members
         for key in list(namespace.keys()):
             if not key.startswith("_") and not callable(namespace.get(key)):
                 value = namespace[key]
@@ -323,4 +408,4 @@ def unique(enumeration):
     return enumeration
 
 
-__all__ = ["Enum", "IntEnum", "unique", "EnumMeta"]
+__all__ = ["Enum", "IntEnum", "unique", "EnumMeta", "auto"]
