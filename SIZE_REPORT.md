@@ -12,7 +12,7 @@ This report documents the code size impact of adding metaclass support and a min
 - Fixed `mp_obj_is_subclass()` to recognize classes created with custom metaclasses
 - Enhanced metaclass special method lookup for operations like `__len__` and `__contains__`
 
-### 2. Enum Implementation (enum_minimal.py)
+### 2. Enum Implementation (enum.py)
 - ~250 lines of Python code
 - Implements `Enum` and `IntEnum` classes
 - Features:
@@ -28,13 +28,13 @@ This report documents the code size impact of adding metaclass support and a min
 | Configuration | Text Size (bytes) | Change | % Change |
 |--------------|------------------|--------|----------|
 | Baseline (no enum) | 368,276 | - | - |
-| With enum_minimal.py frozen | 370,812 | +2,536 | +0.69% |
+| With enum.py frozen | 370,812 | +2,536 | +0.69% |
 
 ### Analysis
 
 1. **Core C Implementation**: The metaclass operator support in py/objtype.c adds approximately 100 lines of C code for the unary_op and binary_op handlers, plus the isinstance fix. This results in minimal overhead since the code is only executed when these operations are actually used on type objects.
 
-2. **Frozen Python Module**: The enum_minimal.py module when frozen as bytecode adds 2,536 bytes (2.5 KB), which is remarkably compact for the functionality provided.
+2. **Frozen Python Module**: The enum.py module when frozen as bytecode adds 2,536 bytes (2.5 KB), which is remarkably compact for the functionality provided.
 
 3. **Total Impact**: The combined overhead is **0.69%** of the baseline firmware size, which is negligible for most applications.
 

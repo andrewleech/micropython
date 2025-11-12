@@ -2,30 +2,17 @@
 
 ## Overview
 
-The `enum_minimal.py` module provides a CPython-compatible implementation of the `enum` module for MicroPython. All supported features work identically between CPython and MicroPython.
+The `enum.py` module provides a CPython-compatible implementation of the `enum` module for MicroPython. All supported features work identically between CPython and MicroPython.
 
 ## Installation
 
-### Option 1: Import as `enum_minimal`
+### Option 1: Frozen Module (Recommended)
 
-Use the module directly as provided:
-
-```python
-from enum_minimal import Enum, IntEnum
-
-class Color(Enum):
-    RED = 1
-    GREEN = 2
-    BLUE = 3
-```
-
-### Option 2: CPython-Compatible Import (Recommended for Frozen Modules)
-
-When freezing the module into your MicroPython firmware, you can rename it to `enum.py` in the manifest to enable standard CPython imports:
+When freezing the module into your MicroPython firmware:
 
 ```python
 # In your manifest.py
-freeze("path/to", "enum_minimal.py", as="enum.py")
+freeze("path/to", "enum.py")
 ```
 
 Then use standard CPython syntax:
@@ -39,12 +26,18 @@ class Color(Enum):
     BLUE = 3
 ```
 
-### Option 3: For Filesystem Deployment
+### Option 2: Filesystem Deployment
 
-If deploying to the MicroPython filesystem (not frozen), you can copy `enum_minimal.py` as `enum.py`:
+If deploying to the MicroPython filesystem (not frozen):
 
 ```bash
-cp enum_minimal.py /path/to/micropython/lib/enum.py
+cp enum.py /path/to/micropython/lib/enum.py
+```
+
+Then import normally:
+
+```python
+from enum import Enum, IntEnum
 ```
 
 ## Supported Features (100% CPython Compatible)
@@ -54,7 +47,7 @@ All the following features work identically to CPython's enum module:
 ### Basic Enum
 
 ```python
-from enum_minimal import Enum
+from enum import Enum
 
 class Color(Enum):
     RED = 1
@@ -86,7 +79,7 @@ print(Color.RED == Color.GREEN)  # False
 ### IntEnum
 
 ```python
-from enum_minimal import IntEnum
+from enum import IntEnum
 
 class Status(IntEnum):
     PENDING = 0
@@ -166,7 +159,7 @@ The following CPython enum features are NOT implemented to keep the module minim
 
 ## Migration from CPython
 
-Code written for CPython's enum module will work unchanged on MicroPython for all supported features. Simply ensure you have `enum_minimal.py` available as described in the Installation section.
+Code written for CPython's enum module will work unchanged on MicroPython for all supported features. Simply ensure you have `enum.py` available as described in the Installation section.
 
 ### Example: Drop-in Replacement
 
@@ -189,7 +182,7 @@ if response.status == Status.OK:
 
 **MicroPython (no changes needed!):**
 ```python
-from enum_minimal import Enum, IntEnum
+from enum import Enum, IntEnum
 
 class Color(Enum):
     RED = 1
@@ -218,4 +211,4 @@ Enum member access and operations have negligible performance overhead compared 
 
 ## Summary
 
-The `enum_minimal.py` module provides full CPython compatibility for basic Enum and IntEnum features, allowing existing CPython enum code to run unchanged on MicroPython. The minimal size overhead (2.5 KB frozen) makes it suitable for embedded deployment.
+The `enum.py` module provides full CPython compatibility for basic Enum and IntEnum features, allowing existing CPython enum code to run unchanged on MicroPython. The minimal size overhead (2.5 KB frozen) makes it suitable for embedded deployment.
