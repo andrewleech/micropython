@@ -31,3 +31,18 @@ FROZEN_MANIFEST ?= $(BOARD_DIR)/manifest.py
 
 # User C modules
 USER_C_MODULES = $(TOP)/examples/usercmodule
+
+# OpenMV bootloader compatibility mode
+# Set OPENMV_BOOTLOADER=1 to:
+# - Configure XSPI at 200 MHz (matches OpenMV bootloader init)
+# - Set DFU VID:PID to 37c5:9206 (OpenMV's USB IDs)
+OPENMV_BOOTLOADER ?= 0
+
+ifeq ($(OPENMV_BOOTLOADER),1)
+# Add preprocessor define for C code
+CFLAGS += -DOPENMV_BOOTLOADER
+
+# Set OpenMV DFU USB VID:PID
+BOOTLOADER_DFU_USB_VID = 0x37c5
+BOOTLOADER_DFU_USB_PID = 0x9206
+endif
