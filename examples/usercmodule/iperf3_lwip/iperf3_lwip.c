@@ -258,6 +258,49 @@ static void iperf3_init_buffers(void) {
 }
 
 /*
+ * Create statistics dictionary for return to Python
+ *
+ * Returns dict with keys:
+ *   - bytes: Total bytes transferred (int)
+ *   - seconds: Elapsed time (float)
+ *   - packets_sent: Packet count for UDP client, 0 for others (int)
+ *   - packets_received: Packet count for UDP server, 0 for others (int)
+ *   - packet_loss: Packets lost for UDP server, 0 for others (int)
+ *   - jitter_ms: Jitter in milliseconds for UDP server, 0.0 for others (float)
+ */
+static mp_obj_t iperf3_create_stats_dict(uint64_t bytes, float seconds,
+    uint32_t packets_sent, uint32_t packets_received,
+    uint32_t packets_lost, float jitter_ms) {
+    mp_obj_t dict = mp_obj_new_dict(6);
+
+    // Bytes transferred
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_bytes),
+        mp_obj_new_int_from_ull(bytes));
+
+    // Duration in seconds
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_seconds),
+        mp_obj_new_float(seconds));
+
+    // Packets sent (UDP client only, 0 for others)
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_packets_sent),
+        mp_obj_new_int(packets_sent));
+
+    // Packets received (UDP server only, 0 for others)
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_packets_received),
+        mp_obj_new_int(packets_received));
+
+    // Packet loss (UDP server only)
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_packet_loss),
+        mp_obj_new_int(packets_lost));
+
+    // Jitter in milliseconds (UDP server only)
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_jitter_ms),
+        mp_obj_new_float(jitter_ms));
+
+    return dict;
+}
+
+/*
  * TCP server implementation (internal)
  */
 static mp_obj_t iperf3_lwip_tcp_server_impl(uint16_t port, uint32_t duration_ms) {
@@ -320,6 +363,7 @@ static mp_obj_t iperf3_lwip_tcp_server_impl(uint16_t port, uint32_t duration_ms)
     float mbytes = iperf3_state.bytes_transferred / (1024.0f * 1024.0f);
     float mbits_per_sec = (iperf3_state.bytes_transferred * 8.0f) / (elapsed_sec * 1000000.0f);
 
+    // Print results (keep for console visibility)
     mp_printf(&mp_plat_print, "\nReceived %.2f MB in %.2f sec = %.2f Mbits/sec\n",
         (double)mbytes, (double)elapsed_sec, (double)mbits_per_sec);
 
@@ -341,7 +385,15 @@ static mp_obj_t iperf3_lwip_tcp_server_impl(uint16_t port, uint32_t duration_ms)
         iperf3_state.listen_pcb = NULL;
     }
 
-    return mp_const_none;
+    // Return statistics dict
+    return iperf3_create_stats_dict(
+        iperf3_state.bytes_transferred, // bytes
+        elapsed_sec,                     // seconds
+        0,                               // packets_sent (TCP doesn't track)
+        0,                               // packets_received (TCP doesn't track)
+        0,                               // packet_loss (TCP doesn't have)
+        0.0f                             // jitter_ms (TCP doesn't measure)
+        );
 }
 
 /*
@@ -413,6 +465,7 @@ static mp_obj_t iperf3_lwip_tcp_client_impl(const char *host, uint16_t port, uin
     float mbytes = iperf3_state.bytes_transferred / (1024.0f * 1024.0f);
     float mbits_per_sec = (iperf3_state.bytes_transferred * 8.0f) / (elapsed_sec * 1000000.0f);
 
+    // Print results (keep for console visibility)
     mp_printf(&mp_plat_print, "\nSent %.2f MB in %.2f sec = %.2f Mbits/sec\n",
         (double)mbytes, (double)elapsed_sec, (double)mbits_per_sec);
 
@@ -425,7 +478,15 @@ static mp_obj_t iperf3_lwip_tcp_client_impl(const char *host, uint16_t port, uin
         iperf3_state.pcb = NULL;
     }
 
-    return mp_const_none;
+    // Return statistics dict
+    return iperf3_create_stats_dict(
+        iperf3_state.bytes_transferred, // bytes
+        elapsed_sec,                     // seconds
+        0,                               // packets_sent (TCP doesn't track)
+        0,                               // packets_received (TCP doesn't track)
+        0,                               // packet_loss (TCP doesn't have)
+        0.0f                             // jitter_ms (TCP doesn't measure)
+        );
 }
 
 /*
@@ -543,6 +604,7 @@ static mp_obj_t iperf3_lwip_udp_server_impl(uint16_t port, uint32_t duration_ms)
         (iperf3_udp_state.packets_lost * 100.0f) / total_packets : 0.0f;
     float jitter_ms = iperf3_udp_state.jitter / 1000.0f;
 
+    // Print results (keep for console visibility)
     mp_printf(&mp_plat_print, "\nReceived %.2f MB in %.2f sec = %.2f Mbits/sec\n",
         (double)mbytes, (double)elapsed_sec, (double)mbits_per_sec);
     mp_printf(&mp_plat_print, "Packets: %lu received, %lu lost (%.2f%%), jitter %.3f ms\n",
@@ -554,7 +616,15 @@ static mp_obj_t iperf3_lwip_udp_server_impl(uint16_t port, uint32_t duration_ms)
     udp_remove(pcb);
     iperf3_udp_state.pcb = NULL;
 
-    return mp_const_none;
+    // Return statistics dict
+    return iperf3_create_stats_dict(
+        iperf3_udp_state.bytes_transferred,
+        elapsed_sec,
+        0,  // packets_sent (server doesn't track sends)
+        iperf3_udp_state.packets_received,
+        iperf3_udp_state.packets_lost,
+        jitter_ms
+        );
 }
 
 /*
@@ -657,6 +727,7 @@ static mp_obj_t iperf3_lwip_udp_client_impl(const char *host, uint16_t port, uin
     float mbytes = iperf3_udp_state.bytes_transferred / (1024.0f * 1024.0f);
     float mbits_per_sec = (iperf3_udp_state.bytes_transferred * 8.0f) / (elapsed_sec * 1000000.0f);
 
+    // Print results (keep for console visibility)
     mp_printf(&mp_plat_print, "\nSent %.2f MB in %.2f sec = %.2f Mbits/sec\n",
         (double)mbytes, (double)elapsed_sec, (double)mbits_per_sec);
     mp_printf(&mp_plat_print, "Packets sent: %lu\n", (unsigned long)iperf3_udp_state.packets_sent);
@@ -665,7 +736,15 @@ static mp_obj_t iperf3_lwip_udp_client_impl(const char *host, uint16_t port, uin
     udp_remove(pcb);
     iperf3_udp_state.pcb = NULL;
 
-    return mp_const_none;
+    // Return statistics dict
+    return iperf3_create_stats_dict(
+        iperf3_udp_state.bytes_transferred,
+        elapsed_sec,
+        iperf3_udp_state.packets_sent,
+        0,     // packets_received (client doesn't receive)
+        0,     // packet_loss (client doesn't measure)
+        0.0f   // jitter_ms (client doesn't measure)
+        );
 }
 
 /*
