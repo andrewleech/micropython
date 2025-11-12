@@ -1314,6 +1314,14 @@ typedef time_t mp_timestamp_t;
 #define MICROPY_PY_METACLASS_PROPERTIES (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
 #endif
 
+// Whether to support metaclass __prepare__ method (PEP 3115)
+// Allows metaclasses to customize the namespace dict before class creation
+// Required for enum.auto() to track insertion order
+// Size impact: ~150-180 bytes
+#ifndef MICROPY_PY_METACLASS_PREPARE
+#define MICROPY_PY_METACLASS_PREPARE (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_FULL_FEATURES)
+#endif
+
 // Support for async/await/async for/async with
 #ifndef MICROPY_PY_ASYNC_AWAIT
 #define MICROPY_PY_ASYNC_AWAIT (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_CORE_FEATURES)
