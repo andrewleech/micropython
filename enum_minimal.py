@@ -37,16 +37,19 @@ class EnumMeta(type):
 
                 # Create member instance
                 # Check if class inherits from int (IntEnum) or has custom __new__
-                has_int_base = False
-                for b in bases:
-                    try:
-                        if isinstance(b, type) and issubclass(b, int):
-                            has_int_base = True
-                            break
-                    except TypeError:
-                        pass
+                # Recursively check if int is in the MRO
+                def has_int_in_mro(klass):
+                    if klass is int:
+                        return True
+                    for base in getattr(klass, "__bases__", ()):
+                        if has_int_in_mro(base):
+                            return True
+                    return False
 
-                if has_int_base or "__new__" in cls.__dict__:
+                has_int_base = has_int_in_mro(cls)
+                has_custom_new = "__new__" in cls.__dict__
+
+                if has_int_base or has_custom_new:
                     # Use the class's __new__ method (e.g., for IntEnum)
                     member = cls.__new__(cls, member_value)
                     if not hasattr(member, "_value_"):
@@ -147,7 +150,7 @@ class Enum(metaclass=EnumMeta):
         return self.__class__, (self._value_,)
 
 
-class IntEnum(int, Enum):
+class IntEnum(int, Enum, metaclass=EnumMeta):
     """
     Enum where members are also integers.
     Supports all integer operations.
@@ -155,10 +158,86 @@ class IntEnum(int, Enum):
 
     def __new__(cls, value):
         """Create integer enum member"""
-        # Create as integer
-        obj = int.__new__(cls, value)
+        # MicroPython limitation: int.__new__ is not accessible
+        # Create enum member using object.__new__ and add int-like behavior via methods
+        obj = object.__new__(cls)
         obj._value_ = value
         return obj
+
+    # Integer operation methods to make IntEnum behave like int
+    def __int__(self):
+        return self._value_
+
+    def __index__(self):
+        return self._value_
+
+    def __eq__(self, other):
+        if type(other) is type(self):
+            return self is other
+        return self._value_ == other
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __lt__(self, other):
+        return self._value_ < int(other)
+
+    def __le__(self, other):
+        return self._value_ <= int(other)
+
+    def __gt__(self, other):
+        return self._value_ > int(other)
+
+    def __ge__(self, other):
+        return self._value_ >= int(other)
+
+    def __add__(self, other):
+        return self._value_ + int(other)
+
+    def __radd__(self, other):
+        return int(other) + self._value_
+
+    def __sub__(self, other):
+        return self._value_ - int(other)
+
+    def __rsub__(self, other):
+        return int(other) - self._value_
+
+    def __mul__(self, other):
+        return self._value_ * int(other)
+
+    def __rmul__(self, other):
+        return int(other) * self._value_
+
+    def __floordiv__(self, other):
+        return self._value_ // int(other)
+
+    def __rfloordiv__(self, other):
+        return int(other) // self._value_
+
+    def __mod__(self, other):
+        return self._value_ % int(other)
+
+    def __rmod__(self, other):
+        return int(other) % self._value_
+
+    def __and__(self, other):
+        return self._value_ & int(other)
+
+    def __rand__(self, other):
+        return int(other) & self._value_
+
+    def __or__(self, other):
+        return self._value_ | int(other)
+
+    def __ror__(self, other):
+        return int(other) | self._value_
+
+    def __xor__(self, other):
+        return self._value_ ^ int(other)
+
+    def __rxor__(self, other):
+        return int(other) ^ self._value_
 
 
 # Module-level functions for compatibility
