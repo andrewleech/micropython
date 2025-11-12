@@ -4,6 +4,9 @@ This test demonstrates that the MicroPython enum module works
 identically to CPython's enum module for supported features.
 """
 
+import sys
+
+sys.path.insert(0, "lib/enum")
 from enum import Enum, IntEnum
 
 
