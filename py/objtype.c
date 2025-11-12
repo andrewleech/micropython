@@ -1245,6 +1245,7 @@ static void type_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     }
 }
 
+#if MICROPY_PY_METACLASS_OPS
 static mp_obj_t type_unary_op(mp_unary_op_t op, mp_obj_t self_in) {
     // Handle unary operations on type objects (e.g., len(EnumClass))
     // by looking up special methods in the metaclass
@@ -1329,6 +1330,7 @@ static mp_obj_t type_binary_op(mp_binary_op_t op, mp_obj_t lhs_in, mp_obj_t rhs_
 
     return MP_OBJ_NULL; // op not supported
 }
+#endif // MICROPY_PY_METACLASS_OPS
 
 MP_DEFINE_CONST_OBJ_TYPE(
     mp_type_type,
@@ -1337,8 +1339,10 @@ MP_DEFINE_CONST_OBJ_TYPE(
     make_new, type_make_new,
     print, type_print,
     call, type_call,
+    #if MICROPY_PY_METACLASS_OPS
     unary_op, type_unary_op,
     binary_op, type_binary_op,
+    #endif
     attr, type_attr
     );
 

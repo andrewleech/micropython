@@ -1292,6 +1292,13 @@ typedef time_t mp_timestamp_t;
 #define MICROPY_PY_DELATTR_SETATTR (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
 #endif
 
+// Whether to support metaclass operator overloading (__len__, __contains__ on type objects)
+// This enables operations like len(EnumClass) and member in EnumClass for custom metaclasses
+// This costs ~100 bytes of code size for the operator dispatch handlers
+#ifndef MICROPY_PY_METACLASS_OPS
+#define MICROPY_PY_METACLASS_OPS (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
+#endif
+
 // Support for async/await/async for/async with
 #ifndef MICROPY_PY_ASYNC_AWAIT
 #define MICROPY_PY_ASYNC_AWAIT (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_CORE_FEATURES)
