@@ -1274,8 +1274,13 @@ static mp_obj_t type_unary_op(mp_unary_op_t op, mp_obj_t self_in) {
     // by looking up special methods in the metaclass
     mp_obj_type_t *self = MP_OBJ_TO_PTR(self_in);
 
-    // Fast path: standard type metaclass doesn't support operators
+    // Fast path: standard type metaclass doesn't support custom operators
+    // but we still need to handle __hash__ with default implementation
     if (self->base.type == &mp_type_type) {
+        if (op == MP_UNARY_OP_HASH) {
+            // Use default hash based on object identity (address)
+            return MP_OBJ_NEW_SMALL_INT((mp_uint_t)self_in);
+        }
         return MP_OBJ_NULL;
     }
 
@@ -1311,6 +1316,12 @@ static mp_obj_t type_unary_op(mp_unary_op_t op, mp_obj_t self_in) {
         }
 
         return val;
+    }
+
+    // Metaclass doesn't define the operator, use default for __hash__
+    if (op == MP_UNARY_OP_HASH) {
+        // Use default hash based on object identity (address)
+        return MP_OBJ_NEW_SMALL_INT((mp_uint_t)self_in);
     }
 
     return MP_OBJ_NULL; // op not supported
