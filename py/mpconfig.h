@@ -1260,6 +1260,13 @@ typedef time_t mp_timestamp_t;
 #define MICROPY_MULTIPLE_INHERITANCE (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_CORE_FEATURES)
 #endif
 
+// Whether to support custom metaclass __init__ method invocation.
+// This allows metaclasses to initialize classes after creation, enabling
+// patterns like class registration and state machine setup.
+#ifndef MICROPY_PY_METACLASS_INIT
+#define MICROPY_PY_METACLASS_INIT (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_CORE_FEATURES)
+#endif
+
 // Whether to implement attributes on functions
 #ifndef MICROPY_PY_FUNCTION_ATTRS
 #define MICROPY_PY_FUNCTION_ATTRS (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
@@ -1297,6 +1304,14 @@ typedef time_t mp_timestamp_t;
 // This costs ~100 bytes of code size for the operator dispatch handlers
 #ifndef MICROPY_PY_METACLASS_OPS
 #define MICROPY_PY_METACLASS_OPS (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
+#endif
+
+// Whether to support metaclass method and property lookup on classes
+// This enables @property and methods on metaclasses to be accessible on classes
+// Critical for python-statemachine's .events and .states properties
+// Size impact: ~200-400 bytes (descriptor protocol support)
+#ifndef MICROPY_PY_METACLASS_PROPERTIES
+#define MICROPY_PY_METACLASS_PROPERTIES (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
 #endif
 
 // Support for async/await/async for/async with

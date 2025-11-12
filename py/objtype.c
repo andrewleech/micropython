@@ -1206,6 +1206,38 @@ static void type_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             .is_type = true,
         };
         mp_obj_class_lookup(&lookup, self);
+
+        #if MICROPY_PY_METACLASS_PROPERTIES
+        // If attribute not found in class, look in the metaclass
+        if (dest[0] == MP_OBJ_NULL) {
+            const mp_obj_type_t *metaclass = self->base.type;
+            if (metaclass != &mp_type_type) {
+                // Look up attribute in metaclass
+                lookup.obj = NULL;
+                mp_obj_class_lookup(&lookup, metaclass);
+
+                if (dest[0] != MP_OBJ_NULL) {
+                    // Found in metaclass - handle descriptor protocol
+                    if (mp_obj_is_type(dest[0], &mp_type_property)) {
+                        // Property descriptor: invoke the getter with the class
+                        const mp_obj_t *proxy = mp_obj_property_get(dest[0]);
+                        if (proxy[0] != mp_const_none) {
+                            // Call getter(cls) - property getters take only one argument
+                            dest[0] = mp_call_function_1(proxy[0], self_in);
+                            dest[1] = MP_OBJ_NULL;
+                        } else {
+                            // Property has no getter - not accessible
+                            dest[0] = MP_OBJ_NULL;
+                            dest[1] = MP_OBJ_NULL;
+                        }
+                    } else if (mp_obj_is_callable(dest[0])) {
+                        // Method: bind the class as first argument
+                        dest[1] = self_in;
+                    }
+                }
+            }
+        }
+        #endif
     } else {
         // delete/store attribute
 
@@ -1517,6 +1549,34 @@ static mp_obj_t mp_obj_new_type(qstr name, mp_obj_t bases_tuple, mp_obj_t locals
 
     #if MICROPY_PY_DESCRIPTORS
     setname_consume_call_all(&setname_list, MP_OBJ_FROM_PTR(o));
+    #endif
+
+    #if MICROPY_PY_METACLASS_INIT
+    // Call metaclass.__init__ if it exists (including inherited)
+    // This provides CPython-compatible behavior for metaclass initialization
+    if (metaclass != &mp_type_type) {
+        mp_obj_t init_fn[2] = {MP_OBJ_NULL, MP_OBJ_NULL};
+        struct class_lookup_data lookup = {
+            .obj = NULL,
+            .attr = MP_QSTR___init__,
+            .slot_offset = 0,
+            .dest = init_fn,
+            .is_type = true,
+        };
+        mp_obj_class_lookup(&lookup, metaclass);
+
+        if (init_fn[0] != MP_OBJ_NULL) {
+            // Found __init__ in metaclass (may be inherited), call it
+            // Call metaclass.__init__(cls, name, bases, dict)
+            mp_obj_t args[5];
+            args[0] = init_fn[0];  // method
+            args[1] = MP_OBJ_FROM_PTR(o);  // cls (the newly created class)
+            args[2] = MP_OBJ_NEW_QSTR(name);  // name
+            args[3] = bases_tuple;  // bases
+            args[4] = locals_dict;  // attrs dict
+            mp_call_method_n_kw(3, 0, args);
+        }
+    }
     #endif
 
     return MP_OBJ_FROM_PTR(o);
