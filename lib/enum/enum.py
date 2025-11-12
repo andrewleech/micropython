@@ -152,21 +152,36 @@ class EnumMeta(type):
                 except (TypeError, AttributeError):
                     # cls might not be fully initialized yet
                     has_int_base = False
-                has_custom_new = "__new__" in cls.__dict__
 
-                if has_int_base:
+                # Check if class has a custom __new__ (from StrEnum, IntFlag, etc.)
+                # We need to check if any of the base classes have __new__ in their __dict__
+                has_custom_new = False
+                def has_custom_new_in_bases(cls_to_check):
+                    """Recursively check if any base has custom __new__"""
+                    for base in cls_to_check.__bases__:
+                        if base is Enum or base is object:
+                            continue
+                        if '__new__' in getattr(base, '__dict__', {}):
+                            return True
+                        if has_custom_new_in_bases(base):
+                            return True
+                    return False
+
+                has_custom_new = has_custom_new_in_bases(cls)
+
+                if has_custom_new:
+                    # Use the class's custom __new__ method (takes priority)
+                    # This handles IntFlag, StrEnum, and other custom cases
+                    member = cls.__new__(cls, member_value)
+                    if not hasattr(member, "_value_"):
+                        member._value_ = member_value
+                elif has_int_base:
                     # For int subclasses (IntEnum), create proper int instances
                     if not isinstance(member_value, int):
                         raise TypeError(f"IntEnum values must be integers, not {type(member_value).__name__}")
 
                     # Create int enum member using helper function
                     member = _create_int_member(cls, member_value, cls.__name__, member_name)
-
-                elif has_custom_new:
-                    # Use the class's custom __new__ method
-                    member = cls.__new__(cls, member_value)
-                    if not hasattr(member, "_value_"):
-                        member._value_ = member_value
                 else:
                     # Default: use object.__new__
                     member = object.__new__(cls)
@@ -385,6 +400,146 @@ class IntEnum(int, Enum, metaclass=EnumMeta):
         return ~int(self)
 
 
+class Flag(Enum):
+    """Support for flags with bitwise operations"""
+
+    def _create_pseudo_member_(self, value):
+        """Create a pseudo-member for composite flag values"""
+        # Try to find existing member first
+        if value in self.__class__._value2member_map_:
+            return self.__class__._value2member_map_[value]
+
+        # Create a new pseudo-member for composite values
+        pseudo_member = object.__new__(self.__class__)
+        pseudo_member._value_ = value
+        pseudo_member._name_ = None  # Composite members don't have simple names
+        return pseudo_member
+
+    def __or__(self, other):
+        if isinstance(other, self.__class__):
+            return self._create_pseudo_member_(self._value_ | other._value_)
+        elif isinstance(other, int):
+            return self._create_pseudo_member_(self._value_ | other)
+        return NotImplemented
+
+    def __and__(self, other):
+        if isinstance(other, self.__class__):
+            return self._create_pseudo_member_(self._value_ & other._value_)
+        elif isinstance(other, int):
+            return self._create_pseudo_member_(self._value_ & other)
+        return NotImplemented
+
+    def __xor__(self, other):
+        if isinstance(other, self.__class__):
+            return self._create_pseudo_member_(self._value_ ^ other._value_)
+        elif isinstance(other, int):
+            return self._create_pseudo_member_(self._value_ ^ other)
+        return NotImplemented
+
+    def __invert__(self):
+        # Calculate the complement based on all defined flag values
+        all_bits = 0
+        for member in self.__class__:
+            all_bits |= member._value_
+        return self._create_pseudo_member_(all_bits & ~self._value_)
+
+    # Reverse operations for when Flag is on the right side
+    __ror__ = __or__
+    __rand__ = __and__
+    __rxor__ = __xor__
+
+
+class IntFlag(int, Flag, metaclass=EnumMeta):
+    """Flag enum that is also compatible with integers"""
+
+    def __new__(cls, value):
+        # Create an int instance - MicroPython doesn't expose int.__new__
+        # Use the same approach as IntEnum's _create_int_member
+        obj = object.__new__(cls)
+        obj._value_ = value
+        return obj
+
+    def __int__(self):
+        """Convert to int"""
+        return self._value_
+
+    def _create_pseudo_member_(self, value):
+        """Create a pseudo-member for composite flag values"""
+        # Try to find existing member first
+        if value in self.__class__._value2member_map_:
+            return self.__class__._value2member_map_[value]
+
+        # Create a new pseudo-member for composite values
+        pseudo_member = object.__new__(self.__class__)
+        pseudo_member._value_ = value
+        pseudo_member._name_ = None  # Composite members don't have simple names
+        return pseudo_member
+
+    def __or__(self, other):
+        if isinstance(other, (self.__class__, int)):
+            return self._create_pseudo_member_(self._value_ | int(other))
+        return NotImplemented
+
+    def __and__(self, other):
+        if isinstance(other, (self.__class__, int)):
+            return self._create_pseudo_member_(self._value_ & int(other))
+        return NotImplemented
+
+    def __xor__(self, other):
+        if isinstance(other, (self.__class__, int)):
+            return self._create_pseudo_member_(self._value_ ^ int(other))
+        return NotImplemented
+
+    __ror__ = __or__
+    __rand__ = __and__
+    __rxor__ = __xor__
+
+
+class StrEnum(str, Enum, metaclass=EnumMeta):
+    """Enum where members are also strings"""
+
+    def __new__(cls, value):
+        if not isinstance(value, str):
+            raise TypeError(f"StrEnum values must be strings, not {type(value).__name__}")
+        # MicroPython doesn't expose str.__new__, use object.__new__
+        obj = object.__new__(cls)
+        obj._value_ = value
+        return obj
+
+    def __str__(self):
+        return self._value_
+
+    def __eq__(self, other):
+        """StrEnum members compare equal to their string values"""
+        if isinstance(other, str):
+            return self._value_ == other
+        return super().__eq__(other)
+
+    def __add__(self, other):
+        """String concatenation"""
+        return self._value_ + other
+
+    def __radd__(self, other):
+        """Reverse string concatenation"""
+        return other + self._value_
+
+    def upper(self):
+        """Return uppercase version"""
+        return self._value_.upper()
+
+    def lower(self):
+        """Return lowercase version"""
+        return self._value_.lower()
+
+    def capitalize(self):
+        """Return capitalized version"""
+        return self._value_.capitalize()
+
+    def replace(self, old, new):
+        """Return string with replacements"""
+        return self._value_.replace(old, new)
+
+
 # Module-level functions for compatibility
 def unique(enumeration):
     """
@@ -408,4 +563,4 @@ def unique(enumeration):
     return enumeration
 
 
-__all__ = ["Enum", "IntEnum", "unique", "EnumMeta", "auto"]
+__all__ = ["Enum", "IntEnum", "Flag", "IntFlag", "StrEnum", "unique", "EnumMeta", "auto"]
