@@ -64,17 +64,32 @@ void mp_usbd_init_class_state(void) {
     // In runtime mode, only CDC enabled by default
     mp_usbd_class_state.cdc_enabled = (CFG_TUD_CDC == 1);
     mp_usbd_class_state.msc_enabled = false;
+    mp_usbd_class_state.ncm_enabled = false;
     #else
     // In static mode, enable all compiled classes
     mp_usbd_class_state.cdc_enabled = (CFG_TUD_CDC == 1);
     mp_usbd_class_state.msc_enabled = (CFG_TUD_MSC == 1);
+    mp_usbd_class_state.ncm_enabled = (CFG_TUD_NCM == 1);
     #endif
 }
 
 // Update class state based on bitfield flags
 void mp_usbd_update_class_state(uint8_t flags) {
+    #if MICROPY_HW_NETWORK_USBNET
+    bool prev_ncm_enabled = mp_usbd_class_state.ncm_enabled;
+    #endif
+
     mp_usbd_class_state.cdc_enabled = (flags & USB_BUILTIN_FLAG_CDC) && (CFG_TUD_CDC == 1);
     mp_usbd_class_state.msc_enabled = (flags & USB_BUILTIN_FLAG_MSC) && (CFG_TUD_MSC == 1);
+    mp_usbd_class_state.ncm_enabled = (flags & USB_BUILTIN_FLAG_NCM) && (CFG_TUD_NCM == 1);
+
+    // If NCM is being disabled and it was active, clean it up
+    #if MICROPY_HW_NETWORK_USBNET
+    if (prev_ncm_enabled && !mp_usbd_class_state.ncm_enabled) {
+        extern void usbnet_deinit(void);
+        usbnet_deinit();
+    }
+    #endif
 }
 
 // Functions to generate descriptors from flags (for new bitfield-based system)
@@ -86,6 +101,9 @@ size_t mp_usbd_get_descriptor_cfg_len_from_flags(uint8_t flags) {
     }
     if ((flags & USB_BUILTIN_FLAG_MSC) && CFG_TUD_MSC) {
         len += TUD_MSC_DESC_LEN;
+    }
+    if ((flags & USB_BUILTIN_FLAG_NCM) && CFG_TUD_NCM) {
+        len += TUD_CDC_NCM_DESC_LEN;
     }
 
     return len;
@@ -99,6 +117,9 @@ static uint8_t mp_usbd_get_interface_count_from_flags(uint8_t flags) {
     }
     if ((flags & USB_BUILTIN_FLAG_MSC) && CFG_TUD_MSC) {
         count += 1;
+    }
+    if ((flags & USB_BUILTIN_FLAG_NCM) && CFG_TUD_NCM) {
+        count += 2;  // NCM uses 2 interfaces (control + data)
     }
 
     return count;
@@ -148,6 +169,17 @@ static const uint8_t *mp_usbd_generate_desc_cfg_unified(uint8_t flags, uint8_t *
     }
     #endif
 
+    #if CFG_TUD_NCM
+    if (flags & USB_BUILTIN_FLAG_NCM) {
+        const uint8_t ncm_desc[] = {
+            TUD_CDC_NCM_DESCRIPTOR(itf_num, USBD_STR_NET, USBD_STR_NET_MAC, USBD_NET_EP_CMD, 64, USBD_NET_EP_OUT, USBD_NET_EP_IN, USBD_NET_IN_OUT_MAX_SIZE, CFG_TUD_NET_MTU)
+        };
+        memcpy(desc, ncm_desc, sizeof(ncm_desc));
+        desc += sizeof(ncm_desc);
+        itf_num += 2;  // NCM uses 2 interfaces (control + data)
+    }
+    #endif
+
     return buffer;
 }
 
@@ -170,6 +202,9 @@ size_t mp_usbd_get_descriptor_cfg_len(void) {
     if (mp_usbd_class_state.msc_enabled && CFG_TUD_MSC) {
         len += TUD_MSC_DESC_LEN;
     }
+    if (mp_usbd_class_state.ncm_enabled && CFG_TUD_NCM) {
+        len += TUD_CDC_NCM_DESC_LEN;
+    }
 
     return len;
 }
@@ -188,6 +223,10 @@ static const uint8_t mp_usbd_builtin_desc_cfg_max[MP_USBD_BUILTIN_DESC_CFG_LEN] 
     #if CFG_TUD_MSC
     TUD_MSC_DESCRIPTOR(USBD_ITF_MSC, USBD_STR_MSC, USBD_MSC_EP_OUT, USBD_MSC_EP_IN, USBD_MSC_IN_OUT_MAX_SIZE),
     #endif
+    #if CFG_TUD_NCM
+    // Interface number, description string index, MAC address string index, EP notification address and size, EP data address (out, in), and size, max segment size.
+    TUD_CDC_NCM_DESCRIPTOR(USBD_ITF_NET, USBD_STR_NET, USBD_STR_NET_MAC, USBD_NET_EP_CMD, 64, USBD_NET_EP_OUT, USBD_NET_EP_IN, USBD_NET_IN_OUT_MAX_SIZE, CFG_TUD_NET_MTU),
+    #endif
 };
 #endif
 
@@ -203,6 +242,9 @@ static uint8_t mp_usbd_class_state_to_flags(void) {
     }
     if (mp_usbd_class_state.msc_enabled) {
         flags |= USB_BUILTIN_FLAG_MSC;
+    }
+    if (mp_usbd_class_state.ncm_enabled) {
+        flags |= USB_BUILTIN_FLAG_NCM;
     }
     return flags;
 }

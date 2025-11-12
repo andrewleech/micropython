@@ -43,7 +43,7 @@
 #include "device/usbd_pvt.h"
 #endif
 
-#define HAS_BUILTIN_DRIVERS (MICROPY_HW_USB_CDC || MICROPY_HW_USB_MSC)
+#define HAS_BUILTIN_DRIVERS (MICROPY_HW_USB_CDC || MICROPY_HW_USB_MSC || MICROPY_HW_USB_NCM)
 
 // USB class flags are defined in mp_usbd.h
 
@@ -92,6 +92,11 @@ static mp_obj_t usb_device_make_new(const mp_obj_type_t *type, size_t n_args, si
             if (mp_usbd_class_state.msc_enabled) {
                 flags |= USB_BUILTIN_FLAG_MSC;
             }
+            #if MICROPY_HW_NETWORK_USBNET
+            if (mp_usbd_class_state.ncm_enabled) {
+                flags |= USB_BUILTIN_FLAG_NCM;
+            }
+            #endif
 
             // Create appropriate builtin object based on current state
             if (flags == USB_BUILTIN_FLAG_NONE) {
@@ -381,6 +386,11 @@ static uint8_t mp_usbd_get_itf_max(uint8_t flags) {
     if ((flags & USB_BUILTIN_FLAG_MSC) && MICROPY_HW_USB_MSC) {
         count += 1;
     }
+    #if MICROPY_HW_NETWORK_USBNET
+    if ((flags & USB_BUILTIN_FLAG_NCM) && MICROPY_HW_NETWORK_USBNET) {
+        count += 2;  // NCM uses 2 interfaces (control + data)
+    }
+    #endif
     return count;
 }
 
@@ -392,6 +402,11 @@ static uint8_t mp_usbd_get_ep_max(uint8_t flags) {
     if ((flags & USB_BUILTIN_FLAG_MSC) && MICROPY_HW_USB_MSC) {
         ep_max = (ep_max > 2) ? ep_max : 2;  // MSC uses endpoints 1, 2
     }
+    #if MICROPY_HW_NETWORK_USBNET
+    if ((flags & USB_BUILTIN_FLAG_NCM) && MICROPY_HW_NETWORK_USBNET) {
+        ep_max = (ep_max > 3) ? ep_max : 3;  // NCM uses endpoints 1, 2, 3
+    }
+    #endif
     return ep_max;
 }
 
@@ -403,6 +418,11 @@ static uint8_t mp_usbd_get_str_max(uint8_t flags) {
     if ((flags & USB_BUILTIN_FLAG_MSC) && MICROPY_HW_USB_MSC) {
         str_max = (str_max > 2) ? str_max : 2;  // MSC uses strings 1, 2
     }
+    #if MICROPY_HW_NETWORK_USBNET
+    if ((flags & USB_BUILTIN_FLAG_NCM) && MICROPY_HW_NETWORK_USBNET) {
+        str_max = (str_max > 3) ? str_max : 3;  // NCM uses strings 1, 2, 3
+    }
+    #endif
     return str_max;
 }
 
@@ -481,6 +501,12 @@ static const mp_obj_usb_builtin_t builtin_msc_obj = {
     {&mp_type_usb_builtin}, USB_BUILTIN_FLAG_MSC
 };
 
+#if MICROPY_HW_NETWORK_USBNET
+static const mp_obj_usb_builtin_t builtin_ncm_obj = {
+    {&mp_type_usb_builtin}, USB_BUILTIN_FLAG_NCM
+};
+#endif
+
 // Create default combination based on compile-time configuration
 #if MICROPY_HW_USB_CDC && MICROPY_HW_USB_MSC
 static const mp_obj_usb_builtin_t builtin_default_obj = {
@@ -524,6 +550,10 @@ static const mp_rom_map_elem_t usb_device_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_BUILTIN_CDC), MP_ROM_PTR(&builtin_cdc_obj) },
     { MP_ROM_QSTR(MP_QSTR_BUILTIN_MSC), MP_ROM_PTR(&builtin_msc_obj) },
 
+    #if MICROPY_HW_NETWORK_USBNET
+    { MP_ROM_QSTR(MP_QSTR_BUILTIN_NCM), MP_ROM_PTR(&builtin_ncm_obj) },
+    #endif
+
     // Legacy combination constant for backward compatibility
     #if MICROPY_HW_USB_CDC && MICROPY_HW_USB_MSC
     { MP_ROM_QSTR(MP_QSTR_BUILTIN_CDC_MSC), MP_ROM_PTR(&builtin_cdc_msc_obj) },
@@ -541,6 +571,10 @@ static const mp_rom_map_elem_t usb_device_locals_dict_table[] = {
     // Individual class constants
     { MP_ROM_QSTR(MP_QSTR_BUILTIN_CDC), MP_ROM_PTR(&builtin_cdc_obj) },
     { MP_ROM_QSTR(MP_QSTR_BUILTIN_MSC), MP_ROM_PTR(&builtin_msc_obj) },
+
+    #if MICROPY_HW_NETWORK_USBNET
+    { MP_ROM_QSTR(MP_QSTR_BUILTIN_NCM), MP_ROM_PTR(&builtin_ncm_obj) },
+    #endif
 
     // Legacy combination constant for backward compatibility
     #if MICROPY_HW_USB_CDC && MICROPY_HW_USB_MSC
@@ -594,6 +628,10 @@ static void usb_device_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
                 flags = USB_BUILTIN_FLAG_CDC;
             } else if (dest[1] == MP_OBJ_FROM_PTR(&builtin_msc_obj)) {
                 flags = USB_BUILTIN_FLAG_MSC;
+            #if MICROPY_HW_NETWORK_USBNET
+            } else if (dest[1] == MP_OBJ_FROM_PTR(&builtin_ncm_obj)) {
+                flags = USB_BUILTIN_FLAG_NCM;
+            #endif
             #if MICROPY_HW_USB_CDC && MICROPY_HW_USB_MSC
             } else if (dest[1] == MP_OBJ_FROM_PTR(&builtin_cdc_msc_obj)) {
                 flags = USB_BUILTIN_FLAG_CDC | USB_BUILTIN_FLAG_MSC;

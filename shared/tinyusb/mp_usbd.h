@@ -60,6 +60,7 @@ void mp_usbd_hex_str(char *out_str, const uint8_t *bytes, size_t bytes_len);
 typedef struct {
     bool cdc_enabled;
     bool msc_enabled;
+    bool ncm_enabled;
 } mp_usbd_class_state_t;
 
 // Global class enable state
