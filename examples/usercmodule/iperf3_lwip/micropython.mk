@@ -7,4 +7,6 @@ SRC_USERMOD += $(IPERF3_LWIP_MOD_DIR)/iperf3_lwip.c
 CFLAGS_USERMOD += -I$(IPERF3_LWIP_MOD_DIR)
 
 # Optimize for size instead of aggressive optimization.
-CFLAGS_USERMOD += -Os
+# Aggressive flags (-O3, -funroll-loops, -finline-functions) can cause issues
+# with static buffers on memory-constrained embedded systems.
+CFLAGS_USERMOD += -Os  # Optimize for size, safe for embedded
