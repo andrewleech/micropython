@@ -3,9 +3,9 @@
 
 import sys
 
-sys.path.insert(0, ".")
+sys.path.insert(0, "lib/enum")
 
-from enum_minimal import Enum, IntEnum
+from enum import Enum, IntEnum
 
 print("=" * 60)
 print("Comprehensive Enum Test Suite")

@@ -49,10 +49,10 @@ static MP_DEFINE_CONST_FUN_OBJ_1(object___init___obj, object___init__);
 
 static mp_obj_t object___new__(mp_obj_t cls) {
     // Check if cls is a class (its metaclass is type or a subclass of type)
-    mp_obj_t cls_type_obj = MP_OBJ_FROM_PTR(mp_obj_get_type(cls));
-    bool is_type = mp_obj_is_subclass_fast(cls_type_obj, MP_OBJ_FROM_PTR(&mp_type_type));
-    mp_obj_type_t *cls_type = (mp_obj_type_t *)MP_OBJ_TO_PTR(cls);
-    bool is_instance_type = mp_obj_is_instance_type(cls_type);
+    mp_obj_t metaclass_obj = MP_OBJ_FROM_PTR(mp_obj_get_type(cls));
+    bool is_type = mp_obj_is_subclass_fast(metaclass_obj, MP_OBJ_FROM_PTR(&mp_type_type));
+    mp_obj_type_t *cls_as_type = (mp_obj_type_t *)MP_OBJ_TO_PTR(cls);
+    bool is_instance_type = mp_obj_is_instance_type(cls_as_type);
     if (!is_type || !is_instance_type) {
         mp_raise_TypeError(MP_ERROR_TEXT("arg must be user-type"));
     }

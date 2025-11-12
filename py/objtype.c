@@ -138,7 +138,6 @@ static void mp_obj_class_lookup(struct class_lookup_data *lookup, const mp_obj_t
     assert(lookup->dest[0] == MP_OBJ_NULL);
     assert(lookup->dest[1] == MP_OBJ_NULL);
     for (;;) {
-        DEBUG_printf("mp_obj_class_lookup: Looking up %s in %s\n", qstr_str(lookup->attr), qstr_str(type->name));
         // Optimize special method lookup for native types
         // This avoids extra method_name => slot lookup. On the other hand,
         // this should not be applied to class types, as will result in extra
@@ -148,8 +147,6 @@ static void mp_obj_class_lookup(struct class_lookup_data *lookup, const mp_obj_t
             // with a special case for getiter where the slot won't be set
             // for MP_TYPE_FLAG_ITER_IS_STREAM.
             if (MP_OBJ_TYPE_HAS_SLOT_BY_OFFSET(type, lookup->slot_offset) || (lookup->slot_offset == MP_OBJ_TYPE_OFFSETOF_SLOT(iter) && type->flags & MP_TYPE_FLAG_ITER_IS_STREAM)) {
-                DEBUG_printf("mp_obj_class_lookup: Matched special meth slot (off=%d) for %s\n",
-                    lookup->slot_offset, qstr_str(lookup->attr));
                 lookup->dest[0] = MP_OBJ_SENTINEL;
                 return;
             }
@@ -183,15 +180,6 @@ static void mp_obj_class_lookup(struct class_lookup_data *lookup, const mp_obj_t
                     }
                     mp_convert_member_lookup(obj_obj, type, elem->value, lookup->dest);
                 }
-                #if DEBUG_PRINT
-                DEBUG_printf("mp_obj_class_lookup: Returning: ");
-                mp_obj_print_helper(MICROPY_DEBUG_PRINTER, lookup->dest[0], PRINT_REPR);
-                if (lookup->dest[1] != MP_OBJ_NULL) {
-                    // Don't try to repr() lookup->dest[1], as we can be called recursively
-                    DEBUG_printf(" <%s @%p>", mp_obj_get_type_str(lookup->dest[1]), MP_OBJ_TO_PTR(lookup->dest[1]));
-                }
-                DEBUG_printf("\n");
-                #endif
                 return;
             }
         }
@@ -209,7 +197,6 @@ static void mp_obj_class_lookup(struct class_lookup_data *lookup, const mp_obj_t
         // attribute not found, keep searching base classes
 
         if (!MP_OBJ_TYPE_HAS_SLOT(type, parent)) {
-            DEBUG_printf("mp_obj_class_lookup: No more parents\n");
             return;
         #if MICROPY_MULTIPLE_INHERITANCE
         } else if (((mp_obj_base_t *)MP_OBJ_TYPE_GET_SLOT(type, parent))->type == &mp_type_tuple) {
@@ -286,7 +273,6 @@ static void instance_print(const mp_print_t *print, mp_obj_t self_in, mp_print_k
 }
 
 static mp_obj_t mp_obj_instance_make_new(const mp_obj_type_t *self, size_t n_args, size_t n_kw, const mp_obj_t *args) {
-    DEBUG_printf("mp_obj_instance_make_new()\n");
     assert(mp_obj_is_instance_type(self));
 
     // look for __new__ function
@@ -338,8 +324,6 @@ static mp_obj_t mp_obj_instance_make_new(const mp_obj_type_t *self, size_t n_arg
         o = MP_OBJ_TO_PTR(new_ret);
     }
 
-    // printf("%d mp_obj_instance_make_new %s %d\n", __LINE__, qstr_str(self->name), (int)self->locals_dict->map.used);
-
     // now call Python class __init__ function with all args
     // This method has a chance to call super().__init__() to construct a
     // possible native base class.
@@ -348,7 +332,6 @@ static mp_obj_t mp_obj_instance_make_new(const mp_obj_type_t *self, size_t n_arg
     lookup.attr = MP_QSTR___init__;
     lookup.slot_offset = 0;
     mp_obj_class_lookup(&lookup, self);
-    // printf("%d mp_obj_instance_make_new %s %d\n", __LINE__, qstr_str(self->name), (int)self->locals_dict->map.used);
     if (init_fn[0] != MP_OBJ_NULL) {
         mp_obj_t init_ret;
         if (n_args == 0 && n_kw == 0) {
@@ -816,7 +799,6 @@ skip_special_accessors:
 }
 
 static void mp_obj_instance_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
-    DEBUG_printf("mp_obj_instance_attr(%s)\n", qstr_str(attr));
     if (dest[0] == MP_OBJ_NULL) {
         mp_obj_instance_load_attr(self_in, attr, dest);
     } else {
@@ -880,7 +862,6 @@ bool mp_obj_instance_is_callable(mp_obj_t self_in) {
 }
 
 mp_obj_t mp_obj_instance_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const mp_obj_t *args) {
-    DEBUG_printf("mp_obj_instance_call %d\n", __LINE__);
     mp_obj_t member[2] = {MP_OBJ_NULL, MP_OBJ_NULL};
     mp_obj_t call = mp_obj_instance_get_call(self_in, member);
     if (call == MP_OBJ_NULL) {
@@ -893,7 +874,6 @@ mp_obj_t mp_obj_instance_call(mp_obj_t self_in, size_t n_args, size_t n_kw, cons
     }
     mp_obj_instance_t *self = MP_OBJ_TO_PTR(self_in);
     if (call == MP_OBJ_SENTINEL) {
-        DEBUG_printf("mp_obj_instance_call %d\n", __LINE__);
         return mp_call_function_n_kw(self->subobj[0], n_args, n_kw, args);
     }
 
@@ -1031,7 +1011,6 @@ static void type_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_
 }
 
 static mp_obj_t type_make_new(const mp_obj_type_t *type_in, size_t n_args, size_t n_kw, const mp_obj_t *args) {
-    DEBUG_printf("type_make_new\n");
     (void)type_in;
 
     mp_arg_check_num(n_args, n_kw, 1, 3, false);
@@ -1074,7 +1053,6 @@ static mp_obj_t type_make_new(const mp_obj_type_t *type_in, size_t n_args, size_
 }
 
 static mp_obj_t type_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const mp_obj_t *args) {
-    DEBUG_printf("type_call\n");
     // instantiate an instance of a class
 
     mp_obj_type_t *self = MP_OBJ_TO_PTR(self_in);
@@ -1096,11 +1074,25 @@ static mp_obj_t type_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const mp
         if (dest[0] != MP_OBJ_NULL) {
             // Found __call__ on metaclass, use it
             // dest[0] contains the function, call it with cls as first argument
-            mp_obj_t *new_args = alloca(sizeof(mp_obj_t) * (n_args + 1));
+            mp_obj_t *new_args;
+            mp_obj_t stack_args[8];  // Stack allocation for small arg counts
+
+            if (n_args < 8) {  // Use all 8 slots: up to 7 args + cls = 8 total
+                new_args = stack_args;
+            } else {
+                new_args = m_new(mp_obj_t, n_args + 1);
+            }
+
             new_args[0] = self_in;  // cls argument
             memcpy(new_args + 1, args, sizeof(mp_obj_t) * n_args);
             // Call the function directly (not as a method) to avoid recursion
-            return mp_call_function_n_kw(dest[0], n_args + 1, n_kw, new_args);
+            mp_obj_t result = mp_call_function_n_kw(dest[0], n_args + 1, n_kw, new_args);
+
+            if (n_args >= 8) {
+                m_del(mp_obj_t, new_args, n_args + 1);
+            }
+
+            return result;
         }
     }
 
@@ -1133,14 +1125,13 @@ static mp_obj_t type___new__(size_t n_args, const mp_obj_t *args) {
         const mp_obj_type_t *metaclass = MP_OBJ_TO_PTR(args[0]);
         return mp_obj_new_type(mp_obj_str_get_qstr(args[1]), args[2], args[3], metaclass);
     } else if (n_args == 2) {
-        // type.__new__(cls, obj) - return obj unchanged (instance creation)
-        // This is used when classes inherit from type and override __new__
-        return args[1];
+        // type.__new__(cls, obj) - return type of obj (CPython compatibility)
+        return MP_OBJ_FROM_PTR(mp_obj_get_type(args[1]));
     } else if (n_args == 1) {
         mp_raise_TypeError(MP_ERROR_TEXT("type.__new__(): not enough arguments"));
     } else {
         mp_raise_msg_varg(&mp_type_TypeError,
-            MP_ERROR_TEXT("type.__new__() takes 2 or 4 arguments (%d given)"), n_args);
+            MP_ERROR_TEXT("type.__new__() takes 1, 2 or 4 arguments (%d given)"), n_args);
     }
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(type___new___obj, 1, 4, type___new__);
@@ -1282,6 +1273,12 @@ static mp_obj_t type_unary_op(mp_unary_op_t op, mp_obj_t self_in) {
     // Handle unary operations on type objects (e.g., len(EnumClass))
     // by looking up special methods in the metaclass
     mp_obj_type_t *self = MP_OBJ_TO_PTR(self_in);
+
+    // Fast path: standard type metaclass doesn't support operators
+    if (self->base.type == &mp_type_type) {
+        return MP_OBJ_NULL;
+    }
+
     qstr op_name = mp_unary_op_method_name[op];
 
     if (op_name == 0) {
@@ -1323,6 +1320,12 @@ static mp_obj_t type_binary_op(mp_binary_op_t op, mp_obj_t lhs_in, mp_obj_t rhs_
     // Handle binary operations on type objects (e.g., member in EnumClass)
     // by looking up special methods in the metaclass
     mp_obj_type_t *lhs = MP_OBJ_TO_PTR(lhs_in);
+
+    // Fast path: standard type metaclass doesn't support operators
+    if (lhs->base.type == &mp_type_type) {
+        return MP_OBJ_NULL;
+    }
+
     qstr op_name = mp_binary_op_method_name[op];
 
     if (op_name == 0) {
