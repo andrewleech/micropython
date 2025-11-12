@@ -10,12 +10,29 @@ may return False due to MicroPython metaclass limitations. All arithmetic and
 comparison operations work correctly.
 """
 
-try:
-    # Check if __prepare__ is supported
-    import sys
-    _prepare_supported = hasattr(type, '__prepare__') or sys.implementation.name == 'micropython'
-except:
-    _prepare_supported = False
+def _check_prepare_support():
+    """
+    Check if __prepare__ metaclass method is actually functional.
+    Returns True only if __prepare__ is called during class creation.
+    """
+    try:
+        class _TestMeta(type):
+            _prepare_called = False
+
+            @classmethod
+            def __prepare__(mcs, name, bases):
+                _TestMeta._prepare_called = True
+                return {}
+
+        class _Test(metaclass=_TestMeta):
+            pass
+
+        return _TestMeta._prepare_called
+    except:
+        return False
+
+
+_prepare_supported = _check_prepare_support()
 
 
 # Global counter for auto() to track creation order
@@ -120,6 +137,15 @@ class EnumMeta(type):
                 for key, value in auto_members:
                     namespace[key] = auto_value
                     auto_value += 1
+        else:
+            # __prepare__ not supported - check if auto() was used
+            for key, value in namespace.items():
+                if not key.startswith("_") and isinstance(value, auto):
+                    raise RuntimeError(
+                        f"auto() in enum {name}.{key} requires MICROPY_PY_METACLASS_PREPARE "
+                        f"to be enabled in py/mpconfig.h. Either enable this feature, or use "
+                        f"explicit integer values instead of auto()."
+                    )
 
         # Extract enum members (non-callable, non-dunder attributes)
         member_names = []
