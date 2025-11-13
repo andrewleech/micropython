@@ -16,8 +16,6 @@ if not _prepare_test:
     raise SystemExit
 
 # Now run the actual tests
-import sys
-sys.path.insert(0, 'lib/enum')
 from enum import Enum, IntEnum, auto
 
 # Test 1: Basic auto() usage - sequential values starting from 1

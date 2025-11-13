@@ -1,8 +1,4 @@
 # Test StrEnum class
-import sys
-# Add lib/enum to path - sys.path[0] is the directory containing this script
-# Go up two levels: tests/basics -> tests -> root
-sys.path.insert(0, sys.path[0] + '/../../lib/enum')
 from enum import StrEnum
 
 print("Test 1: Basic StrEnum")

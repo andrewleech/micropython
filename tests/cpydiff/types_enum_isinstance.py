@@ -5,10 +5,6 @@ cause: IntEnum members are created with object.__new__() rather than as true int
 workaround: Use int(x) to convert, or check hasattr(x, '_value_') for enum members. All integer operations work correctly through operator forwarding.
 """
 
-import sys
-
-sys.path.insert(0, "lib/enum")
-
 from enum import IntEnum
 
 
