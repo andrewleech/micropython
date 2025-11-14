@@ -117,6 +117,21 @@
 #define MBOOT_VFS_RAW (MBOOT_FSLOAD)
 #endif
 
+// Whether to enable DFU inactivity timeout (auto-boot to application after timeout).
+// When enabled, the bootloader will exit and boot the application after
+// MBOOT_DFU_TIMEOUT_MS milliseconds of inactivity, but only if the bootloader
+// was entered without an explicit request (boot pin, magic key, or reset mode).
+#ifndef MBOOT_ENABLE_DFU_TIMEOUT
+#define MBOOT_ENABLE_DFU_TIMEOUT (1)
+#endif
+
+// Timeout in milliseconds before automatically booting application.
+// Only applies when MBOOT_ENABLE_DFU_TIMEOUT is enabled and bootloader was
+// not explicitly requested. First DFU or I2C activity disables timeout.
+#ifndef MBOOT_DFU_TIMEOUT_MS
+#define MBOOT_DFU_TIMEOUT_MS (5000)
+#endif
+
 // These enum values are passed as the first argument to mboot_state_change() to
 // notify of a change in state of the bootloader activity.  This function has a
 // default implementation in ui.c but can be overridden by a board.  Some states

@@ -108,6 +108,9 @@ typedef struct _dfu_state_t {
     dfu_status_t status;
     uint8_t error;
     bool leave_dfu;
+    #if MBOOT_ENABLE_DFU_TIMEOUT
+    bool timeout_active;
+    #endif
     uint16_t wBlockNum;
     uint16_t wLength;
     uint32_t addr;

@@ -116,7 +116,7 @@ extern uint8_t _mboot_protected_flash_start;
 extern uint8_t _mboot_protected_flash_end_exclusive;
 
 // For 1ms system ticker.
-volatile uint32_t systick_ms;
+volatile uint32_t systick_ms = 0;
 
 // Global dfu state
 dfu_context_t dfu_context SECTION_NOZERO_BSS;
@@ -821,6 +821,13 @@ void i2c_slave_process_rx_end(i2c_slave_t *i2c) {
     int len = i2c_obj.cmd_buf_pos - 1;
     uint8_t *buf = i2c_obj.cmd_buf;
 
+    #if MBOOT_ENABLE_DFU_TIMEOUT
+    // Any I2C command disables timeout permanently (except RESET which exits anyway)
+    if (buf[0] != I2C_CMD_RESET) {
+        dfu_context.timeout_active = false;
+    }
+    #endif
+
     if (buf[0] == I2C_CMD_ECHO) {
         ++len;
     } else if (buf[0] == I2C_CMD_GETID && len == 0) {
@@ -931,12 +938,16 @@ void i2c_slave_process_tx_end(i2c_slave_t *i2c) {
 /******************************************************************************/
 // DFU
 
-static void dfu_init(void) {
+static void dfu_init(bool explicit_request) {
     dfu_context.state = DFU_STATE_IDLE;
     dfu_context.cmd = DFU_CMD_NONE;
     dfu_context.status = DFU_STATUS_OK;
     dfu_context.error = 0;
     dfu_context.leave_dfu = false;
+    #if MBOOT_ENABLE_DFU_TIMEOUT
+    // Enable timeout only when bootloader was not explicitly requested
+    dfu_context.timeout_active = !explicit_request;
+    #endif
     dfu_context.addr = 0x08000000;
 }
 
@@ -976,6 +987,11 @@ static int dfu_process_dnload(void) {
 }
 
 static void dfu_handle_rx(int cmd, int arg, int len, const void *buf) {
+    #if MBOOT_ENABLE_DFU_TIMEOUT
+    // Any DFU activity disables timeout permanently
+    dfu_context.timeout_active = false;
+    #endif
+
     if (cmd == DFU_CLRSTATUS) {
         // clear status
         dfu_context.state = DFU_STATE_IDLE;
@@ -1569,19 +1585,27 @@ void stm32_main(uint32_t initial_r0) {
 
     MBOOT_BOARD_EARLY_INIT(&initial_r0);
 
+    // Track whether bootloader was explicitly requested (boot pin, magic key, reset mode).
+    // This is used to determine if DFU timeout should apply.
+    bool explicit_bootloader_request = false;
+
     #ifdef MBOOT_BOOTPIN_PIN
     mp_hal_pin_config(MBOOT_BOOTPIN_PIN, MP_HAL_PIN_MODE_INPUT, MBOOT_BOOTPIN_PULL, 0);
     if (mp_hal_pin_read(MBOOT_BOOTPIN_PIN) == MBOOT_BOOTPIN_ACTIVE) {
+        explicit_bootloader_request = true;
         goto enter_bootloader;
     }
     #endif
 
     if ((initial_r0 & 0xffffff00) == MBOOT_INITIAL_R0_KEY) {
+        explicit_bootloader_request = true;
         goto enter_bootloader;
     }
 
     int reset_mode = MBOOT_BOARD_GET_RESET_MODE(&initial_r0);
-    if (reset_mode != BOARDCTRL_RESET_MODE_BOOTLOADER) {
+    if (reset_mode == BOARDCTRL_RESET_MODE_BOOTLOADER) {
+        explicit_bootloader_request = true;
+    } else {
         // Bootloader mode was not selected so try to enter the application,
         // passing through the reset_mode.  This will return if the application
         // is invalid.
@@ -1654,7 +1678,7 @@ enter_bootloader:
         leave_bootloader();
     }
 
-    dfu_init();
+    dfu_init(explicit_bootloader_request);
 
     pyb_usbdd_init(&pyb_usbdd, pyb_usbdd_detect_port());
     pyb_usbdd_start(&pyb_usbdd);
@@ -1665,6 +1689,12 @@ enter_bootloader:
         initial_r0 = 0x23; // Default I2C address
     }
     i2c_init(initial_r0);
+    #endif
+
+    #if MBOOT_ENABLE_DFU_TIMEOUT
+    // Ensure systick is initialized for timeout functionality.
+    // This is safe to call even if already initialized by SystemClock_Config().
+    systick_init();
     #endif
 
     mboot_state_change(MBOOT_STATE_DFU_START, 0);
@@ -1697,6 +1727,15 @@ enter_bootloader:
         }
         if (has_connected && pyb_usbdd.hUSBDDevice.dev_state == USBD_STATE_SUSPENDED) {
             break;
+        }
+        #endif
+
+        #if MBOOT_ENABLE_DFU_TIMEOUT
+        // Check for inactivity timeout (only when not explicitly requested)
+        // Capture systick_ms once to avoid race condition with ISR
+        uint32_t current_ms = systick_ms;
+        if (dfu_context.timeout_active && current_ms >= MBOOT_DFU_TIMEOUT_MS) {
+            dfu_context.leave_dfu = true;
         }
         #endif
     }
