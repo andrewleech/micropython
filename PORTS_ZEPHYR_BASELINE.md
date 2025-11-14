@@ -342,8 +342,8 @@ If retaining extmod/zephyr_kernel:
 ## AutoMem References
 
 **Memory IDs**:
-- `5979fbb5-e7b4-416d-9e7d-979493f91613` - Test 4 (GC delay) failure
-- [Additional entries will be added during investigation]
+- `79c69160-f1b5-48e4-9780-92e1abca633f` - **ports/zephyr baseline complete** (CRITICAL - deprecate extmod/zephyr_kernel)
+- `5979fbb5-e7b4-416d-9e7d-979493f91613` - Test 4 (GC delay) failure from GC_TIMING_INVESTIGATION
 
 ---
 
