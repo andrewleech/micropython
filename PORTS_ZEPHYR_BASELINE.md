@@ -1,8 +1,8 @@
 # ports/zephyr Baseline Testing - INVESTIGATION IN PROGRESS
 
 **Date**: 2025-11-11
-**Status**: 🟢 Phase 1 Complete (Build)
-**Last Updated**: 2025-11-11 19:45 UTC
+**Status**: 🟢 Phase 2 Complete (Flash & Verify)
+**Last Updated**: 2025-11-11 19:50 UTC
 **Related**: GC_TIMING_INVESTIGATION.md (commit 104d69544c), commit 303bd7c82f (test instrumentation)
 
 ## Purpose
@@ -44,7 +44,7 @@ env RESET='pyocd reset --probe 066CFF495177514867213407' \
 ## Investigation Plan
 
 - [x] **Phase 1**: Build official ports/zephyr with threading ✅
-- [ ] **Phase 2**: Flash and verify firmware on NUCLEO_F429ZI
+- [x] **Phase 2**: Flash and verify firmware on NUCLEO_F429ZI ✅
 - [ ] **Phase 3**: Run complete thread test suite
 - [ ] **Phase 4**: Compare results to extmod/zephyr_kernel
 - [ ] **Phase 5**: Analyze differences and document conclusions
@@ -124,6 +124,31 @@ This is **identical** to the bug in `extmod/zephyr_kernel` that was fixed by cha
 - RAM: 131,848 bytes / 192 KB (67.06%)
 
 **Next**: Flash to NUCLEO_F429ZI and verify
+
+### 2025-11-11 19:50 UTC - Phase 2 Complete: Flash & Verify SUCCESS ✅
+**Agent 2 (general-purpose)** - Flash and verify firmware
+
+**Flash Results**:
+- Status: ✅ SUCCESS
+- Erased: 393,216 bytes (7 sectors)
+- Programmed: 311,296 bytes (76 pages)
+- Speed: 17.22 kB/s
+
+**Firmware Verification**:
+```
+MicroPython v1.27.0-preview.388.g27544a2d81.dirty on 2025-11-14
+Platform: zephyr
+Machine: zephyr-nucleo_f429zi with stm32f429xx
+Build: ZEPHYR_NUCLEO_F429ZI
+Thread mode: _thread='GIL'
+```
+
+**Threading Test**: ✅ PASS
+- Module `_thread` available
+- Basic thread spawning functional
+- GIL-based concurrency confirmed
+
+**Next**: Run thread test suite
 
 ---
 
