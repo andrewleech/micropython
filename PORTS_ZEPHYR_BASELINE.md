@@ -1,8 +1,8 @@
 # ports/zephyr Baseline Testing - INVESTIGATION IN PROGRESS
 
 **Date**: 2025-11-11
-**Status**: 🔵 Planning
-**Last Updated**: 2025-11-11 01:50 UTC
+**Status**: 🟢 Phase 1 Complete (Build)
+**Last Updated**: 2025-11-11 19:45 UTC
 **Related**: GC_TIMING_INVESTIGATION.md (commit 104d69544c), commit 303bd7c82f (test instrumentation)
 
 ## Purpose
@@ -43,7 +43,7 @@ env RESET='pyocd reset --probe 066CFF495177514867213407' \
 
 ## Investigation Plan
 
-- [ ] **Phase 1**: Build official ports/zephyr with threading
+- [x] **Phase 1**: Build official ports/zephyr with threading ✅
 - [ ] **Phase 2**: Flash and verify firmware on NUCLEO_F429ZI
 - [ ] **Phase 3**: Run complete thread test suite
 - [ ] **Phase 4**: Compare results to extmod/zephyr_kernel
@@ -97,6 +97,33 @@ This is **identical** to the bug in `extmod/zephyr_kernel` that was fixed by cha
 - Created investigation document
 - Research complete: Board supported, build system understood
 - Identified dangling pointer bug in upstream code
+- Commit: 171b7d4287 (initial investigation plan)
+
+### 2025-11-11 19:45 UTC - Phase 1 Complete: Build SUCCESS ✅
+**Agent 1 (general-purpose)** - Build official ports/zephyr
+
+**Build Configuration**:
+- Board: nucleo_f429zi (STM32F429ZI)
+- Zephyr: v4.2.99 (development/main)
+- Toolchain: GNU ARM Embedded 14.3.1
+- Overlay: thread.conf (THREAD_CUSTOM_DATA, THREAD_MONITOR, THREAD_STACK_INFO)
+
+**Build Results**:
+- Status: ✅ SUCCESS
+- Duration: ~3 minutes 23 seconds
+- Warnings: 1 (lfs2.c non-critical)
+- Errors: 0
+
+**Artifacts Generated**:
+- `/tmp/zephyr_workspace/build/zephyr/zephyr.elf` - 5.4 MB (with debug symbols)
+- `/tmp/zephyr_workspace/build/zephyr/zephyr.hex` - 856 KB
+- `/tmp/zephyr_workspace/build/zephyr/zephyr.bin` - 304 KB
+
+**Memory Usage**:
+- Flash: 311,284 bytes / 2 MB (14.84%)
+- RAM: 131,848 bytes / 192 KB (67.06%)
+
+**Next**: Flash to NUCLEO_F429ZI and verify
 
 ---
 
