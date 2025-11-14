@@ -45,7 +45,7 @@ void z_ready_thread(struct k_thread *thread);
 #define MP_THREAD_MIN_STACK_SIZE                (4 * 1024)
 #define MP_THREAD_DEFAULT_STACK_SIZE            (MP_THREAD_MIN_STACK_SIZE + 1024)
 #define MP_THREAD_PRIORITY                      K_PRIO_PREEMPT(0)  // Higher priority than main (1)
-#define MP_THREAD_MAXIMUM_USER_THREADS          (8)
+#define MP_THREAD_MAXIMUM_USER_THREADS          (5)  // Reduced from 8 to save RAM (allows mutate_bytearray.py with 4 threads)
 
 // FPU context size validation
 // With CONFIG_FPU_SHARING, each thread context switch may save/restore:
@@ -264,6 +264,21 @@ void mp_thread_gc_others(void) {
         return;  // Threading not initialized
     }
 
+    // VALIDATION: Check thread list integrity before GC
+    int thread_count = 0;
+    for (mp_thread_t *th = MP_STATE_VM(mp_thread_list_head); th != NULL; th = th->next) {
+        thread_count++;
+        if (thread_count > MP_THREAD_MAXIMUM_USER_THREADS + 1) {
+            mp_printf(&mp_plat_print,
+                      "*** GC VALIDATION: Thread list corrupted (too many threads=%d) ***\n",
+                      thread_count);
+            while(1) { __asm volatile("nop"); }  // Hang for GDB
+        }
+
+        // Validation removed - was checking stale th->stack_len from initialization
+        // before we recalculate based on saved psp
+    }
+
     mp_thread_mutex_lock(&thread_mutex, 1);
 
     // Ask kernel to iterate threads and mark alive ones
@@ -343,29 +358,53 @@ void mp_thread_gc_others(void) {
             continue;  // Thread not running
         }
 
-        // Validate stack_len matches Zephyr's reported stack size
-        // This catches corruption where stack_len is modified or uninitialized
-        // Query actual allocated stack size from Zephyr
-        size_t actual_stack_size = th->id->stack_info.size / sizeof(uintptr_t);
-        const size_t min_stack_words = 256;  // Minimum 1KB
+        // CRITICAL FIX: Scan only ACTIVE stack frames using saved stack pointer
+        // ARM stacks grow DOWNWARD (high to low addresses)
+        // - stack_info.start = BOTTOM (low address, lowest valid SP)
+        // - stack_info.start + size = TOP (high address, initial SP)
+        // - callee_saved.psp = Current SP (middle, where execution was preempted)
+        //
+        // Previous bug: Scanned ENTIRE allocated stack including uninitialized
+        // garbage below psp. This preserved stale pointers and caused corruption.
+        //
+        // Correct: Scan ONLY from saved psp UP to stack top (active frames)
 
-        if (th->stack_len < min_stack_words) {
+        uintptr_t stack_bottom = (uintptr_t)th->id->stack_info.start;  // LOW address
+        uintptr_t stack_top = stack_bottom + th->id->stack_info.size;  // HIGH address
+        uintptr_t saved_sp = (uintptr_t)th->id->callee_saved.psp;  // Current SP
+
+        // Validate saved SP is within stack bounds
+        if (saved_sp < stack_bottom || saved_sp > stack_top) {
             mp_printf(&mp_plat_print,
-                      "WARNING: stack_len=0x%x too small (th=%p id=%p status=%d)\r\n",
-                      (unsigned int)th->stack_len, th, th->id, th->status);
-            continue;  // Skip corrupted stack_len values
+                      "WARNING: Corrupt SP thread=%p sp=0x%08x bounds=0x%08x-0x%08x\r\n",
+                      th, (unsigned)saved_sp, (unsigned)stack_bottom, (unsigned)stack_top);
+            // Fallback: scan full stack (better than skipping)
+            th->stack = (void *)stack_bottom;
+            th->stack_len = th->id->stack_info.size / sizeof(uintptr_t);
+        } else {
+            // Scan ONLY active portion: from saved_sp UP to stack_top
+            th->stack = (void *)saved_sp;
+            th->stack_len = (stack_top - saved_sp) / sizeof(uintptr_t);
         }
 
-        if (th->stack_len != actual_stack_size) {
-            mp_printf(&mp_plat_print,
-                      "WARNING: stack_len=0x%x mismatch (th=%p actual=0x%x)\r\n",
-                      (unsigned int)th->stack_len, th, (unsigned int)actual_stack_size);
-            // Use actual size from Zephyr for safety
-            th->stack_len = actual_stack_size;
-        }
+        // Diagnostic disabled for cleaner output
+        // mp_printf(&mp_plat_print,
+        //           "GC scan thread %s: sp=0x%08x..0x%08x (%u words)\r\n",
+        //           k_thread_name_get(th->id), (unsigned)saved_sp, (unsigned)stack_top,
+        //           (unsigned)th->stack_len);
 
-        // Scan the thread's stack
+        // Scan the ACTIVE stack
         gc_collect_root(th->stack, th->stack_len);
+
+        // Scan saved callee registers (r4-r11)
+        void **saved_regs = (void **)&th->id->callee_saved;
+        gc_collect_root(saved_regs, 8);  // v1-v8 = r4-r11 (8 registers)
+    }
+
+    // VALIDATION: Verify we scanned all expected threads
+    DEBUG_printf("GC validation: Scanned %d threads total\n", thread_count);
+    if (thread_count == 0) {
+        mp_printf(&mp_plat_print, "*** GC VALIDATION: NO THREADS SCANNED! ***\n");
     }
 
     mp_thread_mutex_unlock(&thread_mutex);

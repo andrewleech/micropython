@@ -86,7 +86,7 @@ typedef enum {
 #define CONFIG_ARCH_HAS_CUSTOM_SWAP_TO_MAIN 1
 #define CONFIG_NUM_PREEMPT_PRIORITIES 15
 #define CONFIG_NUM_COOP_PRIORITIES 16
-#define CONFIG_MAIN_STACK_SIZE 10240  // 10KB for main thread (matches mp_stack_set_limit)
+#define CONFIG_MAIN_STACK_SIZE 20480  // 20KB for main thread (increased from 10KB to prevent overflow)
 #define CONFIG_MAIN_THREAD_PRIORITY 1  // Slightly lower priority than user threads (0)
 #define CONFIG_IDLE_STACK_SIZE 512
 #define CONFIG_ISR_STACK_SIZE 2048
@@ -98,6 +98,8 @@ typedef enum {
 #define CONFIG_THREAD_NAME 1
 #define CONFIG_THREAD_MAX_NAME_LEN 32
 #define CONFIG_THREAD_MONITOR 1  // Required for k_thread_foreach() to work
+#define CONFIG_THREAD_STACK_INFO 1  // Track stack info for overflow detection
+#define CONFIG_THREAD_STACK_SENTINEL 1  // Enable stack overflow detection with magic sentinel value
 #define CONFIG_DYNAMIC_THREAD 1
 
 // Scheduler configuration

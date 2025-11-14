@@ -26,6 +26,7 @@
 
 #include "py/gc.h"
 #include "py/mpthread.h"
+#include "py/mphal.h"
 #include "shared/runtime/gchelper.h"
 #include "shared/runtime/softtimer.h"
 #include "gccollect.h"
@@ -47,4 +48,10 @@ void gc_collect(void) {
 
     // end the GC
     gc_collect_end();
+
+    // TEST: Clear flag after explicit gc.collect() (allow future allocations)
+    gc_recently_run = false;
+
+    // TEST 4: Update timestamp after explicit GC
+    gc_last_run_ms = mp_hal_ticks_ms();
 }

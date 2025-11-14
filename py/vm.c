@@ -102,7 +102,14 @@
 
 #define DECODE_PTR \
     DECODE_UINT; \
-    void *ptr = (void *)(uintptr_t)code_state->fun_bc->child_table[unum]
+    void *ptr = (void *)(uintptr_t)code_state->fun_bc->child_table[unum]; \
+    if (((uintptr_t)ptr & 0xFF000000) == 0x0F000000 || ((uintptr_t)ptr & 0xFF000000) == 0x5F000000) { \
+        mp_printf(&mp_plat_print, "*** CORRUPT PTR DETECTED: ptr=0x%08x from child_table[%u] ***\n", \
+                  (unsigned)(uintptr_t)ptr, (unsigned)unum); \
+        mp_printf(&mp_plat_print, "  code_state=%p fun_bc=%p child_table=%p\n", \
+                  code_state, code_state->fun_bc, code_state->fun_bc->child_table); \
+        while(1) { __asm volatile("nop"); } \
+    }
 
 #define DECODE_OBJ \
     DECODE_UINT; \

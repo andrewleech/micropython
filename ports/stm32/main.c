@@ -313,8 +313,9 @@ static bool init_sdcard_fs(void) {
 // Static heap for Zephyr threading builds to avoid overlap with thread stacks
 // Thread stacks go into .noinit section after .bss, so we use a static array in .bss
 // This ensures clear separation between heap and thread stack memory regions
-// Reduced to 40KB to fit in NUCLEO_F429ZI RAM (192KB total) with thread stacks (50KB)
-#define MICROPY_HEAP_SIZE (40 * 1024)
+// Increased to 45KB for threading tests (NUCLEO_F429ZI has 192KB RAM total)
+// Reduced MP_THREAD_MAXIMUM_USER_THREADS from 8 to 4 to save RAM for larger heap
+#define MICROPY_HEAP_SIZE (45 * 1024)
 static char heap[MICROPY_HEAP_SIZE];
 
 // Zephyr threading entry point - called by Zephyr kernel after z_cstart()
@@ -356,6 +357,15 @@ micropython_soft_reset:
 
     // GC init with static heap (avoids overlap with thread stacks in .noinit section)
     gc_init(heap, heap + sizeof(heap));
+
+    // DIAGNOSTIC: Verify stack grows downward (ARM assumption)
+    {
+        volatile int local1 = 1;
+        volatile int local2 = 2;
+        mp_printf(&mp_plat_print, "Stack direction check: local1=%p local2=%p -> %s\r\n",
+            &local1, &local2,
+            ((uintptr_t)&local2 < (uintptr_t)&local1) ? "GROWS DOWN (correct)" : "GROWS UP (ERROR!)");
+    }
 
     // Threading init - Phase 2 (allocate main thread on GC heap)
     // Requires GC to be initialized for m_new_obj() heap allocation

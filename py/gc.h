@@ -84,4 +84,10 @@ void gc_info(gc_info_t *info);
 void gc_dump_info(const mp_print_t *print);
 void gc_dump_alloc_table(const mp_print_t *print);
 
+// TEST: Flag to track if GC recently ran (prevent rapid double-GC)
+extern bool gc_recently_run;
+
+// TEST 4: Timestamp of last GC (for minimum delay enforcement)
+extern uint32_t gc_last_run_ms;
+
 #endif // MICROPY_INCLUDED_PY_GC_H
