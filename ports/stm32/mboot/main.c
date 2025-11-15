@@ -1606,10 +1606,13 @@ void stm32_main(uint32_t initial_r0) {
     if (reset_mode == BOARDCTRL_RESET_MODE_BOOTLOADER) {
         explicit_bootloader_request = true;
     } else {
-        // Bootloader mode was not selected so try to enter the application,
-        // passing through the reset_mode.  This will return if the application
-        // is invalid.
+        #if !MBOOT_ENABLE_DFU_TIMEOUT
+        // Without timeout feature, try to boot application immediately if valid.
+        // This will return if the application is invalid.
         try_enter_application(reset_mode);
+        #endif
+        // With timeout feature enabled, always enter bootloader.
+        // Timeout will boot application after MBOOT_DFU_TIMEOUT_MS if no activity.
     }
 
 enter_bootloader:
