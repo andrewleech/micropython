@@ -45,6 +45,15 @@ void mboot_board_early_init(void) {
     LL_APB4_GRP2_EnableClock(LL_APB4_GRP2_PERIPH_BSEC);
     LL_APB4_GRP2_EnableClock(LL_APB4_GRP2_PERIPH_SYSCFG);
 
+    // Enable SWD debug port when booting from FLASH.
+    // Write 0xB4 to BSEC_AP_UNLOCK and 0xB451B400 to BSEC_DBGCR.
+    // This allows debugger attachment in FLASH Boot mode (not just DEV Boot mode).
+    BSEC_HandleTypeDef hbsec_dbg = {.Instance = BSEC};
+    if (HAL_BSEC_UnlockDebug(&hbsec_dbg) != HAL_OK) {
+        // Debug unlock failed, but continue boot
+    }
+    BSEC->DBGCR = 0xB451B400;  // Configure non-secure and secure debug
+
     // Program high speed IO optimization fuses if they aren't already set.
     uint32_t fuse;
     BSEC_HandleTypeDef hbsec = { .Instance = BSEC };
