@@ -44,8 +44,13 @@
 #include "xspi.h"
 
 // Whether the bootloader will leave via reset, or direct jump to the application.
+// When DFU timeout is enabled, default to direct jump to avoid reset loops.
 #ifndef MBOOT_LEAVE_BOOTLOADER_VIA_RESET
+#if MBOOT_ENABLE_DFU_TIMEOUT
+#define MBOOT_LEAVE_BOOTLOADER_VIA_RESET (0)
+#else
 #define MBOOT_LEAVE_BOOTLOADER_VIA_RESET (1)
+#endif
 #endif
 
 // This option selects whether to use explicit polling or IRQs for USB events.
