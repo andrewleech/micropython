@@ -1481,6 +1481,7 @@ static int pyb_usbdd_shutdown(void) {
 /******************************************************************************/
 // main
 
+#if !MBOOT_ENABLE_DFU_TIMEOUT || !MBOOT_LEAVE_BOOTLOADER_VIA_RESET
 MP_NORETURN static __attribute__((naked)) void branch_to_application(uint32_t r0, uint32_t bl_addr) {
     __asm volatile (
         "ldr r2, [r1, #0]\n"    // get address of stack pointer
@@ -1511,6 +1512,7 @@ static void try_enter_application(int reset_mode) {
     // Jump to the application.
     branch_to_application(reset_mode, APPLICATION_ADDR);
 }
+#endif
 
 static void leave_bootloader(void) {
     #if !MBOOT_LEAVE_BOOTLOADER_VIA_RESET
