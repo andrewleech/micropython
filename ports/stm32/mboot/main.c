@@ -1745,7 +1745,14 @@ enter_bootloader:
         // Capture systick_ms once to avoid race condition with ISR
         uint32_t current_ms = systick_ms;
         if (dfu_context.timeout_active && current_ms >= MBOOT_DFU_TIMEOUT_MS) {
-            dfu_context.leave_dfu = true;
+            // Only exit if application is valid (avoid reset loop with invalid app)
+            uint32_t msp = *(volatile uint32_t *)APPLICATION_ADDR;
+            if ((msp & APP_VALIDITY_BITS) == 0) {
+                dfu_context.leave_dfu = true;
+            } else {
+                // Application invalid, disable timeout and stay in bootloader
+                dfu_context.timeout_active = false;
+            }
         }
         #endif
     }
