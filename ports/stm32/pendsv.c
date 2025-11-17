@@ -93,7 +93,9 @@ __attribute__((naked)) void PendSV_Handler(void) {
 
     __asm volatile (
         #if MICROPY_ZEPHYR_THREADING
-        // With Zephyr threading, delegate to Zephyr's z_arm_pendsv handler
+        // Delegate PendSV to Zephyr's z_arm_pendsv for proper context switching.
+        // Zephyr manages thread scheduling, stack switching, and interrupt handling.
+        // Branch (not call) to transfer control completely to Zephyr's handler.
         "b z_arm_pendsv\n"
         #else
         // Legacy threading mode
