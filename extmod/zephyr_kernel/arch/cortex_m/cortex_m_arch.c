@@ -47,6 +47,10 @@ extern int mp_printf(const mp_print_t *print, const char *fmt, ...);
 #include <zephyr/kernel_structs.h>
 #include <zephyr/arch/cpu.h>
 
+// Override arch_irq_lock() to use PRIMASK for complete interrupt masking
+// Must be included AFTER Zephyr headers to override BASEPRI-based implementation
+#include "arch_irq_primask.h"
+
 // Forward declarations for Zephyr functions we provide
 void sys_clock_announce(int32_t ticks);
 
