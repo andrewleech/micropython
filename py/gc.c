@@ -762,13 +762,6 @@ void gc_info(gc_info_t *info) {
     GC_EXIT();
 }
 
-// TEST: Track recent GC to prevent rapid double-GC
-bool gc_recently_run = false;
-
-// TEST 4: Add minimum delay between GC cycles (allow threads to resume)
-uint32_t gc_last_run_ms = 0;
-#define GC_MIN_INTERVAL_MS 100
-
 void *gc_alloc(size_t n_bytes, unsigned int alloc_flags) {
     bool has_finaliser = alloc_flags & GC_ALLOC_FLAG_HAS_FINALISER;
     size_t n_blocks = ((n_bytes + BYTES_PER_BLOCK - 1) & (~(BYTES_PER_BLOCK - 1))) / BYTES_PER_BLOCK;
@@ -798,19 +791,10 @@ void *gc_alloc(size_t n_bytes, unsigned int alloc_flags) {
 
     #if MICROPY_GC_ALLOC_THRESHOLD
     if (!collected && MP_STATE_MEM(gc_alloc_amount) >= MP_STATE_MEM(gc_alloc_threshold)) {
-        // TEST 4: Check if minimum delay elapsed since last GC
-        uint32_t now_ms = mp_hal_ticks_ms();
-        if (now_ms - gc_last_run_ms >= GC_MIN_INTERVAL_MS || gc_last_run_ms == 0) {
-            GC_EXIT();
-            gc_collect();
-            collected = 1;
-            gc_recently_run = true;  // Mark GC as having run
-            gc_last_run_ms = now_ms;  // Update last GC timestamp
-            GC_ENTER();
-        } else {
-            DEBUG_printf("gc_alloc(" UINT_FMT "): skipping GC (only %u ms since last)\n",
-                n_bytes, (unsigned)(now_ms - gc_last_run_ms));
-        }
+        GC_EXIT();
+        gc_collect();
+        collected = 1;
+        GC_ENTER();
     }
     #endif
 
@@ -857,18 +841,9 @@ void *gc_alloc(size_t n_bytes, unsigned int alloc_flags) {
             #endif
             return NULL;
         }
-        // TEST 4: Check if minimum delay elapsed since last GC (emergency collection)
-        uint32_t now_ms = mp_hal_ticks_ms();
-        if (gc_recently_run || (now_ms - gc_last_run_ms < GC_MIN_INTERVAL_MS && gc_last_run_ms != 0)) {
-            DEBUG_printf("gc_alloc(" UINT_FMT "): skipping second GC (recent=%d, delay=%u ms)\n",
-                n_bytes, gc_recently_run, (unsigned)(now_ms - gc_last_run_ms));
-            return NULL;  // Fail allocation instead of running second GC
-        }
         DEBUG_printf("gc_alloc(" UINT_FMT "): no free mem, triggering GC\n", n_bytes);
         gc_collect();
         collected = 1;
-        gc_recently_run = true;  // Mark GC as having run
-        gc_last_run_ms = now_ms;  // Update last GC timestamp
         GC_ENTER();
     }
 
@@ -940,9 +915,6 @@ found:
     #if EXTENSIVE_HEAP_PROFILING
     gc_dump_alloc_table(&mp_plat_print);
     #endif
-
-    // TEST: Clear flag on successful allocation (allow future GCs)
-    gc_recently_run = false;
 
     return ret_ptr;
 }
