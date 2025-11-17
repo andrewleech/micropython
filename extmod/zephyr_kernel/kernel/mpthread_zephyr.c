@@ -376,11 +376,11 @@ void mp_thread_gc_others(void) {
         // Validate saved SP is within stack bounds
         if (saved_sp < stack_bottom || saved_sp > stack_top) {
             mp_printf(&mp_plat_print,
-                      "WARNING: Corrupt SP thread=%p sp=0x%08x bounds=0x%08x-0x%08x\r\n",
+                      "FATAL: Corrupt SP thread=%p sp=0x%08x bounds=0x%08x-0x%08x\r\n",
                       th, (unsigned)saved_sp, (unsigned)stack_bottom, (unsigned)stack_top);
-            // Fallback: scan full stack (better than skipping)
-            th->stack = (void *)stack_bottom;
-            th->stack_len = th->id->stack_info.size / sizeof(uintptr_t);
+            mp_printf(&mp_plat_print, "Stack pointer corruption detected. Halting for GDB.\r\n");
+            // HALT: Do not continue after corruption detection - allows proper debugging
+            while(1) { __asm volatile("nop"); }
         } else {
             // Scan ONLY active portion: from saved_sp UP to stack_top
             th->stack = (void *)saved_sp;
@@ -509,6 +509,14 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     // Store allocated stack size for validation
     size_t allocated_stack_size = K_THREAD_STACK_SIZEOF(mp_thread_stack_array[_slot]);
 
+    // CRITICAL: Initialize fields BEFORE starting thread to prevent GC race
+    // If thread starts immediately (K_NO_WAIT) and triggers GC, mp_thread_gc_others()
+    // will scan th->arg at line 350. Must be valid before thread runs.
+    th->status = MP_THREAD_STATUS_CREATED;
+    th->alive = 0;
+    th->slot = _slot;
+    th->arg = arg;  // MUST be set before k_thread_create() for GC safety
+
     // Create Zephyr thread with K_NO_WAIT to start immediately
     // This matches the ports/zephyr pattern
     th->id = k_thread_create(
@@ -541,11 +549,7 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
                   name, allocated_stack_size, th->z_thread.stack_info.size);
     }
 
-    // Complete initialization (thread already in list from earlier)
-    th->status = MP_THREAD_STATUS_CREATED;
-    th->alive = 0;
-    th->slot = _slot;
-    th->arg = arg;
+    // Complete stack initialization (status/arg/slot already set above for GC safety)
     th->stack = (void *)th->z_thread.stack_info.start;
     // Use allocated size (validated against stack_info above)
     th->stack_len = allocated_stack_size / sizeof(uintptr_t);
@@ -572,8 +576,11 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
 
 // Create thread (standard API)
 mp_uint_t mp_thread_create(void *(*entry)(void *), void *arg, size_t *stack_size) {
-    static char name[16];  // Static to avoid dangling pointer
-    snprintf(name, sizeof(name), "mp_thread_%d", mp_thread_counter);
+    // Allocate name on GC heap to avoid static buffer race condition
+    // Previous: static char name[16] shared across ALL threads (corrupted on concurrent create)
+    // Each thread needs its own name buffer for thread-safe operation
+    char *name = m_new(char, 16);
+    snprintf(name, 16, "mp_thread_%d", mp_thread_counter);
     return mp_thread_create_ex(entry, arg, stack_size, MP_THREAD_PRIORITY, name);
 }
 
