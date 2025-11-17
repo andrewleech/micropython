@@ -358,42 +358,14 @@ void mp_thread_gc_others(void) {
             continue;  // Thread not running
         }
 
-        // CRITICAL FIX: Scan only ACTIVE stack frames using saved stack pointer
-        // ARM stacks grow DOWNWARD (high to low addresses)
-        // - stack_info.start = BOTTOM (low address, lowest valid SP)
-        // - stack_info.start + size = TOP (high address, initial SP)
-        // - callee_saved.psp = Current SP (middle, where execution was preempted)
-        //
-        // Previous bug: Scanned ENTIRE allocated stack including uninitialized
-        // garbage below psp. This preserved stale pointers and caused corruption.
-        //
-        // Correct: Scan ONLY from saved psp UP to stack top (active frames)
-
-        uintptr_t stack_bottom = (uintptr_t)th->id->stack_info.start;  // LOW address
-        uintptr_t stack_top = stack_bottom + th->id->stack_info.size;  // HIGH address
-        uintptr_t saved_sp = (uintptr_t)th->id->callee_saved.psp;  // Current SP
-
-        // Validate saved SP is within stack bounds
-        if (saved_sp < stack_bottom || saved_sp > stack_top) {
-            mp_printf(&mp_plat_print,
-                      "FATAL: Corrupt SP thread=%p sp=0x%08x bounds=0x%08x-0x%08x\r\n",
-                      th, (unsigned)saved_sp, (unsigned)stack_bottom, (unsigned)stack_top);
-            mp_printf(&mp_plat_print, "Stack pointer corruption detected. Halting for GDB.\r\n");
-            // HALT: Do not continue after corruption detection - allows proper debugging
-            while(1) { __asm volatile("nop"); }
-        } else {
-            // Scan ONLY active portion: from saved_sp UP to stack_top
-            th->stack = (void *)saved_sp;
-            th->stack_len = (stack_top - saved_sp) / sizeof(uintptr_t);
+        // Scan entire stack allocation (matches ports/zephyr proven pattern)
+        // Conservative GC safely handles uninitialized stack regions
+        if (th->id == NULL) {
+            continue;  // Defensive: should never happen if status==READY
         }
 
-        // Diagnostic disabled for cleaner output
-        // mp_printf(&mp_plat_print,
-        //           "GC scan thread %s: sp=0x%08x..0x%08x (%u words)\r\n",
-        //           k_thread_name_get(th->id), (unsigned)saved_sp, (unsigned)stack_top,
-        //           (unsigned)th->stack_len);
-
-        // Scan the ACTIVE stack
+        th->stack = (void *)th->id->stack_info.start;
+        th->stack_len = th->id->stack_info.size / sizeof(uintptr_t);
         gc_collect_root(th->stack, th->stack_len);
 
         // Scan saved callee registers (r4-r11)
