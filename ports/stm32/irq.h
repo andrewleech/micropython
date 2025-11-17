@@ -60,21 +60,23 @@ extern uint32_t irq_stats[IRQ_STATS_MAX];
 // value from disable_irq back to enable_irq.
 
 #if MICROPY_ZEPHYR_THREADING
-// Zephyr IRQ management
-#include <zephyr/arch/cpu.h>
+// Zephyr IRQ management using PRIMASK for complete interrupt masking
+// PRIMASK masks ALL interrupts (including NMI-like priority 0), ensuring
+// critical sections are not interrupted by Zephyr's scheduler or any IRQs.
+// This is more complete than BASEPRI which only masks priority >= threshold.
 
 static inline uint32_t query_irq(void) {
-    // For Zephyr, assume IRQs are enabled when not in atomic section
-    // This is a simplification - Zephyr manages IRQs via arch_irq_lock/unlock
-    return IRQ_STATE_ENABLED;
+    return __get_PRIMASK();
 }
 
 static inline void enable_irq(mp_uint_t state) {
-    arch_irq_unlock(state);
+    __set_PRIMASK(state);
 }
 
 static inline mp_uint_t disable_irq(void) {
-    return arch_irq_lock();
+    mp_uint_t state = __get_PRIMASK();
+    __disable_irq();
+    return state;
 }
 
 #else
