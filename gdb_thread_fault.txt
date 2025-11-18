@@ -1,0 +1,11 @@
+Function "mp_thread_create_ex" not defined.
+Make breakpoint pending on future shared library load? (y or [n]) [answered N; input not from terminal]
+/home/corona/mpy/thread/capture_thread_fault.gdb:19: Error in sourced command file:
+Argument required (one or more breakpoint numbers).
+(gdb) A debugging session is active.
+
+	Inferior 1 [Remote target] will be detached.
+
+Quit anyway? (y or n) [answered Y; input not from terminal]
+Detaching from program: /home/corona/micropython/ports/stm32/build-NUCLEO_F429ZI/firmware.elf, Remote target
+[Inferior 1 (Remote target) detached]

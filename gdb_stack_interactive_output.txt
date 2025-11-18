@@ -1,0 +1,36 @@
+GNU gdb (Arm GNU Toolchain 14.3.Rel1 (Build arm-14.174)) 15.2.90.20241229-git
+Copyright (C) 2024 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+Type "show copying" and "show warranty" for details.
+This GDB was configured as "--host=x86_64-pc-linux-gnu --target=arm-none-eabi".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<https://bugs.linaro.org/>.
+Find the GDB manual and other documentation resources online at:
+    <http://www.gnu.org/software/gdb/documentation/>.
+
+For help, type "help".
+Type "apropos word" to search for commands related to "word"...
+Reading symbols from ports/stm32/build-NUCLEO_F429ZI/firmware.elf...
+0x08071908 in usbd_msc_Write (lun=<optimized out>, 
+    buf=0x2000c594 <usb_device+4108> "", blk_addr=0, blk_len=<optimized out>)
+    at usbd_msc_interface.c:310
+310	        return -1;
+Warning: 'set logging on', an alias for the command 'set logging enabled', is deprecated.
+Use 'set logging enabled on'.
+
+Breakpoint 1 at 0x8070844: file stm32_it.c, line 227.
+Note: automatically using hardware breakpoints for read-only addresses.
+
+Program received signal SIGSEGV, Segmentation fault.
+0x08071908 in usbd_msc_Write (lun=<optimized out>, buf=0x2000c594 <usb_device+4108> "", blk_addr=0, blk_len=<optimized out>) at usbd_msc_interface.c:310
+310	        return -1;
+(gdb) A debugging session is active.
+
+	Inferior 1 [Remote target] will be detached.
+
+Quit anyway? (y or n) [answered Y; input not from terminal]
+Detaching from program: /home/corona/micropython/ports/stm32/build-NUCLEO_F429ZI/firmware.elf, Remote target
+[Inferior 1 (Remote target) detached]

@@ -1,0 +1,13 @@
+Breakpoint 1 at 0x8070844: file stm32_it.c, line 227.
+Note: automatically using hardware breakpoints for read-only addresses.
+
+Program received signal SIGSEGV, Segmentation fault.
+0x08071908 in usbd_msc_Write (lun=<optimized out>, buf=0x2000c594 <usb_device+4108> "", blk_addr=0, blk_len=<optimized out>) at usbd_msc_interface.c:310
+310	        return -1;
+(gdb) A debugging session is active.
+
+	Inferior 1 [Remote target] will be detached.
+
+Quit anyway? (y or n) [answered Y; input not from terminal]
+Detaching from program: /home/corona/micropython/ports/stm32/build-NUCLEO_F429ZI/firmware.elf, Remote target
+[Inferior 1 (Remote target) detached]

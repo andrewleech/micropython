@@ -1,0 +1,27 @@
+build-NUCLEO_F429ZI/../../lib/zephyr/kernel/version.o: \
+ ../../lib/zephyr/kernel/version.c \
+ ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h \
+ ../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h \
+ ../../lib/zephyr/include/zephyr/types.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.3.1/include/stddef.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.3.1/include/stdint.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/stdint.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/machine/_default_types.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/features.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/_newlib_version.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/_intsup.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/_stdint.h \
+ build-NUCLEO_F429ZI/zephyr_gen_root/zephyr/version.h
+ ../../lib/zephyr/kernel/version.c :
+ ../../extmod/zephyr_kernel/zephyr_config_cortex_m.h :
+ ../../extmod/zephyr_kernel/generated/zephyr/devicetree_fixup.h :
+ ../../lib/zephyr/include/zephyr/types.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.3.1/include/stddef.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.3.1/include/stdint.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/stdint.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/machine/_default_types.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/features.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/_newlib_version.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/_intsup.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/_stdint.h :
+ build-NUCLEO_F429ZI/zephyr_gen_root/zephyr/version.h :

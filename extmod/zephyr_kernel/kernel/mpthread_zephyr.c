@@ -44,7 +44,7 @@ void z_ready_thread(struct k_thread *thread);
 
 #define MP_THREAD_MIN_STACK_SIZE                (4 * 1024)
 #define MP_THREAD_DEFAULT_STACK_SIZE            (MP_THREAD_MIN_STACK_SIZE + 1024)
-#define MP_THREAD_PRIORITY                      K_PRIO_PREEMPT(0)  // Higher priority than main (1)
+#define MP_THREAD_PRIORITY                      (k_thread_priority_get(k_current_get()))  // Same priority as creating thread (matches ports/zephyr)
 #define MP_THREAD_MAXIMUM_USER_THREADS          (5)  // Reduced from 8 to save RAM (allows mutate_bytearray.py with 4 threads)
 
 // FPU context size validation
