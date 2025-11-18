@@ -592,10 +592,7 @@ int mp_thread_mutex_lock(mp_thread_mutex_t *mutex, int wait) {
 // Unlock mutex
 void mp_thread_mutex_unlock(mp_thread_mutex_t *mutex) {
     k_sem_give(&mutex->handle);
-    // NOTE: k_yield() removed - was causing deadlock during thread creation
-    // When main thread creates new thread and releases thread_mutex, yielding
-    // immediately causes new thread to run and block on GIL (held by main),
-    // creating deadlock. Rely on timeslicing for context switches instead.
+    k_yield();  // Yield to allow waiting threads fair access (matches ports/zephyr)
 }
 
 // Recursive mutex functions (only compiled when GIL is disabled)
