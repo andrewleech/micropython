@@ -100,7 +100,6 @@ extern const mp_obj_type_t mp_type_usb_builtin;
 #define USB_BUILTIN_FLAG_NONE  0x00
 #define USB_BUILTIN_FLAG_CDC   0x01
 #define USB_BUILTIN_FLAG_MSC   0x02
-#define USB_BUILTIN_FLAG_NCM   0x04
 
 // Helper macros for checking enabled classes
 #define MP_USBD_CDC_ENABLED() (mp_usbd_class_state.flags & USB_BUILTIN_FLAG_CDC)
@@ -119,38 +118,6 @@ static inline void mp_usbd_init_class_state(void) {
     #endif
 }
 
-// Calculate descriptor length from flags using compile-time conditionals
-static inline size_t mp_usbd_get_descriptor_cfg_len_from_flags(uint8_t flags) {
-    size_t len = TUD_CONFIG_DESC_LEN;
-    #if CFG_TUD_CDC
-    if (flags & USB_BUILTIN_FLAG_CDC) {
-        len += TUD_CDC_DESC_LEN;
-    }
-    #endif
-    #if CFG_TUD_MSC
-    if (flags & USB_BUILTIN_FLAG_MSC) {
-        len += TUD_MSC_DESC_LEN;
-    }
-    #endif
-    return len;
-}
-
-// Calculate interface count from flags using compile-time conditionals
-static inline uint8_t mp_usbd_get_interface_count_from_flags(uint8_t flags) {
-    uint8_t count = 0;
-    #if CFG_TUD_CDC
-    if (flags & USB_BUILTIN_FLAG_CDC) {
-        count += 2;  // CDC uses 2 interfaces
-    }
-    #endif
-    #if CFG_TUD_MSC
-    if (flags & USB_BUILTIN_FLAG_MSC) {
-        count += 1;  // MSC uses 1 interface
-    }
-    #endif
-    return count;
-}
-
 // Combined descriptor info calculation using compile-time conditionals
 static inline usb_desc_info_t mp_usbd_get_desc_info_from_flags(uint8_t flags) {
     usb_desc_info_t info = { .length = TUD_CONFIG_DESC_LEN, .interface_count = 0 };
@@ -167,6 +134,11 @@ static inline usb_desc_info_t mp_usbd_get_desc_info_from_flags(uint8_t flags) {
     }
     #endif
     return info;
+}
+
+// Wrapper for length-only callers
+static inline size_t mp_usbd_get_descriptor_cfg_len_from_flags(uint8_t flags) {
+    return mp_usbd_get_desc_info_from_flags(flags).length;
 }
 
 // Initialise TinyUSB device
@@ -203,7 +175,16 @@ size_t mp_usbd_get_descriptor_cfg_len(void);
 
 // Built-in USB device and configuration descriptor values
 extern const tusb_desc_device_t mp_usbd_builtin_desc_dev;
+
+#if !MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
+// Static mode: Use static descriptor array
 extern const uint8_t mp_usbd_builtin_desc_cfg[MP_USBD_BUILTIN_DESC_CFG_LEN];
+#else
+// Runtime mode: Use buffer and generation functions
+extern uint8_t mp_usbd_desc_cfg_buffer[MP_USBD_BUILTIN_DESC_CFG_LEN];
+const uint8_t *mp_usbd_get_default_desc(void);
+const uint8_t *mp_usbd_generate_desc_cfg_unified(uint8_t flags, uint8_t *buffer);
+#endif
 
 void mp_usbd_task_callback(mp_sched_node_t *node);
 
@@ -218,6 +199,13 @@ static inline void mp_usbd_init(void) {
 static inline void mp_usbd_deinit(void) {
     // Called in soft reset path. No-op if no runtime USB devices require cleanup.
 }
+
+// Minimal USB device structure for static mode (builtin_driver control only)
+typedef struct {
+    mp_obj_base_t base;
+    mp_obj_t builtin_driver; // Points to a USBBuiltin constant object
+    bool active; // Has the user set the USB device active?
+} mp_obj_usb_device_t;
 
 #else
 // Runtime USB Device support requires more complex init/deinit
@@ -262,15 +250,6 @@ typedef struct {
     // usbd_callback_function_n().
     mp_uint_t num_pend_excs;
     mp_obj_t pend_excs[MP_USBD_MAX_PEND_EXCS];
-} mp_obj_usb_device_t;
-
-#else // Static USBD drivers only
-
-// Minimal USB device structure for static mode (builtin_driver control only)
-typedef struct {
-    mp_obj_base_t base;
-    mp_obj_t builtin_driver; // Points to a USBBuiltin constant object
-    bool active; // Has the user set the USB device active?
 } mp_obj_usb_device_t;
 
 #endif

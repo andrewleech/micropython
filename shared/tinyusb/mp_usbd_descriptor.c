@@ -165,38 +165,8 @@ const uint8_t *mp_usbd_generate_desc_cfg_unified(uint8_t flags, uint8_t *buffer)
 
 // Get dynamic descriptor length based on enabled classes
 size_t mp_usbd_get_descriptor_cfg_len(void) {
-    size_t len = TUD_CONFIG_DESC_LEN;
-
-    #if CFG_TUD_CDC
-    if (MP_USBD_CDC_ENABLED()) {
-        len += TUD_CDC_DESC_LEN;
-    }
-    #endif
-    #if CFG_TUD_MSC
-    if (MP_USBD_MSC_ENABLED()) {
-        len += TUD_MSC_DESC_LEN;
-    }
-    #endif
-
-    return len;
+    return mp_usbd_get_descriptor_cfg_len_from_flags(mp_usbd_class_state.flags);
 }
-
-
-#if 0
-// Static descriptor for maximum possible configuration
-static const uint8_t mp_usbd_builtin_desc_cfg_max[MP_USBD_BUILTIN_DESC_CFG_LEN] = {
-    TUD_CONFIG_DESCRIPTOR(1, USBD_ITF_BUILTIN_MAX, USBD_STR_0, MP_USBD_BUILTIN_DESC_CFG_LEN,
-        0, USBD_MAX_POWER_MA),
-
-    #if CFG_TUD_CDC
-    TUD_CDC_DESCRIPTOR(USBD_ITF_CDC, USBD_STR_CDC, USBD_CDC_EP_CMD,
-        USBD_CDC_CMD_MAX_SIZE, USBD_CDC_EP_OUT, USBD_CDC_EP_IN, USBD_CDC_IN_OUT_MAX_SIZE),
-    #endif
-    #if CFG_TUD_MSC
-    TUD_MSC_DESCRIPTOR(USBD_ITF_MSC, USBD_STR_MSC, USBD_MSC_EP_OUT, USBD_MSC_EP_IN, USBD_MSC_IN_OUT_MAX_SIZE),
-    #endif
-};
-#endif
 
 
 // Dynamic descriptor buffer for runtime configuration
