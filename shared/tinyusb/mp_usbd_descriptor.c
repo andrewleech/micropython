@@ -301,3 +301,44 @@ const uint8_t *tud_descriptor_configuration_cb(uint8_t index) {
 #endif // !MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
 
 #endif // MICROPY_HW_ENABLE_USBDEV
+
+#if MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
+// Helper functions for dynamic property calculation (runtime mode only)
+uint8_t mp_usbd_get_itf_max(uint8_t flags) {
+    uint8_t count = 0;
+    if ((flags & USB_BUILTIN_FLAG_CDC) && MICROPY_HW_USB_CDC) {
+        count += 2;  // CDC uses 2 interfaces
+    }
+    if ((flags & USB_BUILTIN_FLAG_MSC) && MICROPY_HW_USB_MSC) {
+        count += 1;
+    }
+    return count;
+}
+
+uint8_t mp_usbd_get_ep_max(uint8_t flags) {
+    uint8_t ep_max = 1;  // Endpoint 0 is always used
+    if ((flags & USB_BUILTIN_FLAG_CDC) && MICROPY_HW_USB_CDC) {
+        ep_max = 3;  // CDC uses endpoints 1, 2, 3
+    }
+    if ((flags & USB_BUILTIN_FLAG_MSC) && MICROPY_HW_USB_MSC) {
+        ep_max = (ep_max > 2) ? ep_max : 2;  // MSC uses endpoints 1, 2
+    }
+    return ep_max;
+}
+
+uint8_t mp_usbd_get_str_max(uint8_t flags) {
+    uint8_t str_max = 1;  // String 0 is always used (language descriptor)
+    if ((flags & USB_BUILTIN_FLAG_CDC) && MICROPY_HW_USB_CDC) {
+        str_max = 4;  // CDC uses strings 1, 2, 3, 4
+    }
+    if ((flags & USB_BUILTIN_FLAG_MSC) && MICROPY_HW_USB_MSC) {
+        str_max = (str_max > 2) ? str_max : 2;  // MSC uses strings 1, 2
+    }
+    return str_max;
+}
+
+const uint8_t *mp_usbd_get_builtin_desc_cfg(uint8_t flags, size_t *len) {
+    *len = mp_usbd_get_descriptor_cfg_len_from_flags(flags);
+    return mp_usbd_generate_desc_cfg_unified(flags, mp_usbd_desc_cfg_buffer);
+}
+#endif

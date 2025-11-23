@@ -184,14 +184,18 @@ extern const uint8_t mp_usbd_builtin_desc_cfg[MP_USBD_BUILTIN_DESC_CFG_LEN];
 extern uint8_t mp_usbd_desc_cfg_buffer[MP_USBD_BUILTIN_DESC_CFG_LEN];
 const uint8_t *mp_usbd_get_default_desc(void);
 const uint8_t *mp_usbd_generate_desc_cfg_unified(uint8_t flags, uint8_t *buffer);
+uint8_t mp_usbd_get_itf_max(uint8_t flags);
+uint8_t mp_usbd_get_ep_max(uint8_t flags);
+uint8_t mp_usbd_get_str_max(uint8_t flags);
+const uint8_t *mp_usbd_get_builtin_desc_cfg(uint8_t flags, size_t *len);
 #endif
 
 void mp_usbd_task_callback(mp_sched_node_t *node);
 
+// Need init/deinit for both runtime and static, but runtime is more complex
 #if !MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
-
 static inline void mp_usbd_init(void) {
-    // Without runtime USB support, this can be a thin wrapper wrapper around tusb_init()
+    // Without runtime USB support, this can be a thin wrapper around tusb_init()
     // which is called in the below helper function.
     mp_usbd_init_tud();
 }
@@ -200,27 +204,24 @@ static inline void mp_usbd_deinit(void) {
     // Called in soft reset path. No-op if no runtime USB devices require cleanup.
 }
 
-// Minimal USB device structure for static mode (builtin_driver control only)
-typedef struct {
-    mp_obj_base_t base;
-    mp_obj_t builtin_driver; // Points to a USBBuiltin constant object
-    bool active; // Has the user set the USB device active?
-} mp_obj_usb_device_t;
-
 #else
-// Runtime USB Device support requires more complex init/deinit
 void mp_usbd_init(void);
 void mp_usbd_deinit(void);
-
 const char *mp_usbd_runtime_string_cb(uint8_t index);
 
 // Maximum number of pending exceptions per single TinyUSB task execution
 #define MP_USBD_MAX_PEND_EXCS 2
 
-// Full runtime USB device structure
+#endif
+
+// This struct is defined for both static and runtime builds.
+// In static mode, only the base, builtin_driver and active fields are used.
 typedef struct {
     mp_obj_base_t base;
+    uint8_t builtin_driver; // Bitfield of USB_BUILTIN_FLAG_* values
+    bool active; // Has the user set the USB device active?
 
+    #if MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
     mp_obj_t desc_dev; // Device descriptor bytes
     mp_obj_t desc_cfg; // Configuration descriptor bytes
     mp_obj_t desc_strs; // List/dict/similar to look up string descriptors by index
@@ -231,18 +232,15 @@ typedef struct {
     mp_obj_t control_xfer_cb;
     mp_obj_t xfer_cb;
 
-    uint8_t builtin_driver; // Bitfield of USB_BUILTIN_FLAG_* values
-
-    bool active; // Has the user set the USB device active?
     bool trigger; // Has the user requested the active state change (or re-activate)?
 
     // Temporary pointers for xfer data in progress on each endpoint
-    // Ensuring they aren't garbage collected until the xfer completes
+    // Ensuring they aren’t garbage collected until the xfer completes
     mp_obj_t xfer_data[CFG_TUD_ENDPPOINT_MAX][2];
 
     // Pointer to a memoryview that is reused to refer to various pieces of
     // control transfer data that are pushed to USB control transfer
-    // callbacks. Python code can't rely on the memoryview contents
+    // callbacks. Python code can’t rely on the memoryview contents
     // to remain valid after the callback returns!
     mp_obj_array_t *control_data;
 
@@ -250,9 +248,9 @@ typedef struct {
     // usbd_callback_function_n().
     mp_uint_t num_pend_excs;
     mp_obj_t pend_excs[MP_USBD_MAX_PEND_EXCS];
+    #endif
 } mp_obj_usb_device_t;
 
-#endif
 
 // Return true if any built-in driver is enabled
 bool mp_usb_device_builtin_enabled(const mp_obj_usb_device_t *usbd);
