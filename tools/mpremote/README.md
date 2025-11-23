@@ -16,6 +16,10 @@ The full list of supported commands are:
                                          or any valid device name/path
     mpremote disconnect               -- disconnect current device
     mpremote mount <local-dir>        -- mount local directory on device
+                                         options:
+                                             --unsafe-links / -l: follow symlinks outside mount
+                                             --auto-mpy / -m: auto-compile .py to .mpy (default)
+                                             --no-auto-mpy: disable auto-compilation
     mpremote eval <string>            -- evaluate and print the string
     mpremote exec <string>            -- execute the string
     mpremote run <file>               -- run the given local script
@@ -82,3 +86,88 @@ Examples:
     mpremote mip install aioble
     mpremote mip install github:org/repo@branch
     mpremote mip install gitlab:org/repo@branch
+
+## Auto-MPY Compilation
+
+When a local directory is mounted using `mpremote mount`, the tool can automatically
+compile Python files to bytecode (.mpy) format on-demand. This feature:
+
+- **Improves import performance**: .mpy files are pre-compiled and load faster
+- **Transparent operation**: Automatically compiles when device requests .mpy
+- **Caching**: Compiled files are cached to avoid recompilation
+- **Graceful fallback**: Uses .py files if compilation fails
+
+### Installation
+
+Auto-compilation requires the `mpy-cross` Python package:
+
+    pip install mpremote[mpy]
+
+Or install `mpy-cross` separately:
+
+    pip install mpy-cross
+
+### Usage
+
+    mpremote mount /path/to/code              # Auto-compile enabled (default)
+    mpremote mount --no-auto-mpy /path/to/code  # Disable auto-compilation
+
+### How it Works
+
+1. When MicroPython tries to import a module, it checks for .py files first
+2. mpremote intercepts the .py stat request and compiles to .mpy if needed
+3. mpremote returns "file not found" for .py to force MicroPython to use .mpy
+4. The compiled .mpy is saved both locally and in a cache directory
+5. Subsequent imports use the cached .mpy file
+6. Cache is automatically managed (100MB limit, LRU eviction)
+
+### Important Limitations
+
+When auto-mpy is enabled with `mount`, `.py` files on mounted filesystems become invisible to the device for ALL operations, not just imports.
+
+This means:
+- ✗ **`open("script.py")`** will fail (file appears not to exist)
+- ✗ **`os.stat("script.py")`** will return ENOENT
+- ✓ **`import script`** works (uses compiled .mpy)
+
+**Workaround:** Disable auto-mpy if you need direct .py file access:
+
+```bash
+mpremote mount --no-auto-mpy /path/to/code
+```
+
+This limitation exists because mpremote cannot distinguish between import-related file access and regular file operations at the stat interception level.
+
+### Requirements
+
+- The `mpy-cross` Python package must be installed
+- Device must support .mpy files (MicroPython v1.12+)
+- Architecture is auto-detected from the connected device
+
+### Cache Structure
+
+Compiled `.mpy` files are stored in a cache directory:
+
+**Location:** `/tmp/mpremote_mpy_cache/`
+
+**Cache key format:** `_<path>_<mtime>_<arch>.mpy`
+- Example: `_tmp_mpy_test_script_py_1732456789_0_xtensawin.mpy`
+- `<path>`: Source .py file path (sanitized, slashes/dots → underscores)
+- `<mtime>`: Modification timestamp of .py file
+- `<arch>`: Target architecture (e.g., xtensawin, armv7m)
+
+**Cache behavior:**
+- Automatic LRU eviction when cache exceeds 100MB
+- Cached .mpy is reused if source .py file hasn't changed (mtime check)
+- Different architectures maintain separate cache entries
+- Compiled .mpy files are ALSO copied to the mounted directory alongside .py files
+- Example: `/path/to/code/module.py` → `/path/to/code/module.mpy` + cache entry
+
+### Troubleshooting
+
+If auto-compilation isn't working:
+- Check if `mpy-cross` is installed: `python -c "import mpy_cross"`
+- Use verbose mode to see compilation messages: `mpremote -v mount /path/to/code`
+- Manually disable if needed: `mpremote mount --no-auto-mpy /path/to/code`
+- Check cache directory: `ls -lh /tmp/mpremote_mpy_cache/`
+- Clear cache if needed: `rm -rf /tmp/mpremote_mpy_cache/`

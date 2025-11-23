@@ -83,18 +83,20 @@ def do_version(state, _args=None):
 
 def _bool_flag(cmd_parser, name, short_name, default, description):
     # In Python 3.9+ this can be replaced with argparse.BooleanOptionalAction.
+    dest = name.replace("-", "_")
     group = cmd_parser.add_mutually_exclusive_group()
     group.add_argument(
         "--" + name,
         "-" + short_name,
         action="store_true",
         default=default,
+        dest=dest,
         help=description,
     )
     group.add_argument(
         "--no-" + name,
         action="store_false",
-        dest=name,
+        dest=dest,
     )
 
 
@@ -126,6 +128,13 @@ def argparse_mount():
         "l",
         False,
         "follow symbolic links pointing outside of local directory",
+    )
+    _bool_flag(
+        cmd_parser,
+        "auto-mpy",
+        "m",
+        True,
+        "automatically compile .py to .mpy on import (default)",
     )
     cmd_parser.add_argument("path", nargs=1, help="local path to mount")
     return cmd_parser

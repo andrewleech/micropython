@@ -5,7 +5,6 @@ import os
 import sys
 import tempfile
 import zlib
-
 import serial.tools.list_ports
 
 from .transport import TransportError, TransportExecError, stdout_write_bytes
@@ -506,19 +505,18 @@ def do_eval(state, args):
 
 
 def do_run(state, args):
-    filename = args.path[0]
     try:
-        with open(filename, "rb") as f:
+        with open(args.path[0], "rb") as f:
             buf = f.read()
     except OSError:
-        raise CommandError(f"could not read file '{filename}'")
+        raise CommandError(f"could not read file '{args.path[0]}'")
     _do_execbuffer(state, buf, args.follow)
 
 
 def do_mount(state, args):
     state.ensure_raw_repl()
     path = args.path[0]
-    state.transport.mount_local(path, unsafe_links=args.unsafe_links)
+    state.transport.mount_local(path, unsafe_links=args.unsafe_links, auto_mpy=args.auto_mpy)
     print(f"Local directory {path} is mounted at /remote")
 
 

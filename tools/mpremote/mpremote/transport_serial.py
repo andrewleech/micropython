@@ -35,12 +35,14 @@
 # Once the API is stabilised, the idea is that mpremote can be used both
 # as a command line tool and a library for interacting with devices.
 
-import ast, io, os, re, struct, sys, time
+import ast, io, os, re, shutil, struct, sys, time
 import serial
 import serial.tools.list_ports
-from errno import EPERM, ENOTTY
+from errno import EPERM, ENOTTY, ENOENT
+from pathlib import Path
 from .console import VT_ENABLED
 from .transport import TransportError, TransportExecError, Transport
+from .mpy_compiler import MpyCrossCompiler, ARCH_MAP
 
 
 VID_SILICON_LABS = 0x10C4
@@ -54,6 +56,7 @@ class SerialTransport(Transport):
         self.use_raw_paste = True
         self.device_name = device
         self.mounted = False
+        self.supports_deflate = None  # Lazy detection: None=unknown, True/False=detected
 
         # Set options, and exclusive if pyserial supports it
         serial_kwargs = {
@@ -316,13 +319,162 @@ class SerialTransport(Transport):
             pyfile = f.read()
         return self.exec(pyfile)
 
-    def mount_local(self, path, unsafe_links=False):
+    def _detect_device_arch(self):
+        """Detect device architecture by introspecting sys.implementation._mpy.
+
+        Executes code on the device to extract architecture information from
+        sys.implementation._mpy, which encodes both the MPY version and
+        architecture index.
+
+        Sets self.device_arch and self.device_mpy_version on success, or
+        None on failure.
+
+        Returns:
+            True if detection succeeded, False otherwise
+        """
+        try:
+            # Capture output using data_consumer
+            output_data = []
+
+            def capture_output(data):
+                output_data.append(data)
+
+            self.exec(
+                "import sys; mpy = sys.implementation._mpy if '_mpy' in dir(sys.implementation) else 0; "
+                "print(repr({'mpy': mpy, 'arch_idx': mpy >> 10, 'version': mpy & 0xFF}))",
+                data_consumer=capture_output,
+            )
+
+            # Parse the output
+            if output_data:
+                import ast
+
+                # Join and decode, removing control characters
+                result_bytes = b"".join(output_data)
+                # Remove trailing \x04 (EOT) and other control characters
+                result_str = result_bytes.decode().strip().rstrip("\x04\r\n")
+                result = ast.literal_eval(result_str)
+            else:
+                result = None
+
+            # Add defensive checks
+            if not isinstance(result, dict):
+                verbose = getattr(self, "verbose", False)
+                if verbose:
+                    print("Architecture detection: unexpected result type")
+                self.device_arch = None
+                self.device_mpy_version = None
+                return False
+
+            if "error" in result:
+                verbose = getattr(self, "verbose", False)
+                if verbose:
+                    print(f"Architecture detection error: {result['error']}")
+                self.device_arch = None
+                self.device_mpy_version = None
+                return False
+
+            # Extract architecture information using .get() for safe key access
+            arch_idx = result.get("arch_idx", 0)
+            mpy_version = result.get("version", 0)
+
+            # Map architecture index to name
+            arch_name = ARCH_MAP.get(arch_idx)
+
+            if arch_name:
+                self.device_arch = arch_name
+                self.device_mpy_version = mpy_version
+
+                verbose = getattr(self, "verbose", False)
+                if verbose:
+                    print(
+                        f"Detected device architecture: {arch_name} (MPY version: {mpy_version})"
+                    )
+                return True
+            else:
+                verbose = getattr(self, "verbose", False)
+                if verbose:
+                    print(f"Unknown architecture index: {arch_idx}")
+                self.device_arch = None
+                self.device_mpy_version = None
+                return False
+
+        except Exception as e:
+            verbose = getattr(self, "verbose", False)
+            if verbose:
+                print(f"Failed to detect device architecture: {e}")
+            self.device_arch = None
+            self.device_mpy_version = None
+            return False
+
+    def _detect_deflate_support(self):
+        """Detect if device supports deflate module for compression.
+
+        Checks if the device has the deflate module available, which is
+        required for on-device decompression of transferred files.
+
+        Sets self.supports_deflate to True/False based on detection.
+
+        Returns:
+            True if deflate is supported, False otherwise
+        """
+        if self.supports_deflate is not None:
+            # Already detected
+            return self.supports_deflate
+
+        try:
+            self.exec("from deflate import DeflateIO,RAW,ZLIB")
+            self.supports_deflate = True
+            verbose = getattr(self, "verbose", False)
+            if verbose:
+                print("Device supports deflate compression")
+            return True
+        except Exception:
+            self.supports_deflate = False
+            verbose = getattr(self, "verbose", False)
+            if verbose:
+                print("Device does not support deflate compression")
+            return False
+
+    def mount_local(self, path, unsafe_links=False, auto_mpy=True):
         fout = self.serial
         if not self.eval('"RemoteFS" in globals()'):
             self.exec(fs_hook_code)
         self.exec("__mount()")
+
+        # Get verbose flag if available
+        verbose = getattr(self, "verbose", False)
+
+        # Detect device architecture and initialize MPY compiler if requested
+        mpy_compiler = None
+        if auto_mpy:
+            if self._detect_device_arch():
+                try:
+                    mpy_compiler = MpyCrossCompiler(
+                        arch=self.device_arch,
+                        mpy_version=self.device_mpy_version,
+                        verbose=verbose,
+                    )
+                    if not mpy_compiler.enabled:
+                        mpy_compiler = None
+                except Exception as e:
+                    if verbose:
+                        print(f"Failed to initialize MPY compiler: {e}")
+                    mpy_compiler = None
+            else:
+                # Detection failed
+                if verbose:
+                    print("Auto-MPY disabled: could not detect device architecture")
+
         self.mounted = True
-        self.cmd = PyboardCommand(self.serial, fout, path, unsafe_links=unsafe_links)
+        self.cmd = PyboardCommand(
+            self.serial,
+            fout,
+            path,
+            unsafe_links=unsafe_links,
+            mpy_compiler=mpy_compiler,
+            verbose=verbose,
+        )
         self.serial = SerialIntercept(self.serial, self.cmd)
 
     def write_ctrl_d(self, out_callback):
@@ -785,13 +937,15 @@ fs_hook_code = re.sub("buf4", "b4", fs_hook_code)
 
 
 class PyboardCommand:
-    def __init__(self, fin, fout, path, unsafe_links=False):
+    def __init__(self, fin, fout, path, unsafe_links=False, mpy_compiler=None, verbose=False):
         self.fin = fin
         self.fout = fout
         self.root = path + "/"
         self.data_ilistdir = ["", []]
         self.data_files = []
         self.unsafe_links = unsafe_links
+        self.mpy_compiler = mpy_compiler
+        self.verbose = verbose
 
     def rd_s8(self):
         return struct.unpack("<b", self.fin.read(1))[0]
@@ -844,6 +998,76 @@ class PyboardCommand:
     def do_stat(self):
         path = self.root + self.rd_str()
         # self.log_cmd(f"stat {path}")
+
+        # Check if this is a .py request and auto-mpy is enabled
+        # Intercept .py stat to compile and redirect to .mpy
+        #
+        # IMPORTANT LIMITATION: This hides .py files from ALL device operations,
+        # not just imports. This means open("foo.py") and os.stat("foo.py") will
+        # fail on the device side. This is a fundamental limitation of intercepting
+        # at the stat level - we cannot distinguish between import-related stats
+        # and regular file access stats.
+        #
+        # Users who need direct .py file access should use --no-auto-mpy flag.
+        if (
+            path.endswith(".py")
+            and hasattr(self, "mpy_compiler")
+            and self.mpy_compiler
+            and self.mpy_compiler.enabled
+        ):
+            try:
+                py_path = Path(path)
+                mpy_path = Path(path[:-3] + ".mpy")  # Replace .py with .mpy
+
+                # If .py exists, compile it to .mpy and return ENOENT for .py
+                if py_path.exists():
+                    # Security check on .py file
+                    self.path_check(str(py_path))
+
+                    # Check if .mpy already exists and is fresh
+                    mpy_is_fresh = False
+                    if mpy_path.exists():
+                        py_mtime = py_path.stat().st_mtime
+                        mpy_mtime = mpy_path.stat().st_mtime
+                        mpy_is_fresh = mpy_mtime >= py_mtime
+
+                    if not mpy_is_fresh:
+                        # Check cache first
+                        cached_mpy = self.mpy_compiler.get_cached_mpy(py_path)
+                        if cached_mpy:
+                            if self.verbose:
+                                self.log_cmd(f"MPY cache hit: {py_path} -> {mpy_path}")
+                            # Copy from cache to local mount location
+                            shutil.copy2(cached_mpy, mpy_path)
+                        else:
+                            if self.verbose:
+                                self.log_cmd(f"Compiling {py_path} to {mpy_path}")
+                            # Compile and cache
+                            if self.mpy_compiler.compile(py_path, mpy_path):
+                                # Also save to cache
+                                self.mpy_compiler.save_to_cache(py_path, mpy_path)
+                            else:
+                                # Compilation failed, fall back to .py
+                                if self.verbose:
+                                    self.log_cmd(
+                                        f"MPY compilation failed for {py_path}, using .py"
+                                    )
+                                # Let normal stat handle .py
+                                pass
+
+                    # If .mpy exists (either from compilation or already fresh), hide .py
+                    if mpy_path.exists():
+                        if self.verbose:
+                            self.log_cmd(f"Hiding {py_path}, will use {mpy_path}")
+                        # Return ENOENT to force MicroPython to try .mpy
+                        self.wr_s8(-ENOENT)
+                        return
+            except Exception as e:
+                # Log but don't crash - fall through to normal stat
+                if self.verbose:
+                    self.log_cmd(f"MPY compilation error: {e}")
+
+        # Continue with normal stat logic
         try:
             self.path_check(path)
             stat = os.stat(path)

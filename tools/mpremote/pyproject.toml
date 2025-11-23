@@ -33,6 +33,9 @@ dynamic = ["dependencies", "version"]
 [project.scripts]
 mpremote = "mpremote.main:main"
 
+[project.optional-dependencies]
+mpy = ["mpy-cross"]
+
 [tool.hatch.metadata.hooks.requirements_txt]
 files = ["requirements.txt"]
 

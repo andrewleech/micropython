@@ -1,0 +1,32 @@
+-----
+Hello from module1
+Local directory ${TMP}/test_mpy is mounted at /remote
+PASS: .mpy file created
+-----
+Hello from module1
+PASS: .mpy file used after .py removed
+-----
+Hello from module2
+Local directory ${TMP}/test_mpy_disabled is mounted at /remote
+PASS: .mpy file not created with --no-auto-mpy
+-----
+mpremote: SyntaxError:
+expect error
+-----
+from helper
+Local directory ${TMP}/test_mpy_pkg is mounted at /remote
+from subpkg
+PASS: .mpy files created for package
+-----
+cached
+Local directory ${TMP}/test_mpy_cache is mounted at /remote
+cached
+PASS: .mpy restored from cache
+-----
+modified
+PASS: Modified file recompiled
+-----
+A B C
+Local directory ${TMP}/test_mpy_multi is mounted at /remote
+PASS: Multiple .mpy files created
+-----
