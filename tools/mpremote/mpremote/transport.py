@@ -131,12 +131,30 @@ class Transport:
             raise _convert_filesystem_error(e, src) from None
 
     def fs_readfile(self, src, chunk_size=256, progress_callback=None):
+        """Read file data from device filesystem.
+
+        Args:
+            src: Source path on device
+            chunk_size: Size of chunks for transfer
+            progress_callback: Optional callback(bytes_read, total_size)
+
+        Returns:
+            Bytes read from file
+
+        Note:
+            Compression for device→host transfers is not currently supported
+            because many MicroPython builds don't include deflate compression
+            (only decompression). The fs_writefile() function does support
+            compression for host→device transfers.
+        """
+        # Get file size for progress callback
         if progress_callback:
             src_size = self.fs_stat(src).st_size
 
         contents = bytearray()
 
         try:
+            # Standard uncompressed read
             self.exec("f=open('%s','rb')\nr=f.read" % src)
             while True:
                 chunk = self.eval("r({})".format(chunk_size))
@@ -146,25 +164,91 @@ class Transport:
                 if progress_callback:
                     progress_callback(len(contents), src_size)
             self.exec("f.close()")
+
         except TransportExecError as e:
             raise _convert_filesystem_error(e, src) from None
 
         return contents
 
-    def fs_writefile(self, dest, data, chunk_size=256, progress_callback=None):
+    def fs_writefile(
+        self, dest, data, chunk_size=256, progress_callback=None, use_compression=True
+    ):
+        """Write file data to device filesystem.
+
+        Args:
+            dest: Destination path on device
+            data: Bytes to write
+            chunk_size: Size of chunks for transfer (increased to 4096 for compression)
+            progress_callback: Optional callback(bytes_written, total_size)
+            use_compression: Try to compress data if supported (default True)
+        """
+        from .compression_utils import compress_data, MIN_COMPRESS_SIZE, MIN_COMPRESS_RATIO
+        import binascii
+
+        # Detect if device supports deflate compression
+        supports_deflate = getattr(self, "supports_deflate", None)
+        if supports_deflate is None and hasattr(self, "_detect_deflate_support"):
+            supports_deflate = self._detect_deflate_support()
+
+        # Try compression if enabled, supported, and file is large enough
+        compress = False
+        if use_compression and supports_deflate and len(data) >= MIN_COMPRESS_SIZE:
+            try:
+                compressed = compress_data(data)
+                # Only use compression if it achieves meaningful reduction
+                if len(compressed) < len(data) * MIN_COMPRESS_RATIO:
+                    original_size = len(data)
+                    data = compressed
+                    compress = True
+                    if hasattr(self, "verbose") and self.verbose:
+                        ratio = original_size / len(compressed)
+                        print(
+                            f"Compressing {dest}: {original_size}B → {len(compressed)}B ({ratio:.1f}x)"
+                        )
+            except Exception:
+                pass  # Fall back to uncompressed
+
+        # Use larger chunks when compressing (data is already compressed, less overhead)
+        if compress and chunk_size < 4096:
+            chunk_size = 4096
+
         if progress_callback:
             src_size = len(data)
             written = 0
 
         try:
-            self.exec("f=open('%s','wb')\nw=f.write" % dest)
+            if compress:
+                # Setup decompression on device side
+                self.exec(
+                    "from deflate import DeflateIO,ZLIB\n"
+                    "from io import BytesIO\n"
+                    "import binascii\n"
+                    "f=open('%s','wb')" % dest
+                )
+            else:
+                # Standard file write
+                self.exec("import binascii\nf=open('%s','wb')\nw=f.write" % dest)
+
             while data:
                 chunk = data[:chunk_size]
-                self.exec("w(" + repr(chunk) + ")")
+                # Encode chunk as base64 (more efficient than repr)
+                b64_chunk = binascii.b2a_base64(chunk).decode("ascii").strip()
+
+                if compress:
+                    # Decompress on device and write
+                    self.exec(
+                        "d=binascii.a2b_base64('%s')\n"
+                        "f.write(DeflateIO(BytesIO(d),ZLIB).read())" % b64_chunk
+                    )
+                else:
+                    # Decode base64 and write directly
+                    self.exec("w(binascii.a2b_base64('%s'))" % b64_chunk)
+
                 data = data[len(chunk) :]
                 if progress_callback:
                     written += len(chunk)
                     progress_callback(written, src_size)
+
             self.exec("f.close()")
         except TransportExecError as e:
             raise _convert_filesystem_error(e, dest) from None
