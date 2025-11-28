@@ -726,16 +726,20 @@ Results gathered: 2025-11-28
 
 On 2025-11-29, implemented bulk operations in `tud_cdc_rx_cb()` (shared/tinyusb/mp_usbd_cdc.c:73-129).
 
-**Commit:** f8c8369c1b8dbc02c4970f16484a37f091504cae
+**Commits:**
+- 7735584e7e - Initial bulk operations implementation
+- 9b2eed6174 - Fix for mp_interrupt_char == -1 handling
 
 **Changes:**
 - Added `#include <string.h>` for `memchr()`
 - Replaced byte-by-byte loop with bulk operations using:
   - `tud_cdc_n_read()` - reads up to 64 bytes per call (matching USB packet size)
-  - `memchr()` - scans for interrupt character
+  - `memchr()` - scans for interrupt character (with check for disabled state)
   - `ringbuf_put_bytes()` - bulk write to stdin_ringbuf
 - Uses 64-byte temporary buffer for efficient USB packet processing
-- Maintains exact interrupt character behavior (clears ringbuf, discards remaining data)
+- Maintains interrupt character behavior (clears ringbuf, schedules interrupt)
+
+**Behavioral change:** The original code had a comment "// and stop" after scheduling the interrupt, but didn't actually stop - it continued processing remaining bytes into the (now cleared) ringbuf. The new implementation correctly stops processing when interrupt character is detected, discarding remaining buffered bytes. This matches the documented intent and expected behavior when user presses Ctrl-C.
 
 **Test Device:**
 - Raspberry Pi Pico (RP2040)
