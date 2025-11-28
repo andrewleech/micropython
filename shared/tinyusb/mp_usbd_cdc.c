@@ -24,6 +24,8 @@
  * THE SOFTWARE.
  */
 
+#include <string.h>
+
 #include "py/runtime.h"
 #include "py/mphal.h"
 #include "py/stream.h"
@@ -69,28 +71,60 @@ uintptr_t mp_usbd_cdc_poll_interfaces(uintptr_t poll_flags) {
 }
 
 void tud_cdc_rx_cb(uint8_t itf) {
-    // consume pending USB data immediately to free usb buffer and keep the endpoint from stalling.
-    // in case the ringbuffer is full, mark the CDC interface that need attention later on for polling
+    // Consume pending USB data immediately to free USB buffer and keep the endpoint from stalling.
+    // In case the ringbuffer is full, mark the CDC interface that needs attention later on for polling.
     cdc_itf_pending &= ~(1 << itf);
-    for (uint32_t bytes_avail = tud_cdc_n_available(itf); bytes_avail > 0; --bytes_avail) {
-        if (ringbuf_free(&stdin_ringbuf)) {
-            int data_char = tud_cdc_read_char();
-            #if MICROPY_KBD_EXCEPTION
-            if (data_char == mp_interrupt_char) {
-                // Clear the ring buffer
-                stdin_ringbuf.iget = stdin_ringbuf.iput = 0;
-                // and stop
-                mp_sched_keyboard_interrupt();
-            } else {
-                ringbuf_put(&stdin_ringbuf, data_char);
+
+    // Temporary buffer for bulk reads (matches USB packet size)
+    uint8_t temp[64];
+
+    while (tud_cdc_n_available(itf) > 0 && ringbuf_free(&stdin_ringbuf) > 0) {
+        // Calculate chunk size: limited by temp buffer, USB available, and ringbuf space
+        uint32_t chunk = tud_cdc_n_available(itf);
+        if (chunk > sizeof(temp)) {
+            chunk = sizeof(temp);
+        }
+        uint32_t free = ringbuf_free(&stdin_ringbuf);
+        if (chunk > free) {
+            chunk = free;
+        }
+
+        // Bulk read from TinyUSB
+        uint32_t got = tud_cdc_n_read(itf, temp, chunk);
+        if (got == 0) {
+            break;  // No data available (shouldn't happen, but defensive)
+        }
+
+        #if MICROPY_KBD_EXCEPTION
+        // Scan for interrupt character
+        uint8_t *intr_pos = memchr(temp, mp_interrupt_char, got);
+        if (intr_pos != NULL) {
+            // Found interrupt character
+            size_t pre_len = intr_pos - temp;
+
+            // Copy bytes before interrupt char (if any)
+            if (pre_len > 0) {
+                ringbuf_put_bytes(&stdin_ringbuf, temp, pre_len);
             }
-            #else
-            ringbuf_put(&stdin_ringbuf, data_char);
-            #endif
-        } else {
-            cdc_itf_pending |= (1 << itf);
+
+            // Clear the ring buffer
+            stdin_ringbuf.iget = stdin_ringbuf.iput = 0;
+
+            // Schedule keyboard interrupt
+            mp_sched_keyboard_interrupt();
+
+            // Stop processing (discard remaining bytes in temp and USB buffer)
             return;
         }
+        #endif
+
+        // No interrupt char found - bulk copy to ringbuf
+        ringbuf_put_bytes(&stdin_ringbuf, temp, got);
+    }
+
+    // If USB still has data but ringbuf is full, mark interface for later polling
+    if (tud_cdc_n_available(itf) > 0) {
+        cdc_itf_pending |= (1 << itf);
     }
 }
 
