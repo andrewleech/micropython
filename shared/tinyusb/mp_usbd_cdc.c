@@ -96,25 +96,27 @@ void tud_cdc_rx_cb(uint8_t itf) {
         }
 
         #if MICROPY_KBD_EXCEPTION
-        // Scan for interrupt character
-        uint8_t *intr_pos = memchr(temp, mp_interrupt_char, got);
-        if (intr_pos != NULL) {
-            // Found interrupt character
-            size_t pre_len = intr_pos - temp;
+        // Scan for interrupt character (only if enabled, i.e., >= 0)
+        if (mp_interrupt_char >= 0) {
+            uint8_t *intr_pos = memchr(temp, mp_interrupt_char, got);
+            if (intr_pos != NULL) {
+                // Found interrupt character
+                size_t pre_len = intr_pos - temp;
 
-            // Copy bytes before interrupt char (if any)
-            if (pre_len > 0) {
-                ringbuf_put_bytes(&stdin_ringbuf, temp, pre_len);
+                // Copy bytes before interrupt char (if any)
+                if (pre_len > 0) {
+                    ringbuf_put_bytes(&stdin_ringbuf, temp, pre_len);
+                }
+
+                // Clear the ring buffer
+                stdin_ringbuf.iget = stdin_ringbuf.iput = 0;
+
+                // Schedule keyboard interrupt
+                mp_sched_keyboard_interrupt();
+
+                // Stop processing (discard remaining bytes in temp and USB buffer)
+                return;
             }
-
-            // Clear the ring buffer
-            stdin_ringbuf.iget = stdin_ringbuf.iput = 0;
-
-            // Schedule keyboard interrupt
-            mp_sched_keyboard_interrupt();
-
-            // Stop processing (discard remaining bytes in temp and USB buffer)
-            return;
         }
         #endif
 
