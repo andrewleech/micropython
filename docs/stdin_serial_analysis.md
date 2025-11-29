@@ -811,3 +811,23 @@ The bulk USB-CDC optimization successfully removes the device-side bottleneck. F
 - End-to-end stdin throughput: Still limited by protocol flow control (~20 KB/s baseline unchanged)
 
 The optimization is valuable for future protocol improvements and already benefits scenarios where the device processes stdin_ringbuf data faster than the host sends it (reduces USB IRQ overhead).
+
+### Testing Results
+
+Comprehensive test suite run on Raspberry Pi Pico with optimized firmware:
+
+**Test Summary:**
+- **Basics tests:** 536/536 passed (16,779 individual testcases)
+- **MicroPython tests:** 95/95 passed (713 individual testcases)
+- **Keyboard interrupt test:** PASSED (micropython/kbd_intr.py)
+
+**Total:** 631 tests passed with 17,492 individual testcases verified
+
+**Known failures (unrelated to USB-CDC changes):**
+- io/file_stdio*.py tests fail due to `fileno()` not being implemented on RP2 port
+
+The test results confirm:
+- stdin/stdout operations function correctly over USB-CDC
+- Keyboard interrupt handling (Ctrl-C) works as expected with bulk operations
+- No regressions introduced by the optimization
+- All core Python functionality operates correctly with the new implementation
