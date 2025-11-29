@@ -114,7 +114,13 @@ void tud_cdc_rx_cb(uint8_t itf) {
                 // Schedule keyboard interrupt
                 mp_sched_keyboard_interrupt();
 
-                // Stop processing (discard remaining bytes in temp and USB buffer)
+                // Mark interface as pending if there's still data in USB buffer
+                // (so subsequent data like user typing new commands isn't lost)
+                if (tud_cdc_n_available(itf) > 0) {
+                    cdc_itf_pending |= (1 << itf);
+                }
+
+                // Stop processing (discard remaining bytes in current packet)
                 return;
             }
         }
