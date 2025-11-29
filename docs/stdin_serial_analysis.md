@@ -739,7 +739,7 @@ On 2025-11-29, implemented bulk operations in `tud_cdc_rx_cb()` (shared/tinyusb/
 - Uses 64-byte temporary buffer for efficient USB packet processing
 - Maintains interrupt character behavior (clears ringbuf, schedules interrupt)
 
-**Behavioral change:** The original code had a comment "// and stop" after scheduling the interrupt, but didn't actually stop - it continued processing remaining bytes into the (now cleared) ringbuf. The new implementation correctly stops processing when interrupt character is detected, discarding remaining buffered bytes. This matches the documented intent and expected behavior when user presses Ctrl-C.
+**Behavioral change:** See detailed analysis in "Interrupt Character Handling Behavior Change" section below.
 
 **Test Device:**
 - Raspberry Pi Pico (RP2040)
@@ -831,3 +831,170 @@ The test results confirm:
 - Keyboard interrupt handling (Ctrl-C) works as expected with bulk operations
 - No regressions introduced by the optimization
 - All core Python functionality operates correctly with the new implementation
+
+## Interrupt Character Handling Behavior Change
+
+**IMPORTANT:** This optimization introduces a behavioral change in how data after an interrupt character (Ctrl-C) is handled. This section documents the change for PR review consideration.
+
+### Original Behavior (Before Optimization)
+
+```c
+void tud_cdc_rx_cb(uint8_t itf) {
+    cdc_itf_pending &= ~(1 << itf);
+    for (uint32_t bytes_avail = tud_cdc_n_available(itf); bytes_avail > 0; --bytes_avail) {
+        if (ringbuf_free(&stdin_ringbuf)) {
+            int data_char = tud_cdc_read_char();
+            #if MICROPY_KBD_EXCEPTION
+            if (data_char == mp_interrupt_char) {
+                // Clear the ring buffer
+                stdin_ringbuf.iget = stdin_ringbuf.iput = 0;
+                // and stop        <-- COMMENT SAYS "and stop"
+                mp_sched_keyboard_interrupt();
+            } else {
+                ringbuf_put(&stdin_ringbuf, data_char);
+            }
+            #endif
+        } else {
+            cdc_itf_pending |= (1 << itf);
+            return;
+        }
+    }
+    // NO code here to mark interface as pending
+}
+```
+
+**What actually happened:**
+1. Loop initializes `bytes_avail` with `tud_cdc_n_available(itf)` - all bytes in USB buffer
+2. When interrupt char found: clears ringbuf, schedules interrupt
+3. **Loop continues** decrementing `bytes_avail` and reading remaining bytes
+4. Remaining bytes from USB buffer are placed into the (now cleared) ringbuf
+5. Those bytes would be processed by the next Python operation
+
+**Example scenario:**
+```
+USB buffer contains: "for i in range(100): print(i)\x03print('hello')\n"
+                                                    ^ Ctrl-C here
+
+After processing:
+- "for i in range..." is cleared from ringbuf
+- Interrupt scheduled
+- "print('hello')\n" is added to the cleared ringbuf
+- Next REPL prompt sees "print('hello')\n" and executes it
+```
+
+### New Behavior (After Optimization)
+
+```c
+void tud_cdc_rx_cb(uint8_t itf) {
+    cdc_itf_pending &= ~(1 << itf);
+    uint8_t temp[64];
+
+    while (tud_cdc_n_available(itf) > 0 && ringbuf_free(&stdin_ringbuf) > 0) {
+        uint32_t chunk = /* calculate chunk size */;
+        uint32_t got = tud_cdc_n_read(itf, temp, chunk);
+
+        #if MICROPY_KBD_EXCEPTION
+        if (mp_interrupt_char >= 0) {
+            uint8_t *intr_pos = memchr(temp, mp_interrupt_char, got);
+            if (intr_pos != NULL) {
+                size_t pre_len = intr_pos - temp;
+                if (pre_len > 0) {
+                    ringbuf_put_bytes(&stdin_ringbuf, temp, pre_len);
+                }
+                stdin_ringbuf.iget = stdin_ringbuf.iput = 0;
+                mp_sched_keyboard_interrupt();
+
+                // Mark interface as pending for subsequent data
+                if (tud_cdc_n_available(itf) > 0) {
+                    cdc_itf_pending |= (1 << itf);
+                }
+                return;  // <-- ACTUALLY STOPS
+            }
+        }
+        #endif
+
+        ringbuf_put_bytes(&stdin_ringbuf, temp, got);
+    }
+
+    if (tud_cdc_n_available(itf) > 0) {
+        cdc_itf_pending |= (1 << itf);
+    }
+}
+```
+
+**What now happens:**
+1. Reads up to 64 bytes from USB buffer into temp
+2. When interrupt char found: copies bytes before it, clears ringbuf, schedules interrupt
+3. **Returns immediately** - bytes after interrupt char in temp buffer are discarded
+4. Marks interface as pending if more data in USB buffer (for subsequent packets)
+
+**Same example scenario:**
+```
+USB buffer packet 1: "for i in range(100): print(i)\x03print('hello')\n"
+                                                      ^ Ctrl-C here
+
+After processing packet 1:
+- "for i in range..." is cleared from ringbuf
+- Interrupt scheduled
+- "print('hello')\n" is DISCARDED (in same packet as Ctrl-C)
+- Interface marked as pending (in case more packets arrived)
+
+If user then types new commands:
+USB buffer packet 2: "print('world')\n"  (arrives after Ctrl-C)
+- Processed normally in next tud_cdc_rx_cb() call
+- Added to ringbuf and executed at next REPL prompt
+```
+
+### Analysis: Which Behavior is Correct?
+
+**Arguments for new behavior (discard bytes after interrupt in same packet):**
+
+1. **Matches documented intent:** Original code had comment "// and stop" but didn't actually stop
+2. **Expected interrupt semantics:** When user presses Ctrl-C, they intend to abort the current operation and discard pending input
+3. **Consistency with paste abort:** If interrupting a paste operation, remaining pasted data should be discarded
+4. **Prevents confusion:** Old behavior could cause unexpected commands to execute after interrupt
+5. **Preserves interactive typing:** Data in subsequent USB packets (new keystrokes) is still processed via `cdc_itf_pending`
+
+**Arguments for old behavior (preserve bytes after interrupt):**
+
+1. **Existing behavior:** Some users might depend on current behavior
+2. **Data preservation:** In theory, no data loss from USB buffer
+
+**USB packet timing considerations:**
+
+For interactive REPL use:
+- Individual keystrokes typically arrive in separate USB packets (1-16ms apart)
+- By the time user types new commands after pressing Ctrl-C, those are in new packets
+- New packets trigger new `tud_cdc_rx_cb()` calls via `cdc_itf_pending` mechanism
+- Therefore: **Interactive typing after Ctrl-C is NOT lost**
+
+Data that IS discarded:
+- Only bytes in the **same USB packet** as the interrupt character
+- Typical case: bulk paste operation where Ctrl-C appears mid-stream
+- This is the desired behavior for aborting a paste
+
+### Implementation Details
+
+**Three commits implement this change:**
+
+1. **7735584e7e** - Initial bulk operations, includes behavioral change
+2. **9b2eed6174** - Adds `mp_interrupt_char >= 0` check for disabled interrupts
+3. **d903a03435** - Adds `cdc_itf_pending` marking to preserve subsequent packets
+
+The final implementation ensures:
+- ✅ Bytes after Ctrl-C in same packet are discarded (interrupt semantics)
+- ✅ Bytes in subsequent packets are preserved via polling (interactive typing preserved)
+- ✅ No data loss for normal REPL interaction patterns
+
+### Recommendation for PR Review
+
+The new behavior appears more correct for REPL usage:
+1. Matches the documented intent ("// and stop")
+2. Provides expected interrupt semantics
+3. Doesn't lose interactive typing (preserved via `cdc_itf_pending`)
+4. Only discards data that should be discarded (paste data after abort)
+
+However, this should be explicitly called out in the PR description for maintainer review, as it is a behavioral change that could theoretically affect user workflows that depend on the old behavior.
+
+**Suggested PR note:**
+> **Behavioral Change:** When interrupt character (Ctrl-C) is detected, the implementation now discards remaining bytes in the current USB packet rather than buffering them. This matches the "// and stop" comment in the original code but changes the actual behavior. Interactive typing after Ctrl-C is preserved via the `cdc_itf_pending` mechanism. This change provides expected interrupt semantics for aborting paste operations while maintaining REPL usability.
