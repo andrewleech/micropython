@@ -1506,23 +1506,24 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(pyb_timer_period_obj, 1, 2, pyb_timer
 /// Set the function to be called when the timer triggers.
 /// `fun` is passed 1 argument, the timer object.
 /// If `fun` is `None` then the callback will be disabled.
+/// `fun` can also be a generator function or generator instance for lower-latency
+/// hard IRQ handling with pre-allocated state.
 static mp_obj_t pyb_timer_callback(mp_obj_t self_in, mp_obj_t callback) {
     pyb_timer_obj_t *self = MP_OBJ_TO_PTR(self_in);
     if (callback == mp_const_none) {
         // stop interrupt (but not timer)
         __HAL_TIM_DISABLE_IT(&self->tim, TIM_IT_UPDATE);
         self->callback = mp_const_none;
-    } else if (mp_obj_is_callable(callback)) {
+    } else {
         __HAL_TIM_DISABLE_IT(&self->tim, TIM_IT_UPDATE);
-        self->callback = callback;
+        // Prepare callback: auto-instantiate generator functions, prime generator instances.
+        self->callback = mp_irq_prepare_handler(callback, self_in);
         // start timer, so that it interrupts on overflow, but clear any
         // pending interrupts which may have been set by initializing it.
         __HAL_TIM_CLEAR_FLAG(&self->tim, TIM_IT_UPDATE);
         HAL_TIM_Base_Stop(&self->tim); // internal timer state must be released before starting again
         HAL_TIM_Base_Start_IT(&self->tim); // This will re-enable the IRQ
         HAL_NVIC_EnableIRQ(self->irqn);
-    } else {
-        mp_raise_ValueError(MP_ERROR_TEXT("callback must be None or a callable object"));
     }
     return mp_const_none;
 }

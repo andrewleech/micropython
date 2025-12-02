@@ -29,6 +29,7 @@
 
 #include "py/runtime.h"
 #include "py/gc.h"
+#include "py/objgenerator.h"
 #include "shared/runtime/mpirq.h"
 
 #if MICROPY_ENABLE_SCHEDULER
@@ -65,6 +66,34 @@ void mp_irq_init(mp_irq_obj_t *self, const mp_irq_methods_t *methods, mp_obj_t p
     self->ishard = false;
 }
 
+mp_obj_t mp_irq_prepare_handler(mp_obj_t callback, mp_obj_t parent) {
+    // Auto-instantiate generator functions (bytecode or native).
+    if (mp_obj_is_type(callback, &mp_type_gen_wrap)
+        #if MICROPY_EMIT_NATIVE
+        || mp_obj_is_type(callback, &mp_type_native_gen_wrap)
+        #endif
+        ) {
+        callback = mp_call_function_1(callback, parent);
+    }
+
+    // Prime generator instances (run setup code to first yield).
+    if (mp_obj_is_type(callback, &mp_type_gen_instance)) {
+        mp_obj_t ret_val;
+        mp_vm_return_kind_t ret = mp_obj_gen_resume(callback, mp_const_none, MP_OBJ_NULL, &ret_val);
+        if (ret != MP_VM_RETURN_YIELD) {
+            if (ret == MP_VM_RETURN_EXCEPTION) {
+                nlr_raise(ret_val);
+            }
+            mp_raise_ValueError(MP_ERROR_TEXT("generator must yield"));
+        }
+    } else if (callback != mp_const_none && !mp_obj_is_callable(callback)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("callback must be None, callable, or generator"));
+    }
+
+    return callback;
+}
+
+
 int mp_irq_dispatch(mp_obj_t handler, mp_obj_t parent, bool ishard) {
     int result = 0;
     if (handler != mp_const_none) {
@@ -85,7 +114,24 @@ int mp_irq_dispatch(mp_obj_t handler, mp_obj_t parent, bool ishard) {
             gc_lock();
             nlr_buf_t nlr;
             if (nlr_push(&nlr) == 0) {
-                mp_call_function_1(handler, parent);
+                if (mp_obj_is_type(handler, &mp_type_gen_instance)) {
+                    // Generator-based handler: resume with parent as send value.
+                    mp_obj_t ret_val;
+                    mp_vm_return_kind_t ret = mp_obj_gen_resume(handler, parent, MP_OBJ_NULL, &ret_val);
+                    if (ret == MP_VM_RETURN_NORMAL) {
+                        // Generator finished (returned instead of yielding).
+                        result = -1;
+                    } else if (ret == MP_VM_RETURN_EXCEPTION) {
+                        // Generator raised an exception.
+                        mp_printf(MICROPY_ERROR_PRINTER, "Uncaught exception in IRQ callback handler\n");
+                        mp_obj_print_exception(MICROPY_ERROR_PRINTER, ret_val);
+                        result = -1;
+                    }
+                    // MP_VM_RETURN_YIELD: success, handler stays active.
+                } else {
+                    // Regular callable (existing behavior).
+                    mp_call_function_1(handler, parent);
+                }
                 nlr_pop();
             } else {
                 mp_printf(MICROPY_ERROR_PRINTER, "Uncaught exception in IRQ callback handler\n");
