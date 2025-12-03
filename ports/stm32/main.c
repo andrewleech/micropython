@@ -64,7 +64,9 @@
 #include "systick.h"
 #include "pendsv.h"
 #include "powerctrl.h"
+#if !MICROPY_ZEPHYR_THREADING
 #include "pybthread.h"
+#endif
 #include "gccollect.h"
 #include "factoryreset.h"
 #include "modmachine.h"
@@ -93,7 +95,8 @@
 #include "shared/tinyusb/mp_usbd.h"
 #endif
 
-#if MICROPY_PY_THREAD
+#if MICROPY_PY_THREAD && !MICROPY_ZEPHYR_THREADING
+// Legacy threading main thread structure (not used with Zephyr)
 static pyb_thread_t pyb_thread_main;
 #endif
 
@@ -308,6 +311,165 @@ static bool init_sdcard_fs(void) {
 }
 #endif
 
+#if MICROPY_ZEPHYR_THREADING
+// Static heap for Zephyr threading builds to avoid overlap with thread stacks
+// Thread stacks go into .noinit section after .bss, so we use a static array in .bss
+// This ensures clear separation between heap and thread stack memory regions
+// NUCLEO_F429ZI has 192KB RAM total. Heap size reduced to accommodate idle thread
+// stacks (~2.5KB for idle + ISR stacks) when MICROPY_ZEPHYR_USE_IDLE_THREAD=1
+#define MICROPY_HEAP_SIZE (42 * 1024)
+static char heap[MICROPY_HEAP_SIZE];
+
+// Zephyr threading entry point - called by Zephyr kernel after z_cstart()
+// This function runs in z_main_thread context after kernel initialization
+void micropython_main_thread_entry(void *p1, void *p2, void *p3) {
+    (void)p1;
+    (void)p2;
+    (void)p3;
+
+    // NOTE: We're now running in z_main_thread context, not boot/dummy context
+    // This means k_thread_create() and other threading operations are safe
+
+    // Initialize board state for main loop
+    boardctrl_state_t state;
+    state.reset_mode = 1;  // Normal boot for Zephyr entry
+    state.log_soft_reset = false;
+
+    MICROPY_BOARD_BEFORE_SOFT_RESET_LOOP(&state);
+
+    // Jump into main soft reset loop (reuse existing code path)
+    // This is implemented by calling into the soft_reset section of stm32_main
+    // For now, we'll just implement the main loop directly here
+    goto micropython_soft_reset;
+
+micropython_soft_reset:
+    MICROPY_BOARD_TOP_SOFT_RESET_LOOP(&state);
+
+    // Threading early init - Phase 1 (set thread-local state FIRST)
+    // Must be called before ANY code that accesses MP_STATE_THREAD()
+    // This includes mp_cstack_init_with_top() and gc_init()
+    if (!mp_thread_init_early()) {
+        mp_printf(&mp_plat_print, "Failed to initialize threading (early phase)\n");
+        for (;;) {}
+    }
+
+    // Stack limit init (symbols declared in gccollect.h)
+    // Requires thread-local state to be set (accesses MP_STATE_THREAD)
+    // With PSP switch, main thread runs on z_main_stack, not MSP (_sstack/_estack)
+    extern struct k_thread z_main_thread;
+    char *stack_top = (char *)(z_main_thread.stack_info.start + z_main_thread.stack_info.size);
+    size_t stack_size = z_main_thread.stack_info.size;
+    mp_cstack_init_with_top(stack_top, stack_size);
+
+    // GC init with static heap (avoids overlap with thread stacks in .noinit section)
+    gc_init(heap, heap + sizeof(heap));
+
+    // Threading init - Phase 2 (allocate main thread on GC heap)
+    // Requires GC to be initialized for m_new_obj() heap allocation
+    char stack_dummy;
+    if (!mp_thread_init(&stack_dummy)) {
+        mp_printf(&mp_plat_print, "Failed to initialize threading (phase 2)\n");
+        for (;;) {}
+    }
+
+    // THEN enable SysTick interrupt now that threading is fully initialized
+    extern void mp_zephyr_arch_enable_systick_interrupt(void);
+    mp_zephyr_arch_enable_systick_interrupt();
+
+    #if MICROPY_ENABLE_PYSTACK
+    static mp_obj_t pystack[384];
+    mp_pystack_init(pystack, &pystack[384]);
+    #endif
+
+    // MicroPython init
+    mp_init();
+
+    // Initialise low-level sub-systems
+    readline_init0();
+    pin_init0();
+    extint_init0();
+    timer_init0();
+
+    #if MICROPY_HW_ENABLE_CAN
+    pyb_can_init0();
+    #endif
+
+    #if MICROPY_HW_ENABLE_USB
+    pyb_usb_init0();
+    #endif
+
+    #if MICROPY_PY_MACHINE_I2S
+    machine_i2s_init0();
+    #endif
+
+    // Initialize filesystem
+    bool mounted_flash = false;
+    #if MICROPY_HW_FLASH_MOUNT_AT_BOOT
+    mounted_flash = init_flash_fs(state.reset_mode);
+    #endif
+
+    bool mounted_sdcard = false;
+    #if MICROPY_HW_SDCARD_MOUNT_AT_BOOT
+    if (sdcard_is_present()) {
+        if (!mounted_flash || mp_vfs_import_stat("SKIPSD") == MP_IMPORT_STAT_NO_EXIST) {
+            mounted_sdcard = init_sdcard_fs();
+        }
+    }
+    #endif
+
+    #if MICROPY_HW_ENABLE_USB
+    if (pyb_usb_storage_medium == PYB_USB_STORAGE_MEDIUM_NONE) {
+        pyb_usb_storage_medium = PYB_USB_STORAGE_MEDIUM_FLASH;
+    }
+    #endif
+
+    // Set sys.path
+    if (mounted_sdcard) {
+        mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_sd));
+        mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_sd_slash_lib));
+    }
+    if (mounted_flash) {
+        mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_flash));
+        mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_flash_slash_lib));
+    }
+
+    MP_STATE_PORT(pyb_config_main) = MP_OBJ_NULL;
+
+    #ifdef MICROPY_BOARD_FROZEN_BOOT_FILE
+    pyexec_frozen_module(MICROPY_BOARD_FROZEN_BOOT_FILE, false);
+    #endif
+
+    if (MICROPY_BOARD_RUN_BOOT_PY(&state) == BOARDCTRL_GOTO_SOFT_RESET_EXIT) {
+        goto micropython_soft_reset_exit;
+    }
+
+    // Continue with rest of initialization and REPL
+    // (Simplified for Zephyr - full init continues in main loop)
+
+    // Run main.py or REPL
+    for (;;) {
+        if (pyexec_mode_kind == PYEXEC_MODE_RAW_REPL) {
+            if (pyexec_raw_repl() != 0) {
+                break;
+            }
+        } else {
+            if (pyexec_friendly_repl() != 0) {
+                break;
+            }
+        }
+    }
+
+micropython_soft_reset_exit:
+    mp_printf(&mp_plat_print, "MPY: soft reboot\n");
+
+    mp_thread_deinit();
+    gc_sweep_all();
+    mp_deinit();
+
+    goto micropython_soft_reset;
+}
+#endif // MICROPY_ZEPHYR_THREADING
+
 #if defined(STM32N6)
 static void risaf_init(void) {
     RIMC_MasterConfig_t rimc_master = {0};
@@ -431,7 +593,12 @@ void stm32_main(uint32_t reset_mode) {
     #endif
 
     // SysTick is needed by HAL_RCC_ClockConfig (called in SystemClock_Config)
+    // For Zephyr threading, use IRQ_PRI_SYSTICK which is set to a maskable priority
+    #if MICROPY_ZEPHYR_THREADING
+    HAL_InitTick(IRQ_PRI_SYSTICK);
+    #else
     HAL_InitTick(TICK_INT_PRIORITY);
+    #endif
 
     // set the system clock to be HSE
     SystemClock_Config();
@@ -485,10 +652,14 @@ void stm32_main(uint32_t reset_mode) {
     sdram_valid = sdram_test(false);
     #endif
     #endif
-    #if MICROPY_PY_THREAD
+    #if MICROPY_PY_THREAD && !MICROPY_ZEPHYR_THREADING
+    // Legacy threading initialization (not used with Zephyr)
     pyb_thread_init(&pyb_thread_main);
     #endif
+    #if !MICROPY_ZEPHYR_THREADING
+    // PendSV init not needed with Zephyr - Zephyr provides its own PendSV handler
     pendsv_init();
+    #endif
     led_init();
     #if MICROPY_HW_HAS_SWITCH
     switch_init0();
@@ -557,12 +728,19 @@ void stm32_main(uint32_t reset_mode) {
 
     MICROPY_BOARD_BEFORE_SOFT_RESET_LOOP(&state);
 
+    #if MICROPY_ZEPHYR_THREADING
+    // When Zephyr threading enabled, transfer control to Zephyr kernel
+    // z_cstart() initializes Zephyr kernel and never returns
+    extern void z_cstart(void);
+    z_cstart();  // Never returns - Zephyr takes over from here
+    #endif
+
 soft_reset:
 
     MICROPY_BOARD_TOP_SOFT_RESET_LOOP(&state);
 
-    // Python threading init
-    #if MICROPY_PY_THREAD
+    // Python threading init (legacy - Zephyr inits threading in micropython_main_thread_entry)
+    #if MICROPY_PY_THREAD && !MICROPY_ZEPHYR_THREADING
     mp_thread_init();
     #endif
 
@@ -611,8 +789,13 @@ soft_reset:
     pyb_can_init0();
     #endif
 
-    #if MICROPY_HW_STM_USB_STACK && MICROPY_HW_ENABLE_USB
+    #if MICROPY_HW_ENABLE_USB
+    #if MICROPY_HW_TINYUSB_STACK
+    pyb_usbd_init();
+    mp_usbd_init();
+    #else
     pyb_usb_init0();
+    #endif
     #endif
 
     #if MICROPY_PY_MACHINE_I2S
@@ -683,10 +866,6 @@ soft_reset:
         #endif
         pyb_usb_dev_init(pyb_usb_dev_detect(), MICROPY_HW_USB_VID, pid, mode, 0, NULL, NULL);
     }
-    #endif
-
-    #if MICROPY_HW_TINYUSB_STACK && MICROPY_HW_ENABLE_USBDEV
-    mp_usbd_init();
     #endif
 
     #if MICROPY_HW_HAS_MMA7660
@@ -771,7 +950,8 @@ soft_reset_exit:
     machine_deinit();
     #endif
 
-    #if MICROPY_PY_THREAD
+    #if MICROPY_PY_THREAD && !MICROPY_ZEPHYR_THREADING
+    // Legacy threading deinitialization (not used with Zephyr)
     pyb_thread_deinit();
     #endif
 

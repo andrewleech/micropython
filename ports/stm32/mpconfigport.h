@@ -31,6 +31,21 @@
 #include "mpconfigboard.h"
 #include "mpconfigboard_common.h"
 
+// Link MICROPY_ZEPHYR_THREADING to MICROPY_PY_THREAD for standard threading support
+// This enables the GIL and all standard MicroPython threading infrastructure
+#if MICROPY_ZEPHYR_THREADING && !defined(MICROPY_PY_THREAD)
+#define MICROPY_PY_THREAD (1)
+#define MICROPY_PY_THREAD_GIL (1)
+#define MICROPY_PY_THREAD_GIL_VM_DIVISOR (32)
+#define MICROPY_ZEPHYR_USE_IDLE_THREAD (1)
+#endif
+
+// Zephyr kernel configuration (when Zephyr threading is enabled)
+// Include after board headers so STM32 CMSIS defines take precedence
+#if MICROPY_ZEPHYR_THREADING
+#include "extmod/zephyr_kernel/zephyr_config_cortex_m.h"
+#endif
+
 #ifndef MICROPY_CONFIG_ROM_LEVEL
 #define MICROPY_CONFIG_ROM_LEVEL (MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES)
 #endif
@@ -93,7 +108,18 @@
 #define MICROPY_PY_SYS_PLATFORM     "pyboard"
 #endif
 #ifndef MICROPY_PY_THREAD
+#if MICROPY_ZEPHYR_THREADING
+#define MICROPY_PY_THREAD           (1)
+#else
 #define MICROPY_PY_THREAD           (0)
+#endif
+#endif
+
+// Zephyr threading configuration
+#if MICROPY_ZEPHYR_THREADING
+// MICROPY_PY_THREAD_GIL defaults to 1 when MICROPY_PY_THREAD is set (via py/mpconfig.h)
+// This provides thread safety through the Global Interpreter Lock
+#define MICROPY_ENABLE_FINALISER            (1)
 #endif
 
 // extended modules
@@ -231,7 +257,26 @@ extern const struct _mp_obj_type_t network_lan_type;
 
 typedef long mp_off_t;
 
-#if MICROPY_PY_THREAD
+#if MICROPY_ZEPHYR_THREADING
+// Zephyr threading: k_yield() with GIL exit/enter for proper thread switching.
+// Main thread must release GIL to allow other threads to acquire it and run.
+// k_yield() allows equal-priority threads to run when GIL is released.
+// Note: MP_THREAD_GIL_EXIT() already includes k_yield() via mpthreadport_zephyr.h,
+// so the explicit k_yield() here is for the event poll hook only.
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+        extern void k_yield(void); \
+        MP_THREAD_GIL_EXIT(); \
+        k_yield(); \
+        MP_THREAD_GIL_ENTER(); \
+    } while (0);
+
+#define MICROPY_THREAD_YIELD() k_yield()
+
+#elif MICROPY_PY_THREAD
+// Legacy threading: use pyb_thread_yield()
 #define MICROPY_EVENT_POLL_HOOK \
     do { \
         extern void mp_handle_pending(bool); \
@@ -246,7 +291,9 @@ typedef long mp_off_t;
     } while (0);
 
 #define MICROPY_THREAD_YIELD() pyb_thread_yield()
+
 #else
+// No threading
 #define MICROPY_EVENT_POLL_HOOK \
     do { \
         extern void mp_handle_pending(bool); \

@@ -36,7 +36,9 @@ extern __IO uint32_t uwTick;
 
 systick_dispatch_t systick_dispatch_table[SYSTICK_DISPATCH_NUM_SLOTS];
 
-void SysTick_Handler(void) {
+// STM32 systick processing - handles uwTick, soft timers, and dispatch callbacks
+// This is called from either the legacy SysTick_Handler or Zephyr's SysTick_Handler
+void systick_process(void) {
     // Instead of calling HAL_IncTick we do the increment here of the counter.
     // This is purely for efficiency, since SysTick is called 1000 times per
     // second at the highest interrupt priority.
@@ -58,7 +60,8 @@ void SysTick_Handler(void) {
         pendsv_schedule_dispatch(PENDSV_DISPATCH_SOFT_TIMER, soft_timer_handler);
     }
 
-    #if MICROPY_PY_THREAD
+    #if MICROPY_PY_THREAD && !MICROPY_ZEPHYR_THREADING
+    // Legacy threading timeslicing - not used with Zephyr threading
     if (pyb_thread_enabled) {
         if (pyb_thread_cur->timeslice == 0) {
             if (pyb_thread_cur->run_next != pyb_thread_cur) {
@@ -69,6 +72,18 @@ void SysTick_Handler(void) {
         }
     }
     #endif
+}
+
+void SysTick_Handler(void) {
+    // Call STM32-specific systick processing first (uwTick, soft timers, dispatch)
+    systick_process();
+
+    #if MICROPY_ZEPHYR_THREADING
+    // Zephyr threading: call Zephyr scheduler and timer subsystem
+    // Delegate to arch layer which handles tick counting and scheduling
+    extern void mp_zephyr_systick_handler(void);
+    mp_zephyr_systick_handler();
+    #endif // MICROPY_ZEPHYR_THREADING
 }
 
 // We provide our own version of HAL_Delay that calls __WFI while waiting,

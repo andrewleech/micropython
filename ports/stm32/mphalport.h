@@ -1,7 +1,6 @@
 // We use the ST Cube HAL library for most hardware peripherals
 #include STM32_HAL_H
 #include "pin.h"
-#include "usbd_conf.h"
 #include "py/ringbuf.h"
 #include "shared/runtime/interrupt_char.h"
 
@@ -51,16 +50,32 @@ void mp_hal_set_interrupt_char(int c); // -1 to disable
 
 // Atomic section helpers.
 
+#if MICROPY_ZEPHYR_THREADING
+// Use Zephyr atomic primitives for thread-safe atomic sections
+#include <zephyr/arch/cpu.h>
+#include "irq.h"  // Still needed for IRQ priority constants and macros
+#define MICROPY_BEGIN_ATOMIC_SECTION()     arch_irq_lock()
+#define MICROPY_END_ATOMIC_SECTION(state)  arch_irq_unlock(state)
+#else
+// Use STM32 IRQ disable/enable for atomic sections
 #include "irq.h"
-
 #define MICROPY_BEGIN_ATOMIC_SECTION()     disable_irq()
 #define MICROPY_END_ATOMIC_SECTION(state)  enable_irq(state)
+#endif
 
 // For regular code that wants to prevent "background tasks" from running.
 // These background tasks (LWIP, Bluetooth) run in PENDSV context.
+#if MICROPY_ZEPHYR_THREADING
+// Use Zephyr's IRQ lock for PendSV protection
+#define MICROPY_PY_PENDSV_ENTER   unsigned int atomic_state = arch_irq_lock();
+#define MICROPY_PY_PENDSV_REENTER atomic_state = arch_irq_lock();
+#define MICROPY_PY_PENDSV_EXIT    arch_irq_unlock(atomic_state);
+#else
+// Original STM32 implementation
 #define MICROPY_PY_PENDSV_ENTER   uint32_t atomic_state = raise_irq_pri(IRQ_PRI_PENDSV);
 #define MICROPY_PY_PENDSV_REENTER atomic_state = raise_irq_pri(IRQ_PRI_PENDSV);
 #define MICROPY_PY_PENDSV_EXIT    restore_irq_pri(atomic_state);
+#endif
 
 // Prevent the "lwIP task" from running.
 #define MICROPY_PY_LWIP_ENTER   MICROPY_PY_PENDSV_ENTER
@@ -69,7 +84,11 @@ void mp_hal_set_interrupt_char(int c); // -1 to disable
 
 // Timing functions.
 
-#if __CORTEX_M == 0
+#if MICROPY_ZEPHYR_THREADING
+// Use Zephyr's IRQ lock for quiet timing
+#define mp_hal_quiet_timing_enter() arch_irq_lock()
+#define mp_hal_quiet_timing_exit(irq_state) arch_irq_unlock(irq_state)
+#elif __CORTEX_M == 0
 // Don't have raise_irq_pri on Cortex-M0 so keep IRQs enabled to have SysTick timing
 #define mp_hal_quiet_timing_enter() (1)
 #define mp_hal_quiet_timing_exit(irq_state) (void)(irq_state)

@@ -26,6 +26,7 @@
 
 #include "py/gc.h"
 #include "py/mpthread.h"
+#include "py/mphal.h"
 #include "shared/runtime/gchelper.h"
 #include "shared/runtime/softtimer.h"
 #include "gccollect.h"
