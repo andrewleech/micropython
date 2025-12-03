@@ -677,6 +677,12 @@
 #define MICROPY_GC_SPLIT_HEAP_AUTO (0)
 #endif
 
+// Whether to provide gc.add_heap() to add heap segments from Python.
+// Requires MICROPY_GC_SPLIT_HEAP to be enabled.
+#ifndef MICROPY_GC_SPLIT_HEAP_ADD
+#define MICROPY_GC_SPLIT_HEAP_ADD (0)
+#endif
+
 // Hook to run code during time consuming garbage collector operations
 // *i* is the loop index variable (e.g. can be used to run every x loops)
 #ifndef MICROPY_GC_HOOK_LOOP
@@ -2219,7 +2225,7 @@ typedef time_t mp_timestamp_t;
 #endif
 
 // Allocating new heap area at runtime requires port to be able to allocate from system heap
-#if MICROPY_GC_SPLIT_HEAP_AUTO
+#if MICROPY_GC_SPLIT_HEAP_AUTO || MICROPY_GC_SPLIT_HEAP_ADD
 #ifndef MP_PLAT_ALLOC_HEAP
 #define MP_PLAT_ALLOC_HEAP(size) malloc(size)
 #endif

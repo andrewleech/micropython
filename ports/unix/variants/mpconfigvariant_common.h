@@ -118,3 +118,7 @@
 
 #define MICROPY_VFS_ROM                (1)
 #define MICROPY_VFS_ROM_IOCTL          (1)
+
+// Enable split heap and Python-level gc.add_heap()
+#define MICROPY_GC_SPLIT_HEAP          (1)
+#define MICROPY_GC_SPLIT_HEAP_ADD      (1)
