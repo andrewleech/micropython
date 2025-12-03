@@ -35,7 +35,7 @@
 
 extern uint32_t _estack, _sidata, _sdata, _edata, _sbss, _ebss;
 
-__attribute__((naked)) void Reset_Handler(void) {
+void Reset_Handler(void) {
     // set stack pointer
     __asm volatile ("ldr r0, =_estack");
     __asm volatile ("mov sp, r0");
@@ -52,6 +52,14 @@ __attribute__((naked)) void Reset_Handler(void) {
     *((volatile uint32_t *)0xE000ED88) |= 0x00F00000;
     __asm volatile ("dsb");
     __asm volatile ("isb");
+    #endif
+    #if MICROPY_ZEPHYR_THREADING
+    // Switch to PSP for threading - must be done before main thread runs
+    // zephyr_psp_init is provided by zephyr_psp_switch.S and sets up PSP
+    // NOTE: Cannot call printf/semihosting here - it will fail because
+    // heap/IO not initialized. Just trust the asm function works.
+    extern void zephyr_psp_init(void);
+    zephyr_psp_init();
     #endif
     // jump to board initialisation
     void _start(void);

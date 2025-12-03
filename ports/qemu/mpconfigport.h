@@ -62,6 +62,8 @@
 #define MICROPY_VFS                 (1)
 #define MICROPY_VFS_ROM             (1)
 #define MICROPY_VFS_ROM_IOCTL       (0)
+#define MICROPY_PY_TIME_TIME_TIME_NS (1)
+#define MICROPY_PY_TIME_INCLUDEFILE  "ports/qemu/modtime.c"
 
 // type definitions for the specific machine
 
@@ -78,5 +80,37 @@ typedef long mp_off_t;
 
 // We need an implementation of the log2 function which is not a macro.
 #define MP_NEED_LOG2 (1)
+
+// Zephyr threading configuration
+#if MICROPY_ZEPHYR_THREADING
+#define MICROPY_PY_THREAD                   (1)
+#define MICROPY_PY_THREAD_GIL               (1)
+#define MICROPY_PY_THREAD_GIL_VM_DIVISOR    (32)
+
+// Include Zephyr config for CONFIG_* symbols (doesn't require zephyr includes)
+#include "extmod/zephyr_kernel/zephyr_config_cortex_m.h"
+
+// Note: mpthreadport.h is included via py/mpthread.h when needed in actual C code.
+// Do NOT include it here as it requires zephyr/kernel.h which isn't available
+// during QSTR preprocessing (QSTR_GEN_CFLAGS doesn't have Zephyr includes).
+
+// Event poll hook with GIL release for cooperative scheduling
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+        MP_THREAD_GIL_EXIT(); \
+        extern void k_yield(void); \
+        k_yield(); \
+        MP_THREAD_GIL_ENTER(); \
+    } while (0);
+
+// GIL cooperative scheduling: The VM's GIL bounce code does:
+//   MP_THREAD_GIL_EXIT(); MP_THREAD_GIL_ENTER();
+// Without a yield between unlock and lock, the same thread immediately
+// re-acquires the GIL before others can run. We enable k_yield() after
+// GIL unlock in mpthread_zephyr.c (MICROPY_THREAD_YIELD_AFTER_GIL_UNLOCK).
+#define MICROPY_THREAD_YIELD_AFTER_GIL_UNLOCK (1)
+#endif // MICROPY_ZEPHYR_THREADING
 
 #define MP_STATE_PORT MP_STATE_VM

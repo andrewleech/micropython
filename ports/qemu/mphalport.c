@@ -25,9 +25,14 @@
  */
 
 #include "py/mphal.h"
+#include "py/mpthread.h"
 #include "py/stream.h"
 #include "shared/runtime/semihosting_arm.h"
 #include "uart.h"
+
+#if MICROPY_ZEPHYR_THREADING
+#include <zephyr/kernel.h>
+#endif
 
 // UART is better behaved with redirection under qemu-system-arm, so prefer that for stdio.
 #define USE_UART (1)
@@ -82,9 +87,16 @@ mp_uint_t mp_hal_ticks_us(void) {
 }
 
 void mp_hal_delay_ms(mp_uint_t ms) {
+    #if MICROPY_ZEPHYR_THREADING
+    // Use k_sleep with GIL release for cooperative multitasking
+    MP_THREAD_GIL_EXIT();
+    k_sleep(K_MSEC(ms));
+    MP_THREAD_GIL_ENTER();
+    #else
     mp_uint_t start = mp_hal_ticks_ms();
     while (mp_hal_ticks_ms() - start < ms) {
     }
+    #endif
 }
 
 void mp_hal_delay_us(mp_uint_t us) {
@@ -96,3 +108,10 @@ void mp_hal_delay_us(mp_uint_t us) {
 mp_uint_t mp_hal_ticks_cpu(void) {
     return 0;
 }
+
+#if MICROPY_PY_TIME_TIME_TIME_NS
+uint64_t mp_hal_time_ns(void) {
+    // Return nanoseconds since boot (not epoch time, but sufficient for elapsed timing)
+    return (uint64_t)ticks_us() * 1000ULL;
+}
+#endif
