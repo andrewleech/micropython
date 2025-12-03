@@ -27,10 +27,13 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "py/gc.h"
 #include "py/runtime.h"
+#include "py/mpthread.h"
+#include "py/mphal.h"
 
 #if MICROPY_DEBUG_VALGRIND
 #include <valgrind/memcheck.h>
@@ -214,7 +217,9 @@ void gc_init(void *start, void *end) {
     #endif
 
     // unlock the GC
+    #if MICROPY_PY_THREAD
     MP_STATE_THREAD(gc_lock_depth) = 0;
+    #endif
 
     // allow auto collection
     MP_STATE_MEM(gc_auto_collect_enabled) = 1;

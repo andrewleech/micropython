@@ -169,7 +169,6 @@ static void *thread_entry(void *args_in) {
 
     MP_THREAD_GIL_ENTER();
 
-    // signal that we are set up and running
     mp_thread_start();
 
     // TODO set more thread-specific state here:
@@ -196,7 +195,11 @@ static void *thread_entry(void *args_in) {
         }
     }
 
+    #if !MICROPY_ZEPHYR_THREADING
     DEBUG_printf("[thread] finish ts=%p\n", &ts);
+    #else
+    DEBUG_printf("[thread] finish\n");
+    #endif
 
     // signal that we are finished
     mp_thread_finish();
