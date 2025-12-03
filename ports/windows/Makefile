@@ -85,6 +85,18 @@ CFLAGS += -DMICROPY_USE_READLINE=1
 SRC_C += shared/readline/readline.c
 endif
 
+ifeq ($(MICROPY_PY_FFI),1)
+# Build libffi from source.
+GIT_SUBMODULES += lib/libffi
+DEPLIBS += libffi
+LIBFFI_CFLAGS := -I$(BUILD)/lib/libffi/out/include
+LIBFFI_LDFLAGS = $(BUILD)/lib/libffi/out/lib/libffi.a
+
+CFLAGS += $(LIBFFI_CFLAGS) -DMICROPY_PY_FFI=1
+LDFLAGS += $(LIBFFI_LDFLAGS)
+SRC_C += modffi.c
+endif
+
 LIB += -lws2_32
 
 # List of sources for qstr extraction
@@ -107,7 +119,28 @@ CXXFLAGS += $(filter-out -std=gnu99,$(CFLAGS))
 
 include $(TOP)/py/mkrules.mk
 
-.PHONY: test test_full
+# Value of configure's --host= option (required for cross-compilation).
+# Deduce it from CROSS_COMPILE by default, but can be overridden.
+ifneq ($(CROSS_COMPILE),)
+CROSS_COMPILE_HOST = --host=$(patsubst %-,%,$(CROSS_COMPILE))
+else
+CROSS_COMPILE_HOST =
+endif
+
+deplibs: $(DEPLIBS)
+
+libffi: $(BUILD)/lib/libffi/out/include/ffi.h
+
+$(TOP)/lib/libffi/configure: $(TOP)/lib/libffi/autogen.sh
+	cd $(TOP)/lib/libffi; ./autogen.sh
+
+# Build libffi as a dependency library
+$(BUILD)/lib/libffi/out/include/ffi.h: $(TOP)/lib/libffi/configure
+	mkdir -p $(BUILD)/lib/libffi; cd $(BUILD)/lib/libffi; \
+	$(abspath $(TOP))/lib/libffi/configure $(CROSS_COMPILE_HOST) --prefix=$$PWD/out --disable-shared --disable-structs CC="$(CC)" CXX="$(CXX)" LD="$(LD)" CFLAGS="-Os -fomit-frame-pointer -fstrict-aliasing -ffast-math -fno-exceptions"; \
+	$(MAKE) install-exec-recursive; $(MAKE) -C include install-data-am
+
+.PHONY: test test_full deplibs libffi
 
 # Note for recent gcc versions like 13.2:
 # - mingw64-x86_64 gcc builds will pass the math_domain_special test

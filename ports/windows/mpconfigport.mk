@@ -7,3 +7,6 @@ MICROPY_FORCE_32BIT ?= 0
 #  0 - no readline, just simple stdin input
 #  1 - use MicroPython version of readline
 MICROPY_USE_READLINE ?= 1
+
+# ffi module requires libffi (built from source as submodule)
+MICROPY_PY_FFI ?= 0
