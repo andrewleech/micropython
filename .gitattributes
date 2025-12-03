@@ -1,11 +1,9 @@
 # Per default everything gets normalized and gets LF line endings on checkout.
 * text eol=lf
-
 # These will always have CRLF line endings on checkout.
 *.vcxproj text eol=crlf
 *.props text eol=crlf
 *.bat text eol=crlf
-
 # These are binary so should never be modified by git.
 *.a binary
 *.ico binary
@@ -14,7 +12,6 @@
 *.dxf binary
 *.mpy binary
 *.der binary
-
 # These should also not be modified by git.
 tests/basics/string_cr_conversion.py -text
 tests/basics/string_crlf_conversion.py -text
@@ -26,3 +23,4 @@ ports/cc3200/hal/des.c -text
 ports/cc3200/hal/i2s.c -text
 ports/cc3200/hal/i2s.h -text
 ports/cc3200/version.h -text
+lib/micropython-lib/unix-ffi/pyusb/usb/*.dll filter=lfs diff=lfs merge=lfs -text
