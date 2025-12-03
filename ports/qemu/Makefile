@@ -46,6 +46,62 @@ MICROPY_FLOAT_IMPL ?= float
 include $(TOP)/py/py.mk
 include $(TOP)/extmod/extmod.mk
 
+################################################################################
+# Zephyr Threading Integration (optional, enabled per-board)
+
+ifeq ($(MICROPY_ZEPHYR_THREADING),1)
+
+# Set architecture for Zephyr (only ARM Cortex-M supported currently)
+ZEPHYR_ARCH := arm
+
+# Enable idle thread for k_msleep() support in EVENT_POLL_HOOK
+MICROPY_ZEPHYR_USE_IDLE_THREAD = 1
+
+# Include Zephyr kernel build
+include $(TOP)/extmod/zephyr_kernel/zephyr_kernel.mk
+
+# Add Zephyr includes and flags
+# ZEPHYR_CFLAGS includes -include of the config header, which is CRITICAL
+# because any file that includes <zephyr/kernel.h> needs the CONFIG_* defines
+CFLAGS += $(ZEPHYR_INC)
+CFLAGS += $(ZEPHYR_CFLAGS)
+# Define MICROPY_ZEPHYR_THREADING as a preprocessor symbol for C code
+CFLAGS += -DMICROPY_ZEPHYR_THREADING=1
+CFLAGS += -DMICROPY_ZEPHYR_USE_IDLE_THREAD=1
+
+# Add QEMU-specific Zephyr architecture implementation
+SRC_C += zephyr_arch_qemu.c
+
+# Ensure Zephyr objects depend on generated headers
+$(addprefix $(BUILD)/, $(SRC_THIRDPARTY_C:.c=.o)): $(ZEPHYR_GEN_HEADERS)
+
+# Pattern-specific CFLAGS for Zephyr objects
+$(BUILD)/$(TOP)/lib/zephyr/%.o: CFLAGS += -include $(TOP)/extmod/zephyr_kernel/zephyr_config_cortex_m.h -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function -Wno-return-type
+$(BUILD)/$(TOP)/extmod/zephyr_kernel/%.o: CFLAGS += -Wno-unused-parameter -Wno-unused-function
+
+# Build Zephyr assembly files (context switching, PSP initialization)
+ZEPHYR_SWAP_HELPER_O = $(BUILD)/swap_helper.o
+ZEPHYR_PSP_SWITCH_O = $(BUILD)/zephyr_psp_switch.o
+OBJ += $(ZEPHYR_SWAP_HELPER_O)
+OBJ += $(ZEPHYR_PSP_SWITCH_O)
+OBJ += $(BUILD)/zephyr_offsets.o
+
+# Common assembler flags for Zephyr .S files
+ZEPHYR_AS_FLAGS = -x assembler-with-cpp -D_ASMLANGUAGE \
+	$(filter-out -std=% -Wdouble-promotion -Wfloat-conversion -Werror,$(CFLAGS)) \
+	-include $(TOP)/extmod/zephyr_kernel/zephyr_config_cortex_m.h \
+	-Wa,-mimplicit-it=thumb
+
+$(ZEPHYR_SWAP_HELPER_O): $(TOP)/lib/zephyr/arch/arm/core/cortex_m/swap_helper.S $(ZEPHYR_GEN_HEADERS)
+	$(ECHO) "CC $<"
+	$(Q)$(CC) $(ZEPHYR_AS_FLAGS) -c -o $@ $<
+
+$(ZEPHYR_PSP_SWITCH_O): $(TOP)/extmod/zephyr_kernel/zephyr_psp_switch.S
+	$(ECHO) "CC $<"
+	$(Q)$(CC) $(ZEPHYR_AS_FLAGS) -c -o $@ $<
+
+endif # MICROPY_ZEPHYR_THREADING
+
 GIT_SUBMODULES += lib/berkeley-db-1.xx
 
 CFLAGS += -DMICROPY_HEAP_SIZE=$(MICROPY_HEAP_SIZE)
@@ -172,6 +228,11 @@ CFLAGS += $(INC) -Wall -Wpointer-arith -Wdouble-promotion -Wfloat-conversion -We
 	 -ffunction-sections -fdata-sections
 CFLAGS += $(CFLAGS_EXTRA)
 
+# Remove -Werror for Zephyr threading builds (Zephyr headers have many macro redefinitions)
+ifeq ($(MICROPY_ZEPHYR_THREADING),1)
+CFLAGS := $(filter-out -Werror,$(CFLAGS))
+endif
+
 LDFLAGS += -T $(LDSCRIPT) -Wl,--gc-sections -Wl,-Map=$(@:.elf=.map)
 
 # Debugging/Optimization
@@ -235,6 +296,8 @@ OBJ += $(addprefix $(BUILD)/, $(LIBM_SRC_C:.c=.o))
 
 # List of sources for qstr extraction
 SRC_QSTR += $(SRC_C) $(LIBM_SRC_C)
+# Add Zephyr MicroPython sources for root pointer scanning (e.g., mp_thread_list_head)
+SRC_QSTR += $(ZEPHYR_MP_SRC_C)
 
 ################################################################################
 # Main targets

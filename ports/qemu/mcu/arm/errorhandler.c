@@ -187,8 +187,18 @@ __attribute__((naked)) MP_NORETURN void DebugMon_Handler(void) {
     exception_handler(DEBUG_MONITOR);
 }
 
-__attribute__((naked)) MP_NORETURN void PendSV_Handler(void) {
+// Debug flag to trace PendSV entry (incremented in PendSV handler)
+volatile uint32_t pendsv_entry_count = 0;
+
+__attribute__((naked)) void PendSV_Handler(void) {
+    #if MICROPY_ZEPHYR_THREADING
+    // Zephyr context switch - jump directly to z_arm_pendsv
+    // DO NOT modify any registers or stack - z_arm_pendsv expects exact
+    // exception entry state. Any register modification will corrupt the context switch.
+    __asm volatile ("b z_arm_pendsv");
+    #else
     exception_handler(PENDING_SV);
+    #endif
 }
 
 __attribute__((naked, weak)) MP_NORETURN void SysTick_Handler(void) {

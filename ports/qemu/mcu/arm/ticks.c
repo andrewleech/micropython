@@ -25,6 +25,7 @@
  */
 
 #include <stdint.h>
+#include "py/mpconfig.h"
 
 // CPU frequency
 #ifndef CPU_FREQ_HZ
@@ -80,6 +81,18 @@ uintptr_t ticks_us(void) {
     #endif
 }
 
+// Make this handler weak when Zephyr threading is enabled
+// so the Zephyr handler from cortex_m_arch.c takes precedence
+#if MICROPY_ZEPHYR_THREADING
+__attribute__((weak))
+#endif
 void SysTick_Handler(void) {
     _ticks_ms++;
 }
+
+#if MICROPY_ZEPHYR_THREADING
+// Hook called by Zephyr's SysTick_Handler to maintain _ticks_ms counter
+void mp_zephyr_port_systick_hook(void) {
+    _ticks_ms++;
+}
+#endif
