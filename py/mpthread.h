@@ -58,11 +58,20 @@ void mp_thread_recursive_mutex_unlock(mp_thread_recursive_mutex_t *mutex);
 
 #if MICROPY_PY_THREAD && MICROPY_PY_THREAD_GIL
 #include "py/mpstate.h"
+// Allow ports to override GIL macros (e.g., to add k_yield() for cooperative scheduling)
+#ifndef MP_THREAD_GIL_ENTER
 #define MP_THREAD_GIL_ENTER() mp_thread_mutex_lock(&MP_STATE_VM(gil_mutex), 1)
+#endif
+#ifndef MP_THREAD_GIL_EXIT
 #define MP_THREAD_GIL_EXIT() mp_thread_mutex_unlock(&MP_STATE_VM(gil_mutex))
+#endif
 #else
+#ifndef MP_THREAD_GIL_ENTER
 #define MP_THREAD_GIL_ENTER()
+#endif
+#ifndef MP_THREAD_GIL_EXIT
 #define MP_THREAD_GIL_EXIT()
+#endif
 #endif
 
 #endif // MICROPY_INCLUDED_PY_MPTHREAD_H
