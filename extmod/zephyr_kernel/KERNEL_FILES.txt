@@ -1,0 +1,56 @@
+# Minimal Zephyr Kernel Files Needed for MicroPython Threading
+# These files from lib/zephyr/kernel/ are required for basic threading support
+
+## Core Threading and Scheduling
+lib/zephyr/kernel/thread.c          # Thread creation, management
+lib/zephyr/kernel/sched.c            # Scheduler implementation
+lib/zephyr/kernel/idle.c             # Idle thread
+lib/zephyr/kernel/priority_queues.c  # Priority queue implementation (for SCHED_SCALABLE)
+
+## Synchronization Primitives
+lib/zephyr/kernel/mutex.c            # Mutex implementation
+lib/zephyr/kernel/sem.c              # Semaphore implementation
+lib/zephyr/kernel/condvar.c          # Condition variables
+
+## Timing Support
+lib/zephyr/kernel/timeout.c          # Timeout handling
+lib/zephyr/kernel/timer.c            # Timer support (if CONFIG_SYS_CLOCK_EXISTS)
+
+## Memory Management
+lib/zephyr/kernel/mem_slab.c         # Memory slab allocator
+lib/zephyr/kernel/kheap.c            # Kernel heap
+
+## Core Infrastructure
+lib/zephyr/kernel/init.c             # Kernel initialization
+lib/zephyr/kernel/device.c           # Device management (minimal)
+lib/zephyr/kernel/errno.c            # Errno handling
+lib/zephyr/kernel/version.c          # Version info
+lib/zephyr/kernel/banner.c           # Boot banner (optional, can be omitted)
+
+## Additional (if features enabled)
+lib/zephyr/kernel/queue.c            # Message queues
+lib/zephyr/kernel/stack.c            # Stack memory management
+lib/zephyr/kernel/work.c             # Work queue (if needed later)
+lib/zephyr/kernel/events.c           # Event objects (if CONFIG_EVENTS)
+lib/zephyr/kernel/poll.c             # Polling API (if CONFIG_POLL)
+
+## Optional (can be added later)
+# lib/zephyr/kernel/mailbox.c        # Mailboxes
+# lib/zephyr/kernel/msg_q.c          # Message queues
+# lib/zephyr/kernel/pipe.c           # Pipes
+# lib/zephyr/kernel/float.c          # FPU support
+# lib/zephyr/kernel/dynamic.c        # Dynamic thread support
+
+## Minimal Set for POC (Start Here)
+# Just these files for initial proof of concept:
+# 1. thread.c
+# 2. sched.c
+# 3. mutex.c
+# 4. sem.c
+# 5. priority_queues.c
+# 6. timeout.c
+# 7. init.c
+# 8. errno.c
+# 9. version.c
+# 10. mem_slab.c
+# 11. kheap.c
