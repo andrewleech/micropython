@@ -62,6 +62,25 @@ Reset_Handler:
     cmp  r1, r2
     bcc  .bss_zero_loop
 
+    /*
+     * Switch to PSP for Zephyr threading (optional, weak linkage)
+     *
+     * When MICROPY_ZEPHYR_THREADING is enabled, zephyr_psp_init switches
+     * execution from MSP to PSP (z_main_stack). This must happen:
+     * - AFTER .data copy (zephyr_psp_stack_top is in .data)
+     * - AFTER .bss zero (z_main_stack could be in .bss)
+     * - BEFORE any C code that builds stack frames we want to keep
+     *
+     * If zephyr_psp_init is not linked (non-threading builds), the weak
+     * symbol resolves to 0 and we skip the call.
+     */
+    .weak zephyr_psp_init
+    ldr  r0, =zephyr_psp_init
+    cmp  r0, #0
+    beq  .skip_psp_init
+    blx  r0
+.skip_psp_init:
+
     /* Jump to the main code */
     mov  r0, r4
     b    stm32_main

@@ -59,6 +59,27 @@ extern uint32_t irq_stats[IRQ_STATS_MAX];
 // value of the state variable, but rather just pass the return
 // value from disable_irq back to enable_irq.
 
+#if MICROPY_ZEPHYR_THREADING
+// Zephyr IRQ management
+#include <zephyr/arch/cpu.h>
+
+static inline uint32_t query_irq(void) {
+    // For Zephyr, assume IRQs are enabled when not in atomic section
+    // This is a simplification - Zephyr manages IRQs via arch_irq_lock/unlock
+    return IRQ_STATE_ENABLED;
+}
+
+static inline void enable_irq(mp_uint_t state) {
+    arch_irq_unlock(state);
+}
+
+static inline mp_uint_t disable_irq(void) {
+    return arch_irq_lock();
+}
+
+#else
+// STM32 native IRQ management
+
 static inline uint32_t query_irq(void) {
     return __get_PRIMASK();
 }
@@ -72,6 +93,8 @@ static inline mp_uint_t disable_irq(void) {
     __disable_irq();
     return state;
 }
+
+#endif // MICROPY_ZEPHYR_THREADING
 
 #if __CORTEX_M >= 0x03
 
@@ -146,7 +169,14 @@ static inline void restore_irq_pri(uint32_t state) {
 
 #else
 
+// For Zephyr threading, SysTick uses priority 2 (maskable) instead of priority 0
+// arch_irq_lock() uses PRIMASK to mask ALL interrupts (except NMI/HardFault)
+// Priority 2 is chosen to be safely maskable and allow timely context switching
+#if MICROPY_ZEPHYR_THREADING
+#define IRQ_PRI_SYSTICK         NVIC_EncodePriority(NVIC_PRIORITYGROUP_4, 2, 0)
+#else
 #define IRQ_PRI_SYSTICK         NVIC_EncodePriority(NVIC_PRIORITYGROUP_4, 0, 0)
+#endif
 
 // The UARTs have no FIFOs, so if they don't get serviced quickly then characters
 // get dropped. The handling for each character only consumes about 0.5 usec

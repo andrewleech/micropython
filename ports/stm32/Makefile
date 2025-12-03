@@ -60,6 +60,72 @@ include $(TOP)/extmod/extmod.mk
 
 GIT_SUBMODULES += lib/libhydrogen lib/stm32lib lib/tinyusb
 
+# Zephyr threading integration (optional)
+MICROPY_ZEPHYR_THREADING ?= 0
+
+ifeq ($(MICROPY_ZEPHYR_THREADING),1)
+# Add Zephyr submodule
+GIT_SUBMODULES += lib/zephyr
+
+# Remove -Werror for Zephyr headers
+CFLAGS := $(filter-out -Werror,$(CFLAGS))
+
+# Set architecture for Zephyr
+ZEPHYR_ARCH := arm
+
+# Enable idle thread for k_msleep() support in EVENT_POLL_HOOK
+# MUST be set BEFORE including zephyr_kernel.mk so idle.c is compiled
+MICROPY_ZEPHYR_USE_IDLE_THREAD = 1
+
+# Include Zephyr kernel build
+include $(TOP)/extmod/zephyr_kernel/zephyr_kernel.mk
+
+# Add Zephyr includes and flags
+CFLAGS += $(ZEPHYR_INC)
+CFLAGS += -Wno-error -Wno-macro-redefined
+# Define MICROPY_ZEPHYR_THREADING as a preprocessor symbol for C code
+CFLAGS += -DMICROPY_ZEPHYR_THREADING=1
+CFLAGS += -DMICROPY_ZEPHYR_USE_IDLE_THREAD=1
+
+# CRITICAL: Explicitly add optimization flags for Zephyr builds
+# Without this, code is compiled with no optimization, causing 50-100x code size bloat
+CFLAGS += -Os -DNDEBUG
+
+# Add STM32-specific Zephyr architecture implementation
+SRC_C += zephyr_arch_stm32.c
+
+# Ensure Zephyr objects depend on generated headers
+$(addprefix $(BUILD)/, $(SRC_THIRDPARTY_C:.c=.o)): $(ZEPHYR_GEN_HEADERS)
+
+# Pattern-specific CFLAGS for Zephyr objects
+# Zephyr kernel files: Use STM32 CMSIS headers + Zephyr config (for CONFIG_* symbols)
+$(BUILD)/$(TOP)/lib/zephyr/%.o: CFLAGS += -include $(TOP)/extmod/zephyr_kernel/zephyr_config_cortex_m.h -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function -Wno-return-type
+$(BUILD)/$(TOP)/extmod/zephyr_kernel/%.o: CFLAGS += -Wno-unused-parameter -Wno-unused-function
+
+# Build Zephyr assembly files (context switching, PSP initialization)
+ZEPHYR_SWAP_HELPER_O = $(BUILD)/swap_helper.o
+ZEPHYR_PSP_SWITCH_O = $(BUILD)/zephyr_psp_switch.o
+OBJ += $(ZEPHYR_SWAP_HELPER_O)
+OBJ += $(ZEPHYR_PSP_SWITCH_O)
+OBJ += $(BUILD)/zephyr_offsets.o
+
+# Common assembler flags for Zephyr .S files
+ZEPHYR_AS_FLAGS = -x assembler-with-cpp -D_ASMLANGUAGE \
+	$(filter-out -std=% -Wdouble-promotion -Wfloat-conversion -Werror,$(CFLAGS)) \
+	$(CFLAGS_MCU_$(MCU_SERIES)) \
+	-include $(TOP)/extmod/zephyr_kernel/zephyr_config_cortex_m.h \
+	-Wa,-mimplicit-it=thumb
+
+$(ZEPHYR_SWAP_HELPER_O): $(TOP)/lib/zephyr/arch/arm/core/cortex_m/swap_helper.S $(ZEPHYR_GEN_HEADERS)
+	$(ECHO) "CC $<"
+	$(Q)$(CC) $(ZEPHYR_AS_FLAGS) -c -o $@ $<
+
+$(ZEPHYR_PSP_SWITCH_O): $(TOP)/extmod/zephyr_kernel/zephyr_psp_switch.S
+	$(ECHO) "CC $<"
+	$(Q)$(CC) $(ZEPHYR_AS_FLAGS) -c -o $@ $<
+
+endif
+
 CROSS_COMPILE ?= arm-none-eabi-
 LD_DIR=boards
 USBDEV_DIR=usbdev
@@ -114,7 +180,11 @@ INC += -I$(TOP)/lib/tinyusb/src
 INC += -I$(TOP)/shared/tinyusb/
 INC += -Ilwip_inc
 
+ifneq ($(MICROPY_ZEPHYR_THREADING),1)
 CFLAGS += $(INC) -Wall -Wpointer-arith -Werror -Wdouble-promotion -Wfloat-conversion -std=gnu99 -nostdlib $(CFLAGS_EXTRA)
+else
+CFLAGS += $(INC) -Wall -Wpointer-arith -Wdouble-promotion -Wfloat-conversion -std=gnu99 -nostdlib $(CFLAGS_EXTRA)
+endif
 CFLAGS += -D$(CMSIS_MCU) -DUSE_FULL_LL_DRIVER
 CFLAGS += $(CFLAGS_MCU_$(MCU_SERIES))
 CFLAGS += $(COPT)
@@ -507,6 +577,13 @@ $(BUILD)/mpremoteprocport.o: $(BUILD)/openamp/metal/config.h
 endif
 endif
 
+# Conditionally exclude legacy threading files when using Zephyr
+# Note: pendsv.c and systick.c are kept because they contain utility functions,
+# but their interrupt handlers are conditionally compiled out via #if !MICROPY_ZEPHYR_THREADING
+ifeq ($(MICROPY_ZEPHYR_THREADING),1)
+SRC_C := $(filter-out pybthread.c mpthreadport.c,$(SRC_C))
+endif
+
 # SRC_O should be placed first to work around this LTO bug with binutils <2.35:
 # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=83967
 OBJ += $(addprefix $(BUILD)/, $(SRC_O))
@@ -514,6 +591,7 @@ OBJ += $(PY_O)
 OBJ += $(addprefix $(BUILD)/, $(LIB_SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(LIBM_SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SHARED_SRC_C:.c=.o))
+OBJ += $(addprefix $(BUILD)/, $(SRC_THIRDPARTY_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(DRIVERS_SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(HAL_SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(USBDEV_SRC_C:.c=.o))
@@ -682,6 +760,10 @@ $(BUILD)/firmware-trusted.bin: $(BUILD)/firmware.bin
 
 # List of sources for qstr extraction
 SRC_QSTR += $(SRC_C) $(SRC_CXX) $(SHARED_SRC_C) $(GEN_PINS_SRC)
+# Add MicroPython-Zephyr integration files for root pointer extraction
+ifeq ($(MICROPY_ZEPHYR_THREADING),1)
+SRC_QSTR += $(ZEPHYR_MP_SRC_C)
+endif
 
 # Making OBJ use an order-only dependency on the generated pins.h file
 # has the side effect of making the pins.h file before we actually compile
