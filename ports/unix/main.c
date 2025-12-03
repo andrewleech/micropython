@@ -638,14 +638,24 @@ MP_NOINLINE int main_(int argc, char **argv) {
     bool inspect = false;
 
     #if MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL
-    // Check if /rom/main.py exists and should be run.
+    // Check if /rom/main.py (or .mpy) exists and should be run.
     // It runs when no -c, -m, -h, or script file is specified.
     bool run_rom_main = false;
+    const char *rom_main_path = NULL;
     {
         nlr_buf_t nlr;
         if (nlr_push(&nlr) == 0) {
             mp_import_stat_t stat = mp_vfs_import_stat("/rom/main.py");
-            run_rom_main = (stat == MP_IMPORT_STAT_FILE);
+            if (stat == MP_IMPORT_STAT_FILE) {
+                run_rom_main = true;
+                rom_main_path = "/rom/main.py";
+            } else {
+                stat = mp_vfs_import_stat("/rom/main.mpy");
+                if (stat == MP_IMPORT_STAT_FILE) {
+                    run_rom_main = true;
+                    rom_main_path = "/rom/main.mpy";
+                }
+            }
             nlr_pop();
         }
     }
@@ -703,8 +713,8 @@ MP_NOINLINE int main_(int argc, char **argv) {
             }
         }
 
-        // Build sys.argv: ['/rom/main.py', remaining_args...]
-        mp_obj_list_append(mp_sys_argv, mp_obj_new_str_via_qstr("/rom/main.py", 12));
+        // Build sys.argv: [rom_main_path, remaining_args...]
+        mp_obj_list_append(mp_sys_argv, mp_obj_new_str(rom_main_path, strlen(rom_main_path)));
         bool in_positional = false;
         for (int a = 1; a < argc; a++) {
             if (!in_positional && argv[a][0] == '-') {
@@ -731,7 +741,7 @@ MP_NOINLINE int main_(int argc, char **argv) {
             }
         }
 
-        ret = do_file("/rom/main.py");
+        ret = do_file(rom_main_path);
         goto done_execution;
     }
     #endif
