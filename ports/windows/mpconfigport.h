@@ -79,6 +79,8 @@
 #endif
 #define MICROPY_VFS                 (1)
 #define MICROPY_VFS_POSIX           (1)
+#define MICROPY_VFS_ROM             (1)
+#define MICROPY_VFS_ROM_IOCTL       (1)
 #define MICROPY_PY_FUNCTION_ATTRS   (1)
 #define MICROPY_PY_DESCRIPTORS      (1)
 #define MICROPY_PY_DELATTR_SETATTR  (1)
@@ -106,7 +108,7 @@
 #define MICROPY_PY_REVERSE_SPECIAL_METHODS (1)
 #define MICROPY_PY_ARRAY_SLICE_ASSIGN (1)
 #define MICROPY_PY_BUILTINS_SLICE_ATTRS (1)
-#define MICROPY_PY_SYS_PATH_ARGV_DEFAULTS (0)
+#define MICROPY_PY_SYS_PATH_ARGV_DEFAULTS (1)
 #define MICROPY_PY_SYS_EXIT         (1)
 #define MICROPY_PY_SYS_ATEXIT       (1)
 #define MICROPY_PY_SYS_PLATFORM     "win32"

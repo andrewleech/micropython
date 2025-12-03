@@ -323,3 +323,14 @@ install: $(BUILD)/$(PROG)
 
 uninstall:
 	-rm $(BINDIR)/$(PROG)
+
+# Build a romfs image from a directory
+# Usage: make romfs ROMFS_DIR=path/to/directory
+# Creates romfs.img in the current directory
+romfs:
+	@if [ -z "$(ROMFS_DIR)" ]; then \
+		echo "Error: ROMFS_DIR not specified"; \
+		echo "Usage: make romfs ROMFS_DIR=path/to/directory"; \
+		exit 1; \
+	fi
+	$(PYTHON) ../../tools/mpremote/mpremote/main.py romfs build $(ROMFS_DIR) --output romfs.img

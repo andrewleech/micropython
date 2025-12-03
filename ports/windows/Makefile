@@ -69,6 +69,7 @@ SRC_C = \
 	realpath.c \
 	init.c \
 	fmode.c \
+	vfs_rom_ioctl.c \
 	$(wildcard $(VARIANT_DIR)/*.c)
 
 SHARED_SRC_C += $(addprefix shared/,\
@@ -140,7 +141,7 @@ $(BUILD)/lib/libffi/out/include/ffi.h: $(TOP)/lib/libffi/configure
 	$(abspath $(TOP))/lib/libffi/configure $(CROSS_COMPILE_HOST) --prefix=$$PWD/out --disable-shared --disable-structs CC="$(CC)" CXX="$(CXX)" LD="$(LD)" CFLAGS="-Os -fomit-frame-pointer -fstrict-aliasing -ffast-math -fno-exceptions"; \
 	$(MAKE) install-exec-recursive; $(MAKE) -C include install-data-am
 
-.PHONY: test test_full deplibs libffi
+.PHONY: test test_full deplibs libffi romfs
 
 # Note for recent gcc versions like 13.2:
 # - mingw64-x86_64 gcc builds will pass the math_domain_special test
@@ -160,3 +161,14 @@ $(BUILD)/$(PROG): $(BUILD)/micropython.res
 $(BUILD)/%.res: %.rc
 	$(ECHO) "WINDRES $<"
 	$(Q)$(WINDRES) $< -O coff -o $@
+
+# Build a romfs image from a directory
+# Usage: make romfs ROMFS_DIR=path/to/directory
+# Creates romfs.img in the current directory
+romfs:
+	@if [ -z "$(ROMFS_DIR)" ]; then \
+		echo "Error: ROMFS_DIR not specified"; \
+		echo "Usage: make romfs ROMFS_DIR=path/to/directory"; \
+		exit 1; \
+	fi
+	$(PYTHON) ../../tools/mpremote/mpremote/main.py romfs build $(ROMFS_DIR) --output romfs.img

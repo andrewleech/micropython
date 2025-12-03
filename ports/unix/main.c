@@ -605,6 +605,12 @@ MP_NOINLINE int main_(int argc, char **argv) {
         }
     }
 
+    #if MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL
+    // Add "/rom" and "/rom/lib" to sys.path if romfs is mounted
+    mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_rom));
+    mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_rom_slash_lib));
+    #endif
+
     mp_obj_list_init(MP_OBJ_TO_PTR(mp_sys_argv), 0);
 
     #if defined(MICROPY_UNIX_COVERAGE)
@@ -630,6 +636,106 @@ MP_NOINLINE int main_(int argc, char **argv) {
     const int NOTHING_EXECUTED = -2;
     int ret = NOTHING_EXECUTED;
     bool inspect = false;
+
+    #if MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL
+    // Check if /rom/main.py exists and should be run.
+    // It runs when no -c, -m, -h, or script file is specified.
+    bool run_rom_main = false;
+    {
+        nlr_buf_t nlr;
+        if (nlr_push(&nlr) == 0) {
+            mp_import_stat_t stat = mp_vfs_import_stat("/rom/main.py");
+            run_rom_main = (stat == MP_IMPORT_STAT_FILE);
+            nlr_pop();
+        }
+    }
+
+    if (run_rom_main) {
+        // Check if any argument would bypass /rom/main.py
+        // Only -c, -m, and -h bypass; all other args go to main.py
+        for (int a = 1; a < argc; a++) {
+            if (argv[a][0] == '-') {
+                if (strcmp(argv[a], "-c") == 0 ||
+                    strcmp(argv[a], "-m") == 0 ||
+                    strcmp(argv[a], "-h") == 0) {
+                    // These bypass /rom/main.py
+                    run_rom_main = false;
+                    break;
+                } else if (strcmp(argv[a], "-X") == 0) {
+                    // Skip -X and its argument
+                    if (a + 1 < argc) {
+                        a++;
+                    }
+                }
+                // Other flags (-i, -v, -O) or unknown flags don't bypass
+            }
+            // Non-flag arguments become sys.argv for main.py, don't bypass
+        }
+    }
+
+    if (run_rom_main) {
+        // Process flags that affect execution
+        for (int a = 1; a < argc; a++) {
+            if (argv[a][0] == '-') {
+                if (strcmp(argv[a], "-i") == 0) {
+                    inspect = true;
+                } else if (strcmp(argv[a], "-X") == 0 && a + 1 < argc) {
+                    a++; // Skip -X argument (already processed by pre_process_options)
+                #if MICROPY_DEBUG_PRINTERS
+                } else if (strcmp(argv[a], "-v") == 0) {
+                    mp_verbose_flag++;
+                #endif
+                } else if (strncmp(argv[a], "-O", 2) == 0) {
+                    if (unichar_isdigit(argv[a][2])) {
+                        MP_STATE_VM(mp_optimise_value) = argv[a][2] & 0xf;
+                    } else {
+                        MP_STATE_VM(mp_optimise_value) = 0;
+                        for (char *p = argv[a] + 1; *p && *p == 'O'; p++, MP_STATE_VM(mp_optimise_value)++) {;
+                        }
+                    }
+                } else {
+                    // Unknown flag becomes part of sys.argv
+                    break;
+                }
+            } else {
+                // Positional args start here
+                break;
+            }
+        }
+
+        // Build sys.argv: ['/rom/main.py', remaining_args...]
+        mp_obj_list_append(mp_sys_argv, mp_obj_new_str_via_qstr("/rom/main.py", 12));
+        bool in_positional = false;
+        for (int a = 1; a < argc; a++) {
+            if (!in_positional && argv[a][0] == '-') {
+                // Skip known flags
+                if (strcmp(argv[a], "-i") == 0) {
+                    continue;
+                #if MICROPY_DEBUG_PRINTERS
+                } else if (strcmp(argv[a], "-v") == 0) {
+                    continue;
+                #endif
+                } else if (strncmp(argv[a], "-O", 2) == 0) {
+                    continue;
+                } else if (strcmp(argv[a], "-X") == 0 && a + 1 < argc) {
+                    a++; // Skip -X and its argument
+                    continue;
+                }
+                // Unknown flag - treat as start of positional args
+                in_positional = true;
+            } else {
+                in_positional = true;
+            }
+            if (in_positional) {
+                mp_obj_list_append(mp_sys_argv, mp_obj_new_str_from_cstr(argv[a]));
+            }
+        }
+
+        ret = do_file("/rom/main.py");
+        goto done_execution;
+    }
+    #endif
+
     for (int a = 1; a < argc; a++) {
         if (argv[a][0] == '-') {
             if (strcmp(argv[a], "-i") == 0) {
@@ -736,10 +842,15 @@ MP_NOINLINE int main_(int argc, char **argv) {
         }
     }
 
+    #if MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL
+done_execution:
+    #endif
+
     const char *inspect_env = getenv("MICROPYINSPECT");
     if (inspect_env && inspect_env[0] != '\0') {
         inspect = true;
     }
+
     if (ret == NOTHING_EXECUTED || inspect) {
         if (isatty(0) || inspect) {
             prompt_read_history();
@@ -813,16 +924,81 @@ void nlr_jump_fail(void *val) {
 
 #if MICROPY_VFS_ROM_IOCTL
 
-static uint8_t romfs_buf[4] = { 0xd2, 0xcd, 0x31, 0x00 }; // empty ROMFS
-static const MP_DEFINE_MEMORYVIEW_OBJ(romfs_obj, 'B', 0, sizeof(romfs_buf), romfs_buf);
+// RomFS image buffer loaded from file
+static uint8_t *romfs_buf = NULL;
+static size_t romfs_size = 0;
+static mp_obj_t romfs_memoryview = MP_OBJ_NULL;
+
+// Empty ROMFS header
+static const uint8_t empty_romfs[4] = { 0xd2, 0xcd, 0x31, 0x00 };
+
+// Load romfs image from file on first access
+static void load_romfs_image(void) {
+    if (romfs_buf != NULL) {
+        return; // Already loaded
+    }
+
+    // Try to load romfs.img from the current directory
+    FILE *f = fopen("romfs.img", "rb");
+
+    if (f == NULL) {
+        // No romfs.img found, use static empty ROMFS
+        romfs_size = sizeof(empty_romfs);
+        romfs_buf = (uint8_t *)empty_romfs;
+        return;
+    }
+
+    // Get file size
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (file_size <= 0) {
+        // Invalid file, use empty ROMFS
+        fclose(f);
+        romfs_size = sizeof(empty_romfs);
+        romfs_buf = (uint8_t *)empty_romfs;
+        return;
+    }
+
+    romfs_size = (size_t)file_size;
+
+    // Allocate buffer and load file
+    romfs_buf = malloc(romfs_size);
+    if (romfs_buf == NULL) {
+        // Allocation failed, use empty ROMFS
+        fclose(f);
+        romfs_size = sizeof(empty_romfs);
+        romfs_buf = (uint8_t *)empty_romfs;
+        return;
+    }
+
+    size_t read_size = fread(romfs_buf, 1, romfs_size, f);
+    fclose(f);
+
+    if (read_size != romfs_size) {
+        // Read error, fall back to empty ROMFS
+        free(romfs_buf);
+        romfs_size = sizeof(empty_romfs);
+        romfs_buf = (uint8_t *)empty_romfs;
+    }
+}
 
 mp_obj_t mp_vfs_rom_ioctl(size_t n_args, const mp_obj_t *args) {
+    load_romfs_image();
+
     switch (mp_obj_get_int(args[0])) {
         case MP_VFS_ROM_IOCTL_GET_NUMBER_OF_SEGMENTS:
             return MP_OBJ_NEW_SMALL_INT(1);
 
-        case MP_VFS_ROM_IOCTL_GET_SEGMENT:
-            return MP_OBJ_FROM_PTR(&romfs_obj);
+        case MP_VFS_ROM_IOCTL_GET_SEGMENT: {
+            // Create memoryview on first request
+            if (romfs_memoryview == MP_OBJ_NULL) {
+                mp_obj_array_t *view = MP_OBJ_TO_PTR(mp_obj_new_memoryview('B', romfs_size, romfs_buf));
+                romfs_memoryview = MP_OBJ_FROM_PTR(view);
+            }
+            return romfs_memoryview;
+        }
     }
 
     return MP_OBJ_NEW_SMALL_INT(-MP_EINVAL);
