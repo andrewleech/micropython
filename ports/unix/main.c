@@ -741,7 +741,24 @@ MP_NOINLINE int main_(int argc, char **argv) {
             }
         }
 
-        ret = do_file(rom_main_path);
+        // For .mpy files, use import mechanism; for .py files, use lexer
+        if (strlen(rom_main_path) > 4 && strcmp(rom_main_path + strlen(rom_main_path) - 4, ".mpy") == 0) {
+            // Import /rom/main as __main__ module
+            nlr_buf_t nlr;
+            if (nlr_push(&nlr) == 0) {
+                mp_obj_t import_args[4];
+                import_args[0] = MP_OBJ_NEW_QSTR(MP_QSTR_main);
+                import_args[1] = import_args[2] = mp_const_none;
+                import_args[3] = mp_const_false;
+                mp_builtin___import__(4, import_args);
+                nlr_pop();
+                ret = 0;
+            } else {
+                ret = handle_uncaught_exception(nlr.ret_val);
+            }
+        } else {
+            ret = do_file(rom_main_path);
+        }
         goto done_execution;
     }
     #endif
