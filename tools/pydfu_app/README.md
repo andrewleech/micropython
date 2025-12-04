@@ -96,8 +96,11 @@ cd ports/windows
 
 # Build romfs.img same as Unix (see above)
 
-# Cross-compile with MinGW
-make CROSS_COMPILE=x86_64-w64-mingw32- PROG=pydfu ROMFS_IMG=romfs.img
+# Build libffi dependency first
+make deplibs CROSS_COMPILE=x86_64-w64-mingw32- MICROPY_PY_FFI=1
+
+# Cross-compile with MinGW (FFI required for pyusb)
+make CROSS_COMPILE=x86_64-w64-mingw32- MICROPY_PY_FFI=1 PROG=pydfu ROMFS_IMG=romfs.img
 ```
 
 ## Usage
