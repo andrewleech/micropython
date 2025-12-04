@@ -32,27 +32,43 @@
 
 #include <stdio.h>
 
-// RomFS image buffer loaded from file
-static uint8_t *romfs_buf = NULL;
+// RomFS image - either embedded at compile time or loaded from file
+static const uint8_t *romfs_buf = NULL;
 static size_t romfs_size = 0;
 static mp_obj_t romfs_memoryview = MP_OBJ_NULL;
 
-// Empty ROMFS header
+// Empty ROMFS header (used when no romfs is available)
 static const uint8_t empty_romfs[4] = { 0xd2, 0xcd, 0x31, 0x00 };
 
-// Load romfs image from file on first access
+// Weak symbols for embedded romfs data - defined via objcopy when built with ROMFS_IMG
+// Using weak symbols allows linking without embedded romfs for development builds
+__attribute__((weak)) const uint8_t romfs_embedded_data[] = { 0 };
+__attribute__((weak)) const uint8_t romfs_embedded_end[] = { 0 };
+
+// Buffer for file-loaded romfs (only used if not embedded)
+static uint8_t *romfs_file_buf = NULL;
+
+// Load romfs image on first access
 static void load_romfs_image(void) {
     if (romfs_buf != NULL) {
         return; // Already loaded
     }
 
-    // Try to load romfs.img from the current directory
+    // Check if romfs was embedded at compile time
+    size_t embedded_size = romfs_embedded_end - romfs_embedded_data;
+    if (embedded_size > 0) {
+        romfs_buf = romfs_embedded_data;
+        romfs_size = embedded_size;
+        return;
+    }
+
+    // Try to load romfs.img from the current directory (development mode)
     FILE *f = fopen("romfs.img", "rb");
 
     if (f == NULL) {
-        // No romfs.img found, use static empty ROMFS
+        // No romfs found, use empty ROMFS
         romfs_size = sizeof(empty_romfs);
-        romfs_buf = (uint8_t *)empty_romfs;
+        romfs_buf = empty_romfs;
         return;
     }
 
@@ -62,35 +78,35 @@ static void load_romfs_image(void) {
     fseek(f, 0, SEEK_SET);
 
     if (file_size <= 0) {
-        // Invalid file, use empty ROMFS
         fclose(f);
         romfs_size = sizeof(empty_romfs);
-        romfs_buf = (uint8_t *)empty_romfs;
+        romfs_buf = empty_romfs;
         return;
     }
-
-    romfs_size = (size_t)file_size;
 
     // Allocate buffer and load file
     // Use m_new_maybe to avoid exception on allocation failure
-    romfs_buf = m_new_maybe(uint8_t, romfs_size);
-    if (romfs_buf == NULL) {
-        // Allocation failed, use empty ROMFS
+    romfs_file_buf = m_new_maybe(uint8_t, (size_t)file_size);
+    if (romfs_file_buf == NULL) {
         fclose(f);
         romfs_size = sizeof(empty_romfs);
-        romfs_buf = (uint8_t *)empty_romfs;
+        romfs_buf = empty_romfs;
         return;
     }
 
-    size_t read_size = fread(romfs_buf, 1, romfs_size, f);
+    size_t read_size = fread(romfs_file_buf, 1, (size_t)file_size, f);
     fclose(f);
 
-    if (read_size != romfs_size) {
-        // Read error, fall back to empty ROMFS
-        m_del(uint8_t, romfs_buf, romfs_size);
+    if (read_size != (size_t)file_size) {
+        m_del(uint8_t, romfs_file_buf, (size_t)file_size);
+        romfs_file_buf = NULL;
         romfs_size = sizeof(empty_romfs);
-        romfs_buf = (uint8_t *)empty_romfs;
+        romfs_buf = empty_romfs;
+        return;
     }
+
+    romfs_buf = romfs_file_buf;
+    romfs_size = (size_t)file_size;
 }
 
 mp_obj_t mp_vfs_rom_ioctl(size_t n_args, const mp_obj_t *args) {
@@ -103,7 +119,7 @@ mp_obj_t mp_vfs_rom_ioctl(size_t n_args, const mp_obj_t *args) {
         case MP_VFS_ROM_IOCTL_GET_SEGMENT: {
             // Create memoryview on first request
             if (romfs_memoryview == MP_OBJ_NULL) {
-                mp_obj_array_t *view = MP_OBJ_TO_PTR(mp_obj_new_memoryview('B', romfs_size, romfs_buf));
+                mp_obj_array_t *view = MP_OBJ_TO_PTR(mp_obj_new_memoryview('B', romfs_size, (void *)romfs_buf));
                 romfs_memoryview = MP_OBJ_FROM_PTR(view);
             }
             return romfs_memoryview;

@@ -118,7 +118,25 @@ endif
 
 CXXFLAGS += $(filter-out -std=gnu99,$(CFLAGS))
 
+# Build with embedded romfs by linking the binary directly
+# Usage: make ROMFS_IMG=romfs.img
+ifdef ROMFS_IMG
+# Force include the romfs object even though symbols are weak
+LDFLAGS += -Wl,--undefined=romfs_embedded_data
+OBJ += $(BUILD)/romfs_data.o
+endif
+
 include $(TOP)/py/mkrules.mk
+
+# Rule to build romfs_data.o from romfs.img (must be after mkrules.mk for OBJCOPY)
+ifdef ROMFS_IMG
+$(BUILD)/romfs_data.o: $(ROMFS_IMG) | $(BUILD)
+	$(Q)$(OBJCOPY) -I binary -O pe-x86-64 -B i386:x86-64 \
+		--rename-section .data=.rodata,alloc,load,readonly,data,contents \
+		--redefine-sym _binary_$(subst .,_,$(subst /,_,$(ROMFS_IMG)))_start=romfs_embedded_data \
+		--redefine-sym _binary_$(subst .,_,$(subst /,_,$(ROMFS_IMG)))_end=romfs_embedded_end \
+		$< $@
+endif
 
 # Value of configure's --host= option (required for cross-compilation).
 # Deduce it from CROSS_COMPILE by default, but can be overridden.
@@ -171,4 +189,5 @@ romfs:
 		echo "Usage: make romfs ROMFS_DIR=path/to/directory"; \
 		exit 1; \
 	fi
-	$(PYTHON) ../../tools/mpremote/mpremote/main.py romfs build $(ROMFS_DIR) --output romfs.img
+	$(PYTHON) -m mpremote romfs build $(ROMFS_DIR)
+	mv $(notdir $(ROMFS_DIR)).romfs romfs.img
