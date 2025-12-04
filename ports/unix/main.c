@@ -56,6 +56,10 @@
 #include "input.h"
 #include "stack_size.h"
 
+#if MICROPY_MODULE_FROZEN
+#include "py/frozenmod.h"
+#endif
+
 // Command line options, with their defaults
 static bool compile_only = false;
 static uint emit_opt = MP_EMIT_OPT_NONE;
@@ -319,6 +323,7 @@ static int do_str(const char *str) {
     return execute_from_lexer(LEX_SRC_STR, str, MP_PARSE_FILE_INPUT, false);
 }
 
+#if !MICROPY_FROZEN_MAIN_MODULE
 static void print_help(char **argv) {
     printf(
         "usage: %s [<opts>] [-X <implopt>] [-c <command> | -m <module> | <filename>]\n"
@@ -358,6 +363,7 @@ static void print_help(char **argv) {
         printf("  (none)\n");
     }
 }
+#endif
 
 static int invalid_args(void) {
     fprintf(stderr, "Invalid command line arguments. Use -h option for help.\n");
@@ -371,10 +377,12 @@ static void pre_process_options(int argc, char **argv) {
             if (strcmp(argv[a], "-c") == 0 || strcmp(argv[a], "-m") == 0) {
                 break; // Everything after this is a command/module and arguments for it
             }
+            #if !MICROPY_FROZEN_MAIN_MODULE
             if (strcmp(argv[a], "-h") == 0) {
                 print_help(argv);
                 exit(0);
             }
+            #endif
             if (strcmp(argv[a], "--version") == 0) {
                 printf(MICROPY_BANNER_NAME_AND_VERSION "; " MICROPY_BANNER_MACHINE "\n");
                 exit(0);
@@ -637,60 +645,77 @@ MP_NOINLINE int main_(int argc, char **argv) {
     int ret = NOTHING_EXECUTED;
     bool inspect = false;
 
-    #if MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL
-    // Check if /rom/main.py (or .mpy) exists and should be run.
+    // Check if a frozen or romfs main module exists and should be run.
+    // Priority: 1) frozen main module, 2) /rom/main.py or /rom/main.mpy
     // It runs when no -c, -m, -h, or script file is specified.
-    bool run_rom_main = false;
-    const char *rom_main_path = NULL;
+    bool run_main = false;
+    bool main_is_frozen = false;
+    const char *main_path = "main";  // For frozen or import-based execution
+
+    #if MICROPY_MODULE_FROZEN
     {
+        int frozen_type;
+        void *frozen_data;
+        // Try main.py first, then main.mpy (frozen modules use filename with extension)
+        mp_import_stat_t frozen_stat = mp_find_frozen_module("main.py", &frozen_type, &frozen_data);
+        if (frozen_stat != MP_IMPORT_STAT_FILE) {
+            frozen_stat = mp_find_frozen_module("main.mpy", &frozen_type, &frozen_data);
+        }
+        if (frozen_stat == MP_IMPORT_STAT_FILE) {
+            run_main = true;
+            main_is_frozen = true;
+        }
+    }
+    #endif
+
+    #if MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL
+    if (!run_main) {
         nlr_buf_t nlr;
         if (nlr_push(&nlr) == 0) {
             mp_import_stat_t stat = mp_vfs_import_stat("/rom/main.py");
             if (stat == MP_IMPORT_STAT_FILE) {
-                run_rom_main = true;
-                rom_main_path = "/rom/main.py";
+                run_main = true;
+                main_path = "/rom/main.py";
             } else {
                 stat = mp_vfs_import_stat("/rom/main.mpy");
                 if (stat == MP_IMPORT_STAT_FILE) {
-                    run_rom_main = true;
-                    rom_main_path = "/rom/main.mpy";
+                    run_main = true;
+                    main_path = "/rom/main.mpy";
                 }
             }
             nlr_pop();
         }
     }
+    #endif
 
-    if (run_rom_main) {
-        // Check if any argument would bypass /rom/main.py
-        // Only -c, -m, and -h bypass; all other args go to main.py
+    if (run_main) {
+        // Check if any argument would bypass main
+        // -c and -m always bypass; -h bypasses only for romfs main (not frozen)
         for (int a = 1; a < argc; a++) {
             if (argv[a][0] == '-') {
-                if (strcmp(argv[a], "-c") == 0 ||
-                    strcmp(argv[a], "-m") == 0 ||
-                    strcmp(argv[a], "-h") == 0) {
-                    // These bypass /rom/main.py
-                    run_rom_main = false;
+                if (strcmp(argv[a], "-c") == 0 || strcmp(argv[a], "-m") == 0) {
+                    run_main = false;
+                    break;
+                } else if (!main_is_frozen && strcmp(argv[a], "-h") == 0) {
+                    run_main = false;
                     break;
                 } else if (strcmp(argv[a], "-X") == 0) {
-                    // Skip -X and its argument
                     if (a + 1 < argc) {
                         a++;
                     }
                 }
-                // Other flags (-i, -v, -O) or unknown flags don't bypass
             }
-            // Non-flag arguments become sys.argv for main.py, don't bypass
         }
     }
 
-    if (run_rom_main) {
+    if (run_main) {
         // Process flags that affect execution
         for (int a = 1; a < argc; a++) {
             if (argv[a][0] == '-') {
                 if (strcmp(argv[a], "-i") == 0) {
                     inspect = true;
                 } else if (strcmp(argv[a], "-X") == 0 && a + 1 < argc) {
-                    a++; // Skip -X argument (already processed by pre_process_options)
+                    a++;
                 #if MICROPY_DEBUG_PRINTERS
                 } else if (strcmp(argv[a], "-v") == 0) {
                     mp_verbose_flag++;
@@ -704,21 +729,18 @@ MP_NOINLINE int main_(int argc, char **argv) {
                         }
                     }
                 } else {
-                    // Unknown flag becomes part of sys.argv
                     break;
                 }
             } else {
-                // Positional args start here
                 break;
             }
         }
 
-        // Build sys.argv: [rom_main_path, remaining_args...]
-        mp_obj_list_append(mp_sys_argv, mp_obj_new_str(rom_main_path, strlen(rom_main_path)));
+        // Build sys.argv: [main_path, remaining_args...]
+        mp_obj_list_append(mp_sys_argv, mp_obj_new_str(main_path, strlen(main_path)));
         bool in_positional = false;
         for (int a = 1; a < argc; a++) {
             if (!in_positional && argv[a][0] == '-') {
-                // Skip known flags
                 if (strcmp(argv[a], "-i") == 0) {
                     continue;
                 #if MICROPY_DEBUG_PRINTERS
@@ -728,10 +750,9 @@ MP_NOINLINE int main_(int argc, char **argv) {
                 } else if (strncmp(argv[a], "-O", 2) == 0) {
                     continue;
                 } else if (strcmp(argv[a], "-X") == 0 && a + 1 < argc) {
-                    a++; // Skip -X and its argument
+                    a++;
                     continue;
                 }
-                // Unknown flag - treat as start of positional args
                 in_positional = true;
             } else {
                 in_positional = true;
@@ -741,9 +762,9 @@ MP_NOINLINE int main_(int argc, char **argv) {
             }
         }
 
-        // For .mpy files, use import mechanism; for .py files, use lexer
-        if (strlen(rom_main_path) > 4 && strcmp(rom_main_path + strlen(rom_main_path) - 4, ".mpy") == 0) {
-            // Import /rom/main as __main__ module
+        // Execute main module
+        if (main_is_frozen || (strlen(main_path) > 4 && strcmp(main_path + strlen(main_path) - 4, ".mpy") == 0)) {
+            // Frozen or .mpy: use import mechanism
             nlr_buf_t nlr;
             if (nlr_push(&nlr) == 0) {
                 mp_obj_t import_args[4];
@@ -757,11 +778,11 @@ MP_NOINLINE int main_(int argc, char **argv) {
                 ret = handle_uncaught_exception(nlr.ret_val);
             }
         } else {
-            ret = do_file(rom_main_path);
+            // .py file in romfs: use lexer
+            ret = do_file(main_path);
         }
         goto done_execution;
     }
-    #endif
 
     for (int a = 1; a < argc; a++) {
         if (argv[a][0] == '-') {
@@ -869,7 +890,7 @@ MP_NOINLINE int main_(int argc, char **argv) {
         }
     }
 
-    #if MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL
+    #if MICROPY_MODULE_FROZEN || (MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL)
 done_execution:
     #endif
 
