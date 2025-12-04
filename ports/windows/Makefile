@@ -121,8 +121,7 @@ CXXFLAGS += $(filter-out -std=gnu99,$(CFLAGS))
 # Build with embedded romfs by linking the binary directly
 # Usage: make ROMFS_IMG=romfs.img
 ifdef ROMFS_IMG
-# Force include the romfs object even though symbols are weak
-LDFLAGS += -Wl,--undefined=romfs_embedded_data
+CFLAGS += -DMICROPY_ROMFS_EMBEDDED=1
 OBJ += $(BUILD)/romfs_data.o
 endif
 

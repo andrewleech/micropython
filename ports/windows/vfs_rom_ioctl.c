@@ -32,47 +32,42 @@
 
 #include <stdio.h>
 
-// RomFS image - either embedded at compile time or loaded from file
+// RomFS image buffer and metadata
 static const uint8_t *romfs_buf = NULL;
 static size_t romfs_size = 0;
 static mp_obj_t romfs_memoryview = MP_OBJ_NULL;
 
-// Empty ROMFS header (used when no romfs is available)
-static const uint8_t empty_romfs[4] = { 0xd2, 0xcd, 0x31, 0x00 };
+#if MICROPY_ROMFS_EMBEDDED
+// Embedded romfs data - symbols provided by objcopy from romfs.img
+// Build will fail to link if ROMFS_IMG was specified but object not provided
+extern const uint8_t romfs_embedded_data[];
+extern const uint8_t romfs_embedded_end[];
 
-// Weak symbols for embedded romfs data - defined via objcopy when built with ROMFS_IMG
-// Using weak symbols allows linking without embedded romfs for development builds
-__attribute__((weak)) const uint8_t romfs_embedded_data[] = { 0 };
-__attribute__((weak)) const uint8_t romfs_embedded_end[] = { 0 };
-
-// Buffer for file-loaded romfs (only used if not embedded)
-static uint8_t *romfs_file_buf = NULL;
-
-// Load romfs image on first access
 static void load_romfs_image(void) {
     if (romfs_buf != NULL) {
-        return; // Already loaded
+        return;
     }
+    romfs_buf = romfs_embedded_data;
+    romfs_size = romfs_embedded_end - romfs_embedded_data;
+}
 
-    // Check if romfs was embedded at compile time
-    size_t embedded_size = romfs_embedded_end - romfs_embedded_data;
-    if (embedded_size > 0) {
-        romfs_buf = romfs_embedded_data;
-        romfs_size = embedded_size;
+#else
+// File-loading mode for development - load romfs.img from current directory
+static const uint8_t empty_romfs[4] = { 0xd2, 0xcd, 0x31, 0x00 };
+static uint8_t *romfs_file_buf = NULL;
+
+static void load_romfs_image(void) {
+    if (romfs_buf != NULL) {
         return;
     }
 
-    // Try to load romfs.img from the current directory (development mode)
     FILE *f = fopen("romfs.img", "rb");
-
     if (f == NULL) {
-        // No romfs found, use empty ROMFS
         romfs_size = sizeof(empty_romfs);
         romfs_buf = empty_romfs;
         return;
     }
 
-    // Get file size
     fseek(f, 0, SEEK_END);
     long file_size = ftell(f);
     fseek(f, 0, SEEK_SET);
@@ -84,7 +79,6 @@ static void load_romfs_image(void) {
         return;
     }
 
-    // Allocate buffer and load file
     // Use m_new_maybe to avoid exception on allocation failure
     romfs_file_buf = m_new_maybe(uint8_t, (size_t)file_size);
     if (romfs_file_buf == NULL) {
@@ -108,6 +102,7 @@ static void load_romfs_image(void) {
     romfs_buf = romfs_file_buf;
     romfs_size = (size_t)file_size;
 }
+#endif // MICROPY_ROMFS_EMBEDDED
 
 mp_obj_t mp_vfs_rom_ioctl(size_t n_args, const mp_obj_t *args) {
     load_romfs_image();
