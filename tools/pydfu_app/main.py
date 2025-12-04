@@ -47,7 +47,7 @@ def extract_native_libs():
 
     # Create temp directory for extracted DLLs
     # Use a consistent name so we don't litter temp with copies
-    temp_base = os.environ.get("TEMP", os.environ.get("TMP", "."))
+    temp_base = os.getenv("TEMP") or os.getenv("TMP") or "."
     extract_dir = temp_base + "/micropython_native_libs"
 
     try:
