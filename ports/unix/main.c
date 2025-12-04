@@ -949,7 +949,7 @@ void nlr_jump_fail(void *val) {
     exit(1);
 }
 
-#if MICROPY_VFS_ROM_IOCTL
+#if MICROPY_VFS_ROM_IOCTL && !MICROPY_VFS_ROM_IOCTL_USE_EXTERNAL
 
 // RomFS image buffer and metadata
 static const uint8_t *romfs_buf = NULL;
@@ -1042,4 +1042,4 @@ mp_obj_t mp_vfs_rom_ioctl(size_t n_args, const mp_obj_t *args) {
     return MP_OBJ_NEW_SMALL_INT(-MP_EINVAL);
 }
 
-#endif
+#endif // MICROPY_VFS_ROM_IOCTL && !MICROPY_VFS_ROM_IOCTL_USE_EXTERNAL

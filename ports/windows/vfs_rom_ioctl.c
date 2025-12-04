@@ -26,6 +26,7 @@
 
 #include "py/runtime.h"
 #include "py/mperrno.h"
+#include "py/objarray.h"
 #include "extmod/vfs.h"
 
 #if MICROPY_VFS_ROM_IOCTL

@@ -81,6 +81,7 @@
 #define MICROPY_VFS_POSIX           (1)
 #define MICROPY_VFS_ROM             (1)
 #define MICROPY_VFS_ROM_IOCTL       (1)
+#define MICROPY_VFS_ROM_IOCTL_USE_EXTERNAL (1) // Use vfs_rom_ioctl.c instead of main.c
 #define MICROPY_GC_SPLIT_HEAP       (1)
 #define MICROPY_GC_SPLIT_HEAP_ADD   (1)
 #define MICROPY_PY_FUNCTION_ATTRS   (1)
