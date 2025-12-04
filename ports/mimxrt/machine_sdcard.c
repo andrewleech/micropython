@@ -211,6 +211,9 @@ static const mp_rom_map_elem_t sdcard_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_readblocks),  MP_ROM_PTR(&machine_sdcard_readblocks_obj) },
     { MP_ROM_QSTR(MP_QSTR_writeblocks), MP_ROM_PTR(&machine_sdcard_writeblocks_obj) },
     { MP_ROM_QSTR(MP_QSTR_ioctl),       MP_ROM_PTR(&machine_sdcard_ioctl_obj) },
+    #if !MICROPY_HW_SDCARD_NONBLOCKING && !MICROPY_HW_SDCARD_POLLING
+    { MP_ROM_QSTR(MP_QSTR_timing),      MP_ROM_PTR(&sdcard_get_timing_stats_obj) },
+    #endif
 };
 static MP_DEFINE_CONST_DICT(sdcard_locals_dict, sdcard_locals_dict_table);
 

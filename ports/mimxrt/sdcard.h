@@ -34,6 +34,19 @@
 // ---
 // SD Card public defines
 // ---
+
+// Transfer modes:
+// - MICROPY_HW_SDCARD_NONBLOCKING=0, POLLING=0: SDK blocking (USDHC_TransferBlocking) - simple, no scheduler yields
+// - MICROPY_HW_SDCARD_NONBLOCKING=1: Interrupt-based non-blocking (has cache issues when SDRAM disabled)
+// - MICROPY_HW_SDCARD_POLLING=1: Polling-based with scheduler yields (no interrupts, avoids cache issues)
+#ifndef MICROPY_HW_SDCARD_NONBLOCKING
+#define MICROPY_HW_SDCARD_NONBLOCKING (0)
+#endif
+
+#ifndef MICROPY_HW_SDCARD_POLLING
+#define MICROPY_HW_SDCARD_POLLING (1)
+#endif
+
 #define SDCARD_DEFAULT_BLOCK_SIZE    (512U)
 #define SDCARD_CLOCK_400KHZ          (400000U)
 #define SDCARD_CLOCK_25MHZ           (25000000U)
@@ -57,6 +70,9 @@ typedef struct _mimxrt_sdcard_obj_pins_t {
 typedef volatile struct _mimxrt_sdcard_status_obj_t {
     bool initialized;
     bool inserted;
+    #if MICROPY_HW_SDCARD_NONBLOCKING
+    uint32_t transfer_status;  // Bit flags for transfer completion state
+    #endif
 } mimxrt_sdcard_status_obj_t;
 
 typedef struct _mimxrt_sdcard_obj_t {
@@ -103,6 +119,11 @@ bool sdcard_volt_validation(mimxrt_sdcard_obj_t *card);
 bool sdcard_power_on(mimxrt_sdcard_obj_t *self);
 bool sdcard_power_off(mimxrt_sdcard_obj_t *self);
 bool sdcard_detect(mimxrt_sdcard_obj_t *self);
+
+// Timing debug function (only available in SDK blocking mode with SDCARD_TIMING_DEBUG enabled)
+#if !MICROPY_HW_SDCARD_NONBLOCKING && !MICROPY_HW_SDCARD_POLLING
+extern const struct _mp_obj_fun_builtin_fixed_t sdcard_get_timing_stats_obj;
+#endif
 
 static inline bool sdcard_state_initialized(mimxrt_sdcard_obj_t *card) {
     return card->state->initialized;
