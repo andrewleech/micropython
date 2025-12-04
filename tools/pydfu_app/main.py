@@ -8,21 +8,26 @@ import sys
 
 
 def ensure_heap(min_free_bytes):
-    """Ensure at least min_free_bytes are available, expanding heap if needed."""
+    """Ensure at least min_free_bytes are available, expanding heap if needed.
+
+    Note: GC split heap requires contiguous allocation within a single segment.
+    We add a segment large enough for the full allocation size to ensure
+    contiguous space is available.
+    """
     current_free = gc.mem_free()
     if current_free >= min_free_bytes:
         return
 
-    # Try to add heap in 1MB chunks until we have enough
-    chunk_size = 1024 * 1024  # 1MB chunks
+    # Add 10% overhead for GC tables and alignment, allocating a segment
+    # large enough for the full requested size (not just the difference)
+    heap_size = int(min_free_bytes * 1.1)
 
-    while gc.mem_free() < min_free_bytes:
-        try:
-            gc.add_heap(chunk_size)
-        except (MemoryError, AttributeError):
-            # MemoryError: system can't allocate more
-            # AttributeError: gc.add_heap not available on this port
-            break
+    try:
+        gc.add_heap(heap_size)
+    except MemoryError:
+        pass  # Best effort - may still work with existing heap
+    except AttributeError:
+        pass  # gc.add_heap not available on this port
 
 
 def extract_native_libs():
@@ -84,13 +89,15 @@ def main():
 
     # Estimate memory needed: base overhead + file size headroom
     # DFU files can be several MB, allocate extra heap upfront
-    # Start with 4MB minimum free to handle typical firmware images
-    ensure_heap(4 * 1024 * 1024)
+    # Start with 8MB minimum free to handle typical firmware images
+    # (need extra room for imports and runtime overhead)
+    ensure_heap(8 * 1024 * 1024)
 
     # Import pydfu after heap expansion to have room for parsing
     import pydfu
 
     # Run the pydfu main function
+    gc.collect()
     pydfu.main()
 
 

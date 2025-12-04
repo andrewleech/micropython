@@ -6,12 +6,12 @@ A self-contained MicroPython executable that runs `pydfu.py` for flashing STM32 
 
 This project combines several MicroPython features to create a standalone DFU flashing tool:
 
-- **RomFS**: Read-only filesystem embedded directly in the executable binary
+- **Frozen Modules**: Python code compiled directly into the binary
+- **RomFS** (Windows only): Embedded filesystem for native DLL
 - **pyusb**: Pure-Python USB library using FFI to access libusb
 - **gc.add_heap()**: Runtime heap expansion for handling large DFU files
-- **mpy-cross**: Precompilation of Python source to bytecode for smaller size
 
-The result is a single executable (~1MB) that can flash STM32 devices without requiring a Python installation.
+The result is a single executable (~850 KB) that can flash STM32 devices without requiring a Python installation.
 
 ## Components
 
@@ -19,31 +19,31 @@ The result is a single executable (~1MB) that can flash STM32 devices without re
 
 ```
 tools/pydfu_app/
-├── main.py          # Entry point: heap setup, Windows DLL extraction
-├── manifest.py      # RomFS manifest
-└── lib/
-    ├── argparse.py  # Command-line argument parsing
-    ├── pydfu.py     # DFU flashing logic (modified for MicroPython)
-    ├── zlib.py      # Compatibility shim using binascii.crc32
-    └── usb/         # pyusb library
-        ├── __init__.py
-        ├── core.py
-        ├── control.py
-        ├── util.py
+├── main.py              # Entry point: heap setup, Windows DLL extraction
+├── manifest_frozen.py   # Frozen module manifest (Python code)
+├── lib/
+│   ├── pydfu.py         # DFU flashing logic
+│   └── zlib.py          # Compatibility shim using binascii.crc32
+└── romfs_windows/       # Directory for Windows romfs build
+    └── lib/usb/
         └── libusb-1.0.dll  # Windows native library
 ```
 
 ### MicroPython Features Used
 
-**RomFS** (`ports/unix/main.c`, `ports/windows/vfs_rom_ioctl.c`):
-- Mounts an embedded read-only filesystem at `/rom`
-- Auto-executes `/rom/main.py` or `/rom/main.mpy` on startup
-- Embedded via objcopy at link time using `ROMFS_IMG=` make variable
+**Frozen Modules** (`manifest_frozen.py`):
+- Python code (pydfu, pyusb, argparse) compiled into the binary
+- Uses micropython-lib for standard modules
+- main.py detected and auto-executed on startup
+
+**RomFS** (Windows only):
+- Embedded read-only filesystem for native DLL
+- Required because Windows cannot load DLLs from frozen modules
+- Mounted at `/rom` on startup
 
 **gc.add_heap()** (`py/modgc.c`):
 - Dynamically expands heap at runtime
 - Required because DFU file parsing needs significant memory
-- Called from `main.py` to allocate 4MB heap
 
 **FFI** (`ports/unix/modffi.c`, `ports/windows/modffi.c`):
 - Foreign Function Interface for calling native libraries
@@ -64,9 +64,6 @@ Windows cannot load DLLs from a virtual filesystem. The `main.py` entry point:
 # Build mpy-cross (must match MicroPython version)
 cd mpy-cross
 make
-
-# Install mpy_cross Python module for .py to .mpy compilation
-pip install mpy-cross
 ```
 
 ### Unix Build
@@ -74,33 +71,38 @@ pip install mpy-cross
 ```bash
 cd ports/unix
 
-# Build the romfs image (compiles .py to .mpy automatically)
-python3 -c "
-import mpy_cross
-mpy_cross.mpy_cross = '$(pwd)/../../mpy-cross/build/mpy-cross'
-import sys
-sys.argv = ['mpremote', 'romfs', 'build', '../../tools/pydfu_app']
-from mpremote.main import main
-main()
-"
-mv ../../tools/pydfu_app.romfs romfs.img
-
-# Build pydfu with embedded romfs
-make PROG=pydfu ROMFS_IMG=romfs.img
+# Build pydfu with frozen modules
+make FROZEN_MANIFEST=../../tools/pydfu_app/manifest_frozen.py \
+     PROG=pydfu \
+     CFLAGS_EXTRA="-DMICROPY_FROZEN_MAIN_MODULE=1"
 ```
 
-### Windows Build (Cross-compile from Linux)
+### Windows Build (Cross-compile from Linux with dockcross)
 
 ```bash
 cd ports/windows
 
-# Build romfs.img same as Unix (see above)
+# Build romfs image with DLL only (from romfs_windows directory)
+python3 -m mpremote romfs build ../../tools/pydfu_app/romfs_windows
+mv ../../tools/pydfu_app/romfs_windows.romfs romfs.img
+
+# Using dockcross/windows-static-x64-posix container
+CROSS=x86_64-w64-mingw32.static.posix-
 
 # Build libffi dependency first
-make deplibs CROSS_COMPILE=x86_64-w64-mingw32- MICROPY_PY_FFI=1
+docker run --rm -v "$PWD/../..:$PWD/../.." -w "$PWD" --user "$(id -u):$(id -g)" \
+    dockcross/windows-static-x64-posix \
+    make deplibs CROSS_COMPILE=$CROSS MICROPY_PY_FFI=1
 
 # Cross-compile with MinGW (FFI required for pyusb)
-make CROSS_COMPILE=x86_64-w64-mingw32- MICROPY_PY_FFI=1 PROG=pydfu ROMFS_IMG=romfs.img
+docker run --rm -v "$PWD/../..:$PWD/../.." -w "$PWD" --user "$(id -u):$(id -g)" \
+    dockcross/windows-static-x64-posix \
+    make CROSS_COMPILE=$CROSS \
+         MICROPY_PY_FFI=1 \
+         FROZEN_MANIFEST=../../tools/pydfu_app/manifest_frozen.py \
+         PROG=pydfu \
+         ROMFS_IMG=romfs.img \
+         CFLAGS_EXTRA="-DMICROPY_FROZEN_MAIN_MODULE=1"
 ```
 
 ## Usage
@@ -108,6 +110,9 @@ make CROSS_COMPILE=x86_64-w64-mingw32- MICROPY_PY_FFI=1 PROG=pydfu ROMFS_IMG=rom
 The resulting executable works like the original `pydfu.py`:
 
 ```bash
+# Show help
+./pydfu -h
+
 # List DFU devices
 ./pydfu -l
 
@@ -122,19 +127,19 @@ All arguments after the executable name are passed to the pydfu application.
 
 ## How It Works
 
-1. **Startup**: MicroPython initializes and mounts the embedded RomFS at `/rom`
-2. **Detection**: `main.c` checks for `/rom/main.py` or `/rom/main.mpy`
-3. **Execution**: For `.mpy`, uses import mechanism; for `.py`, uses lexer
+1. **Startup**: MicroPython initializes
+2. **Detection**: `main.c` checks for frozen `main.py` module
+3. **Execution**: Imports and runs frozen main module
 4. **Heap Expansion**: `main.py` calls `gc.add_heap()` to allocate working memory
-5. **DLL Setup** (Windows only): Extracts libusb DLL to temp directory
-6. **pydfu**: Imports and runs the DFU flashing logic with `sys.argv`
+5. **DLL Setup** (Windows only): Extracts libusb DLL from romfs to temp directory
+6. **pydfu**: Runs the DFU flashing logic with `sys.argv`
 
 ## File Size Breakdown
 
-| Component | Approximate Size |
-|-----------|------------------|
-| MicroPython core | ~780 KB |
-| RomFS (with .mpy) | ~190 KB |
-| **Total** | **~970 KB** |
+| Platform | Binary Size |
+|----------|-------------|
+| Unix (pydfu) | ~870 KB |
+| Windows (pydfu.exe) | ~750 KB |
 
-Using `.mpy` precompilation reduces the romfs from ~216 KB to ~188 KB.
+The Windows binary is smaller because the romfs with libusb DLL (~170 KB) is embedded
+as read-only data rather than extra code.
