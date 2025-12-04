@@ -37,14 +37,14 @@
 
 // Transfer mode configuration (MICROPY_HW_SDCARD_NONBLOCKING default in sdcard.h)
 // Mode 0: SDK blocking (USDHC_TransferBlocking) - simple, no scheduler yields
-// Mode 1: Interrupt-based non-blocking with callbacks (original, has cache issues)
-// Mode 2: Polling-based with scheduler yields (no interrupts)
+// Mode 1: Interrupt-based non-blocking with callbacks (has cache issues when SDRAM disabled)
+// Mode 2: Polling-based with scheduler yields (SDK blocking + wait-for-ready yields)
 #if MICROPY_HW_SDCARD_NONBLOCKING
 #ifndef MICROPY_HW_SDCARD_USE_DMA
 #define MICROPY_HW_SDCARD_USE_DMA (1)
 #endif
 
-// Transfer status flags (Zephyr-style) - only used in interrupt mode
+// Transfer status flags - only used in interrupt-based non-blocking mode
 #define TRANSFER_CMD_COMPLETE   (1U << 0)
 #define TRANSFER_CMD_FAILED     (1U << 1)
 #define TRANSFER_DATA_COMPLETE  (1U << 2)
@@ -54,8 +54,7 @@
 #define TRANSFER_DATA_FLAGS  (TRANSFER_DATA_COMPLETE | TRANSFER_DATA_FAILED)
 #endif // MICROPY_HW_SDCARD_NONBLOCKING
 
-// Polling mode: use DMA but poll status flags instead of using interrupts
-// This avoids interrupt-related cache coherency issues while still allowing scheduler yields
+// Polling mode: uses SDK blocking transfer but yields to scheduler while waiting for card ready
 #ifndef MICROPY_HW_SDCARD_POLLING
 #define MICROPY_HW_SDCARD_POLLING (1)
 #endif
@@ -305,7 +304,7 @@ void sdcard_dummy_callback(USDHC_Type *base, void *userData) {
 
 #if MICROPY_HW_SDCARD_NONBLOCKING
 
-// Transfer complete callback (Zephyr-style)
+// Transfer complete callback - only used in interrupt-based non-blocking mode
 static void sdcard_transfer_complete_callback(USDHC_Type *base,
     usdhc_handle_t *handle, status_t status, void *userData) {
     mimxrt_sdcard_obj_t *card = (mimxrt_sdcard_obj_t *)userData;
@@ -450,47 +449,30 @@ static status_t sdcard_transfer_blocking(USDHC_Type *base, usdhc_transfer_t *tra
 
 #elif MICROPY_HW_SDCARD_POLLING
 // ============================================================================
-// Polling-based transfer mode: DMA with scheduler-friendly flag polling
-// This mode manually configures DMA and polls status flags (no interrupts).
-// Uses mp_event_handle_nowait() in polling loops to allow scheduler yields.
+// Polling-based transfer mode: Uses SDK's USDHC_TransferBlocking for correct
+// register setup and DMA handling, but yields to scheduler before data transfers
+// to allow background tasks to run. The actual DMA transfer uses tight polling
+// (fast), but we yield during the wait-for-ready phase.
 // ============================================================================
 
-// Read command response from USDHC registers (mirrors SDK's internal function)
-static status_t sdcard_polling_receive_response(USDHC_Type *base, usdhc_command_t *command) {
-    uint32_t response0 = base->CMD_RSP0;
-    uint32_t response1 = base->CMD_RSP1;
-    uint32_t response2 = base->CMD_RSP2;
-
-    if (command->responseType != kCARD_ResponseTypeNone) {
-        command->response[0U] = response0;
-        if (command->responseType == kCARD_ResponseTypeR2) {
-            // R3-R2-R1-R0 format (CID/CSD response)
-            command->response[0U] <<= 8U;
-            command->response[1U] = (response1 << 8U) | ((response0 & 0xFF000000U) >> 24U);
-            command->response[2U] = (response2 << 8U) | ((response1 & 0xFF000000U) >> 24U);
-            command->response[3U] = (base->CMD_RSP3 << 8U) | ((response2 & 0xFF000000U) >> 24U);
+// Wait for card to be ready by polling Data0 line.
+// Data0 low indicates card is busy. Yields to scheduler while waiting.
+static bool sdcard_polling_wait_data0_ready(USDHC_Type *base, uint32_t timeout_ms) {
+    uint32_t start = mp_hal_ticks_ms();
+    while ((mp_hal_ticks_ms() - start) < timeout_ms) {
+        if ((USDHC_GetPresentStatusFlags(base) & (uint32_t)kUSDHC_Data0LineLevelFlag) != 0) {
+            return true;
         }
+        mp_event_handle_nowait();
     }
-
-    // Check response error flags
-    if ((command->responseErrorFlags != 0U) &&
-        ((command->responseType == kCARD_ResponseTypeR1) || (command->responseType == kCARD_ResponseTypeR1b) ||
-         (command->responseType == kCARD_ResponseTypeR6) || (command->responseType == kCARD_ResponseTypeR5))) {
-        if (((command->responseErrorFlags) & (command->response[0U])) != 0U) {
-            return kStatus_USDHC_SendCommandFailed;
-        }
-    }
-
-    return kStatus_Success;
+    return false;
 }
 
-// Polling-based transfer with scheduler yields
+// Scheduler-friendly blocking transfer.
+// Uses SDK's USDHC_TransferBlocking which handles all the complex register setup,
+// but waits for card ready state with scheduler yields beforehand.
 static status_t sdcard_transfer_blocking(USDHC_Type *base, usdhc_transfer_t *transfer, uint32_t timeout_ms) {
-    usdhc_command_t *command = transfer->command;
     usdhc_data_t *data = transfer->data;
-    status_t error = kStatus_Success;
-    uint32_t interruptStatus = 0U;
-    uint32_t start_ms;
 
     usdhc_adma_config_t dma_config = {
         .dmaMode = kUSDHC_DmaModeAdma2,
@@ -501,144 +483,21 @@ static status_t sdcard_transfer_blocking(USDHC_Type *base, usdhc_transfer_t *tra
         .admaTableWords = DMA_DESCRIPTOR_BUFFER_SIZE,
     };
 
-    // Check for re-tuning request
-    #if defined(FSL_FEATURE_USDHC_HAS_SDR50_MODE) && (FSL_FEATURE_USDHC_HAS_SDR50_MODE)
-    if ((USDHC_GetInterruptStatusFlags(base) & (uint32_t)kUSDHC_ReTuningEventFlag) != 0UL) {
-        USDHC_ClearInterruptStatusFlags(base, kUSDHC_ReTuningEventFlag);
-        return kStatus_USDHC_ReTuningRequest;
-    }
-    #endif
+    // For data transfers, wait for card to be ready (yields to scheduler)
+    bool has_data = (data != NULL) && ((data->txData != NULL) || (data->rxData != NULL));
 
-    // Configure DMA for data transfers
-    if (data != NULL) {
-        // Check data inhibit flag before configuring data transfer
-        if ((USDHC_GetPresentStatusFlags(base) & (uint32_t)kUSDHC_DataInhibitFlag) != 0U) {
-            return kStatus_USDHC_BusyTransferring;
-        }
-
-        error = USDHC_SetAdmaTableConfig(base, &dma_config, data, kUSDHC_AdmaDescriptorSingleFlag);
-        if (error != kStatus_Success) {
-            return kStatus_USDHC_PrepareAdmaDescriptorFailed;
-        }
-
-        // Configure data transfer parameters
-        // Note: USDHC_SetDataConfig doesn't set all required flags, so we configure MIX_CTRL directly
-        usdhc_transfer_direction_t direction = (data->txData != NULL) ?
-            kUSDHC_TransferDirectionSend : kUSDHC_TransferDirectionReceive;
-
-        // Set block attributes
-        base->BLK_ATT = ((base->BLK_ATT & ~(USDHC_BLK_ATT_BLKSIZE_MASK | USDHC_BLK_ATT_BLKCNT_MASK)) |
-            (USDHC_BLK_ATT_BLKSIZE(data->blockSize) | USDHC_BLK_ATT_BLKCNT(data->blockCount)));
-
-        // Configure MIX_CTRL for data transfer
-        uint32_t mixCtrl = base->MIX_CTRL;
-        mixCtrl &= ~(USDHC_MIX_CTRL_MSBSEL_MASK | USDHC_MIX_CTRL_BCEN_MASK | USDHC_MIX_CTRL_DTDSEL_MASK |
-            USDHC_MIX_CTRL_AC12EN_MASK | USDHC_MIX_CTRL_AC23EN_MASK);
-
-        // Set direction
-        mixCtrl |= USDHC_MIX_CTRL_DTDSEL(direction);
-
-        // Multi-block transfers need MSBSEL and BCEN
-        if (data->blockCount > 1U) {
-            mixCtrl |= USDHC_MIX_CTRL_MSBSEL_MASK | USDHC_MIX_CTRL_BCEN_MASK;
-            if (data->enableAutoCommand12) {
-                mixCtrl |= USDHC_MIX_CTRL_AC12EN_MASK;
-            }
-        }
-
-        // Auto CMD23 setup
-        if (data->enableAutoCommand23) {
-            mixCtrl |= USDHC_MIX_CTRL_AC23EN_MASK;
-            base->VEND_SPEC2 |= USDHC_VEND_SPEC2_ACMD23_ARGU2_EN_MASK;
-            base->DS_ADDR = data->blockCount;
-        } else {
-            base->VEND_SPEC2 &= ~USDHC_VEND_SPEC2_ACMD23_ARGU2_EN_MASK;
-        }
-
-        base->MIX_CTRL = mixCtrl;
-
-        // Enable DMA
-        USDHC_EnableInternalDMA(base, true);
-
-        // Set data present flag for command
-        command->flags |= (uint32_t)kUSDHC_DataPresentFlag;
-    } else {
-        // Command-only: check command inhibit flag
-        if ((USDHC_GetPresentStatusFlags(base) & (uint32_t)kUSDHC_CommandInhibitFlag) != 0U) {
-            return kStatus_USDHC_BusyTransferring;
-        }
-
-        // Clear data flags for command-only transfers
-        uint32_t mixCtrl = base->MIX_CTRL;
-        mixCtrl &= ~(USDHC_MIX_CTRL_MSBSEL_MASK | USDHC_MIX_CTRL_BCEN_MASK | USDHC_MIX_CTRL_DTDSEL_MASK |
-            USDHC_MIX_CTRL_AC12EN_MASK | USDHC_MIX_CTRL_AC23EN_MASK);
-        base->MIX_CTRL = mixCtrl;
+    if (has_data && !sdcard_polling_wait_data0_ready(base, timeout_ms)) {
+        return kStatus_Timeout;
     }
 
-    // Clear any pending status flags before starting
-    USDHC_ClearInterruptStatusFlags(base, kUSDHC_CommandFlag | kUSDHC_DataDMAFlag);
-
-    // Send command
-    USDHC_SendCommand(base, command);
-
-    // Poll for command completion with scheduler yields
-    start_ms = mp_hal_ticks_ms();
-    while (!(interruptStatus & kUSDHC_CommandFlag)) {
-        interruptStatus = USDHC_GetInterruptStatusFlags(base);
-        if ((mp_hal_ticks_ms() - start_ms) >= timeout_ms) {
-            sdcard_error_recovery(base);
-            return kStatus_Timeout;
-        }
-        mp_event_handle_nowait();  // Allow scheduler to run
-    }
-
-    // Check for command errors
-    if ((interruptStatus & (uint32_t)kUSDHC_CommandErrorFlag) != 0UL) {
-        USDHC_ClearInterruptStatusFlags(base, kUSDHC_CommandFlag);
-        sdcard_error_recovery(base);
-        return kStatus_USDHC_SendCommandFailed;
-    }
-
-    // Read command response
-    error = sdcard_polling_receive_response(base, command);
-    USDHC_ClearInterruptStatusFlags(base, kUSDHC_CommandFlag);
+    // Use SDK blocking transfer - handles complex register setup correctly
+    // and polls hardware status flags directly (no interrupts/callbacks)
+    status_t error = USDHC_TransferBlocking(base, &dma_config, transfer);
 
     if (error != kStatus_Success) {
         sdcard_error_recovery(base);
-        return kStatus_USDHC_SendCommandFailed;
     }
-
-    // Poll for data DMA completion with scheduler yields
-    if (data != NULL) {
-        interruptStatus = 0U;
-        start_ms = mp_hal_ticks_ms();
-        while (!(interruptStatus & (kUSDHC_DataDMAFlag | kUSDHC_TuningErrorFlag))) {
-            interruptStatus = USDHC_GetInterruptStatusFlags(base);
-            if ((mp_hal_ticks_ms() - start_ms) >= timeout_ms) {
-                sdcard_error_recovery(base);
-                return kStatus_Timeout;
-            }
-            mp_event_handle_nowait();  // Allow scheduler to run
-        }
-
-        #if defined(FSL_FEATURE_USDHC_HAS_SDR50_MODE) && (FSL_FEATURE_USDHC_HAS_SDR50_MODE)
-        if (interruptStatus & kUSDHC_TuningErrorFlag) {
-            USDHC_ClearInterruptStatusFlags(base, kUSDHC_TuningErrorFlag);
-            sdcard_error_recovery(base);
-            return kStatus_USDHC_TuningError;
-        }
-        #endif
-
-        if (interruptStatus & ((uint32_t)kUSDHC_DataErrorFlag | (uint32_t)kUSDHC_DmaErrorFlag)) {
-            USDHC_ClearInterruptStatusFlags(base, kUSDHC_DataDMAFlag | kUSDHC_TuningErrorFlag);
-            sdcard_error_recovery(base);
-            return kStatus_USDHC_TransferDataFailed;
-        }
-
-        USDHC_ClearInterruptStatusFlags(base, kUSDHC_DataDMAFlag | kUSDHC_TuningErrorFlag);
-    }
-
-    return kStatus_Success;
+    return error;
 }
 
 #else // !MICROPY_HW_SDCARD_NONBLOCKING && !MICROPY_HW_SDCARD_POLLING
@@ -1201,14 +1060,14 @@ void sdcard_init(mimxrt_sdcard_obj_t *card, uint32_t base_clk) {
         #if MICROPY_HW_SDCARD_NONBLOCKING
         .TransferComplete = sdcard_transfer_complete_callback,
         #else
-        .TransferComplete = NULL,  // Not used - we use blocking/polling transfers
+        .TransferComplete = NULL,  // Not used - polling/blocking modes don't use callbacks
         #endif
         .ReTuning = sdcard_dummy_callback,
     };
 
     #if MICROPY_HW_SDCARD_NONBLOCKING
     // Enable USDHC interrupt for interrupt-based non-blocking transfers
-    IRQn_Type irqn;
+    IRQn_Type irqn = 0;
     #if defined MICROPY_USDHC1 && USDHC1_AVAIL
     if (card->usdhc_inst == USDHC1) {
         irqn = USDHC1_IRQn;
