@@ -124,6 +124,9 @@ $(ZEPHYR_PSP_SWITCH_O): $(TOP)/extmod/zephyr_kernel/zephyr_psp_switch.S
 	$(ECHO) "CC $<"
 	$(Q)$(CC) $(ZEPHYR_AS_FLAGS) -c -o $@ $<
 
+else
+# Zephyr threading disabled - ensure preprocessor symbol is defined as 0
+CFLAGS += -DMICROPY_ZEPHYR_THREADING=0
 endif
 
 CROSS_COMPILE ?= arm-none-eabi-
