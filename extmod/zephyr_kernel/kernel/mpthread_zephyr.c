@@ -14,11 +14,19 @@
 #include <stdio.h>
 #include <string.h>
 
-// Thread allocation strategy selection
-// Testing revealed: static pool WORSENS results (25/42 pass vs 26/40 with heap)
-// Hypothesis that "GC corrupts mp_thread_t" is FALSE
-// Reverting to m_new_obj heap allocation which achieves better compatibility (65%)
-// Future investigation: failures are NOT due to thread pointer corruption
+// Thread Stack Allocation Strategy
+//
+// Previous static pool approach: K_THREAD_STACK_ARRAY_DEFINE pre-allocated 10×4KB = 40KB
+// Problems: Fixed thread limit, wasted RAM for unused slots, requires recompilation to change
+//
+// Current dynamic approach: Allocate stacks from MicroPython's GC heap on demand
+// Benefits: No arbitrary limit (bounded by heap), zero startup cost, per-thread sizing
+//
+// Implementation notes:
+// - Stacks allocated with gc_alloc() (8-byte aligned on ARM, sufficient for ARCH_STACK_PTR_ALIGN)
+// - Stacks are NOT marked as GC roots themselves (thread struct holds reference)
+// - When thread finishes, stack is freed in gc_others() cleanup or mp_thread_deinit()
+// - Thread struct (mp_thread_t) is still heap-allocated via m_new_obj()
 
 #include "py/runtime.h"
 #include "py/gc.h"
@@ -43,13 +51,14 @@ void z_ready_thread(struct k_thread *thread);
 #define DEBUG_printf(...) // printk("mpthread: " __VA_ARGS__)
 
 #define MP_THREAD_MIN_STACK_SIZE                (4 * 1024)
-#define MP_THREAD_DEFAULT_STACK_SIZE            (MP_THREAD_MIN_STACK_SIZE)  // 4KB per thread (reduced from 5KB)
+#define MP_THREAD_DEFAULT_STACK_SIZE            (MP_THREAD_MIN_STACK_SIZE)  // 4KB per thread
 // Give spawned threads higher priority than main thread.
 // Main thread has priority 1, spawned threads get priority 0.
 // This ensures runq_best() returns the new thread instead of _current.
 // Note: In Zephyr, lower number = higher priority.
 #define MP_THREAD_PRIORITY                      0
-#define MP_THREAD_MAXIMUM_USER_THREADS          (10)  // 10 threads to satisfy thread_lock3.py
+// Stack alignment for ARM Cortex-M (AAPCS requires 8-byte stack alignment)
+#define MP_THREAD_STACK_ALIGN                   (8)
 
 // FPU context size validation
 // With CONFIG_FPU_SHARING, each thread context switch may save/restore:
@@ -70,20 +79,16 @@ typedef enum {
     MP_THREAD_STATUS_FINISHED,
 } mp_thread_status_t;
 
-typedef struct _mp_thread_stack_slot_t {
-    bool used;
-} mp_thread_stack_slot_t;
-
 // Linked list node per active thread
 typedef struct _mp_thread_t {
     k_tid_t id;                     // Zephyr thread ID
     struct k_thread z_thread;       // Zephyr thread control block
     mp_thread_status_t status;      // Thread status
     int16_t alive;                  // Whether thread is visible to kernel
-    int16_t slot;                   // Stack slot index
     void *arg;                      // Python args (GC root pointer)
-    void *stack;                    // Stack pointer
-    size_t stack_len;               // Stack size in words
+    void *stack;                    // Stack pointer (dynamically allocated)
+    size_t stack_size;              // Stack size in bytes (for freeing)
+    size_t stack_len;               // Stack size in words (for GC scanning)
     struct _mp_thread_t *next;      // Next in linked list
 } mp_thread_t;
 
@@ -94,14 +99,11 @@ MP_REGISTER_ROOT_POINTER(struct _mp_thread_t *mp_thread_list_head);
 // Global state
 static mp_thread_mutex_t thread_mutex;
 static uint8_t mp_thread_counter;
-static mp_thread_stack_slot_t stack_slot[MP_THREAD_MAXIMUM_USER_THREADS];
-
-// Pre-allocated stack pool
-K_THREAD_STACK_ARRAY_DEFINE(mp_thread_stack_array, MP_THREAD_MAXIMUM_USER_THREADS, MP_THREAD_DEFAULT_STACK_SIZE);
 
 // Forward declarations
 static void mp_thread_iterate_threads_cb(const struct k_thread *thread, void *user_data);
-static int32_t mp_thread_find_stack_slot(void);
+static void *mp_thread_stack_alloc(size_t size);
+static void mp_thread_stack_free(void *stack, size_t size);
 
 // Initialize threading subsystem - Phase 1 (early, before GC init)
 // Sets thread-local state pointer to allow gc_init() to access MP_STATE_THREAD()
@@ -139,6 +141,7 @@ bool mp_thread_init(void *stack) {
     // prepare_multithreading() in zephyr_cstart.c.
     extern struct k_thread z_main_thread;
     th->stack = (void *)z_main_thread.stack_info.start;
+    th->stack_size = 0;  // Main thread stack is NOT dynamically allocated
     th->stack_len = z_main_thread.stack_info.size / sizeof(uintptr_t);
     th->next = NULL;
 
@@ -163,18 +166,21 @@ bool mp_thread_init(void *stack) {
 void mp_thread_deinit(void) {
     mp_thread_mutex_lock(&thread_mutex, 1);
 
-    // Abort all threads except current
+    // Abort all threads except current and free their stacks
     for (mp_thread_t *th = MP_STATE_VM(mp_thread_list_head); th != NULL; th = th->next) {
-        if ((th->id != k_current_get()) && (th->status != MP_THREAD_STATUS_FINISHED)) {
-            th->status = MP_THREAD_STATUS_FINISHED;
-            DEBUG_printf("Aborting thread %s\n", k_thread_name_get(th->id));
-            k_thread_abort(th->id);
+        if (th->id != k_current_get()) {
+            if (th->status != MP_THREAD_STATUS_FINISHED) {
+                th->status = MP_THREAD_STATUS_FINISHED;
+                DEBUG_printf("Aborting thread %s\n", k_thread_name_get(th->id));
+                k_thread_abort(th->id);
+            }
+            // Free dynamically allocated stack (main thread stack is not heap-allocated)
+            if (th->stack != NULL && th->stack_size > 0) {
+                mp_thread_stack_free(th->stack, th->stack_size);
+                th->stack = NULL;
+                th->stack_size = 0;
+            }
         }
-    }
-
-    // Reset all stack slots so they're available after soft reset
-    for (int i = 0; i < MP_THREAD_MAXIMUM_USER_THREADS; i++) {
-        stack_slot[i].used = false;
     }
     mp_thread_counter = 0;
 
@@ -209,8 +215,11 @@ void mp_thread_gc_others(void) {
             } else {
                 MP_STATE_VM(mp_thread_list_head) = next;
             }
-            if (th->slot >= 0 && th->slot < MP_THREAD_MAXIMUM_USER_THREADS) {
-                stack_slot[th->slot].used = false;
+            // Free the dynamically allocated stack
+            if (th->stack != NULL && th->stack_size > 0) {
+                mp_thread_stack_free(th->stack, th->stack_size);
+                th->stack = NULL;
+                th->stack_size = 0;
             }
             mp_thread_counter--;
             DEBUG_printf("GC: Collected thread %s\n", k_thread_name_get(th->id));
@@ -299,45 +308,36 @@ static void zephyr_entry(void *arg1, void *arg2, void *arg3) {
 
 // Create new thread
 mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_size, int priority, char *name) {
-    // Normalize stack_size - we use statically allocated stacks of fixed size
-    // but stack_size must be non-zero for mp_cstack_init_with_top() in thread_entry
+    // Normalize stack_size
     if (*stack_size == 0) {
         *stack_size = MP_THREAD_DEFAULT_STACK_SIZE;
     } else if (*stack_size < MP_THREAD_MIN_STACK_SIZE) {
         *stack_size = MP_THREAD_MIN_STACK_SIZE;
     }
 
-    // NOTE: gc_collect() removed from here - it was causing deadlock with spawned threads
-    // trying to lock thread_mutex while main thread was in gc_collect(). The normal GC
-    // cycles will clean up finished threads anyway.
-
     // Allocate thread structure on GC heap
     mp_thread_t *th = m_new_obj(mp_thread_t);
 
-    mp_thread_mutex_lock(&thread_mutex, 1);
-
-    int32_t _slot = mp_thread_find_stack_slot();
-    if (_slot < 0) {
-        // No free slot - run GC to clean up finished threads, then retry.
-        // This matches MicroPython's pattern of gc_collect() on alloc failure.
-        mp_thread_mutex_unlock(&thread_mutex);
+    // Allocate stack dynamically from MicroPython heap
+    // Note: We allocate outside the mutex to avoid holding the lock during allocation
+    size_t allocated_stack_size = *stack_size;
+    void *stack = mp_thread_stack_alloc(allocated_stack_size);
+    if (stack == NULL) {
+        // Allocation failed - try GC and retry once
         gc_collect();
-        mp_thread_mutex_lock(&thread_mutex, 1);
-        _slot = mp_thread_find_stack_slot();
-    }
-    if (_slot < 0) {
-        mp_thread_mutex_unlock(&thread_mutex);
-        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("maximum number of threads reached"));
+        stack = mp_thread_stack_alloc(allocated_stack_size);
+        if (stack == NULL) {
+            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("can't allocate thread stack"));
+        }
     }
 
-    // Store allocated stack size for validation
-    size_t allocated_stack_size = K_THREAD_STACK_SIZEOF(mp_thread_stack_array[_slot]);
+    mp_thread_mutex_lock(&thread_mutex, 1);
 
     // Create Zephyr thread with K_FOREVER initially to avoid immediate reschedule
     // Then manually start the thread after full initialization
     th->id = k_thread_create(
         &th->z_thread,
-        mp_thread_stack_array[_slot],
+        (k_thread_stack_t *)stack,
         allocated_stack_size,
         zephyr_entry,
         entry, arg, NULL,
@@ -346,29 +346,19 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
 
     if (th->id == NULL) {
         mp_thread_mutex_unlock(&thread_mutex);
+        mp_thread_stack_free(stack, allocated_stack_size);
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("can't create thread"));
     }
 
     k_thread_name_set(th->id, (const char *)name);
 
-    // Validate that Zephyr's stack_info matches our allocation
-    // This detects if stack_info.size is unreliable (as suspected in 0x1d corruption investigation)
-    if (th->z_thread.stack_info.size != allocated_stack_size) {
-        mp_printf(&mp_plat_print,
-                  "WARNING: stack_info.size mismatch for thread %s\r\n"
-                  "  Allocated: %zu bytes\r\n"
-                  "  Reported:  %zu bytes\r\n"
-                  "  Using allocated size for safety\r\n",
-                  name, allocated_stack_size, th->z_thread.stack_info.size);
-    }
-
     // Initialize ALL fields BEFORE adding to thread list (ports/zephyr pattern)
     // This ensures GC never sees partially initialized thread structures
     th->status = MP_THREAD_STATUS_CREATED;
     th->alive = 0;
-    th->slot = _slot;
     th->arg = arg;
-    th->stack = (void *)th->z_thread.stack_info.start;
+    th->stack = stack;
+    th->stack_size = allocated_stack_size;
     th->stack_len = allocated_stack_size / sizeof(uintptr_t);
 
     // Add to thread list AFTER full initialization (matches ports/zephyr)
@@ -377,7 +367,6 @@ mp_uint_t mp_thread_create_ex(void *(*entry)(void *), void *arg, size_t *stack_s
     th->next = MP_STATE_VM(mp_thread_list_head);
     MP_STATE_VM(mp_thread_list_head) = th;
 
-    stack_slot[_slot].used = true;
     mp_thread_counter++;
 
     // Adjust stack size to leave margin (use validated allocated size)
@@ -490,16 +479,28 @@ static void mp_thread_iterate_threads_cb(const struct k_thread *z_thread, void *
     }
 }
 
-// Helper: Find available stack slot
-static int32_t mp_thread_find_stack_slot(void) {
-    for (int i = 0; i < MP_THREAD_MAXIMUM_USER_THREADS; i++) {
-        if (!stack_slot[i].used) {
-            DEBUG_printf("Allocating stack slot %d\n", i);
-            return i;
-        }
-    }
-    return -1;
+// Helper: Allocate thread stack from MicroPython GC heap
+// Returns 8-byte aligned memory suitable for ARM thread stacks
+static void *mp_thread_stack_alloc(size_t size) {
+    // Round up to alignment boundary
+    size = (size + MP_THREAD_STACK_ALIGN - 1) & ~(MP_THREAD_STACK_ALIGN - 1);
+
+    // Allocate from GC heap with proper flags
+    // GC_ALLOC_FLAG_HAS_FINALISER=0 - no finalizer needed
+    // The memory is freed explicitly in mp_thread_gc_others() or mp_thread_deinit()
+    void *stack = gc_alloc(size, 0);
+
+    DEBUG_printf("Stack alloc: size=%zu ptr=%p\n", size, stack);
+    return stack;
 }
 
+// Helper: Free thread stack back to MicroPython GC heap
+static void mp_thread_stack_free(void *stack, size_t size) {
+    (void)size;  // Size not needed for gc_free
+    if (stack != NULL) {
+        DEBUG_printf("Stack free: size=%zu ptr=%p\n", size, stack);
+        gc_free(stack);
+    }
+}
 
 #endif // MICROPY_PY_THREAD

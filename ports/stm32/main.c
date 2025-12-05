@@ -312,12 +312,13 @@ static bool init_sdcard_fs(void) {
 #endif
 
 #if MICROPY_ZEPHYR_THREADING
-// Static heap for Zephyr threading builds to avoid overlap with thread stacks
-// Thread stacks go into .noinit section after .bss, so we use a static array in .bss
-// This ensures clear separation between heap and thread stack memory regions
-// NUCLEO_F429ZI has 192KB RAM total. Heap size reduced to accommodate idle thread
-// stacks (~2.5KB for idle + ISR stacks) when MICROPY_ZEPHYR_USE_IDLE_THREAD=1
-#define MICROPY_HEAP_SIZE (42 * 1024)
+// Static heap for Zephyr threading builds
+// Thread stacks are now dynamically allocated from this heap (not pre-allocated in BSS)
+// Heap size increased to 80KB to accommodate both Python objects and thread stacks
+// NUCLEO_F429ZI has 192KB RAM total.
+// Previous: 42KB heap + 40KB pre-allocated stacks in BSS = 82KB for MicroPython use
+// Current: 80KB heap with dynamic stack allocation = same effective capacity
+#define MICROPY_HEAP_SIZE (80 * 1024)
 static char heap[MICROPY_HEAP_SIZE];
 
 // Zephyr threading entry point - called by Zephyr kernel after z_cstart()
