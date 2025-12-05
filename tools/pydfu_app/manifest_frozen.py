@@ -3,9 +3,9 @@
 #
 # This freezes all Python dependencies into the binary.
 # RomFS is only needed for non-Python files (libusb DLL on Windows).
-
-# Include standard Unix variant modules
-include("$(PORT_DIR)/variants/manifest.py")
+#
+# Note: We intentionally don't include $(PORT_DIR)/variants/manifest.py
+# to avoid pulling in ssl which is not needed for pydfu.
 
 # Add unix-ffi library for pyusb
 add_library("unix-ffi", "$(MPY_LIB_DIR)/unix-ffi")

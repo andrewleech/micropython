@@ -64,7 +64,9 @@
 #endif
 #define MICROPY_READER_POSIX        (1)
 #define MICROPY_READER_VFS          (1)
+#ifndef MICROPY_HELPER_REPL
 #define MICROPY_HELPER_REPL         (1)
+#endif
 #ifndef MICROPY_REPL_EMACS_KEYS
 #define MICROPY_REPL_EMACS_KEYS     (1)
 #endif

@@ -86,3 +86,4 @@
 #define MICROPY_ERROR_REPORTING             (MICROPY_ERROR_REPORTING_TERSE)
 #define MICROPY_WARNINGS                    (0)
 #define MICROPY_PY_STR_BYTES_CMP_WARN       (0)
+
