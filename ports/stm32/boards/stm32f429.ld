@@ -26,7 +26,7 @@ _sstack = _estack - 16K; /* tunable */
 /* RAM extents for the garbage collector */
 _ram_start = ORIGIN(RAM);
 _ram_end = ORIGIN(RAM) + LENGTH(RAM);
-_heap_start = _ebss; /* heap starts just after statically allocated memory */
+_heap_start = _enoinit; /* heap starts after .bss and .noinit sections */
 _heap_end = _sstack;
 
 /* Filesystem cache in RAM, and storage in flash */

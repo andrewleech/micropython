@@ -11,6 +11,15 @@
     _ebss = .;
 } >RAM
 
+/* Non-initialized data section (Zephyr kernel stacks when threading enabled) */
+.noinit (NOLOAD) :
+{
+    . = ALIGN(4);
+    *(.noinit*)
+    . = ALIGN(4);
+    _enoinit = .;
+} >RAM
+
 /* This is to define the start of the heap, and make sure there is a minimum size */
 .heap :
 {
