@@ -27,6 +27,10 @@
 // Minimal variant for pydfu standalone application.
 // Disables features not needed to reduce binary size.
 
+// Note: MICROPY_ENABLE_COMPILER cannot be disabled because the build system
+// unconditionally enables MICROPY_MODULE_FROZEN_STR which requires the compiler.
+// This is a MicroPython core limitation.
+
 // Disable modules not needed by pydfu
 #define MICROPY_PY_JSON                     (0)
 #define MICROPY_PY_RE                       (0)
