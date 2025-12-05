@@ -61,8 +61,10 @@
 #endif
 
 // Command line options, with their defaults
+#if MICROPY_ENABLE_COMPILER
 static bool compile_only = false;
 static uint emit_opt = MP_EMIT_OPT_NONE;
+#endif
 
 #if MICROPY_ENABLE_GC
 // Heap size of GC heap (if enabled)
@@ -113,6 +115,7 @@ static int handle_uncaught_exception(mp_obj_base_t *exc) {
     return 1;
 }
 
+#if MICROPY_ENABLE_COMPILER
 #define LEX_SRC_STR (1)
 #define LEX_SRC_VSTR (2)
 #define LEX_SRC_FILENAME (3)
@@ -322,6 +325,7 @@ static int do_file(const char *file) {
 static int do_str(const char *str) {
     return execute_from_lexer(LEX_SRC_STR, str, MP_PARSE_FILE_INPUT, false);
 }
+#endif // MICROPY_ENABLE_COMPILER
 
 #if !MICROPY_FROZEN_MAIN_MODULE
 static void print_help(char **argv) {
@@ -392,6 +396,7 @@ static void pre_process_options(int argc, char **argv) {
                     exit(invalid_args());
                 }
                 if (0) {
+                #if MICROPY_ENABLE_COMPILER
                 } else if (strcmp(argv[a + 1], "compile-only") == 0) {
                     compile_only = true;
                 } else if (strcmp(argv[a + 1], "emit=bytecode") == 0) {
@@ -402,6 +407,7 @@ static void pre_process_options(int argc, char **argv) {
                 } else if (strcmp(argv[a + 1], "emit=viper") == 0) {
                     emit_opt = MP_EMIT_OPT_VIPER;
                 #endif
+                #endif // MICROPY_ENABLE_COMPILER
                 #if MICROPY_ENABLE_GC
                 } else if (strncmp(argv[a + 1], "heapsize=", sizeof("heapsize=") - 1) == 0) {
                     char *end;
@@ -457,11 +463,13 @@ static void pre_process_options(int argc, char **argv) {
     }
 }
 
+#if MICROPY_ENABLE_COMPILER
 static void set_sys_argv(char *argv[], int argc, int start_arg) {
     for (int i = start_arg; i < argc; i++) {
         mp_obj_list_append(mp_sys_argv, MP_OBJ_NEW_QSTR(qstr_from_str(argv[i])));
     }
 }
+#endif
 
 #if MICROPY_PY_SYS_EXECUTABLE
 extern mp_obj_str_t mp_sys_executable_obj;
@@ -545,11 +553,13 @@ MP_NOINLINE int main_(int argc, char **argv) {
 
     mp_init();
 
+    #if MICROPY_ENABLE_COMPILER
     #if MICROPY_EMIT_NATIVE
     // Set default emitter options
     MP_STATE_VM(default_emit_opt) = emit_opt;
     #else
     (void)emit_opt;
+    #endif
     #endif
 
     #if MICROPY_VFS_POSIX
@@ -641,9 +651,13 @@ MP_NOINLINE int main_(int argc, char **argv) {
     sys_set_excecutable(argv[0]);
     #endif
 
+    #if MICROPY_ENABLE_COMPILER
     const int NOTHING_EXECUTED = -2;
-    int ret = NOTHING_EXECUTED;
+    #endif
+    int ret = 0;
+    #if MICROPY_ENABLE_COMPILER
     bool inspect = false;
+    #endif
 
     // Check if a frozen or romfs main module exists and should be run.
     // Priority: 1) frozen main module, 2) /rom/main.py or /rom/main.mpy
@@ -712,14 +726,18 @@ MP_NOINLINE int main_(int argc, char **argv) {
         // Process flags that affect execution
         for (int a = 1; a < argc; a++) {
             if (argv[a][0] == '-') {
+                #if MICROPY_ENABLE_COMPILER
                 if (strcmp(argv[a], "-i") == 0) {
                     inspect = true;
-                } else if (strcmp(argv[a], "-X") == 0 && a + 1 < argc) {
+                } else
+                #endif
+                if (strcmp(argv[a], "-X") == 0 && a + 1 < argc) {
                     a++;
                 #if MICROPY_DEBUG_PRINTERS
                 } else if (strcmp(argv[a], "-v") == 0) {
                     mp_verbose_flag++;
                 #endif
+                #if MICROPY_ENABLE_COMPILER
                 } else if (strncmp(argv[a], "-O", 2) == 0) {
                     if (unichar_isdigit(argv[a][2])) {
                         MP_STATE_VM(mp_optimise_value) = argv[a][2] & 0xf;
@@ -728,6 +746,7 @@ MP_NOINLINE int main_(int argc, char **argv) {
                         for (char *p = argv[a] + 1; *p && *p == 'O'; p++, MP_STATE_VM(mp_optimise_value)++) {;
                         }
                     }
+                #endif
                 } else {
                     break;
                 }
@@ -741,15 +760,22 @@ MP_NOINLINE int main_(int argc, char **argv) {
         bool in_positional = false;
         for (int a = 1; a < argc; a++) {
             if (!in_positional && argv[a][0] == '-') {
+                #if MICROPY_ENABLE_COMPILER
                 if (strcmp(argv[a], "-i") == 0) {
                     continue;
-                #if MICROPY_DEBUG_PRINTERS
-                } else if (strcmp(argv[a], "-v") == 0) {
-                    continue;
+                } else
                 #endif
-                } else if (strncmp(argv[a], "-O", 2) == 0) {
+                #if MICROPY_DEBUG_PRINTERS
+                if (strcmp(argv[a], "-v") == 0) {
                     continue;
-                } else if (strcmp(argv[a], "-X") == 0 && a + 1 < argc) {
+                } else
+                #endif
+                #if MICROPY_ENABLE_COMPILER
+                if (strncmp(argv[a], "-O", 2) == 0) {
+                    continue;
+                } else
+                #endif
+                if (strcmp(argv[a], "-X") == 0 && a + 1 < argc) {
                     a++;
                     continue;
                 }
@@ -777,13 +803,17 @@ MP_NOINLINE int main_(int argc, char **argv) {
             } else {
                 ret = handle_uncaught_exception(nlr.ret_val);
             }
-        } else {
+        }
+        #if MICROPY_ENABLE_COMPILER
+        else {
             // .py file in romfs: use lexer
             ret = do_file(main_path);
         }
+        #endif
         goto done_execution;
     }
 
+    #if MICROPY_ENABLE_COMPILER
     for (int a = 1; a < argc; a++) {
         if (argv[a][0] == '-') {
             if (strcmp(argv[a], "-i") == 0) {
@@ -889,11 +919,13 @@ MP_NOINLINE int main_(int argc, char **argv) {
             break;
         }
     }
+    #endif // MICROPY_ENABLE_COMPILER
 
     #if MICROPY_MODULE_FROZEN || (MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL)
 done_execution:
     #endif
 
+    #if MICROPY_ENABLE_COMPILER
     const char *inspect_env = getenv("MICROPYINSPECT");
     if (inspect_env && inspect_env[0] != '\0') {
         inspect = true;
@@ -908,6 +940,7 @@ done_execution:
             ret = execute_from_lexer(LEX_SRC_STDIN, NULL, MP_PARSE_FILE_INPUT, false);
         }
     }
+    #endif // MICROPY_ENABLE_COMPILER
 
     #if MICROPY_PY_SYS_SETTRACE
     MP_STATE_THREAD(prof_trace_callback) = MP_OBJ_NULL;
