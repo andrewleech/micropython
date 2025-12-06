@@ -53,13 +53,13 @@ ifndef FREERTOS_DIR
 $(error FREERTOS_DIR must be set to use FreeRTOS threading backend)
 endif
 
-# MicroPython FreeRTOS backend sources
-SRC_FREERTOS_C += extmod/freertos/mpthreadport.c
-SRC_FREERTOS_C += extmod/freertos/mp_freertos_hal.c
+# MicroPython FreeRTOS backend sources (paths relative to TOP)
+SRC_FREERTOS_C += $(TOP)/extmod/freertos/mpthreadport.c
+SRC_FREERTOS_C += $(TOP)/extmod/freertos/mp_freertos_hal.c
 
 # Optional service framework
 ifeq ($(MICROPY_FREERTOS_SERVICE_TASKS),1)
-SRC_FREERTOS_C += extmod/freertos/mp_freertos_service.c
+SRC_FREERTOS_C += $(TOP)/extmod/freertos/mp_freertos_service.c
 endif
 
 # FreeRTOS kernel sources

@@ -283,8 +283,17 @@ void UsageFault_Handler(void) {
   * @param  None
   * @retval None
   */
+#if MICROPY_PY_THREAD && defined(MICROPY_MPTHREADPORT_H)
+// FreeRTOS uses SVC to start the scheduler - forward to FreeRTOS handler
+__attribute__((naked)) void SVC_Handler(void) {
+    __asm volatile (
+        "b vPortSVCHandler\n"
+        );
+}
+#elif !MICROPY_PY_THREAD
 void SVC_Handler(void) {
 }
+#endif
 
 /**
   * @brief  This function handles Debug Monitor exception.

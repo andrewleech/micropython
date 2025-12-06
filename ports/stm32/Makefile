@@ -58,7 +58,35 @@ MBOOT_TEXT0_ADDR ?= 0x08000000
 include $(TOP)/py/py.mk
 include $(TOP)/extmod/extmod.mk
 
+# FreeRTOS threading backend integration
+ifeq ($(MICROPY_PY_THREAD),1)
+FREERTOS_DIR = $(TOP)/lib/FreeRTOS-Kernel
+include $(TOP)/extmod/freertos/freertos.mk
+
+# Architecture-specific FreeRTOS port
+ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),f4 g4 l4 wb wl))
+FREERTOS_PORT_DIR = $(FREERTOS_DIR)/portable/GCC/ARM_CM4F
+else ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),f7 h7 n6))
+FREERTOS_PORT_DIR = $(FREERTOS_DIR)/portable/GCC/ARM_CM7/r0p1
+else ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),f0 g0 l0))
+FREERTOS_PORT_DIR = $(FREERTOS_DIR)/portable/GCC/ARM_CM0
+else ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),f1 f2 l1))
+FREERTOS_PORT_DIR = $(FREERTOS_DIR)/portable/GCC/ARM_CM3
+else
+$(error Unsupported MCU_SERIES for FreeRTOS: $(MCU_SERIES))
+endif
+
+SRC_C += $(FREERTOS_PORT_DIR)/port.c
+SRC_C += freertos_hooks.c
+INC += -I$(FREERTOS_PORT_DIR)
+INC += -I$(FREERTOS_DIR)/include
+CFLAGS += -DMICROPY_PY_THREAD=1
+endif
+
 GIT_SUBMODULES += lib/libhydrogen lib/stm32lib lib/tinyusb
+ifeq ($(MICROPY_PY_THREAD),1)
+GIT_SUBMODULES += lib/FreeRTOS-Kernel
+endif
 
 CROSS_COMPILE ?= arm-none-eabi-
 LD_DIR=boards
@@ -258,14 +286,12 @@ SRC_C += \
 	mphalport.c \
 	msc_disk.c \
 	mpnetworkport.c \
-	mpthreadport.c \
 	irq.c \
 	pendsv.c \
 	systick.c  \
 	powerctrl.c \
 	powerctrlboot.c \
 	rfcore.c \
-	pybthread.c \
 	factoryreset.c \
 	timer.c \
 	led.c \
@@ -317,6 +343,11 @@ SRC_C += \
 	subghz.c \
 	xspi.c \
 	$(wildcard $(BOARD_DIR)/*.c)
+
+# Threading backend - use pybthread when FreeRTOS not enabled
+ifneq ($(MICROPY_PY_THREAD),1)
+SRC_C += mpthreadport.c pybthread.c
+endif
 
 SRC_O += \
 	$(STARTUP_FILE) \
@@ -521,6 +552,9 @@ OBJ += $(addprefix $(BUILD)/, $(TINYUSB_SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_CXX:.cpp=.o))
 OBJ += $(GEN_PINS_SRC:.c=.o)
+ifeq ($(MICROPY_PY_THREAD),1)
+OBJ += $(addprefix $(BUILD)/, $(SRC_FREERTOS_C:.c=.o))
+endif
 
 # This file contains performance critical functions so turn up the optimisation
 # level.  It doesn't add much to the code size and improves performance a bit.
@@ -681,7 +715,7 @@ $(BUILD)/firmware-trusted.bin: $(BUILD)/firmware.bin
 	$(STM32_CUBE_PROGRAMMER)/bin/STM32_SigningTool_CLI -bin $^ -nk -of 0x80000000 -t fsbl -o $@ -hv $(STM32_N6_HEADER_VERSION)
 
 # List of sources for qstr extraction
-SRC_QSTR += $(SRC_C) $(SRC_CXX) $(SHARED_SRC_C) $(GEN_PINS_SRC)
+SRC_QSTR += $(SRC_C) $(SRC_CXX) $(SHARED_SRC_C) $(GEN_PINS_SRC) $(SRC_FREERTOS_C)
 
 # Making OBJ use an order-only dependency on the generated pins.h file
 # has the side effect of making the pins.h file before we actually compile

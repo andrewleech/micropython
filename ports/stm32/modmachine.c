@@ -272,7 +272,7 @@ static mp_obj_t machine_info(size_t n_args, const mp_obj_t *args) {
         #endif
     }
 
-    #if MICROPY_PY_THREAD
+    #if MICROPY_PY_THREAD && !defined(MICROPY_MPTHREADPORT_H)
     pyb_thread_dump(print);
     #endif
 

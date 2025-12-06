@@ -107,12 +107,6 @@ void mp_thread_deinit(void);
 // GC integration (called from gc.c during garbage collection)
 void mp_thread_gc_others(void);
 
-// GIL integration - override default exit to include yield
-#if MICROPY_PY_THREAD_GIL
-void mp_thread_gil_exit(void);
-#define MP_THREAD_GIL_EXIT() mp_thread_gil_exit()
-#endif
-
 #endif // MICROPY_PY_THREAD
 
 #endif // MICROPY_INCLUDED_EXTMOD_FREERTOS_MPTHREADPORT_H

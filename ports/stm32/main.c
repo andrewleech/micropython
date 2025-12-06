@@ -93,9 +93,19 @@
 #include "shared/tinyusb/mp_usbd.h"
 #endif
 
-#if MICROPY_PY_THREAD
+#if MICROPY_PY_THREAD && !defined(MICROPY_MPTHREADPORT_H)
 static pyb_thread_t pyb_thread_main;
 #endif
+
+#if MICROPY_PY_THREAD && defined(MICROPY_MPTHREADPORT_H)
+#include "FreeRTOS.h"
+#include "task.h"
+// Main task runs the soft-reset loop
+#define FREERTOS_MAIN_TASK_STACK_SIZE (16 * 1024 / sizeof(StackType_t))
+static StaticTask_t main_task_tcb;
+static StackType_t main_task_stack[FREERTOS_MAIN_TASK_STACK_SIZE];
+#endif
+static void stm32_main_loop(void *arg);
 
 #if defined(MICROPY_HW_UART_REPL)
 #ifndef MICROPY_HW_UART_REPL_RXBUF
@@ -485,7 +495,8 @@ void stm32_main(uint32_t reset_mode) {
     sdram_valid = sdram_test(false);
     #endif
     #endif
-    #if MICROPY_PY_THREAD
+    #if MICROPY_PY_THREAD && !defined(MICROPY_MPTHREADPORT_H)
+    // Non-FreeRTOS threading: init here. FreeRTOS threading init is in stm32_main_loop.
     pyb_thread_init(&pyb_thread_main);
     #endif
     pendsv_init();
@@ -557,17 +568,46 @@ void stm32_main(uint32_t reset_mode) {
 
     MICROPY_BOARD_BEFORE_SOFT_RESET_LOOP(&state);
 
+    #if MICROPY_PY_THREAD && defined(MICROPY_MPTHREADPORT_H)
+    // FreeRTOS: create main task and start scheduler (never returns)
+    xTaskCreateStatic(
+        stm32_main_loop,
+        "main",
+        FREERTOS_MAIN_TASK_STACK_SIZE,
+        &state,
+        tskIDLE_PRIORITY + 1,
+        main_task_stack,
+        &main_task_tcb);
+    vTaskStartScheduler();
+    MICROPY_BOARD_FATAL_ERROR("Scheduler exited");
+    #else
+    // Non-FreeRTOS: run loop directly
+    stm32_main_loop(&state);
+    #endif
+}
+
+// Main MicroPython loop - runs as FreeRTOS task or called directly.
+// Uses void *arg to support both FreeRTOS task entry point and direct call.
+static void stm32_main_loop(void *arg) {
+    boardctrl_state_t *state = (boardctrl_state_t *)arg;
+
 soft_reset:
 
-    MICROPY_BOARD_TOP_SOFT_RESET_LOOP(&state);
+    MICROPY_BOARD_TOP_SOFT_RESET_LOOP(state);
 
-    // Python threading init
-    #if MICROPY_PY_THREAD
-    mp_thread_init();
+    // FreeRTOS threading init (non-FreeRTOS init is done in stm32_main before scheduler)
+    #if MICROPY_PY_THREAD && defined(MICROPY_MPTHREADPORT_H)
+    mp_thread_init(main_task_stack, sizeof(main_task_stack));
     #endif
 
     // Stack limit init.
+    #if MICROPY_PY_THREAD && defined(MICROPY_MPTHREADPORT_H)
+    // FreeRTOS: use task stack, not MSP stack
+    mp_cstack_init_with_top(main_task_stack + FREERTOS_MAIN_TASK_STACK_SIZE,
+        FREERTOS_MAIN_TASK_STACK_SIZE * sizeof(StackType_t));
+    #else
     mp_cstack_init_with_top(&_estack, (char *)&_estack - (char *)&_sstack);
+    #endif
 
     // GC init
     gc_init(MICROPY_HEAP_START, MICROPY_HEAP_END);
@@ -623,7 +663,7 @@ soft_reset:
     // Create it if needed, mount in on /flash, and set it as current dir.
     bool mounted_flash = false;
     #if MICROPY_HW_FLASH_MOUNT_AT_BOOT
-    mounted_flash = init_flash_fs(state.reset_mode);
+    mounted_flash = init_flash_fs(state->reset_mode);
     #endif
 
     bool mounted_sdcard = false;
@@ -663,7 +703,7 @@ soft_reset:
     #endif
 
     // Run boot.py (or whatever else a board configures at this stage).
-    if (MICROPY_BOARD_RUN_BOOT_PY(&state) == BOARDCTRL_GOTO_SOFT_RESET_EXIT) {
+    if (MICROPY_BOARD_RUN_BOOT_PY(state) == BOARDCTRL_GOTO_SOFT_RESET_EXIT) {
         goto soft_reset_exit;
     }
 
@@ -705,7 +745,7 @@ soft_reset:
     // At this point everything is fully configured and initialised.
 
     // Run main.py (or whatever else a board configures at this stage).
-    if (MICROPY_BOARD_RUN_MAIN_PY(&state) == BOARDCTRL_GOTO_SOFT_RESET_EXIT) {
+    if (MICROPY_BOARD_RUN_MAIN_PY(state) == BOARDCTRL_GOTO_SOFT_RESET_EXIT) {
         goto soft_reset_exit;
     }
 
@@ -729,16 +769,16 @@ soft_reset_exit:
 
     // soft reset
 
-    MICROPY_BOARD_START_SOFT_RESET(&state);
+    MICROPY_BOARD_START_SOFT_RESET(state);
 
     #if MICROPY_HW_ENABLE_STORAGE
-    if (state.log_soft_reset) {
+    if (state->log_soft_reset) {
         mp_printf(&mp_plat_print, "MPY: sync filesystems\n");
     }
     storage_flush();
     #endif
 
-    if (state.log_soft_reset) {
+    if (state->log_soft_reset) {
         mp_printf(&mp_plat_print, "MPY: soft reboot\n");
     }
 
@@ -772,7 +812,11 @@ soft_reset_exit:
     #endif
 
     #if MICROPY_PY_THREAD
+    #ifdef MICROPY_MPTHREADPORT_H
+    mp_thread_deinit();
+    #else
     pyb_thread_deinit();
+    #endif
     #endif
 
     #if defined(MICROPY_HW_UART_REPL)
@@ -784,7 +828,7 @@ soft_reset_exit:
     mp_usbd_deinit();
     #endif
 
-    MICROPY_BOARD_END_SOFT_RESET(&state);
+    MICROPY_BOARD_END_SOFT_RESET(state);
 
     gc_sweep_all();
     mp_deinit();

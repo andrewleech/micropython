@@ -31,17 +31,20 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
+#include "py/mpthread.h"
 #include "extmod/freertos/mp_freertos_hal.h"
 
 // FreeRTOS-aware millisecond delay.
-// Yields to the scheduler if running, otherwise busy-waits.
+// Releases the GIL during the delay to allow other threads to run.
 void mp_freertos_delay_ms(mp_uint_t ms) {
     if (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING) {
+        MP_THREAD_GIL_EXIT();
         if (ms > 0) {
             vTaskDelay(pdMS_TO_TICKS(ms));
         } else {
             taskYIELD();
         }
+        MP_THREAD_GIL_ENTER();
     } else {
         // Scheduler not running, use busy-wait fallback.
         // This path is used during early init before vTaskStartScheduler().

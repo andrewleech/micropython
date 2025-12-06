@@ -32,6 +32,7 @@
 #include "py/gc.h"
 #include "py/mpstate.h"
 #include "py/mpthread.h"
+#include "py/mperrno.h"
 #include "extmod/freertos/mpthreadport.h"
 
 // ============================================================================
@@ -80,6 +81,9 @@ int mp_thread_mutex_lock(mp_thread_mutex_t *mutex, int wait) {
 }
 
 // Unlock a mutex.
+// Yields after unlocking to give other threads a chance to acquire it.
+// This is important for GIL fairness - without yielding, the releasing
+// thread could immediately re-acquire the mutex before others run.
 void mp_thread_mutex_unlock(mp_thread_mutex_t *mutex) {
     // Before scheduler starts, nothing to do
     if (xTaskGetSchedulerState() != taskSCHEDULER_RUNNING) {
@@ -87,6 +91,7 @@ void mp_thread_mutex_unlock(mp_thread_mutex_t *mutex) {
     }
 
     xSemaphoreGive(mutex->handle);
+    taskYIELD();
 }
 
 #if MICROPY_PY_THREAD_RECURSIVE_MUTEX
@@ -126,10 +131,10 @@ void mp_thread_recursive_mutex_unlock(mp_thread_recursive_mutex_t *mutex) {
 
 // Global state for thread management
 static mp_thread_mutex_t thread_mutex;
-static mp_thread_t *thread_list_head;
 static mp_thread_t main_thread;
 
 // Register thread list as GC root so thread structures are not collected
+// Accessed via MP_STATE_VM(mp_thread_list_head)
 MP_REGISTER_ROOT_POINTER(struct _mp_thread_t *mp_thread_list_head);
 
 // Forward declarations
@@ -153,7 +158,6 @@ void mp_thread_init(void *stack, uint32_t stack_len) {
     main_thread.next = NULL;
 
     // Add main thread to list
-    thread_list_head = &main_thread;
     MP_STATE_VM(mp_thread_list_head) = &main_thread;
 
     // Set TLS for main thread
@@ -165,7 +169,7 @@ void mp_thread_deinit(void) {
     mp_thread_mutex_lock(&thread_mutex, 1);
 
     // Clean up all threads except main
-    mp_thread_t *th = thread_list_head;
+    mp_thread_t *th = MP_STATE_VM(mp_thread_list_head);
     while (th != NULL) {
         mp_thread_t *next = th->next;
         if (th != &main_thread) {
@@ -186,7 +190,7 @@ void mp_thread_deinit(void) {
     }
 
     // Reset list to just main thread
-    thread_list_head = &main_thread;
+    MP_STATE_VM(mp_thread_list_head) = &main_thread;
     main_thread.next = NULL;
 
     mp_thread_mutex_unlock(&thread_mutex);
@@ -222,8 +226,8 @@ static void freertos_entry_wrapper(void *arg) {
 static void mp_thread_reap_dead_threads(void) {
     mp_thread_mutex_lock(&thread_mutex, 1);
 
-    mp_thread_t **prev_ptr = &thread_list_head;
-    mp_thread_t *th = thread_list_head;
+    mp_thread_t **prev_ptr = &MP_STATE_VM(mp_thread_list_head);
+    mp_thread_t *th = MP_STATE_VM(mp_thread_list_head);
 
     while (th != NULL) {
         if (th->state == MP_THREAD_STATE_FINISHED && th != &main_thread) {
@@ -315,8 +319,8 @@ mp_uint_t mp_thread_create(void *(*entry)(void *), void *arg, size_t *stack_size
     // Mark as running and add to thread list
     mp_thread_mutex_lock(&thread_mutex, 1);
     th->state = MP_THREAD_STATE_RUNNING;
-    th->next = thread_list_head;
-    thread_list_head = th;
+    th->next = MP_STATE_VM(mp_thread_list_head);
+    MP_STATE_VM(mp_thread_list_head) = th;
     mp_thread_mutex_unlock(&thread_mutex);
 
     return (mp_uint_t)th->id;
@@ -356,7 +360,7 @@ void mp_thread_gc_others(void) {
 
     TaskHandle_t current = xTaskGetCurrentTaskHandle();
 
-    for (mp_thread_t *th = thread_list_head; th != NULL; th = th->next) {
+    for (mp_thread_t *th = MP_STATE_VM(mp_thread_list_head); th != NULL; th = th->next) {
         // Scan the thread structure itself (contains arg pointer)
         gc_collect_root((void **)&th, 1);
         gc_collect_root(&th->arg, 1);
@@ -382,19 +386,5 @@ void mp_thread_gc_others(void) {
 
     mp_thread_mutex_unlock(&thread_mutex);
 }
-
-// ============================================================================
-// Phase 8: GIL Integration
-// ============================================================================
-
-#if MICROPY_PY_THREAD_GIL
-
-// GIL exit with yield to allow other threads to acquire.
-void mp_thread_gil_exit(void) {
-    mp_thread_mutex_unlock(&MP_STATE_VM(gil_mutex));
-    taskYIELD();
-}
-
-#endif // MICROPY_PY_THREAD_GIL
 
 #endif // MICROPY_PY_THREAD
