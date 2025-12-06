@@ -33,6 +33,59 @@
 
 #include "extmod/freertos/mp_freertos_hal.h"
 
-// Implementation will be added in Phase 3
+// FreeRTOS-aware millisecond delay.
+// Yields to the scheduler if running, otherwise busy-waits.
+void mp_freertos_delay_ms(mp_uint_t ms) {
+    if (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING) {
+        if (ms > 0) {
+            vTaskDelay(pdMS_TO_TICKS(ms));
+        } else {
+            taskYIELD();
+        }
+    } else {
+        // Scheduler not running, use busy-wait fallback.
+        // This path is used during early init before vTaskStartScheduler().
+        // Port should provide mp_hal_delay_us() for accurate timing.
+        #if defined(mp_hal_delay_us)
+        mp_hal_delay_us(ms * 1000);
+        #else
+        // Crude busy-wait; actual delay depends on CPU speed.
+        volatile uint32_t count = ms * 1000;
+        while (count--) {
+            __asm volatile ("nop");
+        }
+        #endif
+    }
+}
+
+// Microsecond delay.
+// This is a busy-wait implementation. Ports requiring precise microsecond
+// timing should override with a hardware timer implementation.
+void mp_freertos_delay_us(mp_uint_t us) {
+    // Simple busy-wait loop. Accuracy depends on CPU speed.
+    // Each iteration is roughly 4-10 cycles depending on architecture.
+    // For 100MHz CPU: 1us ≈ 100 cycles ≈ 10-25 iterations.
+    // This is intentionally imprecise; ports needing accuracy should
+    // provide their own mp_hal_delay_us() using DWT or hardware timer.
+    volatile uint32_t count = us * 10;  // Approximate for ~100MHz
+    while (count--) {
+        __asm volatile ("nop");
+    }
+}
+
+// Get milliseconds since boot using FreeRTOS tick count.
+// Resolution is limited to tick rate (typically 1ms for 1kHz tick).
+mp_uint_t mp_freertos_ticks_ms(void) {
+    return xTaskGetTickCount() * portTICK_PERIOD_MS;
+}
+
+// Get microseconds since boot.
+// This uses the tick count scaled to microseconds. Resolution is poor
+// (typically 1ms). Ports needing microsecond precision should override
+// with a hardware timer implementation (DWT, SysTick, or dedicated timer).
+mp_uint_t mp_freertos_ticks_us(void) {
+    // Scale tick count to microseconds. Limited by tick resolution.
+    return xTaskGetTickCount() * (portTICK_PERIOD_MS * 1000);
+}
 
 #endif // MICROPY_PY_THREAD

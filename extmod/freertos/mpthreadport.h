@@ -49,6 +49,16 @@
 #define MP_THREAD_PRIORITY (tskIDLE_PRIORITY + 1)
 #endif
 
+// Default stack size for Python threads (in bytes)
+#ifndef MP_THREAD_DEFAULT_STACK_SIZE
+#define MP_THREAD_DEFAULT_STACK_SIZE (4096)
+#endif
+
+// Minimum stack size for Python threads (in bytes)
+#ifndef MP_THREAD_MIN_STACK_SIZE
+#define MP_THREAD_MIN_STACK_SIZE (2048)
+#endif
+
 // Thread state enumeration
 typedef enum {
     MP_THREAD_STATE_NEW = 0,
@@ -96,6 +106,12 @@ void mp_thread_deinit(void);
 
 // GC integration (called from gc.c during garbage collection)
 void mp_thread_gc_others(void);
+
+// GIL integration - override default exit to include yield
+#if MICROPY_PY_THREAD_GIL
+void mp_thread_gil_exit(void);
+#define MP_THREAD_GIL_EXIT() mp_thread_gil_exit()
+#endif
 
 #endif // MICROPY_PY_THREAD
 
