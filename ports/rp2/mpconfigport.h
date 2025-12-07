@@ -133,10 +133,39 @@
 // Fine control over Python builtins, classes, modules, etc
 #define MICROPY_PY_BUILTINS_HELP_TEXT           rp2_help_text
 #define MICROPY_PY_SYS_PLATFORM                 "rp2"
+// Threading configuration
 #ifndef MICROPY_PY_THREAD
 #define MICROPY_PY_THREAD                       (1)
-#define MICROPY_PY_THREAD_GIL                   (0)
-#define MICROPY_THREAD_YIELD()                  mp_handle_pending(true)
+#define MICROPY_PY_THREAD_GIL                   (1)
+#define MICROPY_STACK_CHECK_MARGIN              (1024)
+#define MICROPY_MPTHREADPORT_H                  "extmod/freertos/mpthreadport.h"
+// FreeRTOS-aware delay (declared here to avoid include order issues)
+void mp_freertos_delay_ms(unsigned int ms);
+#define mp_hal_delay_ms mp_freertos_delay_ms
+#endif
+
+// Event poll hook - must release/acquire GIL for threading
+#if MICROPY_PY_THREAD
+#include "FreeRTOS.h"
+#include "task.h"
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+        MP_THREAD_GIL_EXIT(); \
+        taskYIELD(); \
+        MP_THREAD_GIL_ENTER(); \
+    } while (0);
+
+#define MICROPY_THREAD_YIELD() taskYIELD()
+#else
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+    } while (0);
+
+#define MICROPY_THREAD_YIELD()
 #endif
 
 // Extended modules
