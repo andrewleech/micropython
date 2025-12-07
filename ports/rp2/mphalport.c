@@ -254,13 +254,11 @@ static void soft_timer_hardware_callback(unsigned int alarm_num) {
     // a second ISR, as PendSV may be currently suspended by the other CPU.
     pendsv_schedule_dispatch(PENDSV_DISPATCH_SOFT_TIMER, soft_timer_handler);
 
-    // This ISR only runs on core0, but if core1 is running Python code then it
-    // may be blocked in WFE so wake it up as well. Unfortunately this also sets
-    // the event flag on core0, so a subsequent WFE on this core will not suspend
+    // This ISR only runs on core0, but with FreeRTOS SMP tasks on core1 may be
+    // blocked in WFE so wake them. Unfortunately this also sets the event flag
+    // on core0, so a subsequent WFE on this core will not suspend.
     #if MICROPY_PY_THREAD
-    if (core1_entry != NULL) {
-        __sev();
-    }
+    __sev();
     #endif
 }
 

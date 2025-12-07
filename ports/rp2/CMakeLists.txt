@@ -174,6 +174,7 @@ set(MICROPY_SOURCE_PORT
     mphalport.c
     mpnetworkport.c
     mutex_extra.c
+    pendsv.c
     rp2_flash.c
     rp2_pio.c
     rp2_psram.c
@@ -190,7 +191,6 @@ if(NOT MICROPY_PY_THREAD)
     # Pico SDK multicore threading (no FreeRTOS)
     list(APPEND MICROPY_SOURCE_PORT
         mpthreadport.c
-        pendsv.c
     )
 endif()
 
@@ -278,10 +278,14 @@ if(MICROPY_PY_THREAD)
     set(FREERTOS_DIR ${MICROPY_DIR}/lib/FreeRTOS-Kernel)
     set(FREERTOS_PORT_DIR ${FREERTOS_DIR}/portable/ThirdParty/GCC/RP2040)  # codespell:ignore
 
-    # FreeRTOS kernel sources
-    set(MICROPY_SOURCE_FREERTOS
+    # FreeRTOS threading backend (must be in EXTMOD for root pointer scanning)
+    list(APPEND MICROPY_SOURCE_EXTMOD
         ${MICROPY_DIR}/extmod/freertos/mpthreadport.c
         ${MICROPY_DIR}/extmod/freertos/mp_freertos_hal.c
+    )
+
+    # FreeRTOS kernel sources (no root pointers, can go in PORT)
+    set(MICROPY_SOURCE_FREERTOS
         ${FREERTOS_DIR}/tasks.c
         ${FREERTOS_DIR}/queue.c
         ${FREERTOS_DIR}/list.c
@@ -291,6 +295,7 @@ if(MICROPY_PY_THREAD)
         ${FREERTOS_DIR}/portable/MemMang/heap_4.c
         ${FREERTOS_PORT_DIR}/port.c
         freertos_hooks.c
+        mpthreadport_rp2.c
     )
 
     list(APPEND MICROPY_SOURCE_PORT ${MICROPY_SOURCE_FREERTOS})
@@ -305,6 +310,13 @@ if(MICROPY_PY_THREAD)
     # FreeRTOS compile definitions
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
         MICROPY_PY_THREAD=1
+    )
+
+    # Link against Pico SDK hardware libraries needed by FreeRTOS port
+    target_link_libraries(${MICROPY_TARGET}
+        hardware_exception
+        hardware_clocks
+        hardware_irq
     )
 endif()
 

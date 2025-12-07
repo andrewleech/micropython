@@ -494,6 +494,8 @@ void mp_thread_gil_exit(void) {
 
 **Goal:** Implement background service task management for USB, network, BLE.
 
+many of these tasks currently rely of the C scheduled task system, using pendsv as a low priority interrupt to trigger the tasks at the appropriate time. this is also used for soft timers. investigate this entire system to identify if the pendsv aspects of this can be wrapped/replaced by a high priority thread as part of this phase planning.
+
 ### 9.1 Define Service Task API [HAIKU]
 
 **File:** `mp_freertos_service.h`

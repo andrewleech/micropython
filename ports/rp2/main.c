@@ -54,6 +54,9 @@
 #include "pico/binary_info.h"
 #include "pico/unique_id.h"
 #include "hardware/structs/rosc.h"
+#if MICROPY_PY_THREAD
+#include "hardware/exception.h"
+#endif
 #if MICROPY_PY_LWIP
 #include "lwip/init.h"
 #include "lwip/apps/mdns.h"
@@ -77,6 +80,16 @@
 extern uint8_t __StackTop, __StackBottom;
 extern uint8_t __GcHeapStart, __GcHeapEnd;
 
+#if MICROPY_PY_THREAD
+// FreeRTOS main task static allocation
+#define FREERTOS_MAIN_TASK_STACK_SIZE (8192 / sizeof(StackType_t))
+static StaticTask_t main_task_tcb;
+static StackType_t main_task_stack[FREERTOS_MAIN_TASK_STACK_SIZE];
+
+// Forward declaration for PendSV handler (defined in pendsv.c)
+void PendSV_Handler(void);
+#endif
+
 // Embed version info in the binary in machine readable form
 bi_decl(bi_program_version_string(MICROPY_GIT_TAG));
 
@@ -94,9 +107,7 @@ int main(int argc, char **argv) {
     SCB->SCR |= SCB_SCR_SEVONPEND_Msk;
     #endif
 
-    #if !MICROPY_PY_THREAD
     pendsv_init();
-    #endif
     soft_timer_init();
 
     // Set the MCU frequency and as a side effect the peripheral clock to 48 MHz.
@@ -128,7 +139,6 @@ int main(int argc, char **argv) {
 
     #if MICROPY_PY_THREAD
     bi_decl(bi_program_feature("thread support"))
-    mp_thread_init();
     #endif
 
     // Start and initialise the RTC
@@ -192,10 +202,6 @@ int main(int argc, char **argv) {
 
     #if MICROPY_PY_THREAD
     // FreeRTOS: create main task and start scheduler (never returns)
-    #define FREERTOS_MAIN_TASK_STACK_SIZE (8192 / sizeof(StackType_t))
-    static StaticTask_t main_task_tcb;
-    static StackType_t main_task_stack[FREERTOS_MAIN_TASK_STACK_SIZE];
-
     xTaskCreateStatic(
         rp2_main_loop,
         "main",
@@ -220,7 +226,19 @@ int main(int argc, char **argv) {
 static void rp2_main_loop(void *arg) {
     (void)arg;
 
+    #if MICROPY_PY_THREAD && PICO_ARM
+    // Re-register MicroPython's PendSV handler after FreeRTOS registers its own.
+    // FreeRTOS calls exception_set_exclusive_handler(PENDSV_EXCEPTION, xPortPendSVHandler)
+    // during vTaskStartScheduler(), which overrides the static vector table.
+    // We need to install our wrapper which calls xPortPendSVHandler for context switches.
+    exception_set_exclusive_handler(PENDSV_EXCEPTION, PendSV_Handler);
+    #endif
+
 soft_reset:
+    #if MICROPY_PY_THREAD
+    // Initialize FreeRTOS threading backend with main task stack for GC scanning
+    mp_thread_init(main_task_stack, sizeof(main_task_stack));
+    #endif
 
     // Initialise MicroPython runtime.
     mp_init();

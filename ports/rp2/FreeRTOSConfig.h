@@ -61,6 +61,10 @@
 #define configRUN_MULTIPLE_PRIORITIES (1)
 #define configUSE_PASSIVE_IDLE_HOOK (0)
 
+// RP2040 has 32 hardware spinlocks - assign two for FreeRTOS SMP
+#define configSMP_SPINLOCK_0 (0)
+#define configSMP_SPINLOCK_1 (1)
+
 // ============================================================================
 // MANDATORY for MicroPython threading backend
 // ============================================================================
@@ -103,10 +107,14 @@
 #define INCLUDE_uxTaskGetStackHighWaterMark (1)
 #define configUSE_TASK_NOTIFICATIONS (1)
 #define configUSE_COUNTING_SEMAPHORES (1)
+#define configUSE_EVENT_GROUPS (1)
 #define configUSE_QUEUE_SETS (0)
 
-// Timers disabled to save RAM
-#define configUSE_TIMERS (0)
+// Timers required by RP2040 SMP port for xEventGroupSetBitsFromISR
+#define configUSE_TIMERS (1)
+#define configTIMER_TASK_PRIORITY (configMAX_PRIORITIES - 1)
+#define configTIMER_QUEUE_LENGTH (10)
+#define configTIMER_TASK_STACK_DEPTH (configMINIMAL_STACK_SIZE * 2)
 
 // ============================================================================
 // Include optional function APIs
@@ -120,6 +128,7 @@
 #define INCLUDE_xTaskGetSchedulerState (1)
 #define INCLUDE_xTaskResumeFromISR (1)
 #define INCLUDE_eTaskGetState (1)
+#define INCLUDE_xTimerPendFunctionCall (1)
 
 // ============================================================================
 // Assert configuration
@@ -136,5 +145,8 @@
 
 // Disable handler installation check - our handlers wrap the FreeRTOS handlers
 #define configCHECK_HANDLER_INSTALLATION (0)
+
+// Use dynamic exception handlers so MicroPython's PendSV can wrap FreeRTOS's
+#define configUSE_DYNAMIC_EXCEPTION_HANDLERS (1)
 
 #endif // FREERTOS_CONFIG_H

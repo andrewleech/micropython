@@ -139,9 +139,17 @@
 #define MICROPY_PY_THREAD_GIL                   (1)
 #define MICROPY_STACK_CHECK_MARGIN              (1024)
 #define MICROPY_MPTHREADPORT_H                  "extmod/freertos/mpthreadport.h"
-// FreeRTOS-aware delay (declared here to avoid include order issues)
+#endif
+
+// FreeRTOS-aware delay (redirect mp_hal_delay_ms to FreeRTOS implementation)
+#if MICROPY_PY_THREAD
 void mp_freertos_delay_ms(unsigned int ms);
 #define mp_hal_delay_ms mp_freertos_delay_ms
+#endif
+
+// Recursive mutexes needed for PendSV on dual-core RP2040
+#if MICROPY_PY_THREAD && !defined(MICROPY_PY_THREAD_RECURSIVE_MUTEX)
+#define MICROPY_PY_THREAD_RECURSIVE_MUTEX       (1)
 #endif
 
 // Event poll hook - must release/acquire GIL for threading

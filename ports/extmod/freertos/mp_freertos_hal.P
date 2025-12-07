@@ -1,0 +1,101 @@
+build-MPS2_AN385_THREAD/../../extmod/freertos/mp_freertos_hal.o: \
+ ../../extmod/freertos/mp_freertos_hal.c ../../py/mpconfig.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.3.1/include/stdint.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/stdint.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/machine/_default_types.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/features.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/_newlib_version.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/_intsup.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/_stdint.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.3.1/include/limits.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.3.1/include/syslimits.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/limits.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/newlib.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/cdefs.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.3.1/include/stddef.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/syslimits.h \
+ mpconfigport.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/alloca.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/_ansi.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/config.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/machine/ieeefp.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/reent.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/_ansi.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/_types.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/machine/_types.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/lock.h \
+ ../../lib/FreeRTOS-Kernel/include/FreeRTOS.h FreeRTOSConfig.h \
+ ../../lib/FreeRTOS-Kernel/include/projdefs.h \
+ ../../lib/FreeRTOS-Kernel/include/portable.h \
+ ../../lib/FreeRTOS-Kernel/include/deprecated_definitions.h \
+ ../../lib/FreeRTOS-Kernel/portable/GCC/ARM_CM3/portmacro.h \
+ ../../lib/FreeRTOS-Kernel/include/mpu_wrappers.h \
+ ../../lib/FreeRTOS-Kernel/include/task.h \
+ ../../lib/FreeRTOS-Kernel/include/list.h ../../py/mpthread.h \
+ ../../extmod/freertos/mpthreadport.h \
+ ../../lib/FreeRTOS-Kernel/include/semphr.h \
+ ../../lib/FreeRTOS-Kernel/include/queue.h \
+ ../../lib/FreeRTOS-Kernel/include/task.h ../../py/mpstate.h \
+ ../../py/misc.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.3.1/include/stdbool.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/string.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/_locale.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/strings.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/string.h \
+ build-MPS2_AN385_THREAD/genhdr/compressed.data.h ../../py/nlr.h \
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/assert.h \
+ ../../py/obj.h ../../py/qstr.h \
+ build-MPS2_AN385_THREAD/genhdr/qstrdefs.generated.h ../../py/mpprint.h \
+ ../../py/runtime0.h ../../py/objlist.h ../../py/objexcept.h \
+ ../../py/objtuple.h build-MPS2_AN385_THREAD/genhdr/root_pointers.h \
+ ../../extmod/freertos/mp_freertos_hal.h
+ ../../extmod/freertos/mp_freertos_hal.c ../../py/mpconfig.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.3.1/include/stdint.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/stdint.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/machine/_default_types.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/features.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/_newlib_version.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/_intsup.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/_stdint.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.3.1/include/limits.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.3.1/include/syslimits.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/limits.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/newlib.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/cdefs.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.3.1/include/stddef.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/syslimits.h :
+ mpconfigport.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/alloca.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/_ansi.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/config.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/machine/ieeefp.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/reent.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/_ansi.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/_types.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/machine/_types.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/lock.h :
+ ../../lib/FreeRTOS-Kernel/include/FreeRTOS.h FreeRTOSConfig.h :
+ ../../lib/FreeRTOS-Kernel/include/projdefs.h :
+ ../../lib/FreeRTOS-Kernel/include/portable.h :
+ ../../lib/FreeRTOS-Kernel/include/deprecated_definitions.h :
+ ../../lib/FreeRTOS-Kernel/portable/GCC/ARM_CM3/portmacro.h :
+ ../../lib/FreeRTOS-Kernel/include/mpu_wrappers.h :
+ ../../lib/FreeRTOS-Kernel/include/task.h :
+ ../../lib/FreeRTOS-Kernel/include/list.h ../../py/mpthread.h :
+ ../../extmod/freertos/mpthreadport.h :
+ ../../lib/FreeRTOS-Kernel/include/semphr.h :
+ ../../lib/FreeRTOS-Kernel/include/queue.h :
+ ../../lib/FreeRTOS-Kernel/include/task.h ../../py/mpstate.h :
+ ../../py/misc.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.3.1/include/stdbool.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/string.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/_locale.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/strings.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/sys/string.h :
+ build-MPS2_AN385_THREAD/genhdr/compressed.data.h ../../py/nlr.h :
+ /opt/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/arm-none-eabi/include/assert.h :
+ ../../py/obj.h ../../py/qstr.h :
+ build-MPS2_AN385_THREAD/genhdr/qstrdefs.generated.h ../../py/mpprint.h :
+ ../../py/runtime0.h ../../py/objlist.h ../../py/objexcept.h :
+ ../../py/objtuple.h build-MPS2_AN385_THREAD/genhdr/root_pointers.h :
+ ../../extmod/freertos/mp_freertos_hal.h :

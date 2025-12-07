@@ -42,12 +42,20 @@
 // Get the thread-local MicroPython state for the current thread.
 // Uses FreeRTOS Thread Local Storage (TLS) at index MP_FREERTOS_TLS_INDEX.
 struct _mp_state_thread_t *mp_thread_get_state(void) {
-    return (struct _mp_state_thread_t *)pvTaskGetThreadLocalStoragePointer(NULL, MP_FREERTOS_TLS_INDEX);
+    TaskHandle_t task = xTaskGetCurrentTaskHandle();
+    if (task == NULL) {
+        // Scheduler not started yet or no task running
+        return NULL;
+    }
+    return (struct _mp_state_thread_t *)pvTaskGetThreadLocalStoragePointer(task, MP_FREERTOS_TLS_INDEX);
 }
 
 // Set the thread-local MicroPython state for the current thread.
 void mp_thread_set_state(struct _mp_state_thread_t *state) {
-    vTaskSetThreadLocalStoragePointer(NULL, MP_FREERTOS_TLS_INDEX, state);
+    TaskHandle_t task = xTaskGetCurrentTaskHandle();
+    if (task != NULL) {
+        vTaskSetThreadLocalStoragePointer(task, MP_FREERTOS_TLS_INDEX, state);
+    }
 }
 
 // Get a unique identifier for the current thread (FreeRTOS task handle).

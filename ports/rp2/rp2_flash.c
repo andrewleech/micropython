@@ -115,14 +115,11 @@ bi_decl(bi_block_device(
     BINARY_INFO_BLOCK_DEV_FLAG_PT_UNKNOWN));
 #endif
 
-// This is a workaround to pico-sdk #2201: https://github.com/raspberrypi/pico-sdk/issues/2201
-// which means the multicore_lockout_victim_is_initialized returns true even after core1 is reset.
+// Workaround for pico-sdk #2201: multicore_lockout_victim_is_initialized returns
+// true even after core1 is reset. With FreeRTOS SMP, tasks can run on either core,
+// so we always use lockout when the victim is initialized.
 static bool use_multicore_lockout(void) {
-    return multicore_lockout_victim_is_initialized(1 - get_core_num())
-           #if MICROPY_PY_THREAD
-           && core1_entry != NULL
-           #endif
-    ;
+    return multicore_lockout_victim_is_initialized(1 - get_core_num());
 }
 
 // Function to set the flash divisor to the correct divisor, assumes interrupts disabled
