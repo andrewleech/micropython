@@ -212,7 +212,23 @@ endif
 # Set compile options needed to enable frozen code.
 CFLAGS += -DMICROPY_QSTR_EXTRA_POOL=mp_qstr_frozen_const_pool
 CFLAGS += -DMICROPY_MODULE_FROZEN_MPY
+
+# MICROPY_MODULE_FROZEN_STR enables freezing .py files as source text that
+# requires the compiler at runtime. If the compiler is disabled, default this
+# to 0 since only pre-compiled .mpy files can be used.
+ifeq ($(MICROPY_ENABLE_COMPILER),0)
+MICROPY_MODULE_FROZEN_STR ?= 0
+else
+MICROPY_MODULE_FROZEN_STR ?= 1
+endif
+ifneq ($(MICROPY_MODULE_FROZEN_STR),0)
 CFLAGS += -DMICROPY_MODULE_FROZEN_STR
+endif
+
+# Pass MICROPY_ENABLE_COMPILER to CFLAGS if explicitly set.
+ifeq ($(MICROPY_ENABLE_COMPILER),0)
+CFLAGS += -DMICROPY_ENABLE_COMPILER=0
+endif
 
 # Set default path variables to be passed to makemanifest.py. These will be
 # available in path substitutions. Additional variables can be set per-board
