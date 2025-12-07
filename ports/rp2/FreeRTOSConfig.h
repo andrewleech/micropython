@@ -27,9 +27,9 @@
 /*
  * FreeRTOS Configuration for RP2040 MicroPython port (Cortex-M0+, dual-core)
  *
- * NOTE: The RP2040 FreeRTOS SMP port uses the system TIMER peripheral (1MHz from
- * crystal) for tick generation, NOT the SysTick timer. This means FreeRTOS timing
- * is independent of CPU frequency, allowing machine.freq() to work correctly.
+ * NOTE: The RP2040 FreeRTOS SMP port uses SysTick for tick generation, which
+ * is clocked from clk_sys. This means if machine.freq() changes the system clock,
+ * the FreeRTOS tick rate will be affected. Consider this when changing frequency.
  */
 
 #ifndef FREERTOS_CONFIG_H
@@ -38,9 +38,7 @@
 #include <stdint.h>
 
 // RP2040 default frequency is 125MHz
-// NOTE: FreeRTOS tick is independent of CPU clock (uses 1MHz timer peripheral)
-#define CPU_FREQ_HZ 125000000u
-#define configCPU_CLOCK_HZ (CPU_FREQ_HZ)
+#define configCPU_CLOCK_HZ (125000000u)
 
 // Cortex-M0+ has 2 priority bits (4 levels, 0-3)
 #define __NVIC_PRIO_BITS 2

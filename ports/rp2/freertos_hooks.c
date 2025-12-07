@@ -33,43 +33,9 @@
 
 // ============================================================================
 // FreeRTOS interrupt handlers
-// These wrap FreeRTOS port.c functions for integration with the vector table
-// IMPORTANT: SVC and PendSV must be naked and branch directly - wrapping
-// in a C function call corrupts the exception stack frame.
+// RP2040 FreeRTOS port uses configUSE_DYNAMIC_EXCEPTION_HANDLERS to install
+// its own SVC, PendSV, and SysTick handlers. We do not need to provide them.
 // ============================================================================
-
-// FreeRTOS handler declarations from port.c
-extern void vPortSVCHandler(void);
-extern void xPortPendSVHandler(void);
-extern void xPortSysTickHandler(void);
-
-// SVC handler - naked branch to FreeRTOS handler
-__attribute__((naked)) void SVC_Handler(void) {
-    __asm volatile (
-        "b vPortSVCHandler\n"
-        );
-}
-
-// PendSV handler - naked branch to FreeRTOS handler
-__attribute__((naked)) void PendSV_Handler(void) {
-    __asm volatile (
-        "b xPortPendSVHandler\n"
-        );
-}
-
-// Millisecond tick counter (accessed by ticks_ms())
-extern volatile uint32_t _ticks_ms;
-
-// SysTick handler - updates tick counter and calls FreeRTOS
-void SysTick_Handler(void) {
-    // Update millisecond counter
-    _ticks_ms++;
-
-    // Call FreeRTOS tick handler if scheduler is running
-    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
-        xPortSysTickHandler();
-    }
-}
 
 // ============================================================================
 // Static memory allocation callbacks (required when configSUPPORT_STATIC_ALLOCATION=1)
@@ -96,6 +62,22 @@ void vApplicationGetTimerTaskMemory(StaticTask_t **ppxTimerTaskTCBBuffer,
     *ppxTimerTaskTCBBuffer = &xTimerTaskTCB;
     *ppxTimerTaskStackBuffer = xTimerTaskStack;
     *puxTimerTaskStackSize = configTIMER_TASK_STACK_DEPTH;
+}
+#endif
+
+// For SMP (configNUMBER_OF_CORES > 1), provide passive idle task memory for core 1
+#if configNUMBER_OF_CORES > 1
+static StaticTask_t xPassiveIdleTaskTCB;
+static StackType_t xPassiveIdleTaskStack[configMINIMAL_STACK_SIZE];
+
+void vApplicationGetPassiveIdleTaskMemory(StaticTask_t **ppxIdleTaskTCBBuffer,
+    StackType_t **ppxIdleTaskStackBuffer,
+    configSTACK_DEPTH_TYPE *puxIdleTaskStackSize,
+    BaseType_t xPassiveIdleTaskIndex) {
+    (void)xPassiveIdleTaskIndex;
+    *ppxIdleTaskTCBBuffer = &xPassiveIdleTaskTCB;
+    *ppxIdleTaskStackBuffer = xPassiveIdleTaskStack;
+    *puxIdleTaskStackSize = configMINIMAL_STACK_SIZE;
 }
 #endif
 
