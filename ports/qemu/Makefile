@@ -151,6 +151,36 @@ SRC_BOARD_O += mcu/rv64/entrypoint.o
 endif
 
 ################################################################################
+# FreeRTOS threading support (ARM only for now)
+
+ifeq ($(MICROPY_PY_THREAD),1)
+ifeq ($(QEMU_ARCH),arm)
+
+CFLAGS += -DMICROPY_PY_THREAD=1
+
+# FreeRTOS kernel location
+FREERTOS_DIR = $(TOP)/lib/FreeRTOS-Kernel
+GIT_SUBMODULES += lib/FreeRTOS-Kernel
+
+# FreeRTOS include directories (add to INC for early availability)
+INC += -I$(TOP)/extmod/freertos
+INC += -I$(FREERTOS_DIR)/include
+
+# ARM Cortex-M3 port files
+FREERTOS_PORT_DIR = $(FREERTOS_DIR)/portable/GCC/ARM_CM3
+INC += -I$(FREERTOS_PORT_DIR)
+SRC_C += $(FREERTOS_PORT_DIR)/port.c
+
+# Include common FreeRTOS build rules (adds kernel sources)
+include $(TOP)/extmod/freertos/freertos.mk
+
+# QEMU-specific FreeRTOS hooks
+SRC_C += freertos_hooks.c
+
+endif
+endif
+
+################################################################################
 # Project specific settings and compiler/linker flags
 
 QEMU_SYSTEM = qemu-system-$(QEMU_ARCH)
@@ -232,9 +262,15 @@ OBJ += $(PY_O)
 OBJ += $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_BOARD_O))
 OBJ += $(addprefix $(BUILD)/, $(LIBM_SRC_C:.c=.o))
+ifeq ($(MICROPY_PY_THREAD),1)
+OBJ += $(addprefix $(BUILD)/, $(SRC_FREERTOS_C:.c=.o))
+endif
 
 # List of sources for qstr extraction
 SRC_QSTR += $(SRC_C) $(LIBM_SRC_C)
+ifeq ($(MICROPY_PY_THREAD),1)
+SRC_QSTR += $(SRC_FREERTOS_C)
+endif
 
 ################################################################################
 # Main targets

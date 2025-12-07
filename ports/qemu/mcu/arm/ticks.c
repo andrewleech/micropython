@@ -26,6 +26,8 @@
 
 #include <stdint.h>
 
+#include "py/mpconfig.h"
+
 // CPU frequency
 #ifndef CPU_FREQ_HZ
 #define CPU_FREQ_HZ             25000000u
@@ -42,17 +44,21 @@
 #define SYSTICK_CSR_TICKINT     (1 << 1)
 #define SYSTICK_CSR_CLKSOURCE   (1 << 2)
 
-static volatile uint32_t _ticks_ms = 0;
+// Accessed by freertos_hooks.c for FreeRTOS builds
+volatile uint32_t _ticks_ms = 0;
 #if defined(__ARM_ARCH_ISA_ARM)
 static volatile uint32_t _ticks_us = 0;
 #endif
 
 void ticks_init(void) {
     #if !defined(__ARM_ARCH_ISA_ARM)
+    #if !MICROPY_PY_THREAD
     // Configure SysTick: reload at 1ms intervals (Cortex-M)
+    // When using FreeRTOS, the scheduler configures SysTick
     SYSTICK_CVR = 0;
     SYSTICK_RVR = (CPU_FREQ_HZ / 1000) - 1;
     SYSTICK_CSR = SYSTICK_CSR_ENABLE | SYSTICK_CSR_TICKINT | SYSTICK_CSR_CLKSOURCE;
+    #endif
     #endif
 }
 
@@ -80,6 +86,9 @@ uintptr_t ticks_us(void) {
     #endif
 }
 
+// FreeRTOS provides its own SysTick_Handler in freertos_hooks.c
+#if !MICROPY_PY_THREAD
 void SysTick_Handler(void) {
     _ticks_ms++;
 }
+#endif
