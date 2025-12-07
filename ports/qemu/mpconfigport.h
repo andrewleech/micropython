@@ -68,6 +68,7 @@
 // Threading configuration
 #if MICROPY_PY_THREAD
 #define MICROPY_PY_THREAD_GIL (1)
+#define MICROPY_STACK_CHECK_MARGIN (1024)
 #define MICROPY_MPTHREADPORT_H "extmod/freertos/mpthreadport.h"
 // FreeRTOS-aware delay (declared here to avoid include order issues)
 void mp_freertos_delay_ms(unsigned int ms);
