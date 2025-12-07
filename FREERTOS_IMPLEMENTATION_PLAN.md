@@ -1,8 +1,8 @@
 # MicroPython FreeRTOS Threading Backend: Implementation Plan
 
-**Document Version:** 1.0
-**Date:** 2025-12-06
-**Status:** Ready for Implementation
+**Document Version:** 1.1
+**Date:** 2025-12-07
+**Status:** In Progress (QEMU complete, STM32 in progress)
 **Companion Document:** FREERTOS_THREADING_REQUIREMENTS.md
 
 ---
@@ -33,7 +33,8 @@ extmod/freertos/
 ├── mp_freertos_hal.c
 ├── freertos.mk
 ├── freertos.cmake
-└── FreeRTOSConfig_template.h
+├── FreeRTOSConfig_template.h
+└── freertos_hooks_template.c
 ```
 
 **Task:** Create empty files with standard MicroPython copyright headers and include guards.
@@ -61,6 +62,29 @@ extmod/freertos/
 **Input:** Requirements Section 6.1, 6.2
 
 **Acceptance:** Header compiles, structures match spec exactly.
+
+### 1.4 Write freertos_hooks_template.c [HAIKU]
+
+**File:** `extmod/freertos/freertos_hooks_template.c`
+
+**Task:** Create template for FreeRTOS callback hooks required by all ports:
+```c
+// Static allocation callbacks for Idle and Timer tasks
+void vApplicationGetIdleTaskMemory(...);
+void vApplicationGetTimerTaskMemory(...);
+
+// Stack overflow hook (for debugging)
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName);
+
+// Tick hook (optional, can call mp_handle_pending)
+void vApplicationTickHook(void);
+```
+
+**Input:** Requirements Section 5.3, FreeRTOS documentation
+
+**Output:** Well-commented template that ports can copy and customize.
+
+**Acceptance:** Template compiles, includes all required callbacks.
 
 ---
 
@@ -136,6 +160,21 @@ mp_uint_t mp_freertos_ticks_us(void);
 **Input:** Requirements Section 8.1, 8.2
 
 **Acceptance:** Functions work correctly before and after scheduler starts.
+
+### 3.3 Implement Time Functions [HAIKU]
+
+**File:** Port-specific `mphalport.c` or `mp_freertos_hal.c`
+
+**Task:** Implement time functions that work with FreeRTOS:
+- `mp_hal_time_ns()` must use FreeRTOS ticks, not direct hardware timers
+- Example: `return (uint64_t)mp_hal_ticks_us() * 1000ULL;`
+- Ensure consistency with `mp_hal_ticks_ms()` and `mp_hal_ticks_us()`
+
+**Critical:** Ports must not use hardware timers directly for `time.time()` when threading is enabled, as FreeRTOS manages the system tick.
+
+**Input:** QEMU implementation in `ports/qemu/mphalport.c:104`
+
+**Acceptance:** `time.time()` and `time.time_ns()` return consistent, monotonic values.
 
 ---
 
@@ -389,7 +428,7 @@ Critical review - GC bugs cause silent corruption:
 
 ## Phase 8: GIL Integration
 
-**Goal:** Implement Global Interpreter Lock using mutex primitives.
+**Goal:** Implement Global Interpreter Lock using mutex primitives and ensure responsive thread scheduling.
 
 ### 8.1 Implement GIL Exit with Yield [HAIKU]
 
@@ -411,6 +450,43 @@ void mp_thread_gil_exit(void) {
 **Input:** Requirements Section 8.3
 
 **Acceptance:** Multiple Python threads make progress (no GIL starvation).
+
+### 8.2 Configure Event Poll Hook [HAIKU]
+
+**File:** Port-specific `mpconfigport.h`
+
+**Task:** Each port must define `MICROPY_EVENT_POLL_HOOK` to integrate with FreeRTOS scheduler:
+```c
+#if MICROPY_PY_THREAD
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+        MP_THREAD_GIL_EXIT(); \
+        taskYIELD(); \
+        MP_THREAD_GIL_ENTER(); \
+    } while (0);
+
+#define MICROPY_THREAD_YIELD() taskYIELD()
+#else
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+    } while (0);
+
+#define MICROPY_THREAD_YIELD()
+#endif
+```
+
+**Critical:** This hook is called frequently by the bytecode interpreter and enables:
+- Handling of pending exceptions and keyboard interrupts
+- Fair scheduling between Python threads via GIL release
+- Cooperative multitasking within Python code
+
+**Input:** QEMU implementation in `ports/qemu/mpconfigport.h:99-117`
+
+**Acceptance:** REPL remains responsive, Ctrl+C works, threads yield properly.
 
 ---
 
@@ -457,6 +533,33 @@ Review for:
 - Essential service protection
 - Race conditions in start/stop
 - Memory management
+
+---
+
+## Port Integration Checklist
+
+**This checklist applies to all port integrations (Phases 10-12).**
+
+Each threading-enabled port must implement:
+
+- [ ] **FreeRTOSConfig.h** - Port-specific FreeRTOS configuration with correct CPU clock
+- [ ] **freertos_hooks.c** - Copy and customize from template (static allocation callbacks, stack overflow hook)
+- [ ] **mpconfigport.h threading section** with:
+  - `MICROPY_PY_THREAD_GIL (1)`
+  - `MICROPY_STACK_CHECK_MARGIN (1024)` - **Critical for stress_recurse.py**
+  - `MICROPY_MPTHREADPORT_H "extmod/freertos/mpthreadport.h"`
+  - `MICROPY_EVENT_POLL_HOOK` with GIL release and `taskYIELD()` - **Critical for responsiveness**
+  - `MICROPY_THREAD_YIELD() taskYIELD()`
+  - `mp_hal_delay_ms` macro redirection to `mp_freertos_delay_ms`
+- [ ] **mphalport.c modifications**:
+  - Conditionally compile non-FreeRTOS `mp_hal_delay_ms()` with `#if !MICROPY_PY_THREAD`
+  - Ensure time functions (`mp_hal_time_ns()`) use FreeRTOS ticks when threading enabled
+- [ ] **Build system integration** - Include `freertos.mk` or `freertos.cmake` conditionally
+- [ ] **main.c modifications** - Start FreeRTOS scheduler, call `mp_thread_init()`
+- [ ] **Testing**:
+  - Threaded build compiles and runs
+  - Non-threaded build still works (regression check)
+  - All thread tests pass: `run-tests.py thread/*.py`
 
 ---
 
@@ -507,18 +610,48 @@ endif
 
 **File:** `ports/stm32/mpconfigport.h`
 
-**Task:** Add threading configuration:
+**Task:** Add complete threading configuration per Port Integration Checklist:
 ```c
+// Threading configuration
 #if MICROPY_PY_THREAD
 #define MICROPY_PY_THREAD_GIL (1)
+#define MICROPY_STACK_CHECK_MARGIN (1024)
 #define MICROPY_MPTHREADPORT_H "extmod/freertos/mpthreadport.h"
+// FreeRTOS-aware delay (declared here to avoid include order issues)
+void mp_freertos_delay_ms(unsigned int ms);
 #define mp_hal_delay_ms mp_freertos_delay_ms
+#endif
+
+// Event poll hook - must release/acquire GIL for threading
+#if MICROPY_PY_THREAD
+#include "FreeRTOS.h"
+#include "task.h"
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+        MP_THREAD_GIL_EXIT(); \
+        taskYIELD(); \
+        MP_THREAD_GIL_ENTER(); \
+    } while (0);
+
+#define MICROPY_THREAD_YIELD() taskYIELD()
+#else
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+    } while (0);
+
+#define MICROPY_THREAD_YIELD()
 #endif
 ```
 
-**Input:** Requirements Section 2.4.5
+**Critical:** `MICROPY_STACK_CHECK_MARGIN` is required for `stress_recurse.py` to pass. Without it, deep recursion causes hard stack overflow instead of raising `RecursionError`.
 
-**Acceptance:** Compiles with and without threading.
+**Input:** Requirements Section 2.4.5, QEMU implementation
+
+**Acceptance:** Compiles with and without threading, all thread tests pass.
 
 ### 10.4 Modify STM32 main.c Startup [REGULAR]
 
@@ -573,29 +706,20 @@ endif
 
 **Acceptance:** No duplicate symbol errors, old backend still available if needed.
 
-### 10.6 Implement Static Allocation Callbacks [HAIKU]
+### 10.6 Create freertos_hooks.c [HAIKU]
 
 **File:** `ports/stm32/freertos_hooks.c` (new file)
 
-**Task:** Implement required FreeRTOS callbacks:
-```c
-static StaticTask_t xIdleTaskTCB;
-static StackType_t xIdleTaskStack[configMINIMAL_STACK_SIZE];
+**Task:** Copy `extmod/freertos/freertos_hooks_template.c` and customize for STM32:
+- Adjust idle task stack size if needed based on STM32 RAM
+- Implement `vApplicationStackOverflowHook()` to print error via UART (optional, useful for debugging)
+- Keep timer task callback if `configUSE_TIMERS` is enabled
 
-void vApplicationGetIdleTaskMemory(StaticTask_t **ppxIdleTaskTCBBuffer,
-                                   StackType_t **ppxIdleTaskStackBuffer,
-                                   configSTACK_DEPTH_TYPE *puxIdleTaskStackSize) {
-    *ppxIdleTaskTCBBuffer = &xIdleTaskTCB;
-    *ppxIdleTaskStackBuffer = xIdleTaskStack;
-    *puxIdleTaskStackSize = configMINIMAL_STACK_SIZE;
-}
+**Note:** This file provides the static allocation callbacks required by FreeRTOS when `configSUPPORT_STATIC_ALLOCATION` is enabled. All ports need this file.
 
-// Similar for timer task if configUSE_TIMERS
-```
+**Input:** Template from Phase 1.4, Requirements Section 5.3
 
-**Input:** Requirements Section 5.3
-
-**Acceptance:** Scheduler starts without assertion failures.
+**Acceptance:** File compiles, scheduler starts without assertion failures.
 
 ### 10.7 [REVIEW] STM32 Integration Review
 
@@ -748,16 +872,39 @@ cd tests
 
 **Acceptance:** No crashes, memory stable, counter accurate.
 
-### 13.4 QEMU CI Integration [REGULAR]
+### 13.4 Verify Non-Threaded Builds [HAIKU]
+
+**Task:** For each integrated port, verify that non-threaded builds still work:
+```bash
+# Clean build without threading
+make BOARD=<board> clean
+make BOARD=<board>  # Without MICROPY_PY_THREAD
+
+# Verify it builds and runs basic tests
+./run-tests.py --target <target> basics/
+```
+
+**Critical:** This regression check ensures threading integration didn't break existing non-threaded functionality.
+
+**Acceptance:** Non-threaded builds compile, run, and pass basic tests on all integrated ports.
+
+### 13.5 QEMU CI Integration [REGULAR]
 
 **Task:** Configure QEMU ARM build with threading for CI:
-- Create QEMU board definition with threading enabled
+- Create QEMU board definition with threading enabled (MPS2_AN385_THREAD)
 - Add to CI pipeline
-- Run thread tests in emulator
+- Test with both `exec:` and `execpty:` modes:
+  - `exec:` mode: Direct stdio, faster but less realistic
+  - `execpty:` mode: PTY-based serial, more realistic for interactive tests
+- Tune timeouts for emulation speed (stress tests may be slower)
 
-**Acceptance:** Thread tests run in CI without hardware.
+**Note:** QEMU testing provides fast feedback without hardware. All 32 thread tests should pass (1 skip: disable_irq.py).
 
-### 13.5 [REVIEW] Final Implementation Review
+**Input:** QEMU implementation in `ports/qemu/boards/MPS2_AN385_THREAD/`
+
+**Acceptance:** Thread tests run in CI without hardware, all tests pass.
+
+### 13.6 [REVIEW] Final Implementation Review
 
 Comprehensive review:
 - Code style (run codeformat.py)
