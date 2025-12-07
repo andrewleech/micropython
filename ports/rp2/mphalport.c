@@ -149,6 +149,8 @@ void mp_hal_delay_us(mp_uint_t us) {
     }
 }
 
+#if !MICROPY_PY_THREAD
+// When threading is enabled, mp_hal_delay_ms is redirected to mp_freertos_delay_ms
 void mp_hal_delay_ms(mp_uint_t ms) {
     mp_uint_t start = mp_hal_ticks_ms();
     mp_uint_t elapsed = 0;
@@ -157,6 +159,7 @@ void mp_hal_delay_ms(mp_uint_t ms) {
         elapsed = mp_hal_ticks_ms() - start;
     } while (elapsed < ms);
 }
+#endif
 
 void mp_hal_time_ns_set_from_rtc(void) {
     #if PICO_RP2040
