@@ -84,6 +84,11 @@ endif()
 list(APPEND GIT_SUBMODULES lib/mbedtls)
 list(APPEND GIT_SUBMODULES lib/tinyusb)
 
+# FreeRTOS threading backend
+if(MICROPY_PY_THREAD)
+    list(APPEND GIT_SUBMODULES lib/FreeRTOS-Kernel)
+endif()
+
 # Workaround for pico-sdk host toolchain issue, see directory for details
 list(APPEND CMAKE_MODULE_PATH "${MICROPY_PORT_DIR}/tools_patch")
 
@@ -168,9 +173,7 @@ set(MICROPY_SOURCE_PORT
     modrp2.c
     mphalport.c
     mpnetworkport.c
-    mpthreadport.c
     mutex_extra.c
-    pendsv.c
     rp2_flash.c
     rp2_pio.c
     rp2_psram.c
@@ -181,6 +184,15 @@ set(MICROPY_SOURCE_PORT
     mbedtls/mbedtls_port.c
     ${CMAKE_BINARY_DIR}/pins_${MICROPY_BOARD}.c
 )
+
+# Threading backend - conditional compilation
+if(NOT MICROPY_PY_THREAD)
+    # Pico SDK multicore threading (no FreeRTOS)
+    list(APPEND MICROPY_SOURCE_PORT
+        mpthreadport.c
+        pendsv.c
+    )
+endif()
 
 set(MICROPY_SOURCE_QSTR
     ${MICROPY_SOURCE_PY}
@@ -258,6 +270,41 @@ elseif(PICO_RISCV)
     list(APPEND PICO_SDK_COMPONENTS
         hardware_hazard3
         hardware_riscv
+    )
+endif()
+
+# FreeRTOS threading backend integration
+if(MICROPY_PY_THREAD)
+    set(FREERTOS_DIR ${MICROPY_DIR}/lib/FreeRTOS-Kernel)
+    set(FREERTOS_PORT_DIR ${FREERTOS_DIR}/portable/ThirdParty/GCC/RP2040)  # codespell:ignore
+
+    # FreeRTOS kernel sources
+    set(MICROPY_SOURCE_FREERTOS
+        ${MICROPY_DIR}/extmod/freertos/mpthreadport.c
+        ${MICROPY_DIR}/extmod/freertos/mp_freertos_hal.c
+        ${FREERTOS_DIR}/tasks.c
+        ${FREERTOS_DIR}/queue.c
+        ${FREERTOS_DIR}/list.c
+        ${FREERTOS_DIR}/timers.c
+        ${FREERTOS_DIR}/event_groups.c
+        ${FREERTOS_DIR}/stream_buffer.c
+        ${FREERTOS_DIR}/portable/MemMang/heap_4.c
+        ${FREERTOS_PORT_DIR}/port.c
+        freertos_hooks.c
+    )
+
+    list(APPEND MICROPY_SOURCE_PORT ${MICROPY_SOURCE_FREERTOS})
+
+    # FreeRTOS include directories
+    target_include_directories(${MICROPY_TARGET} PRIVATE
+        ${MICROPY_DIR}/extmod/freertos
+        ${FREERTOS_DIR}/include
+        ${FREERTOS_PORT_DIR}/include
+    )
+
+    # FreeRTOS compile definitions
+    target_compile_definitions(${MICROPY_TARGET} PRIVATE
+        MICROPY_PY_THREAD=1
     )
 endif()
 
