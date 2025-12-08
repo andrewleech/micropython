@@ -120,7 +120,6 @@
 #define MICROPY_TRACKED_ALLOC                   (MICROPY_SSL_MBEDTLS || MICROPY_BLUETOOTH_BTSTACK)
 #define MICROPY_READER_VFS                      (1)
 #define MICROPY_ENABLE_GC                       (1)
-#define MICROPY_STACK_CHECK_MARGIN              (256)
 #define MICROPY_ENABLE_EMERGENCY_EXCEPTION_BUF  (1)
 #define MICROPY_LONGINT_IMPL                    (MICROPY_LONGINT_IMPL_MPZ)
 #define MICROPY_FLOAT_IMPL                      (MICROPY_FLOAT_IMPL_FLOAT)
@@ -133,12 +132,17 @@
 // Fine control over Python builtins, classes, modules, etc
 #define MICROPY_PY_BUILTINS_HELP_TEXT           rp2_help_text
 #define MICROPY_PY_SYS_PLATFORM                 "rp2"
-// Threading configuration
+
+// Threading configuration (enabled by default)
 #ifndef MICROPY_PY_THREAD
 #define MICROPY_PY_THREAD                       (1)
+#endif
+#if MICROPY_PY_THREAD
 #define MICROPY_PY_THREAD_GIL                   (1)
 #define MICROPY_STACK_CHECK_MARGIN              (1024)
 #define MICROPY_MPTHREADPORT_H                  "extmod/freertos/mpthreadport.h"
+#else
+#define MICROPY_STACK_CHECK_MARGIN              (256)
 #endif
 
 // FreeRTOS-aware delay (redirect mp_hal_delay_ms to FreeRTOS implementation)
@@ -154,18 +158,17 @@ void mp_freertos_delay_ms(unsigned int ms);
 
 // Event poll hook - must release/acquire GIL for threading
 #if MICROPY_PY_THREAD
-#include "FreeRTOS.h"
-#include "task.h"
+void mp_freertos_yield(void);  // Wrapper in mp_freertos_hal.c
 #define MICROPY_EVENT_POLL_HOOK \
     do { \
         extern void mp_handle_pending(bool); \
         mp_handle_pending(true); \
         MP_THREAD_GIL_EXIT(); \
-        taskYIELD(); \
+        mp_freertos_yield(); \
         MP_THREAD_GIL_ENTER(); \
     } while (0);
 
-#define MICROPY_THREAD_YIELD() taskYIELD()
+#define MICROPY_THREAD_YIELD() mp_freertos_yield()
 #else
 #define MICROPY_EVENT_POLL_HOOK \
     do { \

@@ -54,9 +54,6 @@
 #include "pico/binary_info.h"
 #include "pico/unique_id.h"
 #include "hardware/structs/rosc.h"
-#if MICROPY_PY_THREAD
-#include "hardware/exception.h"
-#endif
 #if MICROPY_PY_LWIP
 #include "lwip/init.h"
 #include "lwip/apps/mdns.h"
@@ -85,9 +82,6 @@ extern uint8_t __GcHeapStart, __GcHeapEnd;
 #define FREERTOS_MAIN_TASK_STACK_SIZE (8192 / sizeof(StackType_t))
 static StaticTask_t main_task_tcb;
 static StackType_t main_task_stack[FREERTOS_MAIN_TASK_STACK_SIZE];
-
-// Forward declaration for PendSV handler (defined in pendsv.c)
-void PendSV_Handler(void);
 #endif
 
 // Embed version info in the binary in machine readable form
@@ -225,14 +219,6 @@ int main(int argc, char **argv) {
 
 static void rp2_main_loop(void *arg) {
     (void)arg;
-
-    #if MICROPY_PY_THREAD && PICO_ARM
-    // Re-register MicroPython's PendSV handler after FreeRTOS registers its own.
-    // FreeRTOS calls exception_set_exclusive_handler(PENDSV_EXCEPTION, xPortPendSVHandler)
-    // during vTaskStartScheduler(), which overrides the static vector table.
-    // We need to install our wrapper which calls xPortPendSVHandler for context switches.
-    exception_set_exclusive_handler(PENDSV_EXCEPTION, PendSV_Handler);
-    #endif
 
 soft_reset:
     #if MICROPY_PY_THREAD

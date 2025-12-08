@@ -27,7 +27,6 @@
 #include <assert.h>
 #include "py/mpconfig.h"
 #include "pendsv.h"
-#include "hardware/irq.h"
 
 #if MICROPY_PY_THREAD
 #include "py/mpthread.h"
@@ -47,94 +46,144 @@
 
 static pendsv_dispatch_t pendsv_dispatch_table[PENDSV_DISPATCH_NUM_SLOTS];
 
-static inline void pendsv_resume_run_dispatch(void);
-
-// PendSV IRQ priority, to run system-level tasks that preempt the main thread.
-#define IRQ_PRI_PENDSV PICO_LOWEST_IRQ_PRIORITY
-
-void PendSV_Handler(void);
-
 #if MICROPY_PY_THREAD
+
+// ============================================================================
+// FreeRTOS Service Task Implementation
+//
+// Instead of using PendSV interrupt (which conflicts with FreeRTOS's use of
+// PendSV for context switching), we use a high-priority service task that
+// processes the dispatch table when signaled via task notifications.
+//
+// This approach:
+// - Eliminates PendSV handler conflicts with FreeRTOS
+// - Works correctly with FreeRTOS SMP on dual-core RP2040
+// - Maintains the same pendsv_schedule_dispatch() API
+// - Provides similar timing characteristics (task runs as soon as possible)
+// ============================================================================
 
 #include "FreeRTOS.h"
 #include "task.h"
 
-// Important to use a recursive mutex here as softtimer updates PendSV from the
-// loop of mp_wfe_or_timeout(), and either core may call pendsv_suspend().
+// Service task runs at highest priority to emulate "lowest interrupt" behavior.
+// It will preempt all other tasks as soon as it's notified.
+#define SERVICE_TASK_PRIORITY (configMAX_PRIORITIES - 1)
+#define SERVICE_TASK_STACK_SIZE (512 / sizeof(StackType_t))
+
+static StaticTask_t service_task_tcb;
+static StackType_t service_task_stack[SERVICE_TASK_STACK_SIZE];
+static TaskHandle_t service_task_handle;
+
+// Recursive mutex for suspend/resume mechanism.
+// Important to use recursive mutex as either core may call pendsv_suspend()
+// and expect both mutual exclusion and that dispatch won't run.
 static mp_thread_recursive_mutex_t pendsv_mutex;
 
-// Flag to indicate dispatch is pending (checked by naked PendSV handler)
-static volatile uint32_t pendsv_dispatch_active;
+// Service task function - waits for notifications and processes dispatch table.
+static void pendsv_service_task(void *arg) {
+    (void)arg;
 
-// Called from CPU0 during boot, but may be called later when CPU1 wakes up
-void pendsv_init(void) {
-    if (get_core_num() == 0) {
-        pendsv_dispatch_active = false;
-        mp_thread_recursive_mutex_init(&pendsv_mutex);
+    for (;;) {
+        // Block until notified (efficient, doesn't spin)
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        #if MICROPY_PY_NETWORK_CYW43
+        CYW43_STAT_INC(PENDSV_RUN_COUNT);
+        #endif
+
+        // Try to acquire mutex (non-blocking)
+        // If suspended, we'll be re-notified when pendsv_resume() is called
+        if (!mp_thread_recursive_mutex_lock(&pendsv_mutex, 0)) {
+            continue;
+        }
+
+        // Process all pending dispatches
+        for (size_t i = 0; i < PENDSV_DISPATCH_NUM_SLOTS; ++i) {
+            if (pendsv_dispatch_table[i] != NULL) {
+                pendsv_dispatch_t f = pendsv_dispatch_table[i];
+                pendsv_dispatch_table[i] = NULL;
+                f();
+            }
+        }
+
+        mp_thread_recursive_mutex_unlock(&pendsv_mutex);
     }
-    #if !defined(__riscv)
-    NVIC_SetPriority(PendSV_IRQn, IRQ_PRI_PENDSV);
-    #endif
+}
+
+void pendsv_init(void) {
+    static bool initialized = false;
+
+    if (!initialized) {
+        initialized = true;
+        mp_thread_recursive_mutex_init(&pendsv_mutex);
+
+        // Create service task with static allocation
+        service_task_handle = xTaskCreateStatic(
+            pendsv_service_task,
+            "svc",
+            SERVICE_TASK_STACK_SIZE,
+            NULL,
+            SERVICE_TASK_PRIORITY,
+            service_task_stack,
+            &service_task_tcb);
+    }
 }
 
 void pendsv_suspend(void) {
-    // Recursive Mutex here as either core may call pendsv_suspend() and expect
-    // both mutual exclusion (other core can't enter pendsv_suspend() at the
-    // same time), and that no PendSV handler will run.
     mp_thread_recursive_mutex_lock(&pendsv_mutex, 1);
 }
 
 void pendsv_resume(void) {
     mp_thread_recursive_mutex_unlock(&pendsv_mutex);
-    pendsv_resume_run_dispatch();
-}
 
-static inline int pendsv_suspend_count(void) {
-    // Return whether dispatch is suspended (mutex is held)
-    // Try non-blocking lock - if we get it, unlock immediately and return 0.
-    if (mp_thread_recursive_mutex_lock(&pendsv_mutex, 0)) {
-        mp_thread_recursive_mutex_unlock(&pendsv_mutex);
-        return 0; // Not suspended
-    }
-    return 1; // Suspended (locked by some task)
-}
-
-// C function to handle dispatch (called from naked PendSV_Handler)
-__attribute__((used)) static void pendsv_dispatch_handler(void) {
-    #if MICROPY_PY_NETWORK_CYW43
-    CYW43_STAT_INC(PENDSV_RUN_COUNT);
-    #endif
-
-    // Acquire recursive mutex for dispatch table access
-    if (!mp_thread_recursive_mutex_lock(&pendsv_mutex, 0)) {
-        // Other core holds mutex, PendSV will be rescheduled when they release it
-        pendsv_dispatch_active = true;
-        return;
-    }
-
-    // Process all pending dispatches
+    // Check if any dispatch is pending and notify service task
     for (size_t i = 0; i < PENDSV_DISPATCH_NUM_SLOTS; ++i) {
         if (pendsv_dispatch_table[i] != NULL) {
-            pendsv_dispatch_t f = pendsv_dispatch_table[i];
-            pendsv_dispatch_table[i] = NULL;
-            f();
+            xTaskNotifyGive(service_task_handle);
+            break;
         }
     }
-
-    mp_thread_recursive_mutex_unlock(&pendsv_mutex);
-
-    // Check if a dispatch occurred while we were servicing
-    pendsv_resume_run_dispatch();
 }
 
-#else
+// Check if running in interrupt context (Cortex-M: IPSR != 0 means exception/interrupt)
+static inline bool pendsv_in_isr(void) {
+    uint32_t ipsr;
+    __asm volatile ("mrs %0, ipsr" : "=r" (ipsr));
+    return ipsr != 0;
+}
 
-// Without threads we don't include any pico-sdk mutex in the build,
-// but also we don't need to worry about cross-thread contention (or
-// races with interrupts that update this counter).
+void pendsv_schedule_dispatch(size_t slot, pendsv_dispatch_t f) {
+    pendsv_dispatch_table[slot] = f;
+
+    // Check if we're in ISR context
+    if (pendsv_in_isr()) {
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        vTaskNotifyGiveFromISR(service_task_handle, &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    } else {
+        xTaskNotifyGive(service_task_handle);
+    }
+}
+
+#else // !MICROPY_PY_THREAD
+
+// ============================================================================
+// Non-threaded Implementation (original PendSV-based approach)
+//
+// Without FreeRTOS, we use the traditional PendSV interrupt mechanism.
+// ============================================================================
+
+#include "hardware/irq.h"
+
+// PendSV IRQ priority, to run system-level tasks that preempt the main thread.
+#define IRQ_PRI_PENDSV PICO_LOWEST_IRQ_PRIORITY
+
 static int pendsv_lock;
 
 void pendsv_init(void) {
+    #if !defined(__riscv)
+    NVIC_SetPriority(PendSV_IRQn, IRQ_PRI_PENDSV);
+    #endif
 }
 
 void pendsv_suspend(void) {
@@ -144,43 +193,29 @@ void pendsv_suspend(void) {
 void pendsv_resume(void) {
     assert(pendsv_lock > 0);
     pendsv_lock--;
-    pendsv_resume_run_dispatch();
-}
 
-static inline int pendsv_suspend_count(void) {
-    return pendsv_lock;
-}
-
-#endif
-
-bool pendsv_is_pending(size_t slot) {
-    return pendsv_dispatch_table[slot] != NULL;
-}
-
-static inline void pendsv_resume_run_dispatch(void) {
-    // Run pendsv if needed.  Find an entry with a dispatch and call pendsv dispatch
-    // with it.  If pendsv runs it will service all slots.
-    int count = PENDSV_DISPATCH_NUM_SLOTS;
-    while (count--) {
-        if (pendsv_dispatch_table[count]) {
-            pendsv_schedule_dispatch(count, pendsv_dispatch_table[count]);
-            break;
+    // Re-trigger if work is pending
+    if (pendsv_lock == 0) {
+        for (size_t i = 0; i < PENDSV_DISPATCH_NUM_SLOTS; ++i) {
+            if (pendsv_dispatch_table[i] != NULL) {
+                #if PICO_ARM
+                SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;
+                #elif PICO_RISCV
+                struct timespec ts;
+                aon_timer_get_time(&ts);
+                aon_timer_enable_alarm(&ts, PendSV_Handler, false);
+                #endif
+                break;
+            }
         }
     }
 }
 
 void pendsv_schedule_dispatch(size_t slot, pendsv_dispatch_t f) {
     pendsv_dispatch_table[slot] = f;
-    #if MICROPY_PY_THREAD
-    pendsv_dispatch_active = true;
-    #endif
-    // There is a race here where other core calls pendsv_suspend() before ISR
-    // can execute so this check fails, but dispatch will happen later when
-    // other core calls pendsv_resume().
-    if (pendsv_suspend_count() == 0) {
+
+    if (pendsv_lock == 0) {
         #if PICO_ARM
-        // Note this register is part of each CPU core, so setting it on CPUx
-        // will set the IRQ and run PendSV_Handler on CPUx only.
         SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;
         #elif PICO_RISCV
         struct timespec ts;
@@ -194,45 +229,9 @@ void pendsv_schedule_dispatch(size_t slot, pendsv_dispatch_t f) {
     }
 }
 
-#if MICROPY_PY_THREAD
-// Declare FreeRTOS's PendSV handler
-extern void xPortPendSVHandler(void);
-
-// PendSV wrapper: checks for MicroPython dispatch, then tail-calls FreeRTOS handler.
-// This allows both MicroPython's background task dispatch and FreeRTOS's context
-// switching to coexist on the same interrupt.
-__attribute__((naked)) void PendSV_Handler(void) {
-    __asm volatile (
-        ".syntax unified\n"
-        // Check if MicroPython dispatch is pending
-        "ldr r1, pendsv_dispatch_active_ptr\n"
-        "ldr r0, [r1]\n"
-        "cmp r0, #0\n"
-        "beq .Lno_dispatch\n"
-        // Clear dispatch flag
-        "movs r2, #0\n"
-        "str r2, [r1]\n"
-        // Save EXC_RETURN and call dispatch handler (M0+ compatible)
-        "push {r4, lr}\n"
-        "bl pendsv_dispatch_handler\n"
-        "pop {r4, r3}\n"
-        "mov lr, r3\n"
-        ".Lno_dispatch:\n"
-        // Tail-call FreeRTOS context switch handler
-        "ldr r0, =xPortPendSVHandler\n"
-        "bx r0\n"
-        ".align 2\n"
-        "pendsv_dispatch_active_ptr: .word pendsv_dispatch_active\n"
-        );
-}
-
-#else
-
-// PendSV interrupt handler to perform background processing.
-//
-// Non-threaded version handles dispatches directly without FreeRTOS.
+// PendSV interrupt handler for non-threaded builds
 void PendSV_Handler(void) {
-    assert(pendsv_suspend_count() == 0);
+    assert(pendsv_lock == 0);
 
     #if MICROPY_PY_NETWORK_CYW43
     CYW43_STAT_INC(PENDSV_RUN_COUNT);
@@ -247,4 +246,8 @@ void PendSV_Handler(void) {
     }
 }
 
-#endif
+#endif // MICROPY_PY_THREAD
+
+bool pendsv_is_pending(size_t slot) {
+    return pendsv_dispatch_table[slot] != NULL;
+}

@@ -91,4 +91,11 @@ mp_uint_t mp_freertos_ticks_us(void) {
     return xTaskGetTickCount() * (portTICK_PERIOD_MS * 1000);
 }
 
+// Yield to other tasks. Used by MICROPY_EVENT_POLL_HOOK and MICROPY_THREAD_YIELD.
+void mp_freertos_yield(void) {
+    if (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING) {
+        taskYIELD();
+    }
+}
+
 #endif // MICROPY_PY_THREAD

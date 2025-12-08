@@ -30,9 +30,18 @@
 
 #if MICROPY_PY_THREAD
 
+// FreeRTOS headers only available after CMake target setup (not during qstr extraction)
+#ifndef NO_QSTR
 #include "FreeRTOS.h"
 #include "task.h"
 #include "semphr.h"
+#else
+// Stub definitions for qstr extraction phase (types only, macros not needed)
+typedef void *TaskHandle_t;
+typedef struct { char _[256]; } StaticTask_t;
+typedef struct { char _[96]; } StaticSemaphore_t;
+typedef void *SemaphoreHandle_t;
+#endif
 
 // Thread-local storage index for mp_state_thread_t pointer
 #ifndef MP_FREERTOS_TLS_INDEX

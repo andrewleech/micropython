@@ -84,6 +84,11 @@ endif()
 list(APPEND GIT_SUBMODULES lib/mbedtls)
 list(APPEND GIT_SUBMODULES lib/tinyusb)
 
+# Threading enabled by default (matches mpconfigport.h default)
+if(NOT DEFINED MICROPY_PY_THREAD)
+    set(MICROPY_PY_THREAD ON)
+endif()
+
 # FreeRTOS threading backend
 if(MICROPY_PY_THREAD)
     list(APPEND GIT_SUBMODULES lib/FreeRTOS-Kernel)
@@ -186,13 +191,6 @@ set(MICROPY_SOURCE_PORT
     ${CMAKE_BINARY_DIR}/pins_${MICROPY_BOARD}.c
 )
 
-# Threading backend - conditional compilation
-if(NOT MICROPY_PY_THREAD)
-    # Pico SDK multicore threading (no FreeRTOS)
-    list(APPEND MICROPY_SOURCE_PORT
-        mpthreadport.c
-    )
-endif()
 
 set(MICROPY_SOURCE_QSTR
     ${MICROPY_SOURCE_PY}
