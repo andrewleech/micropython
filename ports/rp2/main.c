@@ -84,6 +84,10 @@ static StaticTask_t main_task_tcb;
 static StackType_t main_task_stack[FREERTOS_MAIN_TASK_STACK_SIZE];
 #endif
 
+#if MICROPY_HW_ENABLE_PSRAM
+static size_t psram_size;
+#endif
+
 // Embed version info in the binary in machine readable form
 bi_decl(bi_program_version_string(MICROPY_GIT_TAG));
 
@@ -114,7 +118,7 @@ int main(int argc, char **argv) {
     rp2_flash_set_timing();
 
     #if MICROPY_HW_ENABLE_PSRAM
-    size_t psram_size = psram_init(MICROPY_HW_PSRAM_CS_PIN);
+    psram_size = psram_init(MICROPY_HW_PSRAM_CS_PIN);
     #endif
 
     #if MICROPY_HW_ENABLE_UART_REPL
@@ -143,7 +147,9 @@ int main(int argc, char **argv) {
     mp_hal_time_ns_set_from_rtc();
     #endif
 
-    // Initialise stack extents and GC heap.
+    #if !MICROPY_PY_THREAD
+    // Non-FreeRTOS: Initialise stack extents and GC heap before main loop.
+    // FreeRTOS: These are initialized in rp2_main_loop() after scheduler starts (like STM32).
     mp_cstack_init_with_top(&__StackTop, &__StackTop - &__StackBottom);
 
     #if MICROPY_HW_ENABLE_PSRAM
@@ -159,6 +165,7 @@ int main(int argc, char **argv) {
     }
     #else
     gc_init(&__GcHeapStart, &__GcHeapEnd);
+    #endif
     #endif
 
     #if MICROPY_PY_LWIP && !MICROPY_PY_THREAD
@@ -223,35 +230,30 @@ static void rp2_main_loop(void *arg) {
     (void)arg;
 
     #if MICROPY_PY_THREAD
-    // FreeRTOS: Start and initialise the RTC after scheduler has started.
-    // This must be after scheduler start because busy_wait_us() relies on timer
-    // hardware that doesn't work properly before FreeRTOS ticks begin.
-    //
-    // NOTE: This approach causes firmware boot failure (device enters bootloader).
-    // Root cause unknown - requires further investigation with GDB.
-    // See git history for debugging attempts.
-    struct timespec ts = { 0, 0 };
-    ts.tv_sec = timeutils_seconds_since_epoch(2021, 1, 1, 0, 0, 0);
-    aon_timer_start(&ts);
-    mp_hal_time_ns_set_from_rtc();
+    // FreeRTOS: Initialize stack extents and GC heap AFTER scheduler has started.
+    // This matches STM32's proven architecture (see ports/stm32/main.c:606-630).
+    // Doing this before scheduler causes memory corruption / boot failure.
+    mp_cstack_init_with_top(&__StackTop, &__StackTop - &__StackBottom);
 
-    #if MICROPY_PY_LWIP
-    // FreeRTOS: Initialize lwIP after scheduler has started.
-    // lwIP init needs random numbers which uses busy_wait_us() that requires
-    // the timer hardware to be running (doesn't work before scheduler starts).
-    // lwIP doesn't allow to reinitialise itself by subsequent calls to this function
-    // because the system timeout list (next_timeout) is only ever reset by BSS clearing.
-    // So we only init the lwIP stack once on power-up (before soft_reset label).
-    lwip_init();
-    #if LWIP_MDNS_RESPONDER
-    mdns_resp_init();
-    #endif
+    #if MICROPY_HW_ENABLE_PSRAM
+    if (psram_size) {
+        #if MICROPY_GC_SPLIT_HEAP
+        gc_init(&__GcHeapStart, &__GcHeapEnd);
+        gc_add((void *)PSRAM_BASE, (void *)(PSRAM_BASE + psram_size));
+        #else
+        gc_init((void *)PSRAM_BASE, (void *)(PSRAM_BASE + psram_size));
+        #endif
+    } else {
+        gc_init(&__GcHeapStart, &__GcHeapEnd);
+    }
+    #else
+    gc_init(&__GcHeapStart, &__GcHeapEnd);
     #endif
     #endif
 
 soft_reset:
     #if MICROPY_PY_THREAD
-    // Initialize FreeRTOS threading backend with main task stack for GC scanning
+    // Initialize FreeRTOS threading backend with main task stack for GC scanning.
     mp_thread_init(main_task_stack, sizeof(main_task_stack));
     #endif
 
