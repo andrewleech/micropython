@@ -135,11 +135,13 @@ int main(int argc, char **argv) {
     bi_decl(bi_program_feature("thread support"))
     #endif
 
-    // Start and initialise the RTC
+    #if !MICROPY_PY_THREAD
+    // Non-FreeRTOS: Start and initialise the RTC
     struct timespec ts = { 0, 0 };
     ts.tv_sec = timeutils_seconds_since_epoch(2021, 1, 1, 0, 0, 0);
     aon_timer_start(&ts);
     mp_hal_time_ns_set_from_rtc();
+    #endif
 
     // Initialise stack extents and GC heap.
     mp_cstack_init_with_top(&__StackTop, &__StackTop - &__StackBottom);
@@ -159,8 +161,8 @@ int main(int argc, char **argv) {
     gc_init(&__GcHeapStart, &__GcHeapEnd);
     #endif
 
-    #if MICROPY_PY_LWIP
-    // lwIP doesn't allow to reinitialise itself by subsequent calls to this function
+    #if MICROPY_PY_LWIP && !MICROPY_PY_THREAD
+    // Non-FreeRTOS: lwIP doesn't allow to reinitialise itself by subsequent calls to this function
     // because the system timeout list (next_timeout) is only ever reset by BSS clearing.
     // So for now we only init the lwIP stack once on power-up.
     lwip_init();
@@ -219,6 +221,33 @@ int main(int argc, char **argv) {
 
 static void rp2_main_loop(void *arg) {
     (void)arg;
+
+    #if MICROPY_PY_THREAD
+    // FreeRTOS: Start and initialise the RTC after scheduler has started.
+    // This must be after scheduler start because busy_wait_us() relies on timer
+    // hardware that doesn't work properly before FreeRTOS ticks begin.
+    //
+    // NOTE: This approach causes firmware boot failure (device enters bootloader).
+    // Root cause unknown - requires further investigation with GDB.
+    // See git history for debugging attempts.
+    struct timespec ts = { 0, 0 };
+    ts.tv_sec = timeutils_seconds_since_epoch(2021, 1, 1, 0, 0, 0);
+    aon_timer_start(&ts);
+    mp_hal_time_ns_set_from_rtc();
+
+    #if MICROPY_PY_LWIP
+    // FreeRTOS: Initialize lwIP after scheduler has started.
+    // lwIP init needs random numbers which uses busy_wait_us() that requires
+    // the timer hardware to be running (doesn't work before scheduler starts).
+    // lwIP doesn't allow to reinitialise itself by subsequent calls to this function
+    // because the system timeout list (next_timeout) is only ever reset by BSS clearing.
+    // So we only init the lwIP stack once on power-up (before soft_reset label).
+    lwip_init();
+    #if LWIP_MDNS_RESPONDER
+    mdns_resp_init();
+    #endif
+    #endif
+    #endif
 
 soft_reset:
     #if MICROPY_PY_THREAD
