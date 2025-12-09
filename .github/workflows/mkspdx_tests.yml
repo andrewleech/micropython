@@ -1,0 +1,53 @@
+name: mkspdx SBOM tool tests
+
+on:
+  push:
+    paths:
+      - 'tools/mkspdx/**'
+      - '.github/workflows/mkspdx_tests.yml'
+  pull_request:
+    paths:
+      - 'tools/mkspdx/**'
+      - '.github/workflows/mkspdx_tests.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.11', '3.12']
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest
+        # Optional: install reuse for enhanced tests
+        pip install reuse || true
+    - name: Run unit tests
+      run: |
+        python -m pytest tools/mkspdx/tests/ -v --tb=short
+    - name: Test CLI help
+      run: |
+        python -m tools.mkspdx --help
+    - name: Test validation mode
+      run: |
+        # Create a minimal valid SPDX document and validate it
+        cat > /tmp/test.spdx << 'EOF'
+        SPDXVersion: SPDX-2.3
+        DataLicense: CC0-1.0
+        SPDXID: SPDXRef-DOCUMENT
+        DocumentName: test
+        DocumentNamespace: https://example.org/test
+        Creator: Tool: test
+        Created: 2025-01-01T00:00:00Z
+        EOF
+        python -m tools.mkspdx --validate /tmp/test.spdx

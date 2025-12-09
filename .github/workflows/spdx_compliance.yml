@@ -1,0 +1,16 @@
+name: SPDX license compliance
+
+on: [push, pull_request]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spdx-compliance:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    # Version should be kept in sync with .pre-commit-config.yaml
+    - name: REUSE Compliance Check
+      uses: fsfe/reuse-action@v5
