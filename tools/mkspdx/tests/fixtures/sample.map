@@ -1,0 +1,51 @@
+Archive member included to satisfy reference by file (symbol)
+
+/usr/lib/gcc/arm-none-eabi/10.3.1/libgcc.a(_arm_addsubdf3.o)
+                              build/py/parsenum.o (__aeabi_dsub)
+/usr/lib/gcc/arm-none-eabi/10.3.1/libgcc.a(_arm_muldivdf3.o)
+                              build/py/parsenum.o (__aeabi_dmul)
+build/lib/libmicropython.a(gc.o)
+                              build/py/malloc.o (gc_alloc)
+build/lib/libmicropython.a(objstr.o)
+                              build/py/compile.o (mp_obj_str_get_str)
+
+Allocating common symbols
+Common symbol       size              file
+
+mp_state_ctx        0x150             build/py/mpstate.o
+
+Discarded input sections
+
+ .text          0x0000000000000000        0x0 build/py/mpstate.o
+ .data          0x0000000000000000        0x0 build/py/mpstate.o
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+FLASH            0x0000000008000000 0x0000000000100000 xr
+RAM              0x0000000020000000 0x0000000000020000 xrw
+
+Linker script and memory map
+
+LOAD build/py/gc.o
+LOAD build/py/malloc.o
+LOAD build/py/mpstate.o
+LOAD build/py/objstr.o
+LOAD build/py/compile.o
+LOAD build/py/parsenum.o
+LOAD build/extmod/modasyncio.o
+LOAD build/lib/littlefs/lfs1.o
+LOAD build/lib/littlefs/lfs2.o
+
+.text           0x0000000008000000    0x50000
+ *(.isr_vector)
+ .isr_vector    0x0000000008000000      0x188 build/py/gc.o
+                0x0000000008000000                _isr_vector_start
+ *(.text*)
+ .text          0x0000000008000188     0x1234 build/py/gc.o
+                0x0000000008000188                gc_init
+                0x00000000080001a0                gc_alloc
+ .text          0x00000000080013bc      0x456 build/py/malloc.o
+ .text          0x0000000008001812      0x789 build/py/objstr.o
+
+OUTPUT(firmware.elf elf32-littlearm)
