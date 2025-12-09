@@ -25,3 +25,9 @@ repos:
         name: Spellcheck for changed files (codespell)
         additional_dependencies:
           - tomli
+  - repo: https://github.com/fsfe/reuse-tool
+    # Version should be kept in sync with .github/workflows/spdx_compliance.yml
+    rev: v5.0.2
+    hooks:
+      - id: reuse
+        name: SPDX license compliance check (reuse)
