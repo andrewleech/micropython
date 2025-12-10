@@ -28,6 +28,11 @@
 
 #include "py/obj.h"
 #include "py/runtime.h"
+#include "py/mpconfig.h"
+
+#if defined(MICROPY_PYB_IRQ_PROFILE) && MICROPY_PYB_IRQ_PROFILE
+#include "ports/stm32/mpconfigport.h"
+#endif
 
 typedef struct _mp_obj_bound_meth_t {
     mp_obj_base_t base;
@@ -67,6 +72,9 @@ mp_obj_t mp_call_method_self_n_kw(mp_obj_t meth, mp_obj_t self, size_t n_args, s
     #endif
     args2[0] = self;
     memcpy(args2 + 1, args, n_total * sizeof(mp_obj_t));
+    #if defined(MICROPY_PYB_IRQ_PROFILE) && MICROPY_PYB_IRQ_PROFILE
+    MP_IRQ_PROFILE_CAPTURE(11);  // P11: before mp_call_function_n_kw (after args setup)
+    #endif
     mp_obj_t res = mp_call_function_n_kw(meth, n_args + 1, n_kw, args2);
     #if MICROPY_ENABLE_PYSTACK
     mp_pystack_free(args2);
@@ -79,6 +87,9 @@ mp_obj_t mp_call_method_self_n_kw(mp_obj_t meth, mp_obj_t self, size_t n_args, s
 }
 
 static mp_obj_t bound_meth_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+    #if defined(MICROPY_PYB_IRQ_PROFILE) && MICROPY_PYB_IRQ_PROFILE
+    MP_IRQ_PROFILE_CAPTURE(10);  // P10: bound_meth_call entry
+    #endif
     mp_obj_bound_meth_t *self = MP_OBJ_TO_PTR(self_in);
     return mp_call_method_self_n_kw(self->meth, self->self, n_args, n_kw, args);
 }

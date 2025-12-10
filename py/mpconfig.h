@@ -2428,4 +2428,10 @@ typedef time_t mp_timestamp_t;
 #endif
 #endif
 
+// IRQ profiling capture macro fallback. Ports can override this in mpconfigport.h
+// to capture timing data at key points during IRQ handler execution.
+#ifndef MP_IRQ_PROFILE_CAPTURE
+#define MP_IRQ_PROFILE_CAPTURE(idx)
+#endif
+
 #endif // MICROPY_INCLUDED_PY_MPCONFIG_H

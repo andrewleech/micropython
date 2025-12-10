@@ -81,4 +81,20 @@ mp_obj_t mp_irq_prepare_handler(mp_obj_t callback, mp_obj_t parent);
 int mp_irq_dispatch(mp_obj_t handler, mp_obj_t parent, bool ishard);
 void mp_irq_handler(mp_irq_obj_t *self);
 
+/******************************************************************************
+ IRQ PROFILING HOOKS
+ ******************************************************************************/
+
+// Ports can define MP_IRQ_PROFILE_CAPTURE(idx) to capture timing at key points:
+//   0: timer_handle_irq_channel entry (port-specific)
+//   1: mp_irq_dispatch entry
+//   2: after sched_lock + gc_lock
+//   3: after nlr_push (before type check)
+//   4: before mp_call_function_1 or mp_obj_gen_resume
+//   5: after handler returns
+//   6: mp_irq_dispatch exit
+#ifndef MP_IRQ_PROFILE_CAPTURE
+#define MP_IRQ_PROFILE_CAPTURE(idx)
+#endif
+
 #endif // MICROPY_INCLUDED_LIB_UTILS_MPIRQ_H

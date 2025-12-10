@@ -35,6 +35,12 @@
 #include "pin.h"
 #include "irq.h"
 
+// IRQ profiling: storage for capture points (macro defined in mpconfigport.h)
+#if MICROPY_PYB_IRQ_PROFILE
+volatile uint32_t pyb_irq_profile[IRQ_PROFILE_POINTS];
+volatile bool pyb_irq_profile_enabled = false;
+#endif
+
 /// \moduleref pyb
 /// \class Timer - periodically call a function
 ///
@@ -1416,6 +1422,7 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(pyb_timer_channel_obj, 2, pyb_timer_channel);
 /// \method counter([value])
 /// Get or set the timer counter.
 static mp_obj_t pyb_timer_counter(size_t n_args, const mp_obj_t *args) {
+    MP_IRQ_PROFILE_CAPTURE(21);  // P21: pyb_timer_counter entry
     pyb_timer_obj_t *self = MP_OBJ_TO_PTR(args[0]);
     if (n_args == 1) {
         // get
@@ -1517,7 +1524,8 @@ static mp_obj_t pyb_timer_callback(mp_obj_t self_in, mp_obj_t callback) {
     } else {
         __HAL_TIM_DISABLE_IT(&self->tim, TIM_IT_UPDATE);
         // Prepare callback: auto-instantiate generator functions, prime generator instances.
-        self->callback = mp_irq_prepare_handler(callback, self_in);
+        // For hard IRQ, wrap callables for unified dispatch; for soft IRQ, leave as-is.
+        self->callback = mp_irq_prepare_handler(callback, self_in, self->ishard);
         // start timer, so that it interrupts on overflow, but clear any
         // pending interrupts which may have been set by initializing it.
         __HAL_TIM_CLEAR_FLAG(&self->tim, TIM_IT_UPDATE);
@@ -1715,6 +1723,8 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     );
 
 static void timer_handle_irq_channel(pyb_timer_obj_t *tim, uint8_t channel, mp_obj_t callback) {
+    MP_IRQ_PROFILE_CAPTURE(0);  // P0: timer_handle_irq_channel entry
+
     uint32_t irq_mask = TIMER_IRQ_MASK(channel);
 
     if (__HAL_TIM_GET_FLAG(&tim->tim, irq_mask) != RESET) {
@@ -1722,7 +1732,10 @@ static void timer_handle_irq_channel(pyb_timer_obj_t *tim, uint8_t channel, mp_o
             // clear the interrupt
             __HAL_TIM_CLEAR_IT(&tim->tim, irq_mask);
 
-            if (mp_irq_dispatch(callback, MP_OBJ_FROM_PTR(tim), tim->ishard) < 0) {
+            // P1-P6 captured inside mp_irq_dispatch()
+            int result = mp_irq_dispatch(callback, MP_OBJ_FROM_PTR(tim), tim->ishard);
+
+            if (result < 0) {
                 // Uncaught exception; disable the callback so it doesn't run again.
                 tim->callback = mp_const_none;
                 __HAL_TIM_DISABLE_IT(&tim->tim, irq_mask);
@@ -1765,5 +1778,31 @@ void timer_irq_handler(uint tim_id) {
         }
     }
 }
+
+#if MICROPY_PYB_IRQ_PROFILE
+// Enable/disable IRQ profiling. Clear previous values only when enabling.
+static mp_obj_t pyb_irq_profile_enable(mp_obj_t enable) {
+    bool en = mp_obj_is_true(enable);
+    if (en && !pyb_irq_profile_enabled) {
+        // Only clear when transitioning to enabled
+        for (int i = 0; i < IRQ_PROFILE_POINTS; i++) {
+            pyb_irq_profile[i] = 0;
+        }
+    }
+    pyb_irq_profile_enabled = en;
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_1(pyb_irq_profile_enable_obj, pyb_irq_profile_enable);
+
+// Get IRQ profile data as tuple (P0, P1, P2, P3, P4, P5, P6).
+static mp_obj_t pyb_irq_profile_get(void) {
+    mp_obj_t items[IRQ_PROFILE_POINTS];
+    for (int i = 0; i < IRQ_PROFILE_POINTS; i++) {
+        items[i] = mp_obj_new_int(pyb_irq_profile[i]);
+    }
+    return mp_obj_new_tuple(IRQ_PROFILE_POINTS, items);
+}
+MP_DEFINE_CONST_FUN_OBJ_0(pyb_irq_profile_get_obj, pyb_irq_profile_get);
+#endif
 
 MP_REGISTER_ROOT_POINTER(struct _pyb_timer_obj_t *pyb_timer_obj_all[MICROPY_HW_MAX_TIMER]);

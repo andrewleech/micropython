@@ -269,6 +269,7 @@ mp_vm_return_kind_t MICROPY_WRAP_MP_EXECUTE_BYTECODE(mp_execute_bytecode)(mp_cod
 #if MICROPY_STACKLESS
 run_code_state: ;
 #endif
+    MP_IRQ_PROFILE_CAPTURE(9);  // P9: mp_execute_bytecode entry
 FRAME_ENTER();
 
 #if MICROPY_STACKLESS
@@ -307,6 +308,7 @@ outer_dispatch_loop:
             #endif
             mp_obj_t obj_shared;
             MICROPY_VM_HOOK_INIT
+            MP_IRQ_PROFILE_CAPTURE(10);  // P10: after dispatch setup, before bytecode execution
 
             // If we have exception to inject, now that we finish setting up
             // execution context, raise it. This works as if MP_BC_RAISE_OBJ

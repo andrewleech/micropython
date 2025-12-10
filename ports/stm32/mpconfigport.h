@@ -177,6 +177,47 @@
 #define MICROPY_FATFS_RPATH            (2)
 #define MICROPY_FATFS_MULTI_PARTITION  (1)
 
+// IRQ profiling: capture TIM2->CNT at key points in timer IRQ handling
+#ifndef MICROPY_PYB_IRQ_PROFILE
+#define MICROPY_PYB_IRQ_PROFILE        (0)
+#endif
+
+#if MICROPY_PYB_IRQ_PROFILE
+#include <stdbool.h>
+// Profile capture points (fine-grained function call analysis):
+//   0: timer_handle_irq_channel entry
+//   1: mp_irq_dispatch entry
+//   2: after sched_lock + gc_lock
+//   3: after nlr_push
+//   4: before mp_call_function_1 or mp_obj_gen_resume
+//   5: after handler returns
+//   6: mp_irq_dispatch exit
+//   7: fun_bc_call entry (function) / mp_obj_gen_resume entry (generator)
+//   8: fun_bc_call after INIT_CODESTATE / gen_resume after set send_value
+//   9: mp_execute_bytecode entry / native gen before native call
+//  10: bound_meth_call entry
+//  11: mp_call_method_self_n_kw after alloca
+//  12: mp_call_method_self_n_kw after memcpy, before call
+//  13: mp_call_function_n_kw entry (overwrites on each call)
+//  14: mp_call_function_n_kw after mp_obj_get_type
+//  15: mp_call_function_n_kw before slot call
+//  16-18: (unused)
+//  19: fun_builtin_var_call entry
+//  20: fun_builtin_var_call after arg check
+//  21: pyb_timer_counter entry
+//  22-23: (unused)
+//  Px: Python t.counter() return value (captured in Python)
+#define IRQ_PROFILE_POINTS 24
+extern volatile uint32_t pyb_irq_profile[IRQ_PROFILE_POINTS];
+extern volatile bool pyb_irq_profile_enabled;
+// Hardcode TIM2 base address (0x40000000) + CNT offset (0x24)
+#define MP_IRQ_PROFILE_CAPTURE(idx) do { \
+        if (pyb_irq_profile_enabled) { \
+            pyb_irq_profile[idx] = *(volatile uint32_t *)(0x40000000 + 0x24); \
+        } \
+} while (0)
+#endif
+
 #if MICROPY_PY_PYB
 extern const struct _mp_obj_module_t pyb_module;
 #define PYB_BUILTIN_MODULE_CONSTANTS \

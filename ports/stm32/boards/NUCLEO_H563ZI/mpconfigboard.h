@@ -2,6 +2,7 @@
 #define MICROPY_HW_MCU_NAME                 "STM32H563ZI"
 
 #define MICROPY_PY_PYB_LEGACY               (0)
+#define MICROPY_PYB_IRQ_PROFILE             (1)
 #define MICROPY_HW_ENABLE_INTERNAL_FLASH_STORAGE (1)
 #define MICROPY_HW_ENABLE_RTC               (1)
 #define MICROPY_HW_ENABLE_RNG               (1)

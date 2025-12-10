@@ -36,6 +36,10 @@
 #include "py/bc.h"
 #include "py/cstack.h"
 
+#if defined(MICROPY_PYB_IRQ_PROFILE) && MICROPY_PYB_IRQ_PROFILE
+#include "ports/stm32/mpconfigport.h"
+#endif
+
 #if MICROPY_DEBUG_VERBOSE // print debugging info
 #define DEBUG_PRINT (1)
 #else // don't print debugging info
@@ -100,6 +104,9 @@ MP_DEFINE_CONST_OBJ_TYPE(
     );
 
 static mp_obj_t fun_builtin_var_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+    #if defined(MICROPY_PYB_IRQ_PROFILE) && MICROPY_PYB_IRQ_PROFILE
+    MP_IRQ_PROFILE_CAPTURE(12);  // P12: fun_builtin_var_call entry
+    #endif
     assert(mp_obj_is_type(self_in, &mp_type_fun_builtin_var));
     mp_obj_fun_builtin_var_t *self = MP_OBJ_TO_PTR(self_in);
 
@@ -253,6 +260,7 @@ mp_code_state_t *mp_obj_fun_bc_prepare_codestate(mp_obj_t self_in, size_t n_args
 #endif
 
 static mp_obj_t fun_bc_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+    MP_IRQ_PROFILE_CAPTURE(7);  // P7: fun_bc_call entry
     mp_cstack_check();
 
     DEBUG_printf("Input n_args: " UINT_FMT ", n_kw: " UINT_FMT "\n", n_args, n_kw);
@@ -289,6 +297,7 @@ static mp_obj_t fun_bc_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const 
     #endif
 
     INIT_CODESTATE(code_state, self, n_state, n_args, n_kw, args);
+    MP_IRQ_PROFILE_CAPTURE(8);  // P8: after INIT_CODESTATE
 
     // execute the byte code with the correct globals context
     mp_globals_set(self->context->module.globals);
@@ -480,9 +489,11 @@ MP_DEFINE_CONST_OBJ_TYPE(
 #if MICROPY_EMIT_NATIVE
 
 static mp_obj_t fun_viper_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+    MP_IRQ_PROFILE_CAPTURE(11);  // P11: fun_viper_call entry
     mp_cstack_check();
     mp_obj_fun_bc_t *self = MP_OBJ_TO_PTR(self_in);
     mp_call_fun_t fun = MICROPY_MAKE_POINTER_CALLABLE((void *)self->bytecode);
+    MP_IRQ_PROFILE_CAPTURE(12);  // P12: before calling native viper code
     return fun(self_in, n_args, n_kw, args);
 }
 

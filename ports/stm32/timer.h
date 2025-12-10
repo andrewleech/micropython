@@ -39,4 +39,9 @@ void timer_irq_handler(uint tim_id);
 
 TIM_HandleTypeDef *pyb_timer_get_handle(mp_obj_t timer);
 
+#if MICROPY_PYB_IRQ_PROFILE
+extern const mp_obj_fun_builtin_fixed_t pyb_irq_profile_enable_obj;
+extern const mp_obj_fun_builtin_fixed_t pyb_irq_profile_get_obj;
+#endif
+
 #endif // MICROPY_INCLUDED_STM32_TIMER_H

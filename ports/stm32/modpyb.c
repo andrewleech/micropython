@@ -156,6 +156,10 @@ static const mp_rom_map_elem_t pyb_module_globals_table[] = {
     #if IRQ_ENABLE_STATS
     { MP_ROM_QSTR(MP_QSTR_irq_stats), MP_ROM_PTR(&pyb_irq_stats_obj) },
     #endif
+    #if MICROPY_PYB_IRQ_PROFILE
+    { MP_ROM_QSTR(MP_QSTR_irq_profile_enable), MP_ROM_PTR(&pyb_irq_profile_enable_obj) },
+    { MP_ROM_QSTR(MP_QSTR_irq_profile_get), MP_ROM_PTR(&pyb_irq_profile_get_obj) },
+    #endif
 
     #if MICROPY_PY_PYB_LEGACY
     { MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_PTR(&machine_lightsleep_obj) },

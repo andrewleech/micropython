@@ -95,6 +95,7 @@ mp_obj_t mp_irq_prepare_handler(mp_obj_t callback, mp_obj_t parent) {
 
 
 int mp_irq_dispatch(mp_obj_t handler, mp_obj_t parent, bool ishard) {
+    MP_IRQ_PROFILE_CAPTURE(1);  // P1: mp_irq_dispatch entry
     int result = 0;
     if (handler != mp_const_none) {
         if (ishard) {
@@ -112,12 +113,16 @@ int mp_irq_dispatch(mp_obj_t handler, mp_obj_t parent, bool ishard) {
             // prevent any memory allocations.
             mp_sched_lock();
             gc_lock();
+            MP_IRQ_PROFILE_CAPTURE(2);  // P2: after sched_lock + gc_lock
             nlr_buf_t nlr;
             if (nlr_push(&nlr) == 0) {
+                MP_IRQ_PROFILE_CAPTURE(3);  // P3: after nlr_push
                 if (mp_obj_is_type(handler, &mp_type_gen_instance)) {
                     // Generator-based handler: resume with parent as send value.
+                    MP_IRQ_PROFILE_CAPTURE(4);  // P4: before gen_resume
                     mp_obj_t ret_val;
                     mp_vm_return_kind_t ret = mp_obj_gen_resume(handler, parent, MP_OBJ_NULL, &ret_val);
+                    MP_IRQ_PROFILE_CAPTURE(5);  // P5: after handler returns
                     if (ret == MP_VM_RETURN_NORMAL) {
                         // Generator finished (returned instead of yielding).
                         result = -1;
@@ -130,7 +135,9 @@ int mp_irq_dispatch(mp_obj_t handler, mp_obj_t parent, bool ishard) {
                     // MP_VM_RETURN_YIELD: success, handler stays active.
                 } else {
                     // Regular callable (existing behavior).
+                    MP_IRQ_PROFILE_CAPTURE(4);  // P4: before call_function_1
                     mp_call_function_1(handler, parent);
+                    MP_IRQ_PROFILE_CAPTURE(5);  // P5: after handler returns
                 }
                 nlr_pop();
             } else {
@@ -140,6 +147,7 @@ int mp_irq_dispatch(mp_obj_t handler, mp_obj_t parent, bool ishard) {
             }
             gc_unlock();
             mp_sched_unlock();
+            MP_IRQ_PROFILE_CAPTURE(6);  // P6: mp_irq_dispatch exit
 
             #if MICROPY_STACK_CHECK && MICROPY_STACK_SIZE_HARD_IRQ > 0
             // Restore original stack-limit checking values.

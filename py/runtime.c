@@ -46,6 +46,10 @@
 #include "py/cstack.h"
 #include "py/gc.h"
 
+#if defined(MICROPY_PYB_IRQ_PROFILE) && MICROPY_PYB_IRQ_PROFILE
+#include "ports/stm32/mpconfigport.h"
+#endif
+
 #if MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL
 #include "extmod/vfs.h"
 #endif
@@ -704,11 +708,23 @@ mp_obj_t mp_call_function_n_kw(mp_obj_t fun_in, size_t n_args, size_t n_kw, cons
 
     DEBUG_OP_printf("calling function %p(n_args=" UINT_FMT ", n_kw=" UINT_FMT ", args=%p)\n", fun_in, n_args, n_kw, args);
 
+    #if defined(MICROPY_PYB_IRQ_PROFILE) && MICROPY_PYB_IRQ_PROFILE
+    // Capture at fixed points - use timestamps to determine call sequence
+    MP_IRQ_PROFILE_CAPTURE(13);  // entry
+    #endif
+
     // get the type
     const mp_obj_type_t *type = mp_obj_get_type(fun_in);
 
+    #if defined(MICROPY_PYB_IRQ_PROFILE) && MICROPY_PYB_IRQ_PROFILE
+    MP_IRQ_PROFILE_CAPTURE(14);  // after mp_obj_get_type
+    #endif
+
     // do the call
     if (MP_OBJ_TYPE_HAS_SLOT(type, call)) {
+        #if defined(MICROPY_PYB_IRQ_PROFILE) && MICROPY_PYB_IRQ_PROFILE
+        MP_IRQ_PROFILE_CAPTURE(15);  // before slot call
+        #endif
         return MP_OBJ_TYPE_GET_SLOT(type, call)(fun_in, n_args, n_kw, args);
     }
 

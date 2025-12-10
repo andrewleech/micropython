@@ -151,6 +151,7 @@ static void gen_instance_print(const mp_print_t *print, mp_obj_t self_in, mp_pri
 }
 
 mp_vm_return_kind_t mp_obj_gen_resume(mp_obj_t self_in, mp_obj_t send_value, mp_obj_t throw_value, mp_obj_t *ret_val) {
+    MP_IRQ_PROFILE_CAPTURE(7);  // P7: mp_obj_gen_resume entry
     mp_cstack_check();
     mp_check_self(mp_obj_is_type(self_in, &mp_type_gen_instance));
     mp_obj_gen_instance_t *self = MP_OBJ_TO_PTR(self_in);
@@ -190,6 +191,7 @@ mp_vm_return_kind_t mp_obj_gen_resume(mp_obj_t self_in, mp_obj_t send_value, mp_
 
     // Mark as running
     self->pend_exc = MP_OBJ_NULL;
+    MP_IRQ_PROFILE_CAPTURE(8);  // P8: after set send_value, before globals
 
     // Set up the correct globals context for the generator and execute it
     self->code_state.old_globals = mp_globals_get();
@@ -202,6 +204,7 @@ mp_vm_return_kind_t mp_obj_gen_resume(mp_obj_t self_in, mp_obj_t send_value, mp_
         // A native generator.
         typedef uintptr_t (*mp_fun_native_gen_t)(void *, mp_obj_t);
         mp_fun_native_gen_t fun = mp_obj_fun_native_get_generator_resume(self->code_state.fun_bc);
+        MP_IRQ_PROFILE_CAPTURE(9);  // P9: native gen - before native call
         ret_kind = fun((void *)&self->code_state, throw_value);
     } else
     #endif
