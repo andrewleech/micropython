@@ -1,6 +1,70 @@
 {
   "_generated_by": "micropython-branch-manager (mbm) - do not edit manually",
-  "integration_branch": "main",
-  "remotes": {},
-  "branches": []
+  "integration_branch": "skydeck",
+  "remotes": {
+    "upstream": "https://github.com/micropython/micropython.git",
+    "andrewleech": "git@github.com:andrewleech/micropython.git",
+    "alonbl": "https://github.com/alonbl/micropython.git",
+    "APIUM": "https://github.com/APIUM/micropython.git",
+    "degraves": "git@gitlab.pi.planetinnovation.com.au:degraves/micropython.git",
+    "origin": "git@gitlab.pi.planetinnovation.com.au:degraves/micropython.git"
+  },
+  "branches": [
+    {
+      "name": "mcux_sdk_2.16",
+      "remote": "andrewleech",
+      "pr_url": "https://github.com/micropython/micropython/pull/18333",
+      "pr_number": 18333,
+      "title": "ports/mimxrt: Update nxp_driver to MCUX_2.16.100."
+    },
+    {
+      "name": "manifest_c_module",
+      "remote": "andrewleech",
+      "pr_url": "https://github.com/micropython/micropython/pull/18229",
+      "pr_number": 18229,
+      "title": "Add c_module() manifest function for user C modules"
+    },
+    {
+      "name": "phyboard-rt1170",
+      "remote": "andrewleech",
+      "pr_url": "https://github.com/micropython/micropython/pull/18398",
+      "pr_number": 18398,
+      "title": "mimxrt/PHYBOARD_RT1170: Add phyBOARD-RT1170 Development Kit board sup…"
+    },
+    {
+      "name": "dp83867-phy-driver",
+      "remote": "andrewleech",
+      "pr_url": "https://github.com/micropython/micropython/pull/18392",
+      "pr_number": 18392,
+      "title": "mimxrt/eth: Add DP83867 PHY driver support."
+    },
+    {
+      "name": "mimx_Flash_doc",
+      "remote": "andrewleech",
+      "pr_url": "https://github.com/micropython/micropython/pull/18464",
+      "pr_number": 18464,
+      "title": "docs/mimxrt: Add docs for mimxrt.Flash."
+    },
+    {
+      "name": "mimx_sdcard_timeouts",
+      "remote": "andrewleech",
+      "pr_url": "https://github.com/micropython/micropython/pull/18451",
+      "pr_number": 18451,
+      "title": "mimxrt: Fix SD card deadlock and implement proper timeout handling."
+    },
+    {
+      "name": "adc",
+      "remote": "alonbl",
+      "pr_url": "https://github.com/micropython/micropython/pull/17874",
+      "pr_number": 17874,
+      "title": "mimxrt: adc: rt117x: initialize LPADC2 and support channel groups"
+    },
+    {
+      "name": "mimxrt1176-alt11-pwm",
+      "remote": "APIUM",
+      "pr_url": "https://github.com/micropython/micropython/pull/18515",
+      "pr_number": 18515,
+      "title": "mimxrt: Add ALT11 pin mode support for MIMXRT1176."
+    }
+  ]
 }
