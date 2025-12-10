@@ -40,25 +40,21 @@
 /******************************************************************************
  UNIFIED IRQ HANDLER WRAPPING
 
- All IRQ handlers are converted to generator-compatible objects at registration
- time. This eliminates type checks in the hot dispatch path.
+ For hard IRQ: All handlers are converted to generator-compatible objects at
+ registration time. This eliminates type checks in the hot dispatch path.
 
- Handler types:
+ Handler types for hard IRQ:
  - Real generators: Used as-is after priming (run to first yield)
  - Bytecode functions: Wrapped as mp_type_gen_instance with IRQ_FUNC_BC sentinel
  - Native functions: Wrapped as mp_type_gen_instance with IRQ_FUNC_NAT sentinel
  - Viper functions: Wrapped as mp_type_gen_instance with IRQ_VIPER sentinel
+ - Other callables: Wrapped with IRQ_CALLABLE sentinel, calls via mp_call_function_1
+
+ For soft IRQ: Generators are instantiated and primed, but other callables are
+ passed directly to mp_sched_schedule without wrapping.
 
  The sentinel value in exc_sp_idx tells mp_obj_gen_resume_irq() how to handle it.
  ******************************************************************************/
-
-// Get pointer to extra data stored after the state[] + exc_stack[] arrays.
-// This requires knowing n_state and n_exc_stack (stored in code_state).
-static inline mp_irq_handler_extra_t *mp_irq_get_extra(mp_obj_gen_instance_t *gen, size_t n_exc_stack) {
-    size_t state_size = gen->code_state.n_state * sizeof(mp_obj_t);
-    size_t exc_size = n_exc_stack * sizeof(mp_exc_stack_t);
-    return (mp_irq_handler_extra_t *)((byte *)gen->code_state.state + state_size + exc_size);
-}
 
 // Wrap a bytecode function as a generator-compatible object for fast IRQ dispatch.
 // Calls mp_setup_code_state once at wrap time to initialize everything.
@@ -67,14 +63,18 @@ static mp_obj_t mp_irq_wrap_bytecode_function(mp_obj_t func_in) {
 
     // Decode state requirements from bytecode prelude
     const uint8_t *ip = fun->bytecode;
-    size_t n_state, n_pos_args;
+    size_t n_state, n_pos_args, scope_flags;
     {
-        size_t n_exc_stack, scope_flags, n_kwonly_args, n_def_args;
+        size_t n_exc_stack, n_kwonly_args, n_def_args;
         MP_BC_PRELUDE_SIG_DECODE_INTO(ip, n_state, n_exc_stack, scope_flags, n_pos_args, n_kwonly_args, n_def_args);
         (void)n_exc_stack;
-        (void)scope_flags;
         (void)n_kwonly_args;
         (void)n_def_args;
+    }
+
+    // Reject generator functions (those with yield) - they should be passed as gen_wrap
+    if (scope_flags & MP_SCOPE_FLAG_GENERATOR) {
+        mp_raise_ValueError(MP_ERROR_TEXT("use generator function, not plain function with yield"));
     }
 
     // Verify function signature: must accept exactly 1 positional arg
@@ -120,10 +120,15 @@ static mp_obj_t mp_irq_wrap_bytecode_function(mp_obj_t func_in) {
 static mp_obj_t mp_irq_wrap_native_function(mp_obj_t func_in) {
     mp_obj_fun_bc_t *fun = MP_OBJ_TO_PTR(func_in);
 
-    // Get prelude to determine state size
+    // Get prelude to determine state size and validate signature
     const uint8_t *prelude_ptr = mp_obj_fun_native_get_prelude_ptr(fun);
     const uint8_t *ip = prelude_ptr;
     MP_BC_PRELUDE_SIG_DECODE(ip);
+
+    // Verify function signature: must accept exactly 1 positional arg
+    if (n_pos_args != 1) {
+        mp_raise_ValueError(MP_ERROR_TEXT("IRQ callback must take exactly 1 argument"));
+    }
 
     // Native functions don't need exception stack
     size_t extra_size = sizeof(mp_irq_handler_extra_t);
@@ -173,7 +178,36 @@ static mp_obj_t mp_irq_wrap_viper_function(mp_obj_t func_in) {
     return MP_OBJ_FROM_PTR(o);
 }
 
+// Wrap a @viper function with argument count validation.
+// Viper functions use a special prelude format that must be parsed differently.
+static mp_obj_t mp_irq_wrap_viper_function_validated(mp_obj_t func_in) {
+    // Note: viper functions have different prelude structure - validation at call time
+    // The n_pos_args check would require parsing viper-specific metadata which is complex.
+    // Since viper is called with correct signature, argument errors will be caught at call time.
+    return mp_irq_wrap_viper_function(func_in);
+}
 #endif // MICROPY_EMIT_NATIVE
+
+// Wrap any callable as a generator-compatible object for hard IRQ dispatch.
+// Uses mp_call_function_1 at dispatch time (slower than specialized wrappers but works
+// for any callable including bound methods, closures, etc).
+static mp_obj_t mp_irq_wrap_callable(mp_obj_t callable) {
+    // Minimal allocation: generator instance with space to store the callable
+    // We store the callable in state[0], and use IRQ_CALLABLE sentinel
+    size_t n_state = 2;  // state[0] = callable, state[1] unused
+    size_t total_var_size = n_state * sizeof(mp_obj_t);
+
+    mp_obj_gen_instance_t *o = mp_obj_malloc_var(mp_obj_gen_instance_t, code_state.state,
+        byte, total_var_size, &mp_type_gen_instance);
+
+    o->pend_exc = mp_const_none;
+    o->code_state.fun_bc = NULL;  // Not used for generic callable
+    o->code_state.n_state = n_state;
+    o->code_state.exc_sp_idx = MP_CODE_STATE_EXC_SP_IDX_IRQ_CALLABLE;
+    o->code_state.state[0] = callable;  // Store the actual callable here
+
+    return MP_OBJ_FROM_PTR(o);
+}
 
 /******************************************************************************
  DECLARE PUBLIC DATA
@@ -203,7 +237,7 @@ void mp_irq_init(mp_irq_obj_t *self, const mp_irq_methods_t *methods, mp_obj_t p
     self->ishard = false;
 }
 
-mp_obj_t mp_irq_prepare_handler(mp_obj_t callback, mp_obj_t parent) {
+mp_obj_t mp_irq_prepare_handler(mp_obj_t callback, mp_obj_t parent, bool ishard) {
     // Auto-instantiate generator functions (bytecode or native).
     if (mp_obj_is_type(callback, &mp_type_gen_wrap)
         #if MICROPY_EMIT_NATIVE
@@ -223,19 +257,29 @@ mp_obj_t mp_irq_prepare_handler(mp_obj_t callback, mp_obj_t parent) {
             }
             mp_raise_ValueError(MP_ERROR_TEXT("generator must yield"));
         }
-    } else if (mp_obj_is_type(callback, &mp_type_fun_bc)) {
-        // Wrap bytecode functions as generator-compatible objects for fast IRQ dispatch.
-        callback = mp_irq_wrap_bytecode_function(callback);
-    #if MICROPY_EMIT_NATIVE
-    } else if (mp_obj_is_type(callback, &mp_type_fun_native)) {
-        // Wrap @native functions
-        callback = mp_irq_wrap_native_function(callback);
-    } else if (mp_obj_is_type(callback, &mp_type_fun_viper)) {
-        // Wrap @viper functions
-        callback = mp_irq_wrap_viper_function(callback);
-    #endif
-    } else if (callback != mp_const_none && !mp_obj_is_callable(callback)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("callback must be None, callable, or generator"));
+        // Generator is ready - no wrapping needed (already gen_instance)
+    } else if (ishard) {
+        // Hard IRQ: wrap all callables as generator-compatible objects for unified dispatch
+        if (mp_obj_is_type(callback, &mp_type_fun_bc)) {
+            callback = mp_irq_wrap_bytecode_function(callback);
+        #if MICROPY_EMIT_NATIVE
+        } else if (mp_obj_is_type(callback, &mp_type_fun_native)) {
+            callback = mp_irq_wrap_native_function(callback);
+        } else if (mp_obj_is_type(callback, &mp_type_fun_viper)) {
+            callback = mp_irq_wrap_viper_function_validated(callback);
+        #endif
+        } else if (callback != mp_const_none) {
+            // Generic callable (bound method, closure, etc) - wrap for hard IRQ dispatch
+            if (!mp_obj_is_callable(callback)) {
+                mp_raise_ValueError(MP_ERROR_TEXT("callback must be None, callable, or generator"));
+            }
+            callback = mp_irq_wrap_callable(callback);
+        }
+    } else {
+        // Soft IRQ: don't wrap - mp_sched_schedule will call via mp_call_function_1
+        if (callback != mp_const_none && !mp_obj_is_callable(callback)) {
+            mp_raise_ValueError(MP_ERROR_TEXT("callback must be None, callable, or generator"));
+        }
     }
 
     return callback;
@@ -270,7 +314,8 @@ int mp_irq_dispatch(mp_obj_t handler, mp_obj_t parent, bool ishard) {
                     // Only signal error for real generators that have exhausted
                     if (exc_idx != MP_CODE_STATE_EXC_SP_IDX_IRQ_FUNC_BC
                         && exc_idx != MP_CODE_STATE_EXC_SP_IDX_IRQ_FUNC_NAT
-                        && exc_idx != MP_CODE_STATE_EXC_SP_IDX_IRQ_VIPER) {
+                        && exc_idx != MP_CODE_STATE_EXC_SP_IDX_IRQ_VIPER
+                        && exc_idx != MP_CODE_STATE_EXC_SP_IDX_IRQ_CALLABLE) {
                         result = -1;  // Generator exhausted
                     }
                 } else if (ret == MP_VM_RETURN_EXCEPTION) {

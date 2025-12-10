@@ -174,6 +174,7 @@
 #define MP_CODE_STATE_EXC_SP_IDX_IRQ_FUNC_BC  ((uint16_t)-2)  // Wrapped bytecode function
 #define MP_CODE_STATE_EXC_SP_IDX_IRQ_FUNC_NAT ((uint16_t)-3)  // Wrapped @native function
 #define MP_CODE_STATE_EXC_SP_IDX_IRQ_VIPER    ((uint16_t)-4)  // Wrapped @viper function
+#define MP_CODE_STATE_EXC_SP_IDX_IRQ_CALLABLE ((uint16_t)-5)  // Wrapped generic callable
 #endif
 
 // To convert mp_code_state_t.exc_sp_idx to/from a pointer to mp_exc_stack_t

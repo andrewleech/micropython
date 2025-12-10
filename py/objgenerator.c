@@ -262,8 +262,10 @@ mp_vm_return_kind_t mp_obj_gen_resume_irq(mp_obj_t self_in, mp_obj_t send_value,
     mp_obj_gen_instance_t *self = MP_OBJ_TO_PTR(self_in);
 
     // Reentrance guard (common to all types)
+    // Can't raise exception in hard IRQ context (GC locked), so return error
     if (self->pend_exc == MP_OBJ_NULL) {
-        mp_raise_ValueError(MP_ERROR_TEXT("handler already executing"));
+        *ret_val = MP_OBJ_FROM_PTR(&mp_const_GeneratorExit_obj);  // Use existing const
+        return MP_VM_RETURN_EXCEPTION;
     }
 
     uint16_t exc_sp_idx = self->code_state.exc_sp_idx;
@@ -349,6 +351,16 @@ mp_vm_return_kind_t mp_obj_gen_resume_irq(mp_obj_t self_in, mp_obj_t send_value,
         mp_globals_set(self->code_state.old_globals);
         self->pend_exc = mp_const_none;
     #endif
+
+    } else if (exc_sp_idx == MP_CODE_STATE_EXC_SP_IDX_IRQ_CALLABLE) {
+        // Generic callable wrapper: dispatch via mp_call_function_1
+        // Callable is stored in state[0]
+        mp_obj_t callable = self->code_state.state[0];
+
+        self->pend_exc = MP_OBJ_NULL;
+        *ret_val = mp_call_function_1(callable, send_value);
+        self->pend_exc = mp_const_none;
+        return MP_VM_RETURN_NORMAL;
 
     } else {
         // Bytecode generator: resume from saved IP
