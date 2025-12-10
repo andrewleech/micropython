@@ -147,11 +147,12 @@ static mp_obj_t mp_irq_wrap_native_function(mp_obj_t func_in) {
 }
 
 // Wrap a @viper function as a generator-compatible object.
+// Viper entry point is directly at fun->bytecode (no header offset unlike @native).
 static mp_obj_t mp_irq_wrap_viper_function(mp_obj_t func_in) {
     mp_obj_fun_bc_t *fun = MP_OBJ_TO_PTR(func_in);
 
-    // Viper functions have minimal state needs
-    size_t n_state = 2;  // Minimal state for return value
+    // Viper functions have minimal state needs - we just store fun_bc for context access
+    size_t n_state = 2;
     size_t extra_size = sizeof(mp_irq_handler_extra_t);
     size_t total_var_size = n_state * sizeof(mp_obj_t) + extra_size;
 
@@ -163,13 +164,15 @@ static mp_obj_t mp_irq_wrap_viper_function(mp_obj_t func_in) {
     o->code_state.n_state = n_state;
     o->code_state.exc_sp_idx = MP_CODE_STATE_EXC_SP_IDX_IRQ_VIPER;
 
-    // Store viper function entry point (direct C call)
+    // Store viper function entry point - no extra data needed since we call
+    // through fun_bc->bytecode directly in the dispatch path
     mp_irq_handler_extra_t *extra = (mp_irq_handler_extra_t *)((byte *)o->code_state.state + n_state * sizeof(mp_obj_t));
     extra->bytecode_start = NULL;
-    extra->native_entry = MICROPY_MAKE_POINTER_CALLABLE((void *)(fun->bytecode + sizeof(uintptr_t)));
+    extra->native_entry = NULL;  // Not used - we get entry from fun_bc->bytecode
 
     return MP_OBJ_FROM_PTR(o);
 }
+
 #endif // MICROPY_EMIT_NATIVE
 
 /******************************************************************************

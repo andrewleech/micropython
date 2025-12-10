@@ -306,24 +306,26 @@ mp_vm_return_kind_t mp_obj_gen_resume_irq(mp_obj_t self_in, mp_obj_t send_value,
 
     #if MICROPY_EMIT_NATIVE
     } else if (exc_sp_idx == MP_CODE_STATE_EXC_SP_IDX_IRQ_FUNC_NAT) {
-        // Wrapped @native function: call directly
+        // Wrapped @native function: call with mp_call_fun_t signature
         mp_irq_handler_extra_t *extra = (mp_irq_handler_extra_t *)(
             (byte *)self->code_state.state + self->code_state.n_state * sizeof(mp_obj_t));
 
         self->pend_exc = MP_OBJ_NULL;
-        typedef mp_obj_t (*native_fun_1_t)(mp_obj_t);
-        *ret_val = ((native_fun_1_t)extra->native_entry)(send_value);
+        mp_obj_t args[1] = {send_value};
+        mp_call_fun_t native_fun = (mp_call_fun_t)extra->native_entry;
+        *ret_val = native_fun(MP_OBJ_FROM_PTR(self->code_state.fun_bc), 1, 0, args);
         self->pend_exc = mp_const_none;
         return MP_VM_RETURN_NORMAL;
 
     } else if (exc_sp_idx == MP_CODE_STATE_EXC_SP_IDX_IRQ_VIPER) {
-        // Wrapped @viper function: direct C call
-        mp_irq_handler_extra_t *extra = (mp_irq_handler_extra_t *)(
-            (byte *)self->code_state.state + self->code_state.n_state * sizeof(mp_obj_t));
+        // Wrapped @viper function: call with mp_call_fun_t signature
+        // Viper entry point is directly at fun->bytecode (no offset like @native)
+        mp_obj_fun_bc_t *fun_bc = self->code_state.fun_bc;
+        mp_call_fun_t viper_fun = MICROPY_MAKE_POINTER_CALLABLE((void *)fun_bc->bytecode);
 
         self->pend_exc = MP_OBJ_NULL;
-        typedef mp_obj_t (*viper_fun_1_t)(mp_obj_t);
-        *ret_val = ((viper_fun_1_t)extra->native_entry)(send_value);
+        mp_obj_t args[1] = {send_value};
+        *ret_val = viper_fun(MP_OBJ_FROM_PTR(fun_bc), 1, 0, args);
         self->pend_exc = mp_const_none;
         return MP_VM_RETURN_NORMAL;
 
