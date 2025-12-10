@@ -166,8 +166,15 @@
     MP_BC_PRELUDE_SIZE_DECODE_INTO(ip, n_info, n_cell); \
     (void)n_info; (void)n_cell
 
-// Sentinel value for mp_code_state_t.exc_sp_idx
-#define MP_CODE_STATE_EXC_SP_IDX_SENTINEL ((uint16_t)-1)
+// Sentinel values for mp_code_state_t.exc_sp_idx
+#define MP_CODE_STATE_EXC_SP_IDX_SENTINEL ((uint16_t)-1)  // Native generator
+
+// IRQ handler sentinel values (used by mp_irq_prepare_handler)
+#if MICROPY_ENABLE_SCHEDULER
+#define MP_CODE_STATE_EXC_SP_IDX_IRQ_FUNC_BC  ((uint16_t)-2)  // Wrapped bytecode function
+#define MP_CODE_STATE_EXC_SP_IDX_IRQ_FUNC_NAT ((uint16_t)-3)  // Wrapped @native function
+#define MP_CODE_STATE_EXC_SP_IDX_IRQ_VIPER    ((uint16_t)-4)  // @viper function (direct call)
+#endif
 
 // To convert mp_code_state_t.exc_sp_idx to/from a pointer to mp_exc_stack_t
 #define MP_CODE_STATE_EXC_SP_IDX_FROM_PTR(exc_stack, exc_sp) ((exc_sp) + 1 - (exc_stack))

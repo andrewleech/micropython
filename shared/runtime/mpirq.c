@@ -26,13 +26,151 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 
 #include "py/runtime.h"
 #include "py/gc.h"
+#include "py/bc.h"
+#include "py/objfun.h"
 #include "py/objgenerator.h"
 #include "shared/runtime/mpirq.h"
 
 #if MICROPY_ENABLE_SCHEDULER
+
+/******************************************************************************
+ UNIFIED IRQ HANDLER WRAPPING
+
+ All IRQ handlers are converted to generator-compatible objects at registration
+ time. This eliminates type checks in the hot dispatch path.
+
+ Handler types:
+ - Real generators: Used as-is after priming (run to first yield)
+ - Bytecode functions: Wrapped as mp_type_gen_instance with IRQ_FUNC_BC sentinel
+ - Native functions: Wrapped as mp_type_gen_instance with IRQ_FUNC_NAT sentinel
+ - Viper functions: Wrapped as mp_type_gen_instance with IRQ_VIPER sentinel
+
+ The sentinel value in exc_sp_idx tells mp_obj_gen_resume_irq() how to handle it.
+ ******************************************************************************/
+
+// Get pointer to extra data stored after the state[] + exc_stack[] arrays.
+// This requires knowing n_state and n_exc_stack (stored in code_state).
+static inline mp_irq_handler_extra_t *mp_irq_get_extra(mp_obj_gen_instance_t *gen, size_t n_exc_stack) {
+    size_t state_size = gen->code_state.n_state * sizeof(mp_obj_t);
+    size_t exc_size = n_exc_stack * sizeof(mp_exc_stack_t);
+    return (mp_irq_handler_extra_t *)((byte *)gen->code_state.state + state_size + exc_size);
+}
+
+// Wrap a bytecode function as a generator-compatible object for fast IRQ dispatch.
+// Calls mp_setup_code_state once at wrap time to initialize everything.
+static mp_obj_t mp_irq_wrap_bytecode_function(mp_obj_t func_in) {
+    mp_obj_fun_bc_t *fun = MP_OBJ_TO_PTR(func_in);
+
+    // Decode state requirements from bytecode prelude
+    const uint8_t *ip = fun->bytecode;
+    size_t n_state, n_pos_args;
+    {
+        size_t n_exc_stack, scope_flags, n_kwonly_args, n_def_args;
+        MP_BC_PRELUDE_SIG_DECODE_INTO(ip, n_state, n_exc_stack, scope_flags, n_pos_args, n_kwonly_args, n_def_args);
+        (void)n_exc_stack;
+        (void)scope_flags;
+        (void)n_kwonly_args;
+        (void)n_def_args;
+    }
+
+    // Verify function signature: must accept exactly 1 positional arg
+    if (n_pos_args != 1) {
+        mp_raise_ValueError(MP_ERROR_TEXT("IRQ callback must take exactly 1 argument"));
+    }
+
+    // Calculate allocation size: generator struct + state + extra data (no exc_stack needed)
+    size_t state_size = n_state * sizeof(mp_obj_t);
+    size_t extra_size = sizeof(mp_irq_handler_extra_t);
+    size_t total_var_size = state_size + extra_size;
+
+    // Allocate as a generator instance (same type, compatible layout)
+    mp_obj_gen_instance_t *o = mp_obj_malloc_var(mp_obj_gen_instance_t, code_state.state,
+        byte, total_var_size, &mp_type_gen_instance);
+
+    // Initialize generator header
+    o->pend_exc = mp_const_none;  // Idle
+    o->code_state.fun_bc = fun;
+    o->code_state.n_state = n_state;
+
+    // Initialize code_state using standard setup with placeholder argument.
+    // This parses the prelude, zeros state, and sets up ip/sp correctly.
+    o->code_state.ip = fun->bytecode;
+    o->code_state.sp = &o->code_state.state[0] - 1;
+    mp_obj_t dummy_arg = mp_const_none;
+    mp_setup_code_state(&o->code_state, 1, 0, &dummy_arg);
+
+    // Save the initialized ip (points to bytecode start after prelude) in extra data
+    mp_irq_handler_extra_t *extra = (mp_irq_handler_extra_t *)((byte *)o->code_state.state + state_size);
+    extra->bytecode_start = o->code_state.ip;
+    extra->native_entry = NULL;
+
+    // Mark as wrapped bytecode function (not a real generator)
+    // This overwrites the exc_sp_idx that mp_setup_code_state set to 0
+    o->code_state.exc_sp_idx = MP_CODE_STATE_EXC_SP_IDX_IRQ_FUNC_BC;
+
+    return MP_OBJ_FROM_PTR(o);
+}
+
+#if MICROPY_EMIT_NATIVE
+// Wrap a @native function as a generator-compatible object.
+static mp_obj_t mp_irq_wrap_native_function(mp_obj_t func_in) {
+    mp_obj_fun_bc_t *fun = MP_OBJ_TO_PTR(func_in);
+
+    // Get prelude to determine state size
+    const uint8_t *prelude_ptr = mp_obj_fun_native_get_prelude_ptr(fun);
+    const uint8_t *ip = prelude_ptr;
+    MP_BC_PRELUDE_SIG_DECODE(ip);
+
+    // Native functions don't need exception stack
+    size_t extra_size = sizeof(mp_irq_handler_extra_t);
+    size_t total_var_size = n_state * sizeof(mp_obj_t) + extra_size;
+
+    // Allocate as generator instance
+    mp_obj_gen_instance_t *o = mp_obj_malloc_var(mp_obj_gen_instance_t, code_state.state,
+        byte, total_var_size, &mp_type_gen_instance);
+
+    o->pend_exc = mp_const_none;
+    o->code_state.fun_bc = fun;
+    o->code_state.n_state = n_state;
+    o->code_state.exc_sp_idx = MP_CODE_STATE_EXC_SP_IDX_IRQ_FUNC_NAT;
+
+    // Store native function entry point
+    mp_irq_handler_extra_t *extra = (mp_irq_handler_extra_t *)((byte *)o->code_state.state + n_state * sizeof(mp_obj_t));
+    extra->bytecode_start = NULL;
+    extra->native_entry = mp_obj_fun_native_get_function_start(fun);
+
+    return MP_OBJ_FROM_PTR(o);
+}
+
+// Wrap a @viper function as a generator-compatible object.
+static mp_obj_t mp_irq_wrap_viper_function(mp_obj_t func_in) {
+    mp_obj_fun_bc_t *fun = MP_OBJ_TO_PTR(func_in);
+
+    // Viper functions have minimal state needs
+    size_t n_state = 2;  // Minimal state for return value
+    size_t extra_size = sizeof(mp_irq_handler_extra_t);
+    size_t total_var_size = n_state * sizeof(mp_obj_t) + extra_size;
+
+    mp_obj_gen_instance_t *o = mp_obj_malloc_var(mp_obj_gen_instance_t, code_state.state,
+        byte, total_var_size, &mp_type_gen_instance);
+
+    o->pend_exc = mp_const_none;
+    o->code_state.fun_bc = fun;
+    o->code_state.n_state = n_state;
+    o->code_state.exc_sp_idx = MP_CODE_STATE_EXC_SP_IDX_IRQ_VIPER;
+
+    // Store viper function entry point (direct C call)
+    mp_irq_handler_extra_t *extra = (mp_irq_handler_extra_t *)((byte *)o->code_state.state + n_state * sizeof(mp_obj_t));
+    extra->bytecode_start = NULL;
+    extra->native_entry = MICROPY_MAKE_POINTER_CALLABLE((void *)(fun->bytecode + sizeof(uintptr_t)));
+
+    return MP_OBJ_FROM_PTR(o);
+}
+#endif // MICROPY_EMIT_NATIVE
 
 /******************************************************************************
  DECLARE PUBLIC DATA
@@ -43,10 +181,6 @@ const mp_arg_t mp_irq_init_args[] = {
     { MP_QSTR_trigger, MP_ARG_INT, {.u_int = 0} },
     { MP_QSTR_hard, MP_ARG_BOOL, {.u_bool = false} },
 };
-
-/******************************************************************************
- DECLARE PRIVATE DATA
- ******************************************************************************/
 
 /******************************************************************************
  DEFINE PUBLIC FUNCTIONS
@@ -86,6 +220,17 @@ mp_obj_t mp_irq_prepare_handler(mp_obj_t callback, mp_obj_t parent) {
             }
             mp_raise_ValueError(MP_ERROR_TEXT("generator must yield"));
         }
+    } else if (mp_obj_is_type(callback, &mp_type_fun_bc)) {
+        // Wrap bytecode functions as generator-compatible objects for fast IRQ dispatch.
+        callback = mp_irq_wrap_bytecode_function(callback);
+    #if MICROPY_EMIT_NATIVE
+    } else if (mp_obj_is_type(callback, &mp_type_fun_native)) {
+        // Wrap @native functions
+        callback = mp_irq_wrap_native_function(callback);
+    } else if (mp_obj_is_type(callback, &mp_type_fun_viper)) {
+        // Wrap @viper functions
+        callback = mp_irq_wrap_viper_function(callback);
+    #endif
     } else if (callback != mp_const_none && !mp_obj_is_callable(callback)) {
         mp_raise_ValueError(MP_ERROR_TEXT("callback must be None, callable, or generator"));
     }
@@ -95,50 +240,42 @@ mp_obj_t mp_irq_prepare_handler(mp_obj_t callback, mp_obj_t parent) {
 
 
 int mp_irq_dispatch(mp_obj_t handler, mp_obj_t parent, bool ishard) {
-    MP_IRQ_PROFILE_CAPTURE(1);  // P1: mp_irq_dispatch entry
     int result = 0;
     if (handler != mp_const_none) {
         if (ishard) {
             #if MICROPY_STACK_CHECK && MICROPY_STACK_SIZE_HARD_IRQ > 0
-            // This callback executes in an ISR context so the stack-limit
-            // check must be changed to use the ISR stack for the duration
-            // of this function.
             char *orig_stack_top = MP_STATE_THREAD(stack_top);
             size_t orig_stack_limit = MP_STATE_THREAD(stack_limit);
             mp_cstack_init_with_sp_here(MICROPY_STACK_SIZE_HARD_IRQ);
             #endif
 
-            // When executing code within a handler we must lock the scheduler to
-            // prevent any scheduled callbacks from running, and lock the GC to
-            // prevent any memory allocations.
             mp_sched_lock();
             gc_lock();
-            MP_IRQ_PROFILE_CAPTURE(2);  // P2: after sched_lock + gc_lock
             nlr_buf_t nlr;
             if (nlr_push(&nlr) == 0) {
-                MP_IRQ_PROFILE_CAPTURE(3);  // P3: after nlr_push
-                if (mp_obj_is_type(handler, &mp_type_gen_instance)) {
-                    // Generator-based handler: resume with parent as send value.
-                    MP_IRQ_PROFILE_CAPTURE(4);  // P4: before gen_resume
-                    mp_obj_t ret_val;
-                    mp_vm_return_kind_t ret = mp_obj_gen_resume(handler, parent, MP_OBJ_NULL, &ret_val);
-                    MP_IRQ_PROFILE_CAPTURE(5);  // P5: after handler returns
-                    if (ret == MP_VM_RETURN_NORMAL) {
-                        // Generator finished (returned instead of yielding).
-                        result = -1;
-                    } else if (ret == MP_VM_RETURN_EXCEPTION) {
-                        // Generator raised an exception.
-                        mp_printf(MICROPY_ERROR_PRINTER, "Uncaught exception in IRQ callback handler\n");
-                        mp_obj_print_exception(MICROPY_ERROR_PRINTER, ret_val);
-                        result = -1;
+                // All prepared handlers are generator-compatible (mp_type_gen_instance).
+                // No type checks needed - mp_obj_gen_resume_irq handles all variants
+                // based on exc_sp_idx sentinel values.
+                mp_obj_t ret_val;
+                mp_vm_return_kind_t ret = mp_obj_gen_resume_irq(handler, parent, &ret_val);
+
+                if (ret == MP_VM_RETURN_NORMAL) {
+                    // Handler finished (generator returned, or wrapped function completed).
+                    // For wrapped functions this is normal; for generators it means done.
+                    mp_obj_gen_instance_t *gen = MP_OBJ_TO_PTR(handler);
+                    uint16_t exc_idx = gen->code_state.exc_sp_idx;
+                    // Only signal error for real generators that have exhausted
+                    if (exc_idx != MP_CODE_STATE_EXC_SP_IDX_IRQ_FUNC_BC
+                        && exc_idx != MP_CODE_STATE_EXC_SP_IDX_IRQ_FUNC_NAT
+                        && exc_idx != MP_CODE_STATE_EXC_SP_IDX_IRQ_VIPER) {
+                        result = -1;  // Generator exhausted
                     }
-                    // MP_VM_RETURN_YIELD: success, handler stays active.
-                } else {
-                    // Regular callable (existing behavior).
-                    MP_IRQ_PROFILE_CAPTURE(4);  // P4: before call_function_1
-                    mp_call_function_1(handler, parent);
-                    MP_IRQ_PROFILE_CAPTURE(5);  // P5: after handler returns
+                } else if (ret == MP_VM_RETURN_EXCEPTION) {
+                    mp_printf(MICROPY_ERROR_PRINTER, "Uncaught exception in IRQ callback handler\n");
+                    mp_obj_print_exception(MICROPY_ERROR_PRINTER, ret_val);
+                    result = -1;
                 }
+                // MP_VM_RETURN_YIELD: success, handler stays active.
                 nlr_pop();
             } else {
                 mp_printf(MICROPY_ERROR_PRINTER, "Uncaught exception in IRQ callback handler\n");
@@ -147,10 +284,8 @@ int mp_irq_dispatch(mp_obj_t handler, mp_obj_t parent, bool ishard) {
             }
             gc_unlock();
             mp_sched_unlock();
-            MP_IRQ_PROFILE_CAPTURE(6);  // P6: mp_irq_dispatch exit
 
             #if MICROPY_STACK_CHECK && MICROPY_STACK_SIZE_HARD_IRQ > 0
-            // Restore original stack-limit checking values.
             MP_STATE_THREAD(stack_top) = orig_stack_top;
             MP_STATE_THREAD(stack_limit) = orig_stack_limit;
             #endif

@@ -43,6 +43,14 @@ enum {
  DEFINE TYPES
  ******************************************************************************/
 
+// Extra data stored after the state[] array in wrapped IRQ handlers.
+// This enables generator-compatible objects that can handle different handler types.
+// Memory layout: [mp_obj_gen_instance_t][state[n_state]][exc_stack[n_exc]][mp_irq_handler_extra_t]
+typedef struct _mp_irq_handler_extra_t {
+    const byte *bytecode_start;   // For bytecode funcs: cached IP start position
+    void *native_entry;           // For native/viper: direct function pointer
+} mp_irq_handler_extra_t;
+
 typedef mp_uint_t (*mp_irq_trigger_fun_t)(mp_obj_t self, mp_uint_t trigger);
 typedef mp_uint_t (*mp_irq_info_fun_t)(mp_obj_t self, mp_uint_t info_type);
 

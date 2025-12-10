@@ -41,14 +41,7 @@ const mp_obj_exception_t mp_const_GeneratorExit_obj = {{&mp_type_GeneratorExit},
 /******************************************************************************/
 /* generator wrapper                                                          */
 
-typedef struct _mp_obj_gen_instance_t {
-    mp_obj_base_t base;
-    // mp_const_none: Not-running, no exception.
-    // MP_OBJ_NULL: Running, no exception.
-    // other: Not running, pending exception.
-    mp_obj_t pend_exc;
-    mp_code_state_t code_state;
-} mp_obj_gen_instance_t;
+// mp_obj_gen_instance_t is defined in py/objgenerator.h
 
 static mp_obj_t gen_wrap_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     // A generating function is just a bytecode function with type mp_type_gen_wrap
@@ -151,7 +144,6 @@ static void gen_instance_print(const mp_print_t *print, mp_obj_t self_in, mp_pri
 }
 
 mp_vm_return_kind_t mp_obj_gen_resume(mp_obj_t self_in, mp_obj_t send_value, mp_obj_t throw_value, mp_obj_t *ret_val) {
-    MP_IRQ_PROFILE_CAPTURE(7);  // P7: mp_obj_gen_resume entry
     mp_cstack_check();
     mp_check_self(mp_obj_is_type(self_in, &mp_type_gen_instance));
     mp_obj_gen_instance_t *self = MP_OBJ_TO_PTR(self_in);
@@ -191,7 +183,6 @@ mp_vm_return_kind_t mp_obj_gen_resume(mp_obj_t self_in, mp_obj_t send_value, mp_
 
     // Mark as running
     self->pend_exc = MP_OBJ_NULL;
-    MP_IRQ_PROFILE_CAPTURE(8);  // P8: after set send_value, before globals
 
     // Set up the correct globals context for the generator and execute it
     self->code_state.old_globals = mp_globals_get();
@@ -204,7 +195,6 @@ mp_vm_return_kind_t mp_obj_gen_resume(mp_obj_t self_in, mp_obj_t send_value, mp_
         // A native generator.
         typedef uintptr_t (*mp_fun_native_gen_t)(void *, mp_obj_t);
         mp_fun_native_gen_t fun = mp_obj_fun_native_get_generator_resume(self->code_state.fun_bc);
-        MP_IRQ_PROFILE_CAPTURE(9);  // P9: native gen - before native call
         ret_kind = fun((void *)&self->code_state, throw_value);
     } else
     #endif
@@ -256,6 +246,159 @@ mp_vm_return_kind_t mp_obj_gen_resume(mp_obj_t self_in, mp_obj_t send_value, mp_
 
     return ret_kind;
 }
+
+#if MICROPY_ENABLE_SCHEDULER
+#include "shared/runtime/mpirq.h"
+
+// Unified IRQ handler resume function.
+// Handles all IRQ handler types based on exc_sp_idx sentinel values:
+// - IRQ_FUNC_BC: Wrapped bytecode function (reset IP, execute fresh)
+// - IRQ_FUNC_NAT: Wrapped @native function (call directly)
+// - IRQ_VIPER: Wrapped @viper function (call directly)
+// - SENTINEL: Native generator (resume via function pointer)
+// - Other: Bytecode generator (resume from saved IP)
+mp_vm_return_kind_t mp_obj_gen_resume_irq(mp_obj_t self_in, mp_obj_t send_value, mp_obj_t *ret_val) {
+    mp_cstack_check();
+    mp_obj_gen_instance_t *self = MP_OBJ_TO_PTR(self_in);
+
+    // Reentrance guard (common to all types)
+    if (self->pend_exc == MP_OBJ_NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("handler already executing"));
+    }
+
+    uint16_t exc_sp_idx = self->code_state.exc_sp_idx;
+    mp_vm_return_kind_t ret_kind;
+
+    // Branch on handler type via exc_sp_idx sentinel
+    if (exc_sp_idx == MP_CODE_STATE_EXC_SP_IDX_IRQ_FUNC_BC) {
+        // Wrapped bytecode function: reset state and execute fresh each time
+        // Get extra data (stored after state[] array, no exc_stack for wrapped funcs)
+        mp_irq_handler_extra_t *extra = (mp_irq_handler_extra_t *)(
+            (byte *)self->code_state.state + self->code_state.n_state * sizeof(mp_obj_t));
+
+        // Reset execution state - IP, SP, and argument only
+        // No need to zero state array - function will overwrite its locals
+        self->code_state.ip = extra->bytecode_start;
+        self->code_state.sp = &self->code_state.state[0] - 1;
+        self->code_state.exc_sp_idx = 0;  // VM uses this to index exception stack
+        self->code_state.state[self->code_state.n_state - 1] = send_value;
+
+        // Mark as running
+        self->pend_exc = MP_OBJ_NULL;
+
+        // Set globals and execute
+        self->code_state.old_globals = mp_globals_get();
+        mp_globals_set(self->code_state.fun_bc->context->module.globals);
+        ret_kind = mp_execute_bytecode(&self->code_state, MP_OBJ_NULL);
+        mp_globals_set(self->code_state.old_globals);
+
+        // Restore sentinel and mark as idle
+        self->code_state.exc_sp_idx = MP_CODE_STATE_EXC_SP_IDX_IRQ_FUNC_BC;
+        self->pend_exc = mp_const_none;
+
+        // Handle return
+        if (ret_kind == MP_VM_RETURN_NORMAL) {
+            *ret_val = *self->code_state.sp;
+        } else if (ret_kind == MP_VM_RETURN_EXCEPTION) {
+            *ret_val = self->code_state.state[0];
+        }
+        return ret_kind;
+
+    #if MICROPY_EMIT_NATIVE
+    } else if (exc_sp_idx == MP_CODE_STATE_EXC_SP_IDX_IRQ_FUNC_NAT) {
+        // Wrapped @native function: call directly
+        mp_irq_handler_extra_t *extra = (mp_irq_handler_extra_t *)(
+            (byte *)self->code_state.state + self->code_state.n_state * sizeof(mp_obj_t));
+
+        self->pend_exc = MP_OBJ_NULL;
+        typedef mp_obj_t (*native_fun_1_t)(mp_obj_t);
+        *ret_val = ((native_fun_1_t)extra->native_entry)(send_value);
+        self->pend_exc = mp_const_none;
+        return MP_VM_RETURN_NORMAL;
+
+    } else if (exc_sp_idx == MP_CODE_STATE_EXC_SP_IDX_IRQ_VIPER) {
+        // Wrapped @viper function: direct C call
+        mp_irq_handler_extra_t *extra = (mp_irq_handler_extra_t *)(
+            (byte *)self->code_state.state + self->code_state.n_state * sizeof(mp_obj_t));
+
+        self->pend_exc = MP_OBJ_NULL;
+        typedef mp_obj_t (*viper_fun_1_t)(mp_obj_t);
+        *ret_val = ((viper_fun_1_t)extra->native_entry)(send_value);
+        self->pend_exc = mp_const_none;
+        return MP_VM_RETURN_NORMAL;
+
+    } else if (exc_sp_idx == MP_CODE_STATE_EXC_SP_IDX_SENTINEL) {
+        // Native generator: resume via function pointer
+        if (self->code_state.ip == 0) {
+            *ret_val = mp_const_none;
+            return MP_VM_RETURN_NORMAL;
+        }
+
+        *self->code_state.sp = send_value;
+        self->pend_exc = MP_OBJ_NULL;
+
+        self->code_state.old_globals = mp_globals_get();
+        mp_globals_set(self->code_state.fun_bc->context->module.globals);
+
+        typedef uintptr_t (*mp_fun_native_gen_t)(void *, mp_obj_t);
+        mp_fun_native_gen_t fun = mp_obj_fun_native_get_generator_resume(self->code_state.fun_bc);
+        ret_kind = fun((void *)&self->code_state, MP_OBJ_NULL);
+
+        mp_globals_set(self->code_state.old_globals);
+        self->pend_exc = mp_const_none;
+    #endif
+
+    } else {
+        // Bytecode generator: resume from saved IP
+        if (self->code_state.ip == 0) {
+            *ret_val = mp_const_none;
+            return MP_VM_RETURN_NORMAL;
+        }
+
+        *self->code_state.sp = send_value;
+        self->pend_exc = MP_OBJ_NULL;
+
+        self->code_state.old_globals = mp_globals_get();
+        mp_globals_set(self->code_state.fun_bc->context->module.globals);
+        ret_kind = mp_execute_bytecode(&self->code_state, MP_OBJ_NULL);
+        mp_globals_set(self->code_state.old_globals);
+        self->pend_exc = mp_const_none;
+    }
+
+    // Common return handling for generators
+    switch (ret_kind) {
+        case MP_VM_RETURN_NORMAL:
+        default:
+            self->code_state.ip = 0;
+            *ret_val = *self->code_state.sp;
+            break;
+
+        case MP_VM_RETURN_YIELD:
+            *ret_val = *self->code_state.sp;
+            #if MICROPY_PY_GENERATOR_PEND_THROW
+            *self->code_state.sp = mp_const_none;
+            #endif
+            break;
+
+        case MP_VM_RETURN_EXCEPTION:
+            self->code_state.ip = 0;
+            #if MICROPY_EMIT_NATIVE
+            if (exc_sp_idx == MP_CODE_STATE_EXC_SP_IDX_SENTINEL) {
+                *ret_val = ((mp_obj_gen_instance_native_t *)self)->code_state.state[0];
+            } else
+            #endif
+            {
+                *ret_val = self->code_state.state[0];
+            }
+            if (mp_obj_is_subclass_fast(MP_OBJ_FROM_PTR(mp_obj_get_type(*ret_val)), MP_OBJ_FROM_PTR(&mp_type_StopIteration))) {
+                *ret_val = mp_obj_new_exception_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("generator raised StopIteration"));
+            }
+            break;
+    }
+
+    return ret_kind;
+}
+#endif
 
 static mp_obj_t gen_resume_and_raise(mp_obj_t self_in, mp_obj_t send_value, mp_obj_t throw_value, bool raise_stop_iteration) {
     mp_obj_t ret;
