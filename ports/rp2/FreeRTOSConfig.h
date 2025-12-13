@@ -56,14 +56,28 @@
 // SMP (Symmetric Multiprocessing) configuration
 // ============================================================================
 
-#define configNUMBER_OF_CORES (2)
+// Temporarily test single-core to isolate SMP issues
+#define configNUMBER_OF_CORES (1)
+// #define configNUMBER_OF_CORES (2)
+#if configNUMBER_OF_CORES > 1
 #define configUSE_CORE_AFFINITY (1)
 #define configRUN_MULTIPLE_PRIORITIES (1)
+#endif
 #define configUSE_PASSIVE_IDLE_HOOK (0)
 
 // RP2040 has 32 hardware spinlocks - assign two for FreeRTOS SMP
 #define configSMP_SPINLOCK_0 (0)
 #define configSMP_SPINLOCK_1 (1)
+
+// ============================================================================
+// Pico SDK Interoperability
+// ============================================================================
+
+// Allow SDK pico_sync primitives (sem/mutex/queue) to work from FreeRTOS tasks
+#define configSUPPORT_PICO_SYNC_INTEROP (1)
+
+// Allow SDK pico_time functions (sleep_ms/sleep_us) to block at FreeRTOS level
+#define configSUPPORT_PICO_TIME_INTEROP (1)
 
 // ============================================================================
 // MANDATORY for MicroPython threading backend
@@ -143,10 +157,10 @@
 // M0+ doesn't have CLZ instruction, so use generic task selection
 #define configUSE_PORT_OPTIMISED_TASK_SELECTION (0)
 
-// Disable handler installation check - our handlers wrap the FreeRTOS handlers
+// Disable handler installation check - service task approach doesn't use PendSV
 #define configCHECK_HANDLER_INSTALLATION (0)
 
-// Use dynamic exception handlers so MicroPython's PendSV can wrap FreeRTOS's
-#define configUSE_DYNAMIC_EXCEPTION_HANDLERS (1)
+// Service task approach doesn't need dynamic exception handler registration
+// #define configUSE_DYNAMIC_EXCEPTION_HANDLERS (1)
 
 #endif // FREERTOS_CONFIG_H

@@ -105,7 +105,10 @@ int main(int argc, char **argv) {
     SCB->SCR |= SCB_SCR_SEVONPEND_Msk;
     #endif
 
+    #if !MICROPY_PY_THREAD
+    // Non-threaded: Init pendsv before main loop
     pendsv_init();
+    #endif
     soft_timer_init();
 
     // Set the MCU frequency and as a side effect the peripheral clock to 48 MHz.
@@ -139,13 +142,13 @@ int main(int argc, char **argv) {
     bi_decl(bi_program_feature("thread support"))
     #endif
 
-    #if !MICROPY_PY_THREAD
-    // Non-FreeRTOS: Start and initialise the RTC
-    struct timespec ts = { 0, 0 };
-    ts.tv_sec = timeutils_seconds_since_epoch(2021, 1, 1, 0, 0, 0);
-    aon_timer_start(&ts);
-    mp_hal_time_ns_set_from_rtc();
-    #endif
+    // Start and initialise the RTC (needed for both threaded and non-threaded builds)
+    {
+        struct timespec ts = { 0, 0 };
+        ts.tv_sec = timeutils_seconds_since_epoch(2021, 1, 1, 0, 0, 0);
+        aon_timer_start(&ts);
+        mp_hal_time_ns_set_from_rtc();
+    }
 
     #if !MICROPY_PY_THREAD
     // Non-FreeRTOS: Initialise stack extents and GC heap before main loop.
@@ -168,17 +171,20 @@ int main(int argc, char **argv) {
     #endif
     #endif
 
-    #if MICROPY_PY_LWIP && !MICROPY_PY_THREAD
-    // Non-FreeRTOS: lwIP doesn't allow to reinitialise itself by subsequent calls to this function
+    #if MICROPY_PY_LWIP
+    // lwIP doesn't allow to reinitialise itself by subsequent calls to this function
     // because the system timeout list (next_timeout) is only ever reset by BSS clearing.
-    // So for now we only init the lwIP stack once on power-up.
+    // So for now we only init the lwIP stack once on power-up (before scheduler for FreeRTOS).
     lwip_init();
     #if LWIP_MDNS_RESPONDER
     mdns_resp_init();
     #endif
     #endif
 
-    #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_CYW43
+    #if (MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_CYW43) && !MICROPY_PY_THREAD
+    // Non-threaded: Initialize CYW43 before main loop.
+    // For FreeRTOS builds, CYW43 init is moved AFTER scheduler starts to avoid
+    // GPIO IRQ conflicts during scheduler initialization.
     {
         cyw43_init(&cyw43_state);
         cyw43_irq_init();
@@ -230,10 +236,38 @@ static void rp2_main_loop(void *arg) {
     (void)arg;
 
     #if MICROPY_PY_THREAD
-    // FreeRTOS: Initialize stack extents and GC heap AFTER scheduler has started.
-    // This matches STM32's proven architecture (see ports/stm32/main.c:606-630).
-    // Doing this before scheduler causes memory corruption / boot failure.
-    mp_cstack_init_with_top(&__StackTop, &__StackTop - &__StackBottom);
+    // FreeRTOS: Initialize pendsv service task AFTER scheduler has started.
+    // Cannot create tasks before scheduler init - corrupts kernel state.
+    pendsv_init();
+
+    #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_CYW43
+    // FreeRTOS: Initialize CYW43 AFTER scheduler has started to avoid GPIO IRQ
+    // conflicts during scheduler initialization. Before this change, cyw43_irq_init()
+    // registered GPIO handlers BEFORE vTaskStartScheduler, causing corruption when
+    // IRQs fired during scheduler init.
+    {
+        cyw43_init(&cyw43_state);
+        cyw43_irq_init();
+        cyw43_post_poll_hook(); // enable the irq
+        uint8_t buf[8];
+        memcpy(&buf[0], "PICO", 4);
+
+        // MAC isn't loaded from OTP yet, so use unique id to generate the default AP ssid.
+        const char hexchr[16] = "0123456789ABCDEF";
+        pico_unique_board_id_t pid;
+        pico_get_unique_board_id(&pid);
+        buf[4] = hexchr[pid.id[7] >> 4];
+        buf[5] = hexchr[pid.id[6] & 0xf];
+        buf[6] = hexchr[pid.id[5] >> 4];
+        buf[7] = hexchr[pid.id[4] & 0xf];
+        cyw43_wifi_ap_set_ssid(&cyw43_state, 8, buf);
+        cyw43_wifi_ap_set_auth(&cyw43_state, CYW43_AUTH_WPA2_AES_PSK);
+        cyw43_wifi_ap_set_password(&cyw43_state, 8, (const uint8_t *)"picoW123");
+    }
+    #endif
+
+    // Note: mp_cstack_init_with_top is called in soft_reset section AFTER mp_thread_init
+    // because it uses MP_STATE_THREAD() which requires TLS to be set up first.
 
     #if MICROPY_HW_ENABLE_PSRAM
     if (psram_size) {
@@ -254,7 +288,14 @@ static void rp2_main_loop(void *arg) {
 soft_reset:
     #if MICROPY_PY_THREAD
     // Initialize FreeRTOS threading backend with main task stack for GC scanning.
+    // This must be called first as it sets up Thread Local Storage.
     mp_thread_init(main_task_stack, sizeof(main_task_stack));
+
+    // Initialize stack extents using the FreeRTOS task stack.
+    // Must be after mp_thread_init() because MP_STATE_THREAD() requires TLS setup.
+    // This matches STM32's proven architecture (see ports/stm32/main.c:600-610).
+    mp_cstack_init_with_top(main_task_stack + FREERTOS_MAIN_TASK_STACK_SIZE,
+        FREERTOS_MAIN_TASK_STACK_SIZE * sizeof(StackType_t));
     #endif
 
     // Initialise MicroPython runtime.
@@ -280,6 +321,11 @@ soft_reset:
     mod_network_lwip_init();
     #endif
 
+    #if MICROPY_HW_ENABLE_USBDEV
+    // Initialize USB before executing Python code so CDC REPL is available for any prints.
+    mp_usbd_init();
+    #endif
+
     // Execute _boot.py to set up the filesystem.
     #if MICROPY_VFS_FAT && MICROPY_HW_USB_MSC
     pyexec_frozen_module("_boot_fat.py", false);
@@ -289,10 +335,6 @@ soft_reset:
 
     // Execute user scripts.
     int ret = pyexec_file_if_exists("boot.py");
-
-    #if MICROPY_HW_ENABLE_USBDEV
-    mp_usbd_init();
-    #endif
 
     if (ret & PYEXEC_FORCED_EXIT) {
         goto soft_reset_exit;

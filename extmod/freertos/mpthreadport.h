@@ -48,6 +48,12 @@ typedef void *SemaphoreHandle_t;
 #define MP_FREERTOS_TLS_INDEX (0)
 #endif
 
+// Default GIL enabled for safety on single-core systems.
+// Multi-core ports (e.g., rp2) can override to 0 for true parallelism.
+#ifndef MICROPY_PY_THREAD_GIL
+#define MICROPY_PY_THREAD_GIL (1)
+#endif
+
 // Default stack alignment (8-byte for ARM AAPCS)
 #ifndef MP_THREAD_STACK_ALIGN
 #define MP_THREAD_STACK_ALIGN (8)

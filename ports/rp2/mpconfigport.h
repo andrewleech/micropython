@@ -138,7 +138,8 @@
 #define MICROPY_PY_THREAD                       (1)
 #endif
 #if MICROPY_PY_THREAD
-#define MICROPY_PY_THREAD_GIL                   (1)
+// Disable GIL on RP2040 for true dual-core parallelism
+#define MICROPY_PY_THREAD_GIL                   (0)
 #define MICROPY_STACK_CHECK_MARGIN              (1024)
 #define MICROPY_MPTHREADPORT_H                  "extmod/freertos/mpthreadport.h"
 #else

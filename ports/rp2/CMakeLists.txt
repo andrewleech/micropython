@@ -308,6 +308,8 @@ if(MICROPY_PY_THREAD)
     # FreeRTOS compile definitions
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
         MICROPY_PY_THREAD=1
+        # FreeRTOS SMP needs core 1 stack for multicore_launch_core1()
+        PICO_CORE1_STACK_SIZE=0x800
     )
 
     # Link against Pico SDK hardware libraries needed by FreeRTOS port
@@ -315,6 +317,13 @@ if(MICROPY_PY_THREAD)
         hardware_exception
         hardware_clocks
         hardware_irq
+    )
+else()
+    # Non-threaded: no core 1 stack needed, save RAM
+    # Must explicitly define MICROPY_PY_THREAD=0 to override mpconfigport.h default
+    target_compile_definitions(${MICROPY_TARGET} PRIVATE
+        MICROPY_PY_THREAD=0
+        PICO_CORE1_STACK_SIZE=0
     )
 endif()
 
@@ -635,7 +644,6 @@ target_compile_definitions(${MICROPY_TARGET} PRIVATE
     LFS2_NO_MALLOC LFS2_NO_DEBUG LFS2_NO_WARN LFS2_NO_ERROR LFS2_NO_ASSERT
     PICO_FLOAT_PROPAGATE_NANS=1
     PICO_STACK_SIZE=0x2000
-    PICO_CORE1_STACK_SIZE=0
     PICO_MAX_SHARED_IRQ_HANDLERS=8 # we need more than the default
     PICO_PROGRAM_NAME="MicroPython"
     PICO_NO_PROGRAM_VERSION_STRING=1 # do it ourselves in main.c
