@@ -130,4 +130,57 @@ This is handled by:
 
 - `ports/rp2/FreeRTOSConfig.h` - Added Pico interop settings, conditional SMP config
 - `ports/rp2/CMakeLists.txt` - Conditional PICO_CORE1_STACK_SIZE, explicit MICROPY_PY_THREAD=0
-- `ports/rp2/main.c` - Moved pendsv_init() after scheduler starts (from previous session)
+- `ports/rp2/main.c` - Moved pendsv_init() after scheduler starts, fixed TLS init order, RTC init sequence
+
+## Hardware Issue - Pico W Board (Dec 2025)
+
+### Issue Summary
+
+After fixing the software initialization issues, USB enumeration still failed. Investigation revealed a **hardware fault** on the specific Pico W being used.
+
+### Fixed Software Issues
+
+1. **TLS Init Order**: `mp_thread_init()` must be called before `mp_cstack_init_with_top()`
+2. **lwIP Init**: Must wait for WiFi chip before initializing lwIP with `cyw43_arch_init()`
+3. **RTC Init**: `aon_timer_start()` was hanging because clk_rtc wasn't configured
+
+### Hardware Fault Evidence
+
+GDB debugging revealed:
+
+| Register | Value | Expected | Issue |
+|----------|-------|----------|-------|
+| XOSC_CTRL | 0x255 | 0xfabaa0 | Writes ignored/corrupted |
+| XOSC_STATUS | 0x55 | 0x8xxx1xxx | STABLE bit never set |
+| XOSC_STARTUP | 0x00 | 0xc4 | Write completely ignored |
+| CLK_REF_SEL | 0x00 | 0x01 | Mux never switches |
+| CLK_SYS_SEL | 0x00 | 0x01 | Mux never switches |
+| Flash ID | 0xffffff | valid ID | Flash not responding |
+
+### Test Results
+
+1. **SRAM R/W**: ✅ Works (wrote 0xdeadbeef, read back correctly)
+2. **RAM Execution**: ✅ Works (loaded and executed code from RAM)
+3. **ROSC**: ✅ Running (STATUS shows STABLE=1)
+4. **XOSC**: ❌ Not starting, register writes ignored
+5. **Clock Muxes**: ❌ Not switching (SEL registers stay at 0)
+6. **Flash Access**: ❌ Returns 0xffffff
+7. **OpenOCD Flash**: ❌ "Unknown flash device (ID 0x00ffffff)"
+
+### Conclusion
+
+The Pico W board appeared to have a transient hardware fault affecting:
+- XOSC crystal oscillator circuit
+- Clock distribution network
+- Flash QSPI interface
+
+### Resolution
+
+**Power cycling the board resolved the hardware issue.** After power cycle:
+
+1. Flash programming succeeded: `Found flash device 'win w25q16jv' (ID 0x001540ef)`
+2. USB enumeration works: `MicroPython Board in FS mode`
+3. FreeRTOS threading works: Multiple threads executed successfully
+4. WiFi interface initializes: CYW43 driver functional
+
+The transient hardware fault (stuck XOSC, non-responsive clock muxes) was cleared by a full power cycle. The FreeRTOS-based MicroPython build is now fully functional on the Pico W.
