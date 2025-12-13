@@ -184,3 +184,34 @@ The Pico W board appeared to have a transient hardware fault affecting:
 4. WiFi interface initializes: CYW43 driver functional
 
 The transient hardware fault (stuck XOSC, non-responsive clock muxes) was cleared by a full power cycle. The FreeRTOS-based MicroPython build is now fully functional on the Pico W.
+
+## Thread Test Results
+
+### Standard Thread Tests
+
+All standard thread unit tests pass on the RP2 FreeRTOS build:
+
+```
+29 tests performed (124 individual testcases)
+29 tests passed
+4 tests skipped
+```
+
+### Previously Skipped Tests Now Pass
+
+The `run-tests.py` skips 4 thread tests for `rp2` platform with the comment "require more than 2 threads". This skip was for the **old multicore-based threading** which was limited to 2 threads (one per CPU core).
+
+With FreeRTOS, all 4 tests now pass:
+
+| Test | Threads | Status | Output |
+|------|---------|--------|--------|
+| thread_shared2.py | 2 | ✅ Pass | `[10, 20]` |
+| thread_lock2.py | 4 | ✅ Pass | 4x "have it" + "done" |
+| thread_lock3.py | 10 | ✅ Pass | "my turn: 0" through 9 |
+| stress_heap.py | 10 | ✅ Pass | 10x `49995000 10000` |
+
+### Implication
+
+The skip list in `tests/run-tests.py` could be updated to differentiate between:
+- Old multicore backend (limited to 2 threads)
+- FreeRTOS backend (supports many threads)
