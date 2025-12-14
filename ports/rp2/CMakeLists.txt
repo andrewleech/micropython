@@ -280,6 +280,7 @@ if(MICROPY_PY_THREAD)
     list(APPEND MICROPY_SOURCE_EXTMOD
         ${MICROPY_DIR}/extmod/freertos/mpthreadport.c
         ${MICROPY_DIR}/extmod/freertos/mp_freertos_hal.c
+        ${MICROPY_DIR}/extmod/freertos/mp_freertos_service.c
     )
 
     # FreeRTOS kernel sources (no root pointers, can go in PORT)
@@ -308,6 +309,7 @@ if(MICROPY_PY_THREAD)
     # FreeRTOS compile definitions
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
         MICROPY_PY_THREAD=1
+        MICROPY_FREERTOS_SERVICE_TASKS=1
         # FreeRTOS SMP needs core 1 stack for multicore_launch_core1()
         PICO_CORE1_STACK_SIZE=0x800
     )

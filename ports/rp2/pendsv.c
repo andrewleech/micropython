@@ -28,10 +28,6 @@
 #include "py/mpconfig.h"
 #include "pendsv.h"
 
-#if MICROPY_PY_THREAD
-#include "py/mpthread.h"
-#endif
-
 #if PICO_RP2040
 #include "RP2040.h"
 #elif PICO_RP2350 && PICO_ARM
@@ -44,128 +40,61 @@
 #include "lib/cyw43-driver/src/cyw43_stats.h"
 #endif
 
-static pendsv_dispatch_t pendsv_dispatch_table[PENDSV_DISPATCH_NUM_SLOTS];
-
-#if MICROPY_PY_THREAD
+#if MICROPY_PY_THREAD && MICROPY_FREERTOS_SERVICE_TASKS
 
 // ============================================================================
-// FreeRTOS Service Task Implementation
+// FreeRTOS Service Task Implementation (using shared framework)
 //
-// Instead of using PendSV interrupt (which conflicts with FreeRTOS's use of
-// PendSV for context switching), we use a high-priority service task that
-// processes the dispatch table when signaled via task notifications.
-//
-// This approach:
-// - Eliminates PendSV handler conflicts with FreeRTOS
-// - Works correctly with FreeRTOS SMP on dual-core RP2040
-// - Maintains the same pendsv_schedule_dispatch() API
-// - Provides similar timing characteristics (task runs as soon as possible)
+// Uses the shared mp_freertos_service framework from extmod/freertos/.
+// This port provides wrappers that maintain the pendsv_* API and the
+// required mp_freertos_service_in_isr() function.
 // ============================================================================
 
-#include "FreeRTOS.h"
-#include "task.h"
+#include "extmod/freertos/mp_freertos_service.h"
 
-// Service task runs at highest priority to emulate "lowest interrupt" behavior.
-// It will preempt all other tasks as soon as it's notified.
-#define SERVICE_TASK_PRIORITY (configMAX_PRIORITIES - 1)
-#define SERVICE_TASK_STACK_SIZE (512 / sizeof(StackType_t))
-
-static StaticTask_t service_task_tcb;
-static StackType_t service_task_stack[SERVICE_TASK_STACK_SIZE];
-static TaskHandle_t service_task_handle;
-
-// Recursive mutex for suspend/resume mechanism.
-// Important to use recursive mutex as either core may call pendsv_suspend()
-// and expect both mutual exclusion and that dispatch won't run.
-static mp_thread_recursive_mutex_t pendsv_mutex;
-
-// Service task function - waits for notifications and processes dispatch table.
-static void pendsv_service_task(void *arg) {
-    (void)arg;
-
-    for (;;) {
-        // Block until notified (efficient, doesn't spin)
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
-        #if MICROPY_PY_NETWORK_CYW43
-        CYW43_STAT_INC(PENDSV_RUN_COUNT);
-        #endif
-
-        // Try to acquire mutex (non-blocking)
-        // If suspended, we'll be re-notified when pendsv_resume() is called
-        if (!mp_thread_recursive_mutex_lock(&pendsv_mutex, 0)) {
-            continue;
-        }
-
-        // Process all pending dispatches
-        for (size_t i = 0; i < PENDSV_DISPATCH_NUM_SLOTS; ++i) {
-            if (pendsv_dispatch_table[i] != NULL) {
-                pendsv_dispatch_t f = pendsv_dispatch_table[i];
-                pendsv_dispatch_table[i] = NULL;
-                f();
-            }
-        }
-
-        mp_thread_recursive_mutex_unlock(&pendsv_mutex);
-    }
-}
-
-void pendsv_init(void) {
-    static bool initialized = false;
-
-    if (!initialized) {
-        initialized = true;
-        mp_thread_recursive_mutex_init(&pendsv_mutex);
-
-        // Create service task with static allocation
-        service_task_handle = xTaskCreateStatic(
-            pendsv_service_task,
-            "svc",
-            SERVICE_TASK_STACK_SIZE,
-            NULL,
-            SERVICE_TASK_PRIORITY,
-            service_task_stack,
-            &service_task_tcb);
-    }
-}
-
-void pendsv_suspend(void) {
-    mp_thread_recursive_mutex_lock(&pendsv_mutex, 1);
-}
-
-void pendsv_resume(void) {
-    mp_thread_recursive_mutex_unlock(&pendsv_mutex);
-
-    // Check if any dispatch is pending and notify service task
-    for (size_t i = 0; i < PENDSV_DISPATCH_NUM_SLOTS; ++i) {
-        if (pendsv_dispatch_table[i] != NULL) {
-            xTaskNotifyGive(service_task_handle);
-            break;
-        }
-    }
-}
-
-// Check if running in interrupt context (Cortex-M: IPSR != 0 means exception/interrupt)
-static inline bool pendsv_in_isr(void) {
+// Port-provided ISR context detection for Cortex-M (IPSR != 0 means exception)
+bool mp_freertos_service_in_isr(void) {
+    #if PICO_ARM
     uint32_t ipsr;
     __asm volatile ("mrs %0, ipsr" : "=r" (ipsr));
     return ipsr != 0;
+    #elif PICO_RISCV
+    // RISC-V: check machine cause register or similar
+    // For now, assume we're not in ISR context for RISC-V
+    // TODO: Implement proper RISC-V ISR detection
+    return false;
+    #else
+    return false;
+    #endif
+}
+
+void pendsv_init(void) {
+    mp_freertos_service_init();
+}
+
+void pendsv_suspend(void) {
+    mp_freertos_service_suspend();
+}
+
+void pendsv_resume(void) {
+    mp_freertos_service_resume();
 }
 
 void pendsv_schedule_dispatch(size_t slot, pendsv_dispatch_t f) {
-    pendsv_dispatch_table[slot] = f;
-
-    // Check if we're in ISR context
-    if (pendsv_in_isr()) {
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        vTaskNotifyGiveFromISR(service_task_handle, &xHigherPriorityTaskWoken);
-        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-    } else {
-        xTaskNotifyGive(service_task_handle);
+    #if MICROPY_PY_NETWORK_CYW43
+    // Track CYW43 dispatch scheduling
+    if (slot == PENDSV_DISPATCH_CYW43) {
+        // Stats tracking handled in gpio_irq_handler
     }
+    #endif
+    mp_freertos_service_schedule(slot, f);
 }
 
-#else // !MICROPY_PY_THREAD
+bool pendsv_is_pending(size_t slot) {
+    return mp_freertos_service_is_pending(slot);
+}
+
+#else // !MICROPY_PY_THREAD || !MICROPY_FREERTOS_SERVICE_TASKS
 
 // ============================================================================
 // Non-threaded Implementation (original PendSV-based approach)
@@ -178,6 +107,7 @@ void pendsv_schedule_dispatch(size_t slot, pendsv_dispatch_t f) {
 // PendSV IRQ priority, to run system-level tasks that preempt the main thread.
 #define IRQ_PRI_PENDSV PICO_LOWEST_IRQ_PRIORITY
 
+static volatile pendsv_dispatch_t pendsv_dispatch_table[PENDSV_DISPATCH_NUM_SLOTS];
 static int pendsv_lock;
 
 void pendsv_init(void) {
@@ -246,8 +176,8 @@ void PendSV_Handler(void) {
     }
 }
 
-#endif // MICROPY_PY_THREAD
-
 bool pendsv_is_pending(size_t slot) {
     return pendsv_dispatch_table[slot] != NULL;
 }
+
+#endif // MICROPY_PY_THREAD && MICROPY_FREERTOS_SERVICE_TASKS

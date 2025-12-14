@@ -142,6 +142,12 @@
 #define MICROPY_PY_THREAD_GIL                   (0)
 #define MICROPY_STACK_CHECK_MARGIN              (1024)
 #define MICROPY_MPTHREADPORT_H                  "extmod/freertos/mpthreadport.h"
+// Enable shared service task framework for deferred callbacks
+#ifndef MICROPY_FREERTOS_SERVICE_TASKS
+#define MICROPY_FREERTOS_SERVICE_TASKS          (1)
+#endif
+#define MICROPY_FREERTOS_SERVICE_MAX_SLOTS      (4)  // Soft timer, CYW43, WizNet, board
+#define MICROPY_FREERTOS_SERVICE_STACK_SIZE     (4096)  // CYW43 SPI needs larger stack
 #else
 #define MICROPY_STACK_CHECK_MARGIN              (256)
 #endif
