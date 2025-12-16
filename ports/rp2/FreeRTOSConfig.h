@@ -56,9 +56,8 @@
 // SMP (Symmetric Multiprocessing) configuration
 // ============================================================================
 
-// Temporarily test single-core to isolate SMP issues
-#define configNUMBER_OF_CORES (1)
-// #define configNUMBER_OF_CORES (2)
+// RP2040 has 2 cores - use both for true SMP
+#define configNUMBER_OF_CORES (2)
 #if configNUMBER_OF_CORES > 1
 #define configUSE_CORE_AFFINITY (1)
 #define configRUN_MULTIPLE_PRIORITIES (1)
