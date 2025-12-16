@@ -26,6 +26,7 @@
 
 #include "py/mphal.h"
 #include "py/runtime.h"
+#include "py/mpprint.h"
 #include "drivers/dht/dht.h"
 #include "modrp2.h"
 #include "pico/stdlib.h"
@@ -36,6 +37,11 @@
 
 #if MICROPY_PY_NETWORK_CYW43
 #include "extmod/modnetwork.h"
+#include "lib/cyw43-driver/src/cyw43_stats.h"
+#endif
+
+#if MICROPY_PY_THREAD && MICROPY_FREERTOS_SERVICE_TASKS
+#include "extmod/freertos/mp_freertos_service.h"
 #endif
 
 #if MICROPY_PY_NETWORK_CYW43
@@ -88,6 +94,79 @@ static mp_obj_t rp2_bootsel_button(void) {
 }
 MP_DEFINE_CONST_FUN_OBJ_0(rp2_bootsel_button_obj, rp2_bootsel_button);
 
+// Debug functions for WiFi/service task investigation
+#if MICROPY_PY_NETWORK_CYW43 && CYW43_USE_STATS
+static mp_obj_t rp2_cyw43_stats(void) {
+    cyw43_dump_stats();
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_0(rp2_cyw43_stats_obj, rp2_cyw43_stats);
+#endif
+
+#if MICROPY_PY_NETWORK_CYW43
+// Debug functions for CYW43 GPIO tracking
+extern uint32_t cyw43_debug_get_post_poll_count(void);
+extern void cyw43_debug_reset_post_poll_count(void);
+extern bool cyw43_debug_get_gpio_state(void);
+extern uint32_t cyw43_debug_get_yield_count(void);
+extern void cyw43_debug_reset_yield_count(void);
+extern uint32_t cyw43_debug_get_gpio_irq_count(void);
+extern void cyw43_debug_reset_gpio_irq_count(void);
+
+static mp_obj_t rp2_cyw43_gpio_debug(void) {
+    mp_printf(&mp_plat_print, "=== CYW43 GPIO Debug ===\n");
+    mp_printf(&mp_plat_print, "GPIO IRQ triggers: %lu\n", (unsigned long)cyw43_debug_get_gpio_irq_count());
+    mp_printf(&mp_plat_print, "post_poll_hook calls: %lu\n", (unsigned long)cyw43_debug_get_post_poll_count());
+    mp_printf(&mp_plat_print, "HOST_WAKE GPIO state: %d\n", cyw43_debug_get_gpio_state());
+    mp_printf(&mp_plat_print, "cyw43_yield() calls: %lu\n", (unsigned long)cyw43_debug_get_yield_count());
+    mp_printf(&mp_plat_print, "========================\n");
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_0(rp2_cyw43_gpio_debug_obj, rp2_cyw43_gpio_debug);
+
+static mp_obj_t rp2_cyw43_gpio_reset(void) {
+    cyw43_debug_reset_post_poll_count();
+    cyw43_debug_reset_yield_count();
+    cyw43_debug_reset_gpio_irq_count();
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_0(rp2_cyw43_gpio_reset_obj, rp2_cyw43_gpio_reset);
+#endif
+
+#if MICROPY_PY_THREAD
+extern uint32_t mp_freertos_get_wfe_call_count(void);
+extern uint32_t mp_freertos_get_wfe_delay_count(void);
+extern void mp_freertos_reset_wfe_counters(void);
+
+static mp_obj_t rp2_wfe_debug(void) {
+    mp_printf(&mp_plat_print, "=== WFE Debug ===\n");
+    mp_printf(&mp_plat_print, "WFE calls: %lu\n", (unsigned long)mp_freertos_get_wfe_call_count());
+    mp_printf(&mp_plat_print, "WFE delays: %lu\n", (unsigned long)mp_freertos_get_wfe_delay_count());
+    mp_printf(&mp_plat_print, "=================\n");
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_0(rp2_wfe_debug_obj, rp2_wfe_debug);
+
+static mp_obj_t rp2_wfe_reset(void) {
+    mp_freertos_reset_wfe_counters();
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_0(rp2_wfe_reset_obj, rp2_wfe_reset);
+#endif
+
+#if MICROPY_PY_THREAD && MICROPY_FREERTOS_SERVICE_TASKS && MP_FREERTOS_SERVICE_DEBUG
+static mp_obj_t rp2_service_stats(void) {
+    mp_freertos_service_debug_print();
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_0(rp2_service_stats_obj, rp2_service_stats);
+
+static mp_obj_t rp2_service_stats_reset(void) {
+    mp_freertos_service_debug_reset();
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_0(rp2_service_stats_reset_obj, rp2_service_stats_reset);
+#endif
 
 static const mp_rom_map_elem_t rp2_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),            MP_ROM_QSTR(MP_QSTR_rp2) },
@@ -100,6 +179,23 @@ static const mp_rom_map_elem_t rp2_module_globals_table[] = {
     #if MICROPY_PY_NETWORK_CYW43
     // Deprecated (use network.country instead).
     { MP_ROM_QSTR(MP_QSTR_country),             MP_ROM_PTR(&mod_network_country_obj) },
+    #endif
+
+    // Debug functions (temporary - for debugging WiFi/service task issues)
+    #if MICROPY_PY_NETWORK_CYW43 && CYW43_USE_STATS
+    { MP_ROM_QSTR(MP_QSTR_cyw43_stats),         MP_ROM_PTR(&rp2_cyw43_stats_obj) },
+    #endif
+    #if MICROPY_PY_NETWORK_CYW43
+    { MP_ROM_QSTR(MP_QSTR_cyw43_gpio_debug),    MP_ROM_PTR(&rp2_cyw43_gpio_debug_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cyw43_gpio_reset),    MP_ROM_PTR(&rp2_cyw43_gpio_reset_obj) },
+    #endif
+    #if MICROPY_PY_THREAD
+    { MP_ROM_QSTR(MP_QSTR_wfe_debug),           MP_ROM_PTR(&rp2_wfe_debug_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wfe_reset),           MP_ROM_PTR(&rp2_wfe_reset_obj) },
+    #endif
+    #if MICROPY_PY_THREAD && MICROPY_FREERTOS_SERVICE_TASKS && MP_FREERTOS_SERVICE_DEBUG
+    { MP_ROM_QSTR(MP_QSTR_service_stats),       MP_ROM_PTR(&rp2_service_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_service_stats_reset), MP_ROM_PTR(&rp2_service_stats_reset_obj) },
     #endif
 };
 static MP_DEFINE_CONST_DICT(rp2_module_globals, rp2_module_globals_table);

@@ -44,6 +44,11 @@
 #include "lib/cyw43-driver/src/cyw43.h"
 #endif
 
+#if MICROPY_PY_THREAD
+#include "FreeRTOS.h"
+#include "task.h"
+#endif
+
 #if PICO_RP2040
 // This needs to be added to the result of time_us_64() to get the number of
 // microseconds since the Epoch.
@@ -270,6 +275,47 @@ void soft_timer_init(void) {
 void mp_wfe_or_timeout(uint32_t timeout_ms) {
     best_effort_wfe_or_timeout(delayed_by_ms(get_absolute_time(), timeout_ms));
 }
+
+#if MICROPY_PY_THREAD
+// FreeRTOS-aware wait-for-event that yields to the scheduler.
+// This allows the service task to run and process async events like
+// WiFi GPIO IRQs and cyw43_poll().
+
+// Debug counter for wfe calls
+static volatile uint32_t wfe_call_count = 0;
+static volatile uint32_t wfe_delay_count = 0;
+
+void mp_freertos_wfe_or_timeout(uint32_t timeout_ms) {
+    wfe_call_count++;
+
+    // Check if scheduler is running (it won't be during early init)
+    if (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING) {
+        // Convert ms to ticks, minimum 1 tick to actually yield
+        TickType_t ticks = timeout_ms / portTICK_PERIOD_MS;
+        if (ticks == 0) {
+            ticks = 1;
+        }
+        wfe_delay_count++;
+        vTaskDelay(ticks);
+    } else {
+        // Scheduler not running, fall back to bare-metal WFE
+        best_effort_wfe_or_timeout(delayed_by_ms(get_absolute_time(), timeout_ms));
+    }
+}
+
+uint32_t mp_freertos_get_wfe_call_count(void) {
+    return wfe_call_count;
+}
+
+uint32_t mp_freertos_get_wfe_delay_count(void) {
+    return wfe_delay_count;
+}
+
+void mp_freertos_reset_wfe_counters(void) {
+    wfe_call_count = 0;
+    wfe_delay_count = 0;
+}
+#endif
 
 int mp_hal_is_pin_reserved(int n) {
     #if MICROPY_PY_NETWORK_CYW43
