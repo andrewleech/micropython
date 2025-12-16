@@ -34,6 +34,26 @@
 #include "task.h"
 
 // ============================================================================
+// Debug instrumentation (temporary - remove after debugging)
+// ============================================================================
+#ifndef MP_FREERTOS_SERVICE_DEBUG
+#define MP_FREERTOS_SERVICE_DEBUG (1)
+#endif
+
+#if MP_FREERTOS_SERVICE_DEBUG
+#include "py/mpprint.h"
+
+// Debug counters (function implementations at end of file)
+static volatile uint32_t dbg_notify_count;        // Times service task was notified
+static volatile uint32_t dbg_wakeup_count;        // Times service task woke up
+static volatile uint32_t dbg_suspended_skip;      // Times skipped due to suspend
+static volatile uint32_t dbg_dispatch_count[MICROPY_FREERTOS_SERVICE_MAX_SLOTS];  // Per-slot dispatch count
+static volatile uint32_t dbg_schedule_isr;        // Schedules from ISR context
+static volatile uint32_t dbg_schedule_task;       // Schedules from task context
+static volatile int dbg_suspend_max;              // Max suspend_count seen
+#endif // MP_FREERTOS_SERVICE_DEBUG
+
+// ============================================================================
 // Service Task Implementation
 // ============================================================================
 
@@ -60,9 +80,19 @@ static void service_task_entry(void *arg) {
         // Block until notified (efficient, doesn't spin)
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
+        #if MP_FREERTOS_SERVICE_DEBUG
+        dbg_wakeup_count++;
+        if (suspend_count > dbg_suspend_max) {
+            dbg_suspend_max = suspend_count;
+        }
+        #endif
+
         // If suspended, just consume the notification and wait again.
         // The resume function will re-notify us if work is pending.
         if (suspend_count > 0) {
+            #if MP_FREERTOS_SERVICE_DEBUG
+            dbg_suspended_skip++;
+            #endif
             continue;
         }
 
@@ -70,6 +100,9 @@ static void service_task_entry(void *arg) {
         for (size_t i = 0; i < MICROPY_FREERTOS_SERVICE_MAX_SLOTS; ++i) {
             mp_freertos_dispatch_t f = __atomic_exchange_n(&dispatch_table[i], NULL, __ATOMIC_SEQ_CST);
             if (f != NULL) {
+                #if MP_FREERTOS_SERVICE_DEBUG
+                dbg_dispatch_count[i]++;
+                #endif
                 f();
             }
         }
@@ -100,10 +133,18 @@ void mp_freertos_service_schedule(size_t slot, mp_freertos_dispatch_t callback) 
 
     // Use correct FreeRTOS API based on context
     if (mp_freertos_service_in_isr()) {
+        #if MP_FREERTOS_SERVICE_DEBUG
+        dbg_schedule_isr++;
+        dbg_notify_count++;
+        #endif
         BaseType_t xHigherPriorityTaskWoken = pdFALSE;
         vTaskNotifyGiveFromISR(service_task_handle, &xHigherPriorityTaskWoken);
         portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     } else {
+        #if MP_FREERTOS_SERVICE_DEBUG
+        dbg_schedule_task++;
+        dbg_notify_count++;
+        #endif
         xTaskNotifyGive(service_task_handle);
     }
 }
@@ -131,5 +172,36 @@ void mp_freertos_service_resume(void) {
 bool mp_freertos_service_is_pending(size_t slot) {
     return dispatch_table[slot] != NULL;
 }
+
+// ============================================================================
+// Debug function implementations (after suspend_count is declared)
+// ============================================================================
+#if MP_FREERTOS_SERVICE_DEBUG
+void mp_freertos_service_debug_print(void) {
+    mp_printf(&mp_plat_print, "=== Service Task Debug Stats ===\n");
+    mp_printf(&mp_plat_print, "notify_count:    %lu\n", (unsigned long)dbg_notify_count);
+    mp_printf(&mp_plat_print, "wakeup_count:    %lu\n", (unsigned long)dbg_wakeup_count);
+    mp_printf(&mp_plat_print, "suspended_skip:  %lu\n", (unsigned long)dbg_suspended_skip);
+    mp_printf(&mp_plat_print, "schedule_isr:    %lu\n", (unsigned long)dbg_schedule_isr);
+    mp_printf(&mp_plat_print, "schedule_task:   %lu\n", (unsigned long)dbg_schedule_task);
+    mp_printf(&mp_plat_print, "suspend_count:   %d (max seen: %d)\n", suspend_count, dbg_suspend_max);
+    for (size_t i = 0; i < MICROPY_FREERTOS_SERVICE_MAX_SLOTS; ++i) {
+        mp_printf(&mp_plat_print, "  slot[%u]:       %lu dispatches\n", (unsigned)i, (unsigned long)dbg_dispatch_count[i]);
+    }
+    mp_printf(&mp_plat_print, "================================\n");
+}
+
+void mp_freertos_service_debug_reset(void) {
+    dbg_notify_count = 0;
+    dbg_wakeup_count = 0;
+    dbg_suspended_skip = 0;
+    dbg_schedule_isr = 0;
+    dbg_schedule_task = 0;
+    dbg_suspend_max = 0;
+    for (size_t i = 0; i < MICROPY_FREERTOS_SERVICE_MAX_SLOTS; ++i) {
+        dbg_dispatch_count[i] = 0;
+    }
+}
+#endif // MP_FREERTOS_SERVICE_DEBUG
 
 #endif // MICROPY_PY_THREAD && MICROPY_FREERTOS_SERVICE_TASKS

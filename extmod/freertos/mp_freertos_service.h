@@ -108,6 +108,21 @@ void mp_freertos_service_resume(void);
 // Returns true if the slot has a callback scheduled but not yet executed.
 bool mp_freertos_service_is_pending(size_t slot);
 
+// ============================================================================
+// Debug API (temporary - for debugging service task issues)
+// ============================================================================
+#ifndef MP_FREERTOS_SERVICE_DEBUG
+#define MP_FREERTOS_SERVICE_DEBUG (1)
+#endif
+
+#if MP_FREERTOS_SERVICE_DEBUG
+// Print debug statistics to stdout
+void mp_freertos_service_debug_print(void);
+
+// Reset all debug counters
+void mp_freertos_service_debug_reset(void);
+#endif
+
 #endif // MICROPY_PY_THREAD && MICROPY_FREERTOS_SERVICE_TASKS
 
 #endif // MICROPY_INCLUDED_EXTMOD_FREERTOS_MP_FREERTOS_SERVICE_H
