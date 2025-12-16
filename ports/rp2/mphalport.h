@@ -56,6 +56,16 @@
 //
 // Do not use this macro directly, include py/runtime.h and
 // call mp_event_wait_indefinite() or mp_event_wait_ms(timeout)
+#if MICROPY_PY_THREAD
+// With FreeRTOS, yield to scheduler to allow service task to run.
+// This is critical for async operations like WiFi scan that need
+// the service task to process GPIO IRQs and call cyw43_poll().
+void mp_freertos_wfe_or_timeout(uint32_t timeout_ms);
+#define MICROPY_INTERNAL_WFE(TIMEOUT_MS) \
+    do {                                 \
+        mp_freertos_wfe_or_timeout((TIMEOUT_MS) < 0 ? portMAX_DELAY : (TIMEOUT_MS)); \
+    } while (0)
+#else
 #define MICROPY_INTERNAL_WFE(TIMEOUT_MS) \
     do {                                 \
         if ((TIMEOUT_MS) < 0) { \
@@ -64,6 +74,7 @@
             mp_wfe_or_timeout(TIMEOUT_MS); \
         } \
     } while (0)
+#endif
 
 extern int mp_interrupt_char;
 extern ringbuf_t stdin_ringbuf;
