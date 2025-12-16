@@ -233,15 +233,17 @@ static mp_obj_t network_cyw43_scan(size_t n_args, const mp_obj_t *pos_args, mp_m
         mp_raise_OSError(-scan_res);
     }
 
-    // Wait for scan to finish, with a 10s timeout
+    // Wait for scan to finish
     uint32_t start = mp_hal_ticks_ms();
-    const uint32_t TIMEOUT = 10000;
+    const uint32_t TIMEOUT_MS = 15000;  // 15 second timeout
+
     while (cyw43_wifi_scan_active(self->cyw)) {
         uint32_t elapsed = mp_hal_ticks_ms() - start;
-        if (elapsed >= TIMEOUT) {
-            break;
+        if (elapsed >= TIMEOUT_MS) {
+            break;  // Timeout
         }
-        mp_event_wait_ms(TIMEOUT - elapsed);
+        // Yield to allow service task to process CYW43 polls
+        mp_event_wait_ms(100);
     }
 
     return res;
