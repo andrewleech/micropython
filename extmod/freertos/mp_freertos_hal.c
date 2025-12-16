@@ -92,9 +92,12 @@ mp_uint_t mp_freertos_ticks_us(void) {
 }
 
 // Yield to other tasks. Used by MICROPY_EVENT_POLL_HOOK and MICROPY_THREAD_YIELD.
+// NOTE: For event polling, we delay for 10ms to allow lower-priority tasks
+// (like the service task) adequate CPU time. This is a compromise since
+// MICROPY_EVENT_POLL_HOOK doesn't have access to the timeout parameter.
 void mp_freertos_yield(void) {
     if (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING) {
-        taskYIELD();
+        vTaskDelay(pdMS_TO_TICKS(10));  // Wait 10ms to allow lower-priority tasks to run
     }
 }
 
