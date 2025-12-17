@@ -138,8 +138,10 @@
 #define MICROPY_PY_THREAD                       (1)
 #endif
 #if MICROPY_PY_THREAD
-// Disable GIL on RP2040 for true dual-core parallelism
-#define MICROPY_PY_THREAD_GIL                   (0)
+// Enable GIL to ensure thread-safe access to Python objects.
+// With SMP, all Python threads are pinned to core 0 (MP_THREAD_CORE_AFFINITY)
+// so the GIL provides mutual exclusion. Core 1 runs system tasks (WiFi, etc).
+#define MICROPY_PY_THREAD_GIL                   (1)
 #define MICROPY_STACK_CHECK_MARGIN              (1024)
 #define MICROPY_MPTHREADPORT_H                  "extmod/freertos/mpthreadport.h"
 // Enable shared service task framework for deferred callbacks

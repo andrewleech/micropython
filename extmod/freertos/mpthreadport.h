@@ -64,6 +64,14 @@ typedef void *SemaphoreHandle_t;
 #define MP_THREAD_PRIORITY (tskIDLE_PRIORITY + 1)
 #endif
 
+// Core affinity mask for SMP systems.
+// On SMP, all MicroPython threads must run on the same core to ensure GIL
+// correctness (the GIL uses a binary semaphore which requires single-core
+// execution). Default to core 0 (like ESP32). Ports can override.
+#ifndef MP_THREAD_CORE_AFFINITY
+#define MP_THREAD_CORE_AFFINITY (1 << 0)  // Pin to core 0
+#endif
+
 // Default stack size for Python threads (in bytes)
 #ifndef MP_THREAD_DEFAULT_STACK_SIZE
 #define MP_THREAD_DEFAULT_STACK_SIZE (4096)

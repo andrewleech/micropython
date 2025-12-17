@@ -210,7 +210,19 @@ int main(int argc, char **argv) {
     MICROPY_BOARD_EARLY_INIT();
 
     #if MICROPY_PY_THREAD
-    // FreeRTOS: create main task and start scheduler (never returns)
+    // FreeRTOS: create main task and start scheduler (never returns).
+    // On SMP, pin to same core as child threads to ensure GIL correctness.
+    #if configNUMBER_OF_CORES > 1
+    xTaskCreateStaticAffinitySet(
+        rp2_main_loop,
+        "main",
+        FREERTOS_MAIN_TASK_STACK_SIZE,
+        NULL,
+        tskIDLE_PRIORITY + 1,
+        main_task_stack,
+        &main_task_tcb,
+        MP_THREAD_CORE_AFFINITY);
+    #else
     xTaskCreateStatic(
         rp2_main_loop,
         "main",
@@ -219,6 +231,7 @@ int main(int argc, char **argv) {
         tskIDLE_PRIORITY + 1,
         main_task_stack,
         &main_task_tcb);
+    #endif
     vTaskStartScheduler();
     // Scheduler should never return
     for (;;) {

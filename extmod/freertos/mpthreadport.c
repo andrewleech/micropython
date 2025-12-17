@@ -309,7 +309,20 @@ mp_uint_t mp_thread_create(void *(*entry)(void *), void *arg, size_t *stack_size
     th->state = MP_THREAD_STATE_NEW;
     th->next = NULL;
 
-    // Create the FreeRTOS task with static allocation
+    // Create the FreeRTOS task with static allocation.
+    // On SMP systems, pin to a single core to ensure GIL correctness.
+    #if configNUMBER_OF_CORES > 1
+    th->id = xTaskCreateStaticAffinitySet(
+        freertos_entry_wrapper,
+        "MPThread",
+        stack_len,
+        th,
+        MP_THREAD_PRIORITY,
+        th->stack,
+        th->tcb,
+        MP_THREAD_CORE_AFFINITY
+        );
+    #else
     th->id = xTaskCreateStatic(
         freertos_entry_wrapper,
         "MPThread",
@@ -319,6 +332,7 @@ mp_uint_t mp_thread_create(void *(*entry)(void *), void *arg, size_t *stack_size
         th->stack,
         th->tcb
         );
+    #endif
 
     if (th->id == NULL) {
         goto fail_task;
