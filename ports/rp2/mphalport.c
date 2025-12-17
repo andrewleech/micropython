@@ -280,6 +280,9 @@ void mp_wfe_or_timeout(uint32_t timeout_ms) {
 // FreeRTOS-aware wait-for-event that yields to the scheduler.
 // This allows the service task to run and process async events like
 // WiFi GPIO IRQs and cyw43_poll().
+// Note: Caller must hold the GIL. This function releases the GIL during
+// the delay to allow other Python threads to run, matching the behavior
+// of MICROPY_EVENT_POLL_HOOK.
 
 // Debug counter for wfe calls
 static volatile uint32_t wfe_call_count = 0;
@@ -296,7 +299,11 @@ void mp_freertos_wfe_or_timeout(uint32_t timeout_ms) {
             ticks = 1;
         }
         wfe_delay_count++;
+        // Release GIL before blocking to allow other Python threads to run.
+        // This matches the legacy MICROPY_EVENT_POLL_HOOK behavior.
+        MP_THREAD_GIL_EXIT();
         vTaskDelay(ticks);
+        MP_THREAD_GIL_ENTER();
     } else {
         // Scheduler not running, fall back to bare-metal WFE
         best_effort_wfe_or_timeout(delayed_by_ms(get_absolute_time(), timeout_ms));

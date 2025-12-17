@@ -282,7 +282,14 @@ void mp_event_wait_indefinite(void) {
 // Handle any pending MicroPython events and then suspends execution until the
 // next interrupt or event, or until timeout_ms milliseconds have elapsed.
 void mp_event_wait_ms(mp_uint_t timeout_ms) {
-    #if defined(MICROPY_EVENT_POLL_HOOK) && !MICROPY_PREVIEW_VERSION_2
+    // Note: mp_event_wait_indefinite() above uses the legacy MICROPY_EVENT_POLL_HOOK
+    // path even when MICROPY_INTERNAL_WFE is defined. This is intentional because
+    // MICROPY_INTERNAL_WFE(-1) would call vTaskDelay(portMAX_DELAY) which blocks
+    // indefinitely. The legacy hook uses taskYIELD() which returns immediately,
+    // allowing callers like mp_hal_stdin_rx_chr() to poll for events.
+    // This function (mp_event_wait_ms) uses the new WFE path because bounded
+    // timeouts work correctly with vTaskDelay().
+    #if defined(MICROPY_EVENT_POLL_HOOK) && !MICROPY_PREVIEW_VERSION_2 && !defined(MICROPY_INTERNAL_WFE)
     // For ports still using the old macros.
     MICROPY_EVENT_POLL_HOOK
     #else
