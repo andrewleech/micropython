@@ -65,11 +65,11 @@ typedef void *SemaphoreHandle_t;
 #endif
 
 // Core affinity mask for SMP systems.
-// On SMP, all MicroPython threads must run on the same core to ensure GIL
-// correctness (the GIL uses a binary semaphore which requires single-core
-// execution). Default to core 0 (like ESP32). Ports can override.
+// With GIL disabled and spinlock-based atomic sections, threads can safely run
+// on any core. tskNO_AFFINITY allows FreeRTOS to schedule on any available core.
+// Ports can override to pin to specific core(s) if needed.
 #ifndef MP_THREAD_CORE_AFFINITY
-#define MP_THREAD_CORE_AFFINITY (1 << 0)  // Pin to core 0
+#define MP_THREAD_CORE_AFFINITY tskNO_AFFINITY  // Allow any core
 #endif
 
 // Default stack size for Python threads (in bytes)
