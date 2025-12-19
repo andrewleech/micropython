@@ -67,9 +67,7 @@ struct bt_dev {
 };
 extern struct bt_dev bt_dev;
 
-// CONTAINER_OF macro (standard container_of pattern)
-#define CONTAINER_OF(ptr, type, field) \
-    ((type *)(((char *)(ptr)) - offsetof(type, field)))
+// Use CONTAINER_OF from zephyr_ble_work.h (already defined there)
 
 #if ZEPHYR_BLE_DEBUG
 #define DEBUG_WORK_printf(...) mp_printf(&mp_plat_print, "WORK: " __VA_ARGS__)
@@ -407,7 +405,9 @@ void mp_bluetooth_zephyr_work_process(void) {
 #if MICROPY_PY_THREAD
     // On FreeRTOS, the dedicated work thread handles work processing.
     // Skip polling-based processing when thread is active to avoid redundant work.
-    if (ble_work_thread_handle != NULL && ble_work_thread_running) {
+    // Check ble_work_sem as the authoritative indicator - it's cleared first during shutdown,
+    // ensuring no race where both thread and polling process work simultaneously.
+    if (ble_work_sem != NULL) {
         DEBUG_WORK_printf("work_process: skipping (work thread active)\n");
         return;
     }
@@ -571,10 +571,16 @@ static void ble_work_process_all(void) {
             continue;
         }
 
-        while (q->head != NULL) {
-            // Dequeue work item
+        // Process all work items in this queue
+        // Note: Must check q->head inside critical section to avoid race
+        for (;;) {
+            // Dequeue work item atomically
             MICROPY_PY_BLUETOOTH_ENTER
             struct k_work *work = q->head;
+            if (work == NULL) {
+                MICROPY_PY_BLUETOOTH_EXIT
+                break;  // Queue empty
+            }
             q->head = work->next;
             if (q->head) {
                 q->head->prev = NULL;
@@ -655,22 +661,34 @@ void mp_bluetooth_zephyr_work_thread_stop(void) {
 
     DEBUG_WORK_printf("work_thread: stopping...\n");
 
-    // Signal thread to exit
+    // Signal thread to exit - this also prevents polling from processing work
     ble_work_thread_running = false;
 
-    // Wake the thread so it can check the flag and exit
-    if (ble_work_sem != NULL) {
-        xSemaphoreGive(ble_work_sem);
-    }
+    // Save handle before clearing (for waiting)
+    TaskHandle_t thread_to_wait = ble_work_thread_handle;
+    SemaphoreHandle_t sem_to_signal = ble_work_sem;
 
-    // Wait for thread to exit (with timeout)
-    // Note: xTaskCreateStatic doesn't require explicit deletion, but we
-    // wait to ensure the thread has fully exited before cleanup
-    vTaskDelay(pdMS_TO_TICKS(200));
-
-    // Clean up
+    // Clear handles first to prevent new work from signaling
     ble_work_thread_handle = NULL;
     ble_work_sem = NULL;
+
+    // Wake the thread so it can check the flag and exit
+    if (sem_to_signal != NULL) {
+        xSemaphoreGive(sem_to_signal);
+    }
+
+    // Wait for thread to actually exit with timeout
+    // The thread calls vTaskDelete(NULL) which transitions to deleted state
+    // We poll the task state to confirm deletion
+    if (thread_to_wait != NULL) {
+        for (int i = 0; i < 50; i++) {  // 50 * 10ms = 500ms max wait
+            eTaskState state = eTaskGetState(thread_to_wait);
+            if (state == eDeleted || state == eInvalid) {
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
 
     DEBUG_WORK_printf("work_thread: stopped\n");
 }
