@@ -404,6 +404,15 @@ static int work_items_processed = 0;
 void mp_bluetooth_zephyr_work_process(void) {
     work_process_call_count++;
 
+#if MICROPY_PY_THREAD
+    // On FreeRTOS, the dedicated work thread handles work processing.
+    // Skip polling-based processing when thread is active to avoid redundant work.
+    if (ble_work_thread_handle != NULL && ble_work_thread_running) {
+        DEBUG_WORK_printf("work_process: skipping (work thread active)\n");
+        return;
+    }
+#endif
+
     // ARCHITECTURAL FIX for Issue #6 recursion deadlock:
     // Prevent recursion UNLESS we're explicitly in a wait loop.
     // When mp_bluetooth_zephyr_in_wait_loop is true, we MUST allow work processing
