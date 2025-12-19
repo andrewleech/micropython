@@ -34,7 +34,29 @@
 
 #if MICROPY_PY_THREAD
 #include "FreeRTOS.h"
+#include "task.h"
+#include "semphr.h"
 #include "timers.h"
+#include "extmod/freertos/mp_freertos_service.h"
+
+// BLE Work Queue Thread Configuration
+#define BLE_WORK_THREAD_STACK_SIZE (4096 / sizeof(StackType_t))  // 4KB stack
+#define BLE_WORK_THREAD_PRIORITY   (configMAX_PRIORITIES - 2)    // High priority
+
+// Static allocation for work queue thread
+static StaticTask_t ble_work_thread_tcb;
+static StackType_t ble_work_thread_stack[BLE_WORK_THREAD_STACK_SIZE];
+static TaskHandle_t ble_work_thread_handle = NULL;
+
+// Binary semaphore to signal work available
+static StaticSemaphore_t ble_work_sem_storage;
+static SemaphoreHandle_t ble_work_sem = NULL;
+
+// Flag to signal thread shutdown
+static volatile bool ble_work_thread_running = false;
+
+// Forward declaration
+static void ble_work_thread_func(void *param);
 #endif
 
 // Forward declare bt_dev to detect initialization work
@@ -144,6 +166,22 @@ static int k_work_submit_internal(struct k_work_q *queue, struct k_work *work) {
     }
 
     MICROPY_PY_BLUETOOTH_EXIT
+
+#if MICROPY_PY_THREAD
+    // Signal the work queue thread (ISR-safe)
+    if (ble_work_sem != NULL) {
+        if (mp_freertos_service_in_isr()) {
+            // ISR context - use ISR-safe API
+            BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+            xSemaphoreGiveFromISR(ble_work_sem, &xHigherPriorityTaskWoken);
+            portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+        } else {
+            // Task context - use normal API
+            xSemaphoreGive(ble_work_sem);
+        }
+    }
+#endif
+
     return 1;
 }
 
@@ -509,3 +547,134 @@ void mp_bluetooth_zephyr_work_debug_stats(void) {
     mp_printf(&mp_plat_print, "WORK STATS: process() called %d times, %d items processed\n",
         work_process_call_count, work_items_processed);
 }
+
+// ============================================================================
+// FreeRTOS Work Queue Thread (Phase 3)
+// ============================================================================
+#if MICROPY_PY_THREAD
+
+// Process all pending work in all queues (except init queue)
+// Called by the work queue thread
+static void ble_work_process_all(void) {
+    for (struct k_work_q *q = global_work_q; q != NULL; q = q->nextq) {
+        // Skip initialization work queue (processed separately)
+        if (q == &k_init_work_q) {
+            continue;
+        }
+
+        while (q->head != NULL) {
+            // Dequeue work item
+            MICROPY_PY_BLUETOOTH_ENTER
+            struct k_work *work = q->head;
+            q->head = work->next;
+            if (q->head) {
+                q->head->prev = NULL;
+            }
+            work->next = NULL;
+            work->prev = NULL;
+            work->pending = false;
+            MICROPY_PY_BLUETOOTH_EXIT
+
+            // Execute work handler outside critical section
+            work_items_processed++;
+            DEBUG_WORK_printf("work_thread: execute(%p, handler=%p) [total: %d]\n",
+                work, work->handler, work_items_processed);
+
+            if (work->handler) {
+                work->handler(work);
+            }
+
+            DEBUG_WORK_printf("work_thread: execute(%p) done\n", work);
+        }
+    }
+}
+
+// BLE Work Queue Thread Function
+// Blocks on semaphore waiting for work, processes work when signaled
+static void ble_work_thread_func(void *param) {
+    (void)param;
+
+    DEBUG_WORK_printf("work_thread: started\n");
+
+    while (ble_work_thread_running) {
+        // Block waiting for work (with timeout to check shutdown flag)
+        if (xSemaphoreTake(ble_work_sem, pdMS_TO_TICKS(100)) == pdTRUE) {
+            // Process all pending work
+            ble_work_process_all();
+        }
+        // Timeout: loop back to check ble_work_thread_running flag
+    }
+
+    DEBUG_WORK_printf("work_thread: exiting\n");
+    vTaskDelete(NULL);
+}
+
+// Start the BLE work queue thread
+// Called from mp_bluetooth_init() after basic initialization
+void mp_bluetooth_zephyr_work_thread_start(void) {
+    if (ble_work_thread_handle != NULL) {
+        DEBUG_WORK_printf("work_thread: already running\n");
+        return;
+    }
+
+    DEBUG_WORK_printf("work_thread: starting...\n");
+
+    // Create binary semaphore for work signaling
+    ble_work_sem = xSemaphoreCreateBinaryStatic(&ble_work_sem_storage);
+
+    // Create the work queue thread
+    ble_work_thread_running = true;
+    ble_work_thread_handle = xTaskCreateStatic(
+        ble_work_thread_func,
+        "BLE_WORK",
+        BLE_WORK_THREAD_STACK_SIZE,
+        NULL,
+        BLE_WORK_THREAD_PRIORITY,
+        ble_work_thread_stack,
+        &ble_work_thread_tcb
+    );
+
+    DEBUG_WORK_printf("work_thread: started, handle=%p\n", ble_work_thread_handle);
+}
+
+// Stop the BLE work queue thread
+// Called from mp_bluetooth_deinit() before shutdown
+void mp_bluetooth_zephyr_work_thread_stop(void) {
+    if (ble_work_thread_handle == NULL) {
+        return;
+    }
+
+    DEBUG_WORK_printf("work_thread: stopping...\n");
+
+    // Signal thread to exit
+    ble_work_thread_running = false;
+
+    // Wake the thread so it can check the flag and exit
+    if (ble_work_sem != NULL) {
+        xSemaphoreGive(ble_work_sem);
+    }
+
+    // Wait for thread to exit (with timeout)
+    // Note: xTaskCreateStatic doesn't require explicit deletion, but we
+    // wait to ensure the thread has fully exited before cleanup
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    // Clean up
+    ble_work_thread_handle = NULL;
+    ble_work_sem = NULL;
+
+    DEBUG_WORK_printf("work_thread: stopped\n");
+}
+
+#else // !MICROPY_PY_THREAD
+
+// Stub implementations for non-FreeRTOS builds
+void mp_bluetooth_zephyr_work_thread_start(void) {
+    // No-op: polling-based work processing used instead
+}
+
+void mp_bluetooth_zephyr_work_thread_stop(void) {
+    // No-op
+}
+
+#endif // MICROPY_PY_THREAD

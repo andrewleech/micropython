@@ -199,6 +199,12 @@ struct k_work *mp_bluetooth_zephyr_init_work_get(void);
 // Debug function to report work processing statistics
 void mp_bluetooth_zephyr_work_debug_stats(void);
 
+// BLE Work Queue Thread Control (Phase 3)
+// These start/stop the dedicated FreeRTOS thread for processing work queues
+// On non-FreeRTOS builds, these are no-ops and polling is used instead
+void mp_bluetooth_zephyr_work_thread_start(void);
+void mp_bluetooth_zephyr_work_thread_stop(void);
+
 // Get delayable work from work (for internal use)
 // work is embedded in the delayable work structure
 static inline struct k_work_delayable *k_work_delayable_from_work(struct k_work *work) {
