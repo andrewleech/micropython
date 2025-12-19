@@ -27,18 +27,38 @@
 #ifndef MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_SEM_H
 #define MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_SEM_H
 
+#include "py/mpconfig.h"
 #include <stdint.h>
 #include <errno.h>
 #include "zephyr_ble_work.h"
 
 // Zephyr k_sem abstraction layer for MicroPython
-// Maps Zephyr semaphore API to busy-wait pattern (like NimBLE)
+//
+// When MICROPY_PY_THREAD is enabled (FreeRTOS available):
+//   Uses real FreeRTOS counting semaphores with true blocking
+//
+// When MICROPY_PY_THREAD is disabled (no RTOS):
+//   Falls back to polling-based implementation
 
-// Semaphore structure
+#if MICROPY_PY_THREAD
+// FreeRTOS-backed semaphore with static allocation
+#include "FreeRTOS.h"
+#include "semphr.h"
+
+struct k_sem {
+    SemaphoreHandle_t handle;       // FreeRTOS semaphore handle
+    StaticSemaphore_t storage;      // Static storage for semaphore
+    uint16_t limit;                 // Maximum count (for reference)
+};
+
+#else
+// Polling-based semaphore (fallback for non-RTOS ports)
 struct k_sem {
     volatile uint16_t count;
     uint16_t limit;
 };
+
+#endif // MICROPY_PY_THREAD
 
 // --- Semaphore API ---
 
@@ -62,10 +82,30 @@ void k_sem_reset(struct k_sem *sem);
 #define K_SEM_MAX_LIMIT UINT16_MAX
 
 // Static semaphore definition macro
+// Note: FreeRTOS semaphores require runtime initialization via k_sem_init()
+// The K_SEM_DEFINE macro creates the structure but does NOT initialize it.
+// Call k_sem_init() before use.
+#if MICROPY_PY_THREAD
+#define K_SEM_DEFINE(name, initial_count, max_limit) \
+    struct k_sem name = { \
+        .handle = NULL, \
+        .limit = (max_limit) \
+    }
+#else
 #define K_SEM_DEFINE(name, initial_count, max_limit) \
     struct k_sem name = { \
         .count = (initial_count), \
         .limit = (max_limit) \
     }
+#endif
+
+// Check if we're in ISR context (for k_sem_give from ISR)
+// This is provided by the port via mp_freertos_service_in_isr() when available
+#if MICROPY_PY_THREAD && MICROPY_FREERTOS_SERVICE_TASKS
+#include "extmod/freertos/mp_freertos_service.h"
+#define k_sem_in_isr() mp_freertos_service_in_isr()
+#else
+#define k_sem_in_isr() (0)
+#endif
 
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_SEM_H

@@ -24,6 +24,7 @@
  * THE SOFTWARE.
  */
 
+#include "py/mpconfig.h"
 #include "zephyr_ble_mutex.h"
 
 #include <assert.h>
@@ -35,7 +36,84 @@
 #define DEBUG_MUTEX_printf(...) do {} while (0)
 #endif
 
-// --- Mutex API ---
+// ============================================================================
+// FreeRTOS-based implementation (when MICROPY_PY_THREAD is enabled)
+// ============================================================================
+#if MICROPY_PY_THREAD
+
+#include "FreeRTOS.h"
+#include "semphr.h"
+#include "task.h"
+#include <errno.h>
+
+void k_mutex_init(struct k_mutex *mutex) {
+    DEBUG_MUTEX_printf("k_mutex_init(%p)\n", mutex);
+
+    // Create recursive mutex with priority inheritance
+    mutex->handle = xSemaphoreCreateRecursiveMutexStatic(&mutex->storage);
+
+    if (mutex->handle == NULL) {
+        DEBUG_MUTEX_printf("  --> FAILED to create mutex!\n");
+    }
+}
+
+int k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout) {
+    DEBUG_MUTEX_printf("k_mutex_lock(%p, timeout=%u)\n", mutex, timeout.ticks);
+
+    if (mutex->handle == NULL) {
+        DEBUG_MUTEX_printf("  --> mutex not initialized!\n");
+        return -EINVAL;
+    }
+
+    // Convert timeout to FreeRTOS ticks
+    TickType_t ticks;
+    if (timeout.ticks == 0) {
+        // K_NO_WAIT
+        ticks = 0;
+    } else if (timeout.ticks == 0xFFFFFFFF) {
+        // K_FOREVER
+        ticks = portMAX_DELAY;
+    } else {
+        // Convert milliseconds to ticks
+        ticks = pdMS_TO_TICKS(timeout.ticks);
+        if (ticks == 0 && timeout.ticks > 0) {
+            ticks = 1;
+        }
+    }
+
+    BaseType_t result = xSemaphoreTakeRecursive(mutex->handle, ticks);
+
+    if (result == pdTRUE) {
+        DEBUG_MUTEX_printf("  --> locked\n");
+        return 0;
+    } else {
+        DEBUG_MUTEX_printf("  --> timeout/busy\n");
+        return (timeout.ticks == 0) ? -EBUSY : -EAGAIN;
+    }
+}
+
+int k_mutex_unlock(struct k_mutex *mutex) {
+    DEBUG_MUTEX_printf("k_mutex_unlock(%p)\n", mutex);
+
+    if (mutex->handle == NULL) {
+        DEBUG_MUTEX_printf("  --> mutex not initialized!\n");
+        return -EINVAL;
+    }
+
+    BaseType_t result = xSemaphoreGiveRecursive(mutex->handle);
+
+    if (result == pdTRUE) {
+        DEBUG_MUTEX_printf("  --> unlocked\n");
+        return 0;
+    }
+    DEBUG_MUTEX_printf("  --> unlock failed (not held?)\n");
+    return -EPERM;
+}
+
+// ============================================================================
+// No-op implementation (fallback when no RTOS)
+// ============================================================================
+#else // !MICROPY_PY_THREAD
 
 void k_mutex_init(struct k_mutex *mutex) {
     DEBUG_MUTEX_printf("k_mutex_init(%p)\n", mutex);
@@ -73,3 +151,5 @@ int k_mutex_unlock(struct k_mutex *mutex) {
     mutex->locked--;
     return 0;
 }
+
+#endif // MICROPY_PY_THREAD

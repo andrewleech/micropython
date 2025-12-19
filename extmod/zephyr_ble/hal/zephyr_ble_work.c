@@ -24,12 +24,18 @@
  * THE SOFTWARE.
  */
 
+#include "py/mpconfig.h"
 #include "py/mphal.h"
 #include "py/runtime.h"
 #include "zephyr_ble_work.h"
 #include "zephyr_ble_atomic.h"
 
 #include <stddef.h>
+
+#if MICROPY_PY_THREAD
+#include "FreeRTOS.h"
+#include "timers.h"
+#endif
 
 // Forward declare bt_dev to detect initialization work
 // bt_dev is defined in Zephyr's hci_core.c
@@ -304,6 +310,15 @@ int k_work_cancel_delayable_sync(struct k_work_delayable *dwork, void *sync) {
 }
 
 k_ticks_t k_work_delayable_remaining_get(const struct k_work_delayable *dwork) {
+#if MICROPY_PY_THREAD
+    // FreeRTOS: Check if timer is active using FreeRTOS API
+    if (dwork->timer.handle == NULL || !xTimerIsTimerActive(dwork->timer.handle)) {
+        return 0;
+    }
+    // FreeRTOS doesn't easily expose remaining time, return 1 if active
+    return 1;
+#else
+    // Polling: Use the active flag and expiry_ticks
     if (!dwork->timer.active) {
         return 0;
     }
@@ -313,10 +328,18 @@ k_ticks_t k_work_delayable_remaining_get(const struct k_work_delayable *dwork) {
         return dwork->timer.expiry_ticks - now;
     }
     return 0;
+#endif
 }
 
 bool k_work_delayable_is_pending(const struct k_work_delayable *dwork) {
+#if MICROPY_PY_THREAD
+    // FreeRTOS: Check work pending flag and timer active state
+    bool timer_active = (dwork->timer.handle != NULL) && xTimerIsTimerActive(dwork->timer.handle);
+    return dwork->work.pending || timer_active;
+#else
+    // Polling: Use the active flag
     return dwork->work.pending || dwork->timer.active;
+#endif
 }
 
 int k_work_delayable_busy_get(const struct k_work_delayable *dwork) {

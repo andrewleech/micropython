@@ -45,20 +45,33 @@
 
 #if MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR
 
-// CYW43 driver for BT/WiFi chip
-#include "lib/cyw43-driver/src/cyw43.h"
-
+// Include our HAL first (uses our macro definitions)
 #include "extmod/zephyr_ble/hal/zephyr_ble_hal.h"
+
+// Undef conflicting macros before including real Zephyr headers
+// Our macros are functionally equivalent to Zephyr's but defined without guards
+// Pico-SDK KHZ/MHZ vs Zephyr function-like macros
+#undef KHZ
+#undef MHZ
+// Our stubs vs Zephyr util.h
+#undef CONTAINER_OF
+#undef FLEXIBLE_ARRAY_DECLARE
 #include "zephyr/device.h"
 #include <zephyr/net_buf.h>
 #include <zephyr/bluetooth/buf.h>
+#include <zephyr/drivers/bluetooth.h>
 
 // CYW43 driver for WiFi/BT chip
 #if MICROPY_PY_NETWORK_CYW43
 #include "lib/cyw43-driver/src/cyw43.h"
 #endif
 
+// Debug output controlled by ZEPHYR_BLE_DEBUG
+#if ZEPHYR_BLE_DEBUG
 #define debug_printf(...) mp_printf(&mp_plat_print, "mpzephyrport_rp2: " __VA_ARGS__)
+#else
+#define debug_printf(...) do {} while (0)
+#endif
 #define error_printf(...) mp_printf(&mp_plat_print, "mpzephyrport_rp2 ERROR: " __VA_ARGS__)
 
 // CYW43 SPI btbus HCI transport
@@ -149,7 +162,7 @@ static void mp_zephyr_hci_poll_now(void) {
 // Zephyr HCI driver implementation
 
 static int hci_cyw43_open(const struct device *dev, bt_hci_recv_t recv) {
-    mp_printf(&mp_plat_print, "=== HCI: hci_cyw43_open called, dev=%p recv=%p\n", dev, recv);
+    debug_printf("hci_cyw43_open called, dev=%p recv=%p\n", dev, recv);
     hci_dev = dev;
     recv_cb = recv;
 
@@ -157,10 +170,10 @@ static int hci_cyw43_open(const struct device *dev, bt_hci_recv_t recv) {
     // No additional setup needed - just start polling for incoming HCI packets
 
     // Start polling
-    mp_printf(&mp_plat_print, "=== HCI: Starting HCI polling\n");
+    debug_printf("Starting HCI polling\n");
     mp_zephyr_hci_poll_now();
 
-    mp_printf(&mp_plat_print, "=== HCI: hci_cyw43_open completed\n");
+    debug_printf("hci_cyw43_open completed\n");
     return 0;
 }
 
@@ -223,31 +236,44 @@ static const struct bt_hci_driver_api hci_cyw43_api = {
     .send = hci_cyw43_send,
 };
 
+// Device state (required for device_is_ready())
+static struct device_state hci_device_state = {
+    .init_res = 0,
+    .initialized = true,
+};
+
 // HCI device structure (referenced by Zephyr via DEVICE_DT_GET macro)
-const struct device mp_bluetooth_zephyr_hci_dev = {
+// Named __device_dts_ord_0 to match what DEVICE_DT_GET() expands to
+// __attribute__((used)) prevents garbage collection with -fdata-sections
+__attribute__((used))
+const struct device __device_dts_ord_0 = {
     .name = "HCI_CYW43",
     .api = &hci_cyw43_api,
+    .state = &hci_device_state,
     .data = NULL,
 };
+
+// Alias for code that uses the descriptive name
+const struct device *const mp_bluetooth_zephyr_hci_dev = &__device_dts_ord_0;
 
 // CYW43 BT uses shared SPI bus (btbus), no UART HAL needed
 
 // HCI transport setup (called by BLE host during initialization)
 int bt_hci_transport_setup(const struct device *dev) {
-    mp_printf(&mp_plat_print, "=== HCI: bt_hci_transport_setup called\n");
+    debug_printf("bt_hci_transport_setup called\n");
     (void)dev;
 
     // Initialize CYW43 BT using shared SPI bus (same as BTstack)
     // This ensures WiFi driver is up first, then loads BT firmware
-    mp_printf(&mp_plat_print, "=== HCI: Calling cyw43_bluetooth_hci_init\n");
+    debug_printf("Calling cyw43_bluetooth_hci_init\n");
     extern int cyw43_bluetooth_hci_init(void);
     int ret = cyw43_bluetooth_hci_init();
     if (ret != 0) {
-        mp_printf(&mp_plat_print, "=== HCI ERROR: cyw43_bluetooth_hci_init failed: %d\n", ret);
+        error_printf("cyw43_bluetooth_hci_init failed: %d\n", ret);
         return ret;
     }
 
-    mp_printf(&mp_plat_print, "=== HCI: bt_hci_transport_setup completed successfully\n");
+    debug_printf("bt_hci_transport_setup completed\n");
     return 0;
 }
 

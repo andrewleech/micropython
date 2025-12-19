@@ -32,9 +32,8 @@ CFLAGS_EXTMOD += -DMICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS=1
 # Enable pairing and bonding with synchronous events
 CFLAGS_EXTMOD += -DMICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING=1
 
-# Force inclusion of autoconf.h before any Zephyr headers
-# This ensures CONFIG_ARM and other architecture defines are available
-CFLAGS_EXTMOD += -include $(TOP)/$(ZEPHYR_BLE_EXTMOD_DIR)/zephyr_headers_stub/zephyr/autoconf.h
+# Note: No force-include needed - the stub toolchain/gcc.h includes autoconf.h
+# before forwarding to the real gcc.h, ensuring CONFIG_ARM is defined in time.
 
 ZEPHYR_LIB_DIR = lib/zephyr
 
@@ -70,7 +69,8 @@ $(BUILD)/$(ZEPHYR_LIB_DIR)/lib/net_buf/buf_simple.o: CFLAGS += -Wno-attributes
 
 # Suppress warnings in BLE host (third-party Zephyr code)
 # Use broad suppression for all BLE host files to avoid warning churn
-$(BUILD)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/%.o: CFLAGS += -Wno-error
+# -Wno-format: Zephyr uses %u for uint32_t which varies by platform
+$(BUILD)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/%.o: CFLAGS += -Wno-error -Wno-format
 
 # gatt.c has "initializer element is not constant" error with ARRAY_SIZE
 # This is a GCC limitation: sizeof(external_array) not recognized as compile-time constant

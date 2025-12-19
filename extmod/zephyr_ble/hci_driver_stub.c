@@ -30,6 +30,7 @@
 #include "zephyr/kernel.h"
 #include "zephyr/device.h"
 #include <zephyr/net_buf.h>
+#include <zephyr/drivers/bluetooth.h>
 #include <errno.h>
 
 #define DEBUG_HCI_printf(...) // printf(__VA_ARGS__)

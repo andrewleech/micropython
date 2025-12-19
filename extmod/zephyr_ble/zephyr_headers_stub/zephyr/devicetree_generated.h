@@ -19,13 +19,14 @@
 // With no nodes, this expands to nothing.
 #define DT_FOREACH_OKAY_HELPER(fn) /* empty - no devicetree nodes */
 
-// Define a special node identifier for our BT HCI device
-// We use DT_N_S_soc_S_bluetooth_hci_0 as the node identifier
-// This matches Zephyr's devicetree node naming convention
-#define DT_N_S_soc_S_bluetooth_hci_0 DT_N_S_soc_S_bluetooth_hci_0
+// Define the BT HCI node identifier
+// This is used by DT_CHOSEN() and similar macros
+// The value must be a valid identifier that can be concatenated with _ORD etc.
+// Note: We don't define DT_N_S_soc_S_bluetooth_hci_0 itself because DEVICE_DT_GET
+// in device.h bypasses the devicetree system entirely.
 
-// Chosen node for zephyr,bt-hci points to our BT HCI node
-#define DT_CHOSEN_zephyr_bt_hci DT_N_S_soc_S_bluetooth_hci_0
+// Chosen node for zephyr,bt-hci - value is arbitrary but must be consistent
+#define DT_CHOSEN_zephyr_bt_hci mp_zephyr_bt_hci_node
 
 // Indicate that the chosen node exists (required by DT_HAS_CHOSEN macro)
 #define DT_CHOSEN_zephyr_bt_hci_EXISTS 1
@@ -38,8 +39,8 @@
 
 // Define dependency ordinal for our BT HCI device node
 // Zephyr's DT_DEP_ORD(node_id) expands to DT_CAT(node_id, _ORD)
-// So we need DT_N_S_soc_S_bluetooth_hci_0_ORD
-#define DT_N_S_soc_S_bluetooth_hci_0_ORD 0
+// So we need mp_zephyr_bt_hci_node_ORD (matching DT_CHOSEN_zephyr_bt_hci)
+#define mp_zephyr_bt_hci_node_ORD 0
 
 // ARM NVIC devicetree node stub
 // The NVIC (Nested Vector Interrupt Controller) configuration is needed by ARM Cortex-M code

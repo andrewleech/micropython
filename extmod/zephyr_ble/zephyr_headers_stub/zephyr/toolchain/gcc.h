@@ -5,14 +5,19 @@
  *
  * Wrapper for zephyr/toolchain/gcc.h
  *
- * Includes the real gcc.h but overrides BUILD_ASSERT to avoid
- * complex type expression issues with _Static_assert.
+ * This stub shadows the real Zephyr gcc.h and ensures our config
+ * (with CONFIG_ARM etc.) is loaded BEFORE the real header checks
+ * for architecture defines.
  */
 
 #ifndef MP_ZEPHYR_TOOLCHAIN_GCC_WRAPPER_H_
 #define MP_ZEPHYR_TOOLCHAIN_GCC_WRAPPER_H_
 
-// Include the real gcc.h
+// Load our configuration FIRST - this defines CONFIG_ARM and other
+// architecture defines that the real gcc.h checks for
+#include <zephyr/autoconf.h>
+
+// Now include the real gcc.h - it will see CONFIG_ARM is defined
 #include_next <zephyr/toolchain/gcc.h>
 
 // gcc.h defines BUILD_ASSERT with _Static_assert, but this fails with

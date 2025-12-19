@@ -101,3 +101,34 @@ __attribute__((section(".data.pool_list"))) struct net_buf_pool **_net_buf_pool_
 void mp_net_buf_pool_update_end(void) {
     _net_buf_pool_list_end = registered_pools + num_pools;
 }
+
+// ============================================================================
+// Section list stubs for Zephyr STRUCT_SECTION_ITERABLE macros
+// ============================================================================
+// Zephyr uses linker sections to collect statically defined structures.
+// Since we register callbacks dynamically, these lists are empty but the
+// symbols must exist for the linker. Start and end point to same location.
+
+// Forward declarations for Zephyr types
+struct bt_conn_cb;
+struct bt_l2cap_fixed_chan;
+struct bt_gatt_service_static;
+
+// Connection callbacks - registered dynamically via bt_conn_cb_register()
+// Note: No const qualifier - Zephyr expects mutable section boundaries
+__attribute__((section(".data.bt_conn_cb_list")))
+struct bt_conn_cb *_bt_conn_cb_list_start = NULL;
+__attribute__((section(".data.bt_conn_cb_list")))
+struct bt_conn_cb *_bt_conn_cb_list_end = NULL;
+
+// L2CAP fixed channels - registered dynamically
+__attribute__((section(".data.bt_l2cap_fixed_chan_list")))
+struct bt_l2cap_fixed_chan *_bt_l2cap_fixed_chan_list_start = NULL;
+__attribute__((section(".data.bt_l2cap_fixed_chan_list")))
+struct bt_l2cap_fixed_chan *_bt_l2cap_fixed_chan_list_end = NULL;
+
+// GATT static services - registered dynamically via bt_gatt_service_register()
+__attribute__((section(".data.bt_gatt_service_static_list")))
+struct bt_gatt_service_static *_bt_gatt_service_static_list_start = NULL;
+__attribute__((section(".data.bt_gatt_service_static_list")))
+struct bt_gatt_service_static *_bt_gatt_service_static_list_end = NULL;

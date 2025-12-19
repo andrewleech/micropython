@@ -86,50 +86,56 @@ extern const struct device __device_dts_ord_0;
 
 // Atomic bitmap operations (simplified stubs)
 // Normally defined in sys/atomic.h
-#define ATOMIC_DEFINE(name, num_bits) unsigned long name[((num_bits) + 31) / 32]
+// Note: ATOMIC_DEFINE may be redefined by real Zephyr headers
+// atomic_t is defined as 'long' (signed) in Zephyr
+#ifndef ATOMIC_DEFINE
+#define ATOMIC_DEFINE(name, num_bits) long name[((num_bits) + 31) / 32]
+#endif
+#ifndef ATOMIC_INIT
 #define ATOMIC_INIT(value) (value)
+#endif
 
-// Conditional compilation helpers
-// __COND_CODE(flag, if_1_code, if_0_code) - expands to if_1_code if flag=1, if_0_code if flag=0
-#define __COND_CODE(flag, if_1_code, if_0_code) \
-    __COND_CODE_IMPL(flag, if_1_code, if_0_code)
+// Conditional compilation helpers from Zephyr's util_internal.h
+// These use a clever comma-detection trick to select code paths at compile time
 
-// Helper for __COND_CODE
-#define __COND_CODE_IMPL(flag, if_1_code, if_0_code) \
-    __COND_CODE_##flag(if_1_code, if_0_code)
+// Core trick: _XXXX1 maps to "_YYYY," (with comma), _XXXX0 stays as single token
+#define _XXXX1 _YYYY,
+#define _ZZZZ0 _YYYY,
 
-#define __COND_CODE_0(if_1_code, if_0_code) if_0_code
-#define __COND_CODE_1(if_1_code, if_0_code) if_1_code
+// Z_COND_CODE_1: if flag=1, expands to if_1_code; otherwise if_0_code
+#define Z_COND_CODE_1(_flag, _if_1_code, _else_code) \
+    __COND_CODE(_XXXX##_flag, _if_1_code, _else_code)
+
+// Z_COND_CODE_0: if flag=0, expands to if_0_code; otherwise else_code
+#define Z_COND_CODE_0(_flag, _if_0_code, _else_code) \
+    __COND_CODE(_ZZZZ##_flag, _if_0_code, _else_code)
+
+// The core macro uses argument position to select output
+// If one_or_two_args contains a comma, it becomes 2 args and _if_code is selected
+// If one_or_two_args is single token, _else_code is selected
+#define __COND_CODE(one_or_two_args, _if_code, _else_code) \
+    __GET_ARG2_DEBRACKET(one_or_two_args _if_code, _else_code)
+
+// Gets second argument and removes brackets around it
+#define __GET_ARG2_DEBRACKET(ignore_this, val, ...) __DEBRACKET val
+
+// Used to remove brackets from around a single argument
+#define __DEBRACKET(...) __VA_ARGS__
+
+// COND_CODE_1 - public API (uses Z_COND_CODE_1 internally)
+#define COND_CODE_1(_flag, _if_1_code, _else_code) \
+    Z_COND_CODE_1(_flag, _if_1_code, _else_code)
+
+// COND_CODE_0 - public API (uses Z_COND_CODE_0 internally)
+#define COND_CODE_0(_flag, _if_0_code, _else_code) \
+    Z_COND_CODE_0(_flag, _if_0_code, _else_code)
 
 // IF_ENABLED(config, (code)) expands to code if config=1, empty otherwise
-// When config=0 or undefined, expands to nothing
-// Need indirection to force config macro expansion before concatenation
-#define IF_ENABLED(config, code) \
-    __IF_ENABLED_IMPL(config, code)
+#define IF_ENABLED(_flag, _code) \
+    COND_CODE_1(_flag, _code, ())
 
-#define __IF_ENABLED_IMPL(config, code) \
-    __IF_ENABLED_##config(code)
-
-#define __IF_ENABLED_0(code)  /* empty - expands to nothing */
-#define __IF_ENABLED_1(code) code
-// Handle undefined config values (expands to literal token, which we ignore)
+// Handle undefined config values (should expand to nothing)
 #define __IF_ENABLED_CONFIG_BT_SETTINGS_DELAYED_STORE(code) /* empty */
-
-// Note: IS_ENABLED is defined in sys/util_macro.h
-
-// COND_CODE_1 is like COND_CODE but checks if value is 1 specifically
-// When flag=1, expands to if_1_code; when flag=0, expands to if_0_code
-#define COND_CODE_1(flag, if_1_code, if_0_code) \
-    __COND_CODE_1_IMPL(flag, if_1_code, if_0_code)
-
-#define __COND_CODE_1_IMPL(flag, if_1_code, if_0_code) \
-    __COND_CODE_1_##flag(if_1_code, if_0_code)
-
-// Helper macros: parameter names match the code path they select
-// __COND_CODE_1_0 is invoked when flag=0, so it returns the "false" branch (if_0_code)
-// __COND_CODE_1_1 is invoked when flag=1, so it returns the "true" branch (if_1_code)
-#define __COND_CODE_1_0(true_branch, false_branch) false_branch
-#define __COND_CODE_1_1(true_branch, false_branch) true_branch
 
 // Net buf configuration (must be before net_buf.h is included)
 #define CONFIG_NET_BUF_ALIGNMENT 0
@@ -171,9 +177,8 @@ extern const struct device __device_dts_ord_0;
 #define BIT64(n) (1ULL << (n))
 #endif
 
-#ifndef BITS_PER_BYTE
-#define BITS_PER_BYTE 8
-#endif
+// Note: BITS_PER_BYTE is defined by Zephyr's sys/util.h - don't define here
+// to avoid redefinition conflicts in CMake builds where include order varies
 
 #ifndef IN_RANGE
 #define IN_RANGE(val, min, max) ((val) >= (min) && (val) <= (max))
@@ -233,13 +238,8 @@ extern const struct device __device_dts_ord_0;
 #define __noinit __attribute__((section(".noinit")))
 #endif
 
-#ifndef FLEXIBLE_ARRAY_DECLARE
-// Flexible array member declaration (C99 feature)
-// Add dummy member if needed to avoid "struct with no named members" error
-#define FLEXIBLE_ARRAY_DECLARE(type, name) \
-    uint8_t __flex_dummy; \
-    type name[]
-#endif
+// Note: FLEXIBLE_ARRAY_DECLARE is defined by Zephyr's sys/util.h - don't define here
+// to avoid redefinition conflicts in CMake builds where include order varies
 
 // =============================================================================
 // PART 3: Architecture Detection

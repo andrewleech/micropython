@@ -8,6 +8,8 @@ target_include_directories(micropy_extmod_zephyr_ble INTERFACE
     ${MICROPY_PORT_DIR}/
     ${ZEPHYR_BLE_EXTMOD_DIR}/
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/
+    # Stub headers must come BEFORE real Zephyr headers to shadow them
+    ${ZEPHYR_BLE_EXTMOD_DIR}/zephyr_headers_stub/
     ${ZEPHYR_LIB_DIR}/include
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host
@@ -17,12 +19,15 @@ target_sources(micropy_extmod_zephyr_ble INTERFACE
     # MicroPython bindings
     ${ZEPHYR_BLE_EXTMOD_DIR}/modbluetooth_zephyr.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hci_driver_stub.c
+    ${ZEPHYR_BLE_EXTMOD_DIR}/net_buf_pool_registry.c
 
     # HAL abstraction layer
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_timer.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_work.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_sem.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_mutex.c
+    ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_fifo.c
+    ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_mem_slab.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_kernel.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_poll.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_settings.c
@@ -58,8 +63,8 @@ target_sources(micropy_extmod_zephyr_ble INTERFACE
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/data.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/keys.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/smp.c
-    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/ecc.c
-    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/crypto_psa.c
+    # ecc.c and crypto_psa.c are replaced by our zephyr_ble_crypto_stubs.c
+    # which provides stub implementations that work without PSA Crypto
 )
 
 # Debug output for Zephyr BLE (enabled by default for development)
@@ -75,15 +80,13 @@ target_compile_definitions(micropy_extmod_zephyr_ble INTERFACE
     ZEPHYR_BLE_DEBUG=${ZEPHYR_BLE_DEBUG}
 )
 
-# Force-include config header before any other includes (C files only, not ASM) to:
-# - Pre-define header guards for unwanted headers
-# - Prevent macro conflicts with platform SDKs
-target_compile_options(micropy_extmod_zephyr_ble INTERFACE
-    $<$<COMPILE_LANGUAGE:C>:-include ${ZEPHYR_BLE_EXTMOD_DIR}/zephyr_ble_config.h>
-)
+# Note: No force-include needed - the stub toolchain/gcc.h includes autoconf.h
+# before forwarding to the real gcc.h, ensuring CONFIG_ARM is defined in time.
 
-# Selective warning suppressions for Zephyr BLE integration (C files only)
-# Only suppress specific warnings that are unavoidable due to integration challenges:
+# Warning suppressions for Zephyr BLE integration (C files only)
+# These are unavoidable due to integrating Zephyr (designed for its own build system) into MicroPython:
+# - Wno-error: Required because Zephyr headers and our stubs have unavoidable macro redefinitions
+#   (GCC's macro redefinition warnings can't be individually disabled like Clang's -Wno-macro-redefined)
 # - implicit-function-declaration: ARRAY_SIZE stub resolved at link time for zero-sized arrays
 # - unused-value: LOG_DBG macro uses comma operator (no-op when logging disabled)
 # - array-bounds: Zero-sized arrays when CONFIG options disable features
@@ -91,6 +94,7 @@ target_compile_options(micropy_extmod_zephyr_ble INTERFACE
 # - unused-function/variable/but-set-variable: Debug/logging code compiled out by CONFIG
 # - format: Printf format strings use %x for uint32_t (platform-dependent type)
 target_compile_options(micropy_extmod_zephyr_ble INTERFACE
+    $<$<COMPILE_LANGUAGE:C>:-Wno-error>
     $<$<COMPILE_LANGUAGE:C>:-Wno-implicit-function-declaration>
     $<$<COMPILE_LANGUAGE:C>:-Wno-unused-value>
     $<$<COMPILE_LANGUAGE:C>:-Wno-array-bounds>

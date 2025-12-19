@@ -20,9 +20,15 @@
 
 // Atomic bitmap macros
 // Note: We define these directly to avoid including util.h which pulls in kernel.h
+#ifndef ATOMIC_BITS
 #define ATOMIC_BITS (sizeof(atomic_val_t) * 8)
+#endif
+#ifndef ATOMIC_BITMAP_SIZE
 #define ATOMIC_BITMAP_SIZE(num_bits) (((num_bits) + ATOMIC_BITS - 1) / ATOMIC_BITS)
+#endif
+#ifndef ATOMIC_DEFINE
 #define ATOMIC_DEFINE(name, num_bits) atomic_t name[ATOMIC_BITMAP_SIZE(num_bits)]
+#endif
 
 // Include our atomic implementations (static inline functions)
 // This must come after type definitions

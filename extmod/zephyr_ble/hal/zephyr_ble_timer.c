@@ -24,6 +24,7 @@
  * THE SOFTWARE.
  */
 
+#include "py/mpconfig.h"
 #include "py/mphal.h"
 #include "py/runtime.h"
 #include "zephyr_ble_timer.h"
@@ -33,6 +34,94 @@
 #else
 #define DEBUG_TIMER_printf(...) do {} while (0)
 #endif
+
+// ============================================================================
+// FreeRTOS-based implementation (when MICROPY_PY_THREAD is enabled)
+// ============================================================================
+#if MICROPY_PY_THREAD
+
+#include "FreeRTOS.h"
+#include "timers.h"
+
+// FreeRTOS timer callback - calls the Zephyr timer's expiry function
+static void freertos_timer_callback(TimerHandle_t xTimer) {
+    struct k_timer *timer = (struct k_timer *)pvTimerGetTimerID(xTimer);
+    DEBUG_TIMER_printf("freertos_timer_callback(%p)\n", timer);
+
+    if (timer && timer->expiry_fn) {
+        timer->expiry_fn(timer);
+    }
+}
+
+void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_expiry_t stop_fn) {
+    DEBUG_TIMER_printf("k_timer_init(%p, %p, %p)\n", timer, expiry_fn, stop_fn);
+
+    // Note: stop_fn is not used in current modbluetooth_zephyr.c implementation
+    (void)stop_fn;
+
+    timer->expiry_fn = expiry_fn;
+    timer->user_data = NULL;
+
+    // Create a one-shot timer (auto-reload = pdFALSE)
+    // Initial period is 1 tick - will be changed on k_timer_start()
+    timer->handle = xTimerCreateStatic(
+        "kt",                       // Timer name (for debugging)
+        1,                          // Initial period (will be changed on start)
+        pdFALSE,                    // One-shot mode
+        (void *)timer,              // Timer ID = pointer to k_timer
+        freertos_timer_callback,    // Callback
+        &timer->storage             // Static storage
+    );
+
+    if (timer->handle == NULL) {
+        DEBUG_TIMER_printf("  --> FAILED to create timer!\n");
+    }
+}
+
+void k_timer_start(struct k_timer *timer, k_timeout_t duration, k_timeout_t period) {
+    DEBUG_TIMER_printf("k_timer_start(%p, %u, %u)\n",
+        timer, (unsigned)duration.ticks, (unsigned)period.ticks);
+
+    if (timer->handle == NULL) {
+        DEBUG_TIMER_printf("  --> timer not initialized!\n");
+        return;
+    }
+
+    // Note: period is not used in current modbluetooth_zephyr.c (always K_NO_WAIT)
+    (void)period;
+
+    // Convert milliseconds to FreeRTOS ticks
+    TickType_t ticks = pdMS_TO_TICKS(duration.ticks);
+    if (ticks == 0 && duration.ticks > 0) {
+        ticks = 1;  // Ensure at least 1 tick for non-zero timeout
+    }
+
+    // Change timer period and start it
+    if (xTimerChangePeriod(timer->handle, ticks, 0) != pdPASS) {
+        DEBUG_TIMER_printf("  --> xTimerChangePeriod failed!\n");
+    }
+}
+
+void k_timer_stop(struct k_timer *timer) {
+    DEBUG_TIMER_printf("k_timer_stop(%p)\n", timer);
+
+    if (timer->handle == NULL) {
+        return;
+    }
+
+    xTimerStop(timer->handle, 0);
+}
+
+// mp_bluetooth_zephyr_timer_process() is a no-op with FreeRTOS
+// The timer daemon task handles all timer callbacks
+void mp_bluetooth_zephyr_timer_process(void) {
+    // Nothing to do - FreeRTOS timer daemon handles callbacks
+}
+
+// ============================================================================
+// Polling-based implementation (fallback when no RTOS)
+// ============================================================================
+#else // !MICROPY_PY_THREAD
 
 // Global linked list of timers (similar to NimBLE callouts)
 static struct k_timer *global_timer = NULL;
@@ -94,3 +183,5 @@ void mp_bluetooth_zephyr_timer_process(void) {
         }
     }
 }
+
+#endif // MICROPY_PY_THREAD

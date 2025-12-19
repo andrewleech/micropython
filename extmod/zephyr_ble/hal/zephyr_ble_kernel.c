@@ -61,15 +61,8 @@ void k_sched_unlock(void) {
 }
 
 // --- Device Readiness Check ---
-
-// Note: device_is_ready() is declared with __syscall in <zephyr/device.h>
-// We define __syscall as empty in zephyr_ble_config.h, so this becomes a regular function
-bool device_is_ready(const struct device *dev) {
-    // In MicroPython, we don't have a device tree with runtime initialization
-    // All devices are statically configured and always ready
-    (void)dev;
-    return true;
-}
+// Note: device_is_ready() is now provided as a static inline function
+// in zephyr_headers_stub/zephyr/device.h
 
 // --- Fatal Error Handlers ---
 

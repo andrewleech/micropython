@@ -30,6 +30,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// Include MicroPython config to get port-defined MICROPY_PY_BLUETOOTH_ENTER/EXIT
+// This must come before our fallback definitions below
+#include "py/mpconfig.h"
+
 // Include Zephyr's real atomic types
 // These define atomic_t, atomic_val_t from sys/atomic_types.h
 #include <zephyr/sys/atomic_types.h>
