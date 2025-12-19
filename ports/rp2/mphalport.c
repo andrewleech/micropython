@@ -44,6 +44,11 @@
 #include "lib/cyw43-driver/src/cyw43.h"
 #endif
 
+#if MICROPY_PY_THREAD
+#include "FreeRTOS.h"
+#include "task.h"
+#endif
+
 #if PICO_RP2040
 // This needs to be added to the result of time_us_64() to get the number of
 // microseconds since the Epoch.
@@ -149,6 +154,8 @@ void mp_hal_delay_us(mp_uint_t us) {
     }
 }
 
+#if !MICROPY_PY_THREAD
+// When threading is enabled, mp_hal_delay_ms is redirected to mp_freertos_delay_ms
 void mp_hal_delay_ms(mp_uint_t ms) {
     mp_uint_t start = mp_hal_ticks_ms();
     mp_uint_t elapsed = 0;
@@ -157,6 +164,7 @@ void mp_hal_delay_ms(mp_uint_t ms) {
         elapsed = mp_hal_ticks_ms() - start;
     } while (elapsed < ms);
 }
+#endif
 
 void mp_hal_time_ns_set_from_rtc(void) {
     #if PICO_RP2040
@@ -251,13 +259,11 @@ static void soft_timer_hardware_callback(unsigned int alarm_num) {
     // a second ISR, as PendSV may be currently suspended by the other CPU.
     pendsv_schedule_dispatch(PENDSV_DISPATCH_SOFT_TIMER, soft_timer_handler);
 
-    // This ISR only runs on core0, but if core1 is running Python code then it
-    // may be blocked in WFE so wake it up as well. Unfortunately this also sets
-    // the event flag on core0, so a subsequent WFE on this core will not suspend
+    // This ISR only runs on core0, but with FreeRTOS SMP tasks on core1 may be
+    // blocked in WFE so wake them. Unfortunately this also sets the event flag
+    // on core0, so a subsequent WFE on this core will not suspend.
     #if MICROPY_PY_THREAD
-    if (core1_entry != NULL) {
-        __sev();
-    }
+    __sev();
     #endif
 }
 
@@ -269,6 +275,54 @@ void soft_timer_init(void) {
 void mp_wfe_or_timeout(uint32_t timeout_ms) {
     best_effort_wfe_or_timeout(delayed_by_ms(get_absolute_time(), timeout_ms));
 }
+
+#if MICROPY_PY_THREAD
+// FreeRTOS-aware wait-for-event that yields to the scheduler.
+// This allows the service task to run and process async events like
+// WiFi GPIO IRQs and cyw43_poll().
+// Note: Caller must hold the GIL. This function releases the GIL during
+// the delay to allow other Python threads to run, matching the behavior
+// of MICROPY_EVENT_POLL_HOOK.
+
+// Debug counter for wfe calls
+static volatile uint32_t wfe_call_count = 0;
+static volatile uint32_t wfe_delay_count = 0;
+
+void mp_freertos_wfe_or_timeout(uint32_t timeout_ms) {
+    wfe_call_count++;
+
+    // Check if scheduler is running (it won't be during early init)
+    if (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING) {
+        // Convert ms to ticks, minimum 1 tick to actually yield
+        TickType_t ticks = timeout_ms / portTICK_PERIOD_MS;
+        if (ticks == 0) {
+            ticks = 1;
+        }
+        wfe_delay_count++;
+        // Release GIL before blocking to allow other Python threads to run.
+        // This matches the legacy MICROPY_EVENT_POLL_HOOK behavior.
+        MP_THREAD_GIL_EXIT();
+        vTaskDelay(ticks);
+        MP_THREAD_GIL_ENTER();
+    } else {
+        // Scheduler not running, fall back to bare-metal WFE
+        best_effort_wfe_or_timeout(delayed_by_ms(get_absolute_time(), timeout_ms));
+    }
+}
+
+uint32_t mp_freertos_get_wfe_call_count(void) {
+    return wfe_call_count;
+}
+
+uint32_t mp_freertos_get_wfe_delay_count(void) {
+    return wfe_delay_count;
+}
+
+void mp_freertos_reset_wfe_counters(void) {
+    wfe_call_count = 0;
+    wfe_delay_count = 0;
+}
+#endif
 
 int mp_hal_is_pin_reserved(int n) {
     #if MICROPY_PY_NETWORK_CYW43

@@ -120,6 +120,7 @@
 #define MICROPY_ENABLE_GC           (1)
 #define MICROPY_ENABLE_FINALISER    (1)
 #define MICROPY_STACK_CHECK         (1)
+#define MICROPY_STACK_CHECK_MARGIN  (400)
 #define MICROPY_HELPER_REPL         (1)
 #define MICROPY_REPL_INFO           (1)
 #define MICROPY_REPL_AUTO_INDENT    (1)
@@ -336,8 +337,6 @@ void *nrf_native_code_commit(void *, unsigned int, void *);
 
 #define HEX2_FMT "%02x"
 
-typedef int mp_int_t; // must be pointer size
-typedef unsigned int mp_uint_t; // must be pointer size
 typedef long mp_off_t;
 
 #if MICROPY_HW_ENABLE_RNG

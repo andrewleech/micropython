@@ -82,10 +82,14 @@ static void gpio_set_cpu0_host_wake_irq_enabled(bool enable) {
     }
 }
 
+// Debug counter for GPIO IRQ - declared here for static linkage, accessed via function
+static volatile uint32_t gpio_irq_count_internal;
+
 // GPIO IRQ always runs on CPU0
 static void gpio_irq_handler(void) {
     uint32_t events = gpio_get_irq_event_mask(CYW43_PIN_WL_HOST_WAKE);
     if (events & CYW43_IRQ_LEVEL) {
+        gpio_irq_count_internal++;  // Debug: track IRQ triggers
         // As we use a level interrupt (and can't use an edge interrupt
         // as CYW43_PIN_WL_HOST_WAKE is also a SPI data pin), we need to disable
         // the interrupt to stop it re-triggering until after PendSV run
@@ -103,9 +107,50 @@ void cyw43_irq_init(void) {
     irq_set_enabled(IO_IRQ_BANK0, true);
 }
 
+// Debug counter for post_poll_hook calls
+static volatile uint32_t dbg_post_poll_count;
+
+// Debug counter for cyw43_yield calls
+static volatile uint32_t dbg_yield_count;
+
+uint32_t cyw43_debug_get_gpio_irq_count(void) {
+    return gpio_irq_count_internal;
+}
+
+void cyw43_debug_reset_gpio_irq_count(void) {
+    gpio_irq_count_internal = 0;
+}
+
 // This hook will run on whichever CPU serviced the PendSV interrupt
 void cyw43_post_poll_hook(void) {
+    dbg_post_poll_count++;
     gpio_set_cpu0_host_wake_irq_enabled(true);
+}
+
+// Debug function to check GPIO IRQ state (callable from Python)
+uint32_t cyw43_debug_get_post_poll_count(void) {
+    return dbg_post_poll_count;
+}
+
+void cyw43_debug_reset_post_poll_count(void) {
+    dbg_post_poll_count = 0;
+}
+
+bool cyw43_debug_get_gpio_state(void) {
+    return gpio_get(CYW43_PIN_WL_HOST_WAKE);
+}
+
+// Debug functions for yield counter
+void cyw43_debug_inc_yield_count(void) {
+    dbg_yield_count++;
+}
+
+uint32_t cyw43_debug_get_yield_count(void) {
+    return dbg_yield_count;
+}
+
+void cyw43_debug_reset_yield_count(void) {
+    dbg_yield_count = 0;
 }
 
 #endif

@@ -77,3 +77,6 @@
 [submodule "lib/zephyr"]
 	path = lib/zephyr
 	url = https://github.com/zephyrproject-rtos/zephyr.git
+[submodule "lib/FreeRTOS-Kernel"]
+	path = lib/FreeRTOS-Kernel
+	url = https://github.com/FreeRTOS/FreeRTOS-Kernel.git

@@ -120,7 +120,6 @@
 #define MICROPY_TRACKED_ALLOC                   (MICROPY_SSL_MBEDTLS || MICROPY_BLUETOOTH_BTSTACK)
 #define MICROPY_READER_VFS                      (1)
 #define MICROPY_ENABLE_GC                       (1)
-#define MICROPY_STACK_CHECK_MARGIN              (256)
 #define MICROPY_ENABLE_EMERGENCY_EXCEPTION_BUF  (1)
 #define MICROPY_LONGINT_IMPL                    (MICROPY_LONGINT_IMPL_MPZ)
 #define MICROPY_FLOAT_IMPL                      (MICROPY_FLOAT_IMPL_FLOAT)
@@ -133,10 +132,60 @@
 // Fine control over Python builtins, classes, modules, etc
 #define MICROPY_PY_BUILTINS_HELP_TEXT           rp2_help_text
 #define MICROPY_PY_SYS_PLATFORM                 "rp2"
+
+// Threading configuration (enabled by default)
 #ifndef MICROPY_PY_THREAD
 #define MICROPY_PY_THREAD                       (1)
+#endif
+#if MICROPY_PY_THREAD
+// GIL disabled for true SMP parallelism. Users must use _thread.allocate_lock() to
+// protect shared mutable objects (dict, list, set). FreeRTOS locks are SMP-safe.
+// This matches master's approach but with N threads instead of 2.
 #define MICROPY_PY_THREAD_GIL                   (0)
-#define MICROPY_THREAD_YIELD()                  mp_handle_pending(true)
+#define MICROPY_STACK_CHECK_MARGIN              (1024)
+#define MICROPY_MPTHREADPORT_H                  "extmod/freertos/mpthreadport.h"
+// Enable shared service task framework for deferred callbacks
+#ifndef MICROPY_FREERTOS_SERVICE_TASKS
+#define MICROPY_FREERTOS_SERVICE_TASKS          (1)
+#endif
+#define MICROPY_FREERTOS_SERVICE_MAX_SLOTS      (4)  // Soft timer, CYW43, WizNet, board
+#define MICROPY_FREERTOS_SERVICE_STACK_SIZE     (4096)  // CYW43 SPI needs larger stack
+#else
+#define MICROPY_STACK_CHECK_MARGIN              (256)
+#endif
+
+// FreeRTOS-aware delay (redirect mp_hal_delay_ms to FreeRTOS implementation)
+#if MICROPY_PY_THREAD
+void mp_freertos_delay_ms(unsigned int ms);
+#define mp_hal_delay_ms mp_freertos_delay_ms
+#endif
+
+// Recursive mutexes needed for PendSV on dual-core RP2040
+#if MICROPY_PY_THREAD && !defined(MICROPY_PY_THREAD_RECURSIVE_MUTEX)
+#define MICROPY_PY_THREAD_RECURSIVE_MUTEX       (1)
+#endif
+
+// Event poll hook - must release/acquire GIL for threading
+#if MICROPY_PY_THREAD
+void mp_freertos_yield(void);  // Wrapper in mp_freertos_hal.c
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+        MP_THREAD_GIL_EXIT(); \
+        mp_freertos_yield(); \
+        MP_THREAD_GIL_ENTER(); \
+    } while (0);
+
+#define MICROPY_THREAD_YIELD() mp_freertos_yield()
+#else
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+    } while (0);
+
+#define MICROPY_THREAD_YIELD()
 #endif
 
 // Extended modules
@@ -151,6 +200,9 @@
 #define MICROPY_PY_OS_URANDOM                   (1)
 #define MICROPY_PY_RE_MATCH_GROUPS              (1)
 #define MICROPY_PY_RE_MATCH_SPAN_START_END      (1)
+#define MICROPY_PY_HASHLIB_MD5                  (1)
+#define MICROPY_PY_HASHLIB_SHA1                 (1)
+#define MICROPY_PY_CRYPTOLIB                    (1)
 #define MICROPY_PY_TIME_GMTIME_LOCALTIME_MKTIME (1)
 #define MICROPY_PY_TIME_TIME_TIME_NS            (1)
 #define MICROPY_PY_TIME_INCLUDEFILE             "ports/rp2/modtime.c"
@@ -279,8 +331,6 @@
 #endif
 
 #define MP_SSIZE_MAX (0x7fffffff)
-typedef intptr_t mp_int_t; // must be pointer size
-typedef uintptr_t mp_uint_t; // must be pointer size
 typedef intptr_t mp_off_t;
 
 // We need to provide a declaration/definition of alloca()

@@ -80,6 +80,10 @@ function ci_code_size_setup {
     ci_picotool_setup
 }
 
+function _ci_is_git_merge {
+    [[ $(git log -1 --format=%P "$1" | wc -w) > 1 ]]
+}
+
 function ci_code_size_build {
     # check the following ports for the change in their code size
     # Override the list by setting PORTS_TO_CHECK in the environment before invoking ci.
@@ -94,8 +98,8 @@ function ci_code_size_build {
     # the code size impact would be if we merged this PR. During CI we are at a merge commit,
     # so this tests the merged PR against its merge base.
     # Override the refs by setting REFERENCE and/or COMPARISON in the environment before invoking ci.
-    : ${REFERENCE:=$(git rev-parse --short HEAD^1)}
     : ${COMPARISON:=$(git rev-parse --short HEAD)}
+    : ${REFERENCE:=$(git rev-parse --short ${COMPARISON}^1)}
 
     echo "Comparing sizes of reference ${REFERENCE} to ${COMPARISON}..."
     git log --oneline $REFERENCE..$COMPARISON
@@ -112,21 +116,26 @@ function ci_code_size_build {
             OUTFILE=$2
             IGNORE_ERRORS=$3
 
-            echo "Building ${COMMIT}..."
             git checkout --detach $COMMIT
             git submodule update --init $SUBMODULES
             git show -s
             tools/metrics.py clean "$PORTS_TO_CHECK"
             # Allow errors from tools/metrics.py to propagate out of the pipe below.
             set -o pipefail
-            tools/metrics.py build "$PORTS_TO_CHECK" | tee $OUTFILE || $IGNORE_ERRORS
+            tools/metrics.py build "$PORTS_TO_CHECK" | tee -a $OUTFILE || $IGNORE_ERRORS
             return $?
         }
 
         # build reference, save to size0
         # ignore any errors with this build, in case master is failing
+        echo "BUILDING $(git log --format='%s [%h]' -1 ${REFERENCE})" > ~/size0
         code_size_build_step $REFERENCE ~/size0 true
         # build PR/branch, save to size1
+        if _ci_is_git_merge "$COMPARISON"; then
+            echo "BUILDING $(git log --oneline -1 --format='%s [merge of %h]' ${COMPARISON}^2)"
+        else
+            echo "BUILDING $(git log --oneline -1 --formta='%s [%h]' ${COMPARISON})"
+        fi > ~/size1
         code_size_build_step $COMPARISON ~/size1 false
     )
 }
@@ -162,6 +171,15 @@ function ci_mpy_format_test {
     make -C examples/natmod/features1
     ./tools/mpy-tool.py -xd examples/natmod/features1/features1.mpy
     $micropython ./tools/mpy-tool.py -x -d examples/natmod/features1/features1.mpy
+}
+
+function ci_mpy_cross_debug_emitter {
+    make ${MAKEOPTS} -C mpy-cross
+    mpy_cross=./mpy-cross/build/mpy-cross
+
+    # Make sure the debug emitter does not crash or fail for simple files
+    $mpy_cross -X emit=native -march=debug ./tests/basics/0prelim.py | \
+	    grep -E "ENTRY|EXIT" | wc -l | grep "^2$"
 }
 
 ########################################################################################
@@ -228,11 +246,19 @@ function ci_esp32_build_s3_c3 {
     make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC_C3
 }
 
-function ci_esp32_build_c2_c6 {
+function ci_esp32_build_c2_c5_c6 {
     ci_esp32_build_common
 
     make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC_C2
+    make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC_C5
     make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC_C6
+}
+
+function ci_esp32_build_p4 {
+    ci_esp32_build_common
+
+    make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC_P4
+    make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC_P4 BOARD_VARIANT=C6_WIFI
 }
 
 ########################################################################################
@@ -475,13 +501,22 @@ function ci_samd_build {
 # ports/stm32
 
 function ci_stm32_setup {
-    ci_gcc_arm_setup
+    # Use a recent version of the ARM toolchain, to work with Cortex-M55.
+    wget https://developer.arm.com/-/media/Files/downloads/gnu/14.3.rel1/binrel/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi.tar.xz
+    xzcat arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi.tar.xz | tar x
+
     pip3 install pyelftools
     pip3 install ar
     pip3 install pyhy
 }
 
+function ci_stm32_path {
+    echo $(pwd)/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/bin
+}
+
 function ci_stm32_pyb_build {
+    # This function builds the following MCU families: F4, F7.
+
     make ${MAKEOPTS} -C mpy-cross
     make ${MAKEOPTS} -C ports/stm32 MICROPY_PY_NETWORK_WIZNET5K=5200 submodules
     make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF2 submodules
@@ -496,13 +531,15 @@ function ci_stm32_pyb_build {
 }
 
 function ci_stm32_nucleo_build {
+    # This function builds the following MCU families: F0, H5, H7, L0, L4, WB.
+
     make ${MAKEOPTS} -C mpy-cross
     make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H743ZI submodules
     git submodule update --init lib/mynewt-nimble
 
     # Test building various MCU families, some with additional options.
     make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_F091RC
-    make ${MAKEOPTS} -C ports/stm32 BOARD=STM32H573I_DK
+    make ${MAKEOPTS} -C ports/stm32 BOARD=STM32H573I_DK CFLAGS_EXTRA='-DMICROPY_HW_TINYUSB_STACK=1'
     make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H743ZI COPT=-O2 CFLAGS_EXTRA='-DMICROPY_PY_THREAD=1'
     make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_L073RZ
     make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_L476RG DEBUG=1
@@ -522,9 +559,17 @@ function ci_stm32_nucleo_build {
 }
 
 function ci_stm32_misc_build {
+    # This function builds the following MCU families: G0, G4, H7, L1, N6, U5, WL.
+
     make ${MAKEOPTS} -C mpy-cross
     make ${MAKEOPTS} -C ports/stm32 BOARD=ARDUINO_GIGA submodules
     make ${MAKEOPTS} -C ports/stm32 BOARD=ARDUINO_GIGA
+    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_G0B1RE
+    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_G474RE
+    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_L152RE
+    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_N657X0
+    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_U5A5ZJ_Q
+    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_WL55
 }
 
 ########################################################################################
@@ -940,6 +985,7 @@ function ci_windows_build {
     make ${MAKEOPTS} -C mpy-cross
     make ${MAKEOPTS} -C ports/windows submodules
     make ${MAKEOPTS} -C ports/windows CROSS_COMPILE=i686-w64-mingw32-
+    make ${MAKEOPTS} -C ports/windows CROSS_COMPILE=x86_64-w64-mingw32- BUILD=build-standard-w64
 }
 
 ########################################################################################
@@ -986,6 +1032,7 @@ function ci_zephyr_install {
 }
 
 function ci_zephyr_build {
+    git submodule update --init lib/micropython-lib
     docker exec zephyr-ci west build -p auto -b qemu_x86 -- -DCONF_FILE=prj_minimal.conf
     docker exec zephyr-ci west build -p auto -b frdm_k64f
     docker exec zephyr-ci west build -p auto -b mimxrt1050_evk
@@ -1037,6 +1084,14 @@ function _ci_bash_completion {
     echo "alias ci=\"$(readlink -f "$0")\"; complete -W '$(grep '^function ci_' $0 | awk '{print $2}' | sed 's/^ci_//')' ci"
 }
 
+function _ci_zsh_completion {
+    echo "alias ci=\"$(readlink -f "$0"\"); _complete_mpy_ci_zsh() { compadd $(grep '^function ci_' $0 | awk '{sub(/^ci_/,"",$2); print $2}' | tr '\n' ' ') }; autoload -Uz compinit; compinit; compdef _complete_mpy_ci_zsh $(readlink -f "$0")"
+}
+
+function _ci_fish_completion {
+    echo "alias ci=\"$(readlink -f "$0"\"); complete -c ci -p $(readlink -f "$0") -f -a '$(grep '^function ci_' $(readlink -f "$0") | awk '{sub(/^ci_/,"",$2); print $2}' | tr '\n' ' ')'"
+}
+
 function _ci_main {
     case "$1" in
         (-h|-?|--help)
@@ -1044,6 +1099,12 @@ function _ci_main {
         ;;
         (--bash-completion)
             _ci_bash_completion
+        ;;
+        (--zsh-completion)
+            _ci_zsh_completion
+        ;;
+        (--fish-completion)
+            _ci_fish_completion
         ;;
         (-*)
             echo "Unknown option: $1" 1>&2

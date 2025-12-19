@@ -179,20 +179,23 @@ __attribute__((naked)) MP_NORETURN void UsageFault_Handler(void) {
     exception_handler(USAGE_FAULT);
 }
 
+// SVC, PendSV, and SysTick handlers are provided by freertos_hooks.c when threading is enabled
+#if !MICROPY_PY_THREAD
 __attribute__((naked)) MP_NORETURN void SVC_Handler(void) {
     exception_handler(SV_CALL);
 }
+#endif
 
 __attribute__((naked)) MP_NORETURN void DebugMon_Handler(void) {
     exception_handler(DEBUG_MONITOR);
 }
 
+#if !MICROPY_PY_THREAD
 __attribute__((naked)) MP_NORETURN void PendSV_Handler(void) {
     exception_handler(PENDING_SV);
 }
+#endif
 
-__attribute__((naked)) MP_NORETURN void SysTick_Handler(void) {
-    exception_handler(SYSTEM_TICK);
-}
+// SysTick_Handler is provided by ticks.c (non-threaded) or freertos_hooks.c (threaded)
 
 #endif

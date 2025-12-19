@@ -40,9 +40,25 @@
 bool cyw43_poll_is_pending(void);
 
 static inline void cyw43_yield(void) {
+    #if MICROPY_PY_THREAD
+    // With FreeRTOS, always yield to scheduler even if poll is pending.
+    // The pending poll can't be processed while we hold CYW43_THREAD_LOCK
+    // (which suspends the service task), so we must yield to allow other
+    // tasks (including timers) to run.
+    extern long xTaskGetSchedulerState(void);
+    extern void vTaskDelay(const unsigned long);
+    // taskSCHEDULER_RUNNING == 2 in FreeRTOS
+    if (xTaskGetSchedulerState() == 2) {
+        vTaskDelay(1);  // Yield and wait 1 tick
+    } else {
+        best_effort_wfe_or_timeout(make_timeout_time_ms(1));
+    }
+    #else
+    // Without threading, skip wait if poll is pending (will be processed soon)
     if (!cyw43_poll_is_pending()) {
         best_effort_wfe_or_timeout(make_timeout_time_ms(1));
     }
+    #endif
 }
 
 #define CYW43_POST_POLL_HOOK            cyw43_post_poll_hook();
@@ -85,15 +101,24 @@ uint cyw43_get_pin_wl(cyw43_pin_index_t pin_id);
 
 #endif
 
+// With FreeRTOS SMP, tasks can run on either core.
+// Always yield regardless of core number to allow service task to process
+// responses from the CYW43 chip.
+#if MICROPY_PY_THREAD
+#define CYW43_SDPCM_SEND_COMMON_WAIT cyw43_yield();
+#define CYW43_DO_IOCTL_WAIT cyw43_yield();
+#else
+// Without threading, only yield on core 0 (original behavior)
 #define CYW43_SDPCM_SEND_COMMON_WAIT \
     if (get_core_num() == 0) { \
         cyw43_yield(); \
-    } \
+    }
 
 #define CYW43_DO_IOCTL_WAIT \
     if (get_core_num() == 0) { \
         cyw43_yield(); \
-    } \
+    }
+#endif
 
 // Bluetooth requires dynamic memory allocation to load its firmware (the allocation
 // call is made from pico-sdk).  This allocation is always done at thread-level, not

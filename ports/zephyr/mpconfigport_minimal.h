@@ -50,7 +50,6 @@
 #define MICROPY_LONGINT_IMPL (MICROPY_LONGINT_IMPL_LONGLONG)
 #define MICROPY_FLOAT_IMPL (MICROPY_FLOAT_IMPL_FLOAT)
 #define MICROPY_PY_BUILTINS_COMPLEX (0)
-#define MICROPY_PY_MATH_POW_FIX_NAN (1)
 
 // These features are enabled to get the test suite passing.
 #define MICROPY_FULL_CHECKS         (1)
@@ -73,10 +72,14 @@
 #define MICROPY_HW_MCU_NAME "unknown-cpu"
 #endif
 
-typedef int mp_int_t; // must be pointer size
-typedef unsigned mp_uint_t; // must be pointer size
 typedef long mp_off_t;
 
 #define MP_STATE_PORT MP_STATE_VM
 
 #define MICROPY_EVENT_POLL_HOOK
+
+// Compatibility switches
+
+#ifdef CONFIG_NEWLIB_LIBC
+#define MICROPY_PY_MATH_POW_FIX_NAN (1)
+#endif

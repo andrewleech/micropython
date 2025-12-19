@@ -71,8 +71,24 @@
 #include "pico/aon_timer.h"
 #include "shared/timeutils/timeutils.h"
 
+#if MICROPY_PY_THREAD
+#include "FreeRTOS.h"
+#include "task.h"
+#endif
+
 extern uint8_t __StackTop, __StackBottom;
 extern uint8_t __GcHeapStart, __GcHeapEnd;
+
+#if MICROPY_PY_THREAD
+// FreeRTOS main task static allocation
+#define FREERTOS_MAIN_TASK_STACK_SIZE (8192 / sizeof(StackType_t))
+static StaticTask_t main_task_tcb;
+static StackType_t main_task_stack[FREERTOS_MAIN_TASK_STACK_SIZE];
+#endif
+
+#if MICROPY_HW_ENABLE_PSRAM
+static size_t psram_size;
+#endif
 
 // Embed version info in the binary in machine readable form
 bi_decl(bi_program_version_string(MICROPY_GIT_TAG));
@@ -83,13 +99,18 @@ bi_decl(bi_program_feature_group_with_flags(BINARY_INFO_TAG_MICROPYTHON,
     BINARY_INFO_ID_MP_FROZEN, "frozen modules",
     BI_NAMED_GROUP_SEPARATE_COMMAS | BI_NAMED_GROUP_SORT_ALPHA));
 
+static void rp2_main_loop(void *arg);
+
 int main(int argc, char **argv) {
     // This is a tickless port, interrupts should always trigger SEV.
     #if PICO_ARM
     SCB->SCR |= SCB_SCR_SEVONPEND_Msk;
     #endif
 
+    #if !MICROPY_PY_THREAD
+    // Non-threaded: Init pendsv before main loop
     pendsv_init();
+    #endif
     soft_timer_init();
 
     // Set the MCU frequency and as a side effect the peripheral clock to 48 MHz.
@@ -102,7 +123,7 @@ int main(int argc, char **argv) {
     rp2_flash_set_timing();
 
     #if MICROPY_HW_ENABLE_PSRAM
-    size_t psram_size = psram_init(MICROPY_HW_PSRAM_CS_PIN);
+    psram_size = psram_init(MICROPY_HW_PSRAM_CS_PIN);
     #endif
 
     #if MICROPY_HW_ENABLE_UART_REPL
@@ -121,16 +142,19 @@ int main(int argc, char **argv) {
 
     #if MICROPY_PY_THREAD
     bi_decl(bi_program_feature("thread support"))
-    mp_thread_init();
     #endif
 
-    // Start and initialise the RTC
-    struct timespec ts = { 0, 0 };
-    ts.tv_sec = timeutils_seconds_since_epoch(2021, 1, 1, 0, 0, 0);
-    aon_timer_start(&ts);
-    mp_hal_time_ns_set_from_rtc();
+    // Start and initialise the RTC (needed for both threaded and non-threaded builds)
+    {
+        struct timespec ts = { 0, 0 };
+        ts.tv_sec = timeutils_seconds_since_epoch(2021, 1, 1, 0, 0, 0);
+        aon_timer_start(&ts);
+        mp_hal_time_ns_set_from_rtc();
+    }
 
-    // Initialise stack extents and GC heap.
+    #if !MICROPY_PY_THREAD
+    // Non-FreeRTOS: Initialise stack extents and GC heap before main loop.
+    // FreeRTOS: These are initialized in rp2_main_loop() after scheduler starts (like STM32).
     mp_cstack_init_with_top(&__StackTop, &__StackTop - &__StackBottom);
 
     #if MICROPY_HW_ENABLE_PSRAM
@@ -147,19 +171,22 @@ int main(int argc, char **argv) {
     #else
     gc_init(&__GcHeapStart, &__GcHeapEnd);
     #endif
+    #endif
 
     #if MICROPY_PY_LWIP
     // lwIP doesn't allow to reinitialise itself by subsequent calls to this function
     // because the system timeout list (next_timeout) is only ever reset by BSS clearing.
-    // So for now we only init the lwIP stack once on power-up.
+    // So for now we only init the lwIP stack once on power-up (before scheduler for FreeRTOS).
     lwip_init();
     #if LWIP_MDNS_RESPONDER
     mdns_resp_init();
     #endif
     #endif
 
-    // Initialize CYW43 WiFi hardware (not needed for Zephyr BLE - BT init handled separately)
-    #if MICROPY_PY_NETWORK_CYW43
+    #if (MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_CYW43) && !MICROPY_PY_THREAD
+    // Non-threaded: Initialize CYW43 before main loop.
+    // For FreeRTOS builds, CYW43 init is moved AFTER scheduler starts to avoid
+    // GPIO IRQ conflicts during scheduler initialization.
     {
         cyw43_init(&cyw43_state);
         cyw43_irq_init();
@@ -184,108 +211,214 @@ int main(int argc, char **argv) {
     // Hook for setting up anything that can wait until after other hardware features are initialised.
     MICROPY_BOARD_EARLY_INIT();
 
+    #if MICROPY_PY_THREAD
+    // FreeRTOS: create main task and start scheduler (never returns).
+    // On SMP, pin to same core as child threads to ensure GIL correctness.
+    #if configNUMBER_OF_CORES > 1
+    xTaskCreateStaticAffinitySet(
+        rp2_main_loop,
+        "main",
+        FREERTOS_MAIN_TASK_STACK_SIZE,
+        NULL,
+        tskIDLE_PRIORITY + 1,
+        main_task_stack,
+        &main_task_tcb,
+        MP_THREAD_CORE_AFFINITY);
+    #else
+    xTaskCreateStatic(
+        rp2_main_loop,
+        "main",
+        FREERTOS_MAIN_TASK_STACK_SIZE,
+        NULL,
+        tskIDLE_PRIORITY + 1,
+        main_task_stack,
+        &main_task_tcb);
+    #endif
+    vTaskStartScheduler();
+    // Scheduler should never return
     for (;;) {
+        __breakpoint();
+    }
+    #else
+    // Non-FreeRTOS: run loop directly
+    rp2_main_loop(NULL);
+    #endif
 
-        // Initialise MicroPython runtime.
-        mp_init();
-        mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_lib));
+    return 0;
+}
 
-        // Initialise sub-systems.
-        readline_init0();
-        machine_pin_init();
-        rp2_pio_init();
-        rp2_dma_init();
-        machine_i2s_init0();
+static void rp2_main_loop(void *arg) {
+    (void)arg;
 
-        #if MICROPY_PY_BLUETOOTH
-        // Initialize shared HCI infrastructure (polling, scheduling)
-        // Stack initialization happens lazily when user calls ble.active(True)
-        mp_bluetooth_hci_init();
-        #endif
-        #if MICROPY_PY_NETWORK
-        mod_network_init();
-        #endif
-        #if MICROPY_PY_LWIP
-        mod_network_lwip_init();
-        #endif
+    #if MICROPY_PY_THREAD
+    // FreeRTOS: Initialize pendsv service task AFTER scheduler has started.
+    // Cannot create tasks before scheduler init - corrupts kernel state.
+    pendsv_init();
+    #endif
 
-        // Execute _boot.py to set up the filesystem.
-        #if MICROPY_VFS_FAT && MICROPY_HW_USB_MSC
-        pyexec_frozen_module("_boot_fat.py", false);
+    #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_CYW43
+    // FreeRTOS: Initialize CYW43 AFTER scheduler has started to avoid GPIO IRQ
+    // conflicts during scheduler initialization. Before this change, cyw43_irq_init()
+    // registered GPIO handlers BEFORE vTaskStartScheduler, causing corruption when
+    // IRQs fired during scheduler init.
+    {
+        cyw43_init(&cyw43_state);
+        cyw43_irq_init();
+        cyw43_post_poll_hook(); // enable the irq
+        uint8_t buf[8];
+        memcpy(&buf[0], "PICO", 4);
+
+        // MAC isn't loaded from OTP yet, so use unique id to generate the default AP ssid.
+        const char hexchr[16] = "0123456789ABCDEF";
+        pico_unique_board_id_t pid;
+        pico_get_unique_board_id(&pid);
+        buf[4] = hexchr[pid.id[7] >> 4];
+        buf[5] = hexchr[pid.id[6] & 0xf];
+        buf[6] = hexchr[pid.id[5] >> 4];
+        buf[7] = hexchr[pid.id[4] & 0xf];
+        cyw43_wifi_ap_set_ssid(&cyw43_state, 8, buf);
+        cyw43_wifi_ap_set_auth(&cyw43_state, CYW43_AUTH_WPA2_AES_PSK);
+        cyw43_wifi_ap_set_password(&cyw43_state, 8, (const uint8_t *)"picoW123");
+    }
+    #endif
+
+    // Note: mp_cstack_init_with_top is called in soft_reset section AFTER mp_thread_init
+    // because it uses MP_STATE_THREAD() which requires TLS to be set up first.
+
+    #if MICROPY_HW_ENABLE_PSRAM
+    if (psram_size) {
+        #if MICROPY_GC_SPLIT_HEAP
+        gc_init(&__GcHeapStart, &__GcHeapEnd);
+        gc_add((void *)PSRAM_BASE, (void *)(PSRAM_BASE + psram_size));
         #else
-        pyexec_frozen_module("_boot.py", false);
+        gc_init((void *)PSRAM_BASE, (void *)(PSRAM_BASE + psram_size));
         #endif
+    } else {
+        gc_init(&__GcHeapStart, &__GcHeapEnd);
+    }
+    #else
+    gc_init(&__GcHeapStart, &__GcHeapEnd);
+    #endif
 
-        // Execute user scripts.
-        int ret = pyexec_file_if_exists("boot.py");
+soft_reset:
+    #if MICROPY_PY_THREAD
+    // Initialize FreeRTOS threading backend with main task stack for GC scanning.
+    // This must be called first as it sets up Thread Local Storage.
+    mp_thread_init(main_task_stack, sizeof(main_task_stack));
 
-        #if MICROPY_HW_ENABLE_USBDEV
-        mp_usbd_init();
-        #endif
+    // Initialize stack extents using the FreeRTOS task stack.
+    // Must be after mp_thread_init() because MP_STATE_THREAD() requires TLS setup.
+    // This matches STM32's proven architecture (see ports/stm32/main.c:600-610).
+    mp_cstack_init_with_top(main_task_stack + FREERTOS_MAIN_TASK_STACK_SIZE,
+        FREERTOS_MAIN_TASK_STACK_SIZE * sizeof(StackType_t));
+    #endif
 
+    // Initialise MicroPython runtime.
+    mp_init();
+    mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_lib));
+
+    // Initialise sub-systems.
+    readline_init0();
+    machine_pin_init();
+    rp2_pio_init();
+    rp2_dma_init();
+    #if MICROPY_PY_MACHINE_I2S
+    machine_i2s_init0();
+    #endif
+
+    #if MICROPY_PY_BLUETOOTH
+    mp_bluetooth_hci_init();
+    #endif
+    #if MICROPY_PY_NETWORK
+    mod_network_init();
+    #endif
+    #if MICROPY_PY_LWIP
+    mod_network_lwip_init();
+    #endif
+
+    #if MICROPY_HW_ENABLE_USBDEV
+    // Initialize USB before executing Python code so CDC REPL is available for any prints.
+    mp_usbd_init();
+    #endif
+
+    // Execute _boot.py to set up the filesystem.
+    #if MICROPY_VFS_FAT && MICROPY_HW_USB_MSC
+    pyexec_frozen_module("_boot_fat.py", false);
+    #else
+    pyexec_frozen_module("_boot.py", false);
+    #endif
+
+    // Execute user scripts.
+    int ret = pyexec_file_if_exists("boot.py");
+
+    if (ret & PYEXEC_FORCED_EXIT) {
+        goto soft_reset_exit;
+    }
+    if (pyexec_mode_kind == PYEXEC_MODE_FRIENDLY_REPL && ret != 0) {
+        ret = pyexec_file_if_exists("main.py");
         if (ret & PYEXEC_FORCED_EXIT) {
             goto soft_reset_exit;
         }
-        if (pyexec_mode_kind == PYEXEC_MODE_FRIENDLY_REPL && ret != 0) {
-            ret = pyexec_file_if_exists("main.py");
-            if (ret & PYEXEC_FORCED_EXIT) {
-                goto soft_reset_exit;
-            }
-        }
-
-        for (;;) {
-            if (pyexec_mode_kind == PYEXEC_MODE_RAW_REPL) {
-                if (pyexec_raw_repl() != 0) {
-                    break;
-                }
-            } else {
-                if (pyexec_friendly_repl() != 0) {
-                    break;
-                }
-            }
-        }
-
-    soft_reset_exit:
-        mp_printf(MP_PYTHON_PRINTER, "MPY: soft reboot\n");
-
-        // Hook for resetting anything immediately following a soft reset command.
-        MICROPY_BOARD_START_SOFT_RESET();
-
-        #if MICROPY_PY_NETWORK
-        mod_network_deinit();
-        #endif
-        machine_i2s_deinit_all();
-        rp2_dma_deinit();
-        rp2_pio_deinit();
-        #if MICROPY_PY_BLUETOOTH
-        mp_bluetooth_deinit();
-        #endif
-        machine_pwm_deinit_all();
-        machine_pin_deinit();
-        machine_uart_deinit_all();
-        #if MICROPY_PY_MACHINE_I2C_TARGET
-        mp_machine_i2c_target_deinit_all();
-        #endif
-        #if MICROPY_PY_THREAD
-        mp_thread_deinit();
-        #endif
-        soft_timer_deinit();
-        #if MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
-        mp_usbd_deinit();
-        #endif
-
-        // Hook for resetting anything right at the end of a soft reset command.
-        MICROPY_BOARD_END_SOFT_RESET();
-
-        gc_sweep_all();
-        mp_deinit();
-        #if MICROPY_HW_ENABLE_UART_REPL
-        setup_default_uart();
-        mp_uart_init();
-        #endif
     }
 
-    return 0;
+    for (;;) {
+        if (pyexec_mode_kind == PYEXEC_MODE_RAW_REPL) {
+            if (pyexec_raw_repl() != 0) {
+                break;
+            }
+        } else {
+            if (pyexec_friendly_repl() != 0) {
+                break;
+            }
+        }
+    }
+
+soft_reset_exit:
+    mp_printf(MP_PYTHON_PRINTER, "MPY: soft reboot\n");
+
+    // Hook for resetting anything immediately following a soft reset command.
+    MICROPY_BOARD_START_SOFT_RESET();
+
+    #if MICROPY_PY_NETWORK
+    mod_network_deinit();
+    #endif
+    #if MICROPY_PY_MACHINE_I2S
+    machine_i2s_deinit_all();
+    #endif
+    rp2_dma_deinit();
+    rp2_pio_deinit();
+    #if MICROPY_PY_BLUETOOTH
+    mp_bluetooth_deinit();
+    #endif
+    #if MICROPY_PY_MACHINE_PWM
+    machine_pwm_deinit_all();
+    #endif
+    machine_pin_deinit();
+    #if MICROPY_PY_MACHINE_UART
+    machine_uart_deinit_all();
+    #endif
+    #if MICROPY_PY_MACHINE_I2C_TARGET
+    mp_machine_i2c_target_deinit_all();
+    #endif
+    #if MICROPY_PY_THREAD
+    mp_thread_deinit();
+    #endif
+    soft_timer_deinit();
+    #if MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
+    mp_usbd_deinit();
+    #endif
+
+    // Hook for resetting anything right at the end of a soft reset command.
+    MICROPY_BOARD_END_SOFT_RESET();
+
+    gc_sweep_all();
+    mp_deinit();
+    #if MICROPY_HW_ENABLE_UART_REPL
+    setup_default_uart();
+    mp_uart_init();
+    #endif
+
+    goto soft_reset;
 }
 
 void gc_collect(void) {

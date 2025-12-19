@@ -58,7 +58,35 @@ MBOOT_TEXT0_ADDR ?= 0x08000000
 include $(TOP)/py/py.mk
 include $(TOP)/extmod/extmod.mk
 
-GIT_SUBMODULES += lib/libhydrogen lib/stm32lib
+# FreeRTOS threading backend integration
+ifeq ($(MICROPY_PY_THREAD),1)
+FREERTOS_DIR = $(TOP)/lib/FreeRTOS-Kernel
+include $(TOP)/extmod/freertos/freertos.mk
+
+# Architecture-specific FreeRTOS port
+ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),f4 g4 l4 wb wl))
+FREERTOS_PORT_DIR = $(FREERTOS_DIR)/portable/GCC/ARM_CM4F
+else ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),f7 h7 n6))
+FREERTOS_PORT_DIR = $(FREERTOS_DIR)/portable/GCC/ARM_CM7/r0p1
+else ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),f0 g0 l0))
+FREERTOS_PORT_DIR = $(FREERTOS_DIR)/portable/GCC/ARM_CM0
+else ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),f1 f2 l1))
+FREERTOS_PORT_DIR = $(FREERTOS_DIR)/portable/GCC/ARM_CM3
+else
+$(error Unsupported MCU_SERIES for FreeRTOS: $(MCU_SERIES))
+endif
+
+SRC_C += $(FREERTOS_PORT_DIR)/port.c
+SRC_C += freertos_hooks.c
+INC += -I$(FREERTOS_PORT_DIR)
+INC += -I$(FREERTOS_DIR)/include
+CFLAGS += -DMICROPY_PY_THREAD=1
+endif
+
+GIT_SUBMODULES += lib/libhydrogen lib/stm32lib lib/tinyusb
+ifeq ($(MICROPY_PY_THREAD),1)
+GIT_SUBMODULES += lib/FreeRTOS-Kernel
+endif
 
 CROSS_COMPILE ?= arm-none-eabi-
 LD_DIR=boards
@@ -110,6 +138,8 @@ INC += -I$(STM32LIB_CMSIS_ABS)/Include
 INC += -I$(STM32LIB_HAL_ABS)/Inc
 INC += -I$(USBDEV_DIR)/core/inc -I$(USBDEV_DIR)/class/inc
 #INC += -I$(USBHOST_DIR)
+INC += -I$(TOP)/lib/tinyusb/src
+INC += -I$(TOP)/shared/tinyusb/
 INC += -Ilwip_inc
 
 CFLAGS += $(INC) -Wall -Wpointer-arith -Wdouble-promotion -Wfloat-conversion -std=gnu99 -nostdlib $(CFLAGS_EXTRA)
@@ -213,6 +243,10 @@ SHARED_SRC_C += $(addprefix shared/,\
 	runtime/stdout_helpers.c \
 	runtime/sys_stdio_mphal.c \
 	timeutils/timeutils.c \
+	tinyusb/mp_usbd.c \
+	tinyusb/mp_usbd_cdc.c \
+	tinyusb/mp_usbd_descriptor.c \
+	tinyusb/mp_usbd_runtime.c \
 	)
 
 ifeq ($(MICROPY_FLOAT_IMPL),double)
@@ -242,21 +276,22 @@ SRC_C += \
 	boardctrl.c \
 	main.c \
 	stm32_it.c \
+	usbd.c \
 	usbd_conf.c \
+	usb.c \
 	usbd_desc.c \
 	usbd_cdc_interface.c \
 	usbd_hid_interface.c \
 	usbd_msc_interface.c \
 	mphalport.c \
+	msc_disk.c \
 	mpnetworkport.c \
-	mpthreadport.c \
 	irq.c \
 	pendsv.c \
 	systick.c  \
 	powerctrl.c \
 	powerctrlboot.c \
 	rfcore.c \
-	pybthread.c \
 	factoryreset.c \
 	timer.c \
 	led.c \
@@ -277,7 +312,6 @@ SRC_C += \
 	can.c \
 	fdcan.c \
 	pyb_can.c \
-	usb.c \
 	eth.c \
 	eth_phy.c \
 	gccollect.c \
@@ -309,6 +343,11 @@ SRC_C += \
 	subghz.c \
 	xspi.c \
 	$(wildcard $(BOARD_DIR)/*.c)
+
+# Threading backend - use pybthread when FreeRTOS not enabled
+ifneq ($(MICROPY_PY_THREAD),1)
+SRC_C += mpthreadport.c pybthread.c
+endif
 
 SRC_O += \
 	$(STARTUP_FILE) \
@@ -367,7 +406,7 @@ HAL_SRC_C += $(addprefix $(STM32LIB_HAL_BASE)/Src/stm32$(MCU_SERIES)xx_,\
 	)
 endif
 
-ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),f4 f7 g0 g4 h5 h7 l0 l1 l4 n6 wb))
+ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),f4 f7 g0 g4 h5 h7 l0 l1 l4 n6 u5 wb))
 HAL_SRC_C += $(addprefix $(STM32LIB_HAL_BASE)/Src/stm32$(MCU_SERIES)xx_,\
 	hal_pcd.c \
 	hal_pcd_ex.c \
@@ -408,7 +447,7 @@ $(BUILD)/$(STM32LIB_HAL_BASE)/Src/stm32$(MCU_SERIES)xx_hal_mmc.o: CFLAGS += -Wno
 endif
 endif
 
-ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),f4 f7 g0 g4 h5 h7 n6))
+ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),f4 f7 g0 g4 h5 h7 n6 u5))
 HAL_SRC_C += $(addprefix $(STM32LIB_HAL_BASE)/Src/stm32$(MCU_SERIES)xx_,\
 	hal_dma_ex.c \
 	)
@@ -460,6 +499,16 @@ USBDEV_SRC_C += $(addprefix $(USBDEV_DIR)/,\
 	class/src/usbd_msc_scsi.c \
 	)
 
+# TinyUSB Stack source
+-include $(TOP)/lib/tinyusb/src/tinyusb.mk
+TINYUSB_SRC_C := $(addprefix lib/tinyusb/, \
+	$(TINYUSB_SRC_C) \
+	src/portable/st/stm32_fsdev/dcd_stm32_fsdev.c \
+	src/portable/synopsys/dwc2/dcd_dwc2.c \
+	src/portable/synopsys/dwc2/dwc2_common.c \
+	src/portable/synopsys/dwc2/hcd_dwc2.c \
+	)
+
 ifeq ($(MICROPY_SSL_MBEDTLS),1)
 LIB_SRC_C += mbedtls/mbedtls_port.c
 endif
@@ -504,9 +553,13 @@ OBJ += $(addprefix $(BUILD)/, $(SHARED_SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(DRIVERS_SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(HAL_SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(USBDEV_SRC_C:.c=.o))
+OBJ += $(addprefix $(BUILD)/, $(TINYUSB_SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_CXX:.cpp=.o))
 OBJ += $(GEN_PINS_SRC:.c=.o)
+ifeq ($(MICROPY_PY_THREAD),1)
+OBJ += $(addprefix $(BUILD)/, $(SRC_FREERTOS_C:.c=.o))
+endif
 
 # This file contains performance critical functions so turn up the optimisation
 # level.  It doesn't add much to the code size and improves performance a bit.
@@ -667,7 +720,7 @@ $(BUILD)/firmware-trusted.bin: $(BUILD)/firmware.bin
 	$(STM32_CUBE_PROGRAMMER)/bin/STM32_SigningTool_CLI -bin $^ -nk -of 0x80000000 -t fsbl -o $@ -hv $(STM32_N6_HEADER_VERSION)
 
 # List of sources for qstr extraction
-SRC_QSTR += $(SRC_C) $(SRC_CXX) $(SHARED_SRC_C) $(GEN_PINS_SRC)
+SRC_QSTR += $(SRC_C) $(SRC_CXX) $(SHARED_SRC_C) $(GEN_PINS_SRC) $(SRC_FREERTOS_C)
 
 # Making OBJ use an order-only dependency on the generated pins.h file
 # has the side effect of making the pins.h file before we actually compile

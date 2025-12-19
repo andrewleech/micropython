@@ -54,9 +54,6 @@
 #define MICROPY_LONGINT_IMPL        (MICROPY_LONGINT_IMPL_MPZ)
 #define MICROPY_WARNINGS            (1)
 #define MICROPY_PY_SYS_PLATFORM     "qemu"
-#define MICROPY_PY_SYS_STDIO_BUFFER (0)
-#define MICROPY_PY_SELECT           (0)
-#define MICROPY_PY_TIME             (0)
 #define MICROPY_PY_ASYNCIO          (0)
 #define MICROPY_PY_MACHINE          (1)
 #define MICROPY_PY_MACHINE_INCLUDEFILE "ports/qemu/modmachine.c"
@@ -65,17 +62,25 @@
 #define MICROPY_VFS                 (1)
 #define MICROPY_VFS_ROM             (1)
 #define MICROPY_VFS_ROM_IOCTL       (0)
+#define MICROPY_PY_TIME_TIME_TIME_NS (1)
+#define MICROPY_PY_TIME_INCLUDEFILE "ports/qemu/modtime.c"
+
+// Threading configuration
+#if MICROPY_PY_THREAD
+#define MICROPY_PY_THREAD_GIL (1)
+#define MICROPY_STACK_CHECK_MARGIN (1024)
+#define MICROPY_MPTHREADPORT_H "extmod/freertos/mpthreadport.h"
+// FreeRTOS-aware delay (declared here to avoid include order issues)
+void mp_freertos_delay_ms(unsigned int ms);
+#define mp_hal_delay_ms mp_freertos_delay_ms
+#endif
 
 // type definitions for the specific machine
 
 #if defined(__riscv) && (__riscv_xlen == 64)
 #define MP_SSIZE_MAX (0x7fffffffffffffff)
-typedef int64_t mp_int_t; // must be pointer size
-typedef uint64_t mp_uint_t; // must be pointer size
 #else
 #define MP_SSIZE_MAX (0x7fffffff)
-typedef int32_t mp_int_t; // must be pointer size
-typedef uint32_t mp_uint_t; // must be pointer size
 #endif
 
 typedef long mp_off_t;
@@ -87,3 +92,27 @@ typedef long mp_off_t;
 #define MP_NEED_LOG2 (1)
 
 #define MP_STATE_PORT MP_STATE_VM
+
+// Event poll hook - must release/acquire GIL for threading
+#if MICROPY_PY_THREAD
+#include "FreeRTOS.h"
+#include "task.h"
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+        MP_THREAD_GIL_EXIT(); \
+        taskYIELD(); \
+        MP_THREAD_GIL_ENTER(); \
+    } while (0);
+
+#define MICROPY_THREAD_YIELD() taskYIELD()
+#else
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+    } while (0);
+
+#define MICROPY_THREAD_YIELD()
+#endif

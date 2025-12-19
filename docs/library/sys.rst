@@ -103,7 +103,7 @@ Constants
    is ``"unsafe"`` and the target has threading but does not enable the GIL,
    and mutable Python objects (such as `bytearray`, `list` and `dict`) that are
    shared amongst threads must be protected explicitly by locks such as
-   ``_thread.allocate_lock``.
+   ``_thread.allocate_lock``.  See :mod:`_thread` for port-specific details.
 
    .. admonition:: Difference to CPython
       :class: attention

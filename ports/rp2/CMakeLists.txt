@@ -84,6 +84,16 @@ endif()
 list(APPEND GIT_SUBMODULES lib/mbedtls)
 list(APPEND GIT_SUBMODULES lib/tinyusb)
 
+# Threading enabled by default (matches mpconfigport.h default)
+if(NOT DEFINED MICROPY_PY_THREAD)
+    set(MICROPY_PY_THREAD ON)
+endif()
+
+# FreeRTOS threading backend
+if(MICROPY_PY_THREAD)
+    list(APPEND GIT_SUBMODULES lib/FreeRTOS-Kernel)
+endif()
+
 # Workaround for pico-sdk host toolchain issue, see directory for details
 list(APPEND CMAKE_MODULE_PATH "${MICROPY_PORT_DIR}/tools_patch")
 
@@ -168,7 +178,6 @@ set(MICROPY_SOURCE_PORT
     modrp2.c
     mphalport.c
     mpnetworkport.c
-    mpthreadport.c
     mutex_extra.c
     pendsv.c
     rp2_flash.c
@@ -181,6 +190,7 @@ set(MICROPY_SOURCE_PORT
     mbedtls/mbedtls_port.c
     ${CMAKE_BINARY_DIR}/pins_${MICROPY_BOARD}.c
 )
+
 
 set(MICROPY_SOURCE_QSTR
     ${MICROPY_SOURCE_PY}
@@ -258,6 +268,64 @@ elseif(PICO_RISCV)
     list(APPEND PICO_SDK_COMPONENTS
         hardware_hazard3
         hardware_riscv
+    )
+endif()
+
+# FreeRTOS threading backend integration
+if(MICROPY_PY_THREAD)
+    set(FREERTOS_DIR ${MICROPY_DIR}/lib/FreeRTOS-Kernel)
+    set(FREERTOS_PORT_DIR ${FREERTOS_DIR}/portable/ThirdParty/GCC/RP2040)  # codespell:ignore
+
+    # FreeRTOS threading backend (must be in EXTMOD for root pointer scanning)
+    list(APPEND MICROPY_SOURCE_EXTMOD
+        ${MICROPY_DIR}/extmod/freertos/mpthreadport.c
+        ${MICROPY_DIR}/extmod/freertos/mp_freertos_hal.c
+        ${MICROPY_DIR}/extmod/freertos/mp_freertos_service.c
+    )
+
+    # FreeRTOS kernel sources (no root pointers, can go in PORT)
+    set(MICROPY_SOURCE_FREERTOS
+        ${FREERTOS_DIR}/tasks.c
+        ${FREERTOS_DIR}/queue.c
+        ${FREERTOS_DIR}/list.c
+        ${FREERTOS_DIR}/timers.c
+        ${FREERTOS_DIR}/event_groups.c
+        ${FREERTOS_DIR}/stream_buffer.c
+        ${FREERTOS_DIR}/portable/MemMang/heap_4.c
+        ${FREERTOS_PORT_DIR}/port.c
+        freertos_hooks.c
+        mpthreadport_rp2.c
+    )
+
+    list(APPEND MICROPY_SOURCE_PORT ${MICROPY_SOURCE_FREERTOS})
+
+    # FreeRTOS include directories
+    target_include_directories(${MICROPY_TARGET} PRIVATE
+        ${MICROPY_DIR}/extmod/freertos
+        ${FREERTOS_DIR}/include
+        ${FREERTOS_PORT_DIR}/include
+    )
+
+    # FreeRTOS compile definitions
+    target_compile_definitions(${MICROPY_TARGET} PRIVATE
+        MICROPY_PY_THREAD=1
+        MICROPY_FREERTOS_SERVICE_TASKS=1
+        # FreeRTOS SMP needs core 1 stack for multicore_launch_core1()
+        PICO_CORE1_STACK_SIZE=0x800
+    )
+
+    # Link against Pico SDK hardware libraries needed by FreeRTOS port
+    target_link_libraries(${MICROPY_TARGET}
+        hardware_exception
+        hardware_clocks
+        hardware_irq
+    )
+else()
+    # Non-threaded: no core 1 stack needed, save RAM
+    # Must explicitly define MICROPY_PY_THREAD=0 to override mpconfigport.h default
+    target_compile_definitions(${MICROPY_TARGET} PRIVATE
+        MICROPY_PY_THREAD=0
+        PICO_CORE1_STACK_SIZE=0
     )
 endif()
 
@@ -634,7 +702,6 @@ target_compile_definitions(${MICROPY_TARGET} PRIVATE
     LFS2_NO_MALLOC LFS2_NO_DEBUG LFS2_NO_WARN LFS2_NO_ERROR LFS2_NO_ASSERT
     PICO_FLOAT_PROPAGATE_NANS=1
     PICO_STACK_SIZE=0x2000
-    PICO_CORE1_STACK_SIZE=0
     PICO_MAX_SHARED_IRQ_HANDLERS=8 # we need more than the default
     PICO_PROGRAM_NAME="MicroPython"
     PICO_NO_PROGRAM_VERSION_STRING=1 # do it ourselves in main.c
@@ -700,12 +767,6 @@ separate_arguments(MICROPY_CPP_FLAGS_EXTRA)
 # Include the main MicroPython cmake rules.
 include(${MICROPY_DIR}/py/mkrules.cmake)
 
-set(GEN_PINS_AF_CSV "${MICROPY_PORT_DIR}/boards/rp2_af.csv")
-set(GEN_PINS_PREFIX "${MICROPY_PORT_DIR}/boards/rp2_prefix.c")
-set(GEN_PINS_MKPINS "${MICROPY_PORT_DIR}/boards/make-pins.py")
-set(GEN_PINS_SRC "${CMAKE_BINARY_DIR}/pins_${MICROPY_BOARD}.c")
-set(GEN_PINS_HDR "${MICROPY_GENHDR_DIR}/pins.h")
-
 if(NOT PICO_NUM_GPIOS)
     set(PICO_NUM_GPIOS 30)
 endif()
@@ -713,6 +774,21 @@ endif()
 if(NOT PICO_NUM_EXT_GPIOS)
     set(PICO_NUM_EXT_GPIOS 10)
 endif()
+
+if(PICO_RP2040)
+    set(GEN_PINS_AF_CSV "${MICROPY_PORT_DIR}/boards/rp2040_af.csv")
+elseif(PICO_RP2350)
+    if(PICO_NUM_GPIOS EQUAL 48)
+        set(GEN_PINS_AF_CSV "${MICROPY_PORT_DIR}/boards/rp2350b_af.csv")
+    else()
+        set(GEN_PINS_AF_CSV "${MICROPY_PORT_DIR}/boards/rp2350_af.csv")
+    endif()
+endif()
+
+set(GEN_PINS_PREFIX "${MICROPY_PORT_DIR}/boards/rp2_prefix.c")
+set(GEN_PINS_MKPINS "${MICROPY_PORT_DIR}/boards/make-pins.py")
+set(GEN_PINS_SRC "${CMAKE_BINARY_DIR}/pins_${MICROPY_BOARD}.c")
+set(GEN_PINS_HDR "${MICROPY_GENHDR_DIR}/pins.h")
 
 if(NOT MICROPY_BOARD_PINS)
     set(MICROPY_BOARD_PINS "${MICROPY_BOARD_DIR}/pins.csv")

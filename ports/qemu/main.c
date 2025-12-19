@@ -28,11 +28,16 @@
 
 #include "py/compile.h"
 #include "py/runtime.h"
-#include "py/stackctrl.h"
 #include "py/gc.h"
 #include "py/mperrno.h"
 #include "shared/runtime/gchelper.h"
 #include "shared/runtime/pyexec.h"
+
+#if MICROPY_PY_THREAD
+#include "py/mpthread.h"
+#include "FreeRTOS.h"
+#include "task.h"
+#endif
 
 #if MICROPY_HEAP_SIZE <= 0
 #error MICROPY_HEAP_SIZE must be a positive integer.
@@ -40,10 +45,59 @@
 
 static uint32_t gc_heap[MICROPY_HEAP_SIZE / sizeof(uint32_t)];
 
+#if MICROPY_PY_THREAD
+// Main task stack and TCB for static allocation
+#define MAIN_TASK_STACK_SIZE (4096 / sizeof(StackType_t))
+static StaticTask_t main_task_tcb;
+static StackType_t main_task_stack[MAIN_TASK_STACK_SIZE];
+#endif
+
+// Forward declaration
+static void qemu_main_loop(void *arg);
+
 int main(int argc, char **argv) {
-    mp_stack_ctrl_init();
-    mp_stack_set_limit(10240);
+    #if MICROPY_PY_THREAD
+    // With threading, all initialization happens inside the FreeRTOS task
+    // because mp_cstack_init_with_sp_here and gc_init use MP_STATE_THREAD
+    // which requires FreeRTOS thread-local storage (needs running task context)
+
+    // Create main task using static allocation
+    xTaskCreateStatic(
+        qemu_main_loop,
+        "main",
+        MAIN_TASK_STACK_SIZE,
+        NULL,
+        tskIDLE_PRIORITY + 1,
+        main_task_stack,
+        &main_task_tcb
+        );
+
+    // Start the FreeRTOS scheduler - does not return
+    vTaskStartScheduler();
+
+    // Should never reach here
+    for (;;) {
+    }
+    #else
+    // Non-threaded: initialize here and run directly
+    mp_cstack_init_with_sp_here(10240);
     gc_init(gc_heap, (char *)gc_heap + MICROPY_HEAP_SIZE);
+    qemu_main_loop(NULL);
+    #endif
+
+    return 0;
+}
+
+static void qemu_main_loop(void *arg) {
+    (void)arg;
+
+    #if MICROPY_PY_THREAD
+    // Initialize threading FIRST - sets up TLS which is needed by MP_STATE_THREAD
+    mp_thread_init(main_task_stack, sizeof(main_task_stack));
+    // Now initialize MicroPython state (these use MP_STATE_THREAD)
+    mp_cstack_init_with_sp_here(MAIN_TASK_STACK_SIZE * sizeof(StackType_t));
+    gc_init(gc_heap, (char *)gc_heap + MICROPY_HEAP_SIZE);
+    #endif
 
     for (;;) {
         mp_init();
@@ -62,6 +116,10 @@ int main(int argc, char **argv) {
 
         mp_printf(&mp_plat_print, "MPY: soft reboot\n");
 
+        #if MICROPY_PY_THREAD
+        mp_thread_deinit();
+        #endif
+
         gc_sweep_all();
         mp_deinit();
     }
@@ -70,6 +128,9 @@ int main(int argc, char **argv) {
 void gc_collect(void) {
     gc_collect_start();
     gc_helper_collect_regs_and_stack();
+    #if MICROPY_PY_THREAD
+    mp_thread_gc_others();
+    #endif
     gc_collect_end();
 }
 

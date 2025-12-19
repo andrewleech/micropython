@@ -77,6 +77,7 @@ LIBS = $(shell $(CC) $(CFLAGS) -print-libgcc-file-name)
 SRC_C += \
 	mcu/arm/errorhandler.c \
 	mcu/arm/startup.c \
+	mcu/arm/ticks.c \
 	shared/runtime/semihosting_arm.c \
 
 endif
@@ -109,6 +110,7 @@ LDFLAGS += -mabi=$(RV32_ABI) -march=$(RV32_ARCH) -Wl,-EL
 SRC_C += \
 	mcu/rv32/interrupts.c \
 	mcu/rv32/startup.c \
+	mcu/riscv/ticks.c \
 
 SRC_BOARD_O += mcu/rv32/entrypoint.o
 
@@ -142,9 +144,40 @@ LDFLAGS += -mabi=$(RV64_ABI) -march=$(RV64_ARCH) -Wl,-EL -mcmodel=medany
 SRC_C += \
 	mcu/rv64/interrupts.c \
 	mcu/rv64/startup.c \
+	mcu/riscv/ticks.c \
 
 SRC_BOARD_O += mcu/rv64/entrypoint.o
 
+endif
+
+################################################################################
+# FreeRTOS threading support (ARM only for now)
+
+ifeq ($(MICROPY_PY_THREAD),1)
+ifeq ($(QEMU_ARCH),arm)
+
+CFLAGS += -DMICROPY_PY_THREAD=1
+
+# FreeRTOS kernel location
+FREERTOS_DIR = $(TOP)/lib/FreeRTOS-Kernel
+GIT_SUBMODULES += lib/FreeRTOS-Kernel
+
+# FreeRTOS include directories (add to INC for early availability)
+INC += -I$(TOP)/extmod/freertos
+INC += -I$(FREERTOS_DIR)/include
+
+# ARM Cortex-M3 port files
+FREERTOS_PORT_DIR = $(FREERTOS_DIR)/portable/GCC/ARM_CM3
+INC += -I$(FREERTOS_PORT_DIR)
+SRC_C += $(FREERTOS_PORT_DIR)/port.c
+
+# Include common FreeRTOS build rules (adds kernel sources)
+include $(TOP)/extmod/freertos/freertos.mk
+
+# QEMU-specific FreeRTOS hooks
+SRC_C += freertos_hooks.c
+
+endif
 endif
 
 ################################################################################
@@ -193,7 +226,7 @@ CFLAGS += $(SPECS_FRAGMENT)
 LDFLAGS += $(SPECS_FRAGMENT)
 endif
 
-RUN_TESTS_FULL_ARGS = -t execpty:"$(QEMU_SYSTEM) $(QEMU_ARGS) -serial pty -kernel ../ports/qemu/$<" --mpy-cross-flags='$(MPY_CROSS_FLAGS)' $(RUN_TESTS_ARGS)
+RUN_TESTS_FULL_ARGS = -t execpty:"$(QEMU_SYSTEM) $(QEMU_ARGS) -serial pty -kernel ../ports/qemu/$<" $(RUN_TESTS_ARGS)
 
 ################################################################################
 # Source files and libraries
@@ -229,9 +262,15 @@ OBJ += $(PY_O)
 OBJ += $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_BOARD_O))
 OBJ += $(addprefix $(BUILD)/, $(LIBM_SRC_C:.c=.o))
+ifeq ($(MICROPY_PY_THREAD),1)
+OBJ += $(addprefix $(BUILD)/, $(SRC_FREERTOS_C:.c=.o))
+endif
 
 # List of sources for qstr extraction
 SRC_QSTR += $(SRC_C) $(LIBM_SRC_C)
+ifeq ($(MICROPY_PY_THREAD),1)
+SRC_QSTR += $(SRC_FREERTOS_C)
+endif
 
 ################################################################################
 # Main targets
