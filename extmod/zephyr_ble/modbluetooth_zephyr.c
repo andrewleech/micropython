@@ -39,6 +39,7 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/device.h>
 #include "extmod/modbluetooth.h"
+#include "extmod/zephyr_ble/hal/zephyr_ble_work.h"
 
 #if ZEPHYR_BLE_DEBUG
 #define DEBUG_printf(...) mp_printf(&mp_plat_print, "BLE: " __VA_ARGS__)
@@ -515,6 +516,10 @@ int mp_bluetooth_init(void) {
     bt_le_scan_cb_register(&mp_bluetooth_zephyr_gap_scan_cb_struct);
     #endif
 
+    // Start the dedicated BLE work queue thread (FreeRTOS builds only)
+    // This processes Zephyr work items in a high-priority thread
+    mp_bluetooth_zephyr_work_thread_start();
+
     mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE;
 
     DEBUG_printf("mp_bluetooth_init: ready\n");
@@ -528,6 +533,10 @@ int mp_bluetooth_deinit(void) {
         || mp_bluetooth_zephyr_ble_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_SUSPENDED) {
         return 0;
     }
+
+    // Stop the dedicated BLE work queue thread (FreeRTOS builds only)
+    // Must be done before other cleanup to prevent work from being processed during teardown
+    mp_bluetooth_zephyr_work_thread_stop();
 
     // Set state to SUSPENDED first to prevent disconnect callbacks from unreffing connections
     // that will be unreffed by Zephyr's deferred_work (triggered by advertise_stop/scan_stop).
