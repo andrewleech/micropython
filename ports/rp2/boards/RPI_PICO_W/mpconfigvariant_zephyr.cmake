@@ -5,5 +5,8 @@
 set(MICROPY_BLUETOOTH_BTSTACK OFF)
 set(MICROPY_BLUETOOTH_ZEPHYR ON)
 
+# Disable debug output for Zephyr BLE (causes FreeRTOS SMP issues)
+set(ZEPHYR_BLE_DEBUG 0)
+
 # Note: MICROPY_PY_BLUETOOTH and MICROPY_PY_BLUETOOTH_CYW43 are already
 # set in the base mpconfigboard.cmake and remain enabled
