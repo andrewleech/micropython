@@ -67,6 +67,31 @@ target_sources(micropy_extmod_zephyr_ble INTERFACE
     # which provides stub implementations that work without PSA Crypto
 )
 
+# CRITICAL FIX: Disable -fdata-sections for Zephyr sources using STRUCT_SECTION_ITERABLE
+#
+# Zephyr's STRUCT_SECTION_ITERABLE macro requires structures to be placed in named linker
+# sections (e.g., ._net_buf_pool.static.*) so they can be iterated at runtime via
+# TYPE_SECTION_START/TYPE_SECTION_END symbols. When -fdata-sections is enabled, GCC splits
+# data objects into individual sections (e.g., .data.hci_cmd_pool), preventing the linker
+# from collecting them into the expected section array.
+#
+# Without this fix, net_buf pools end up scattered across memory, causing TYPE_SECTION_START
+# to point to the wrong location. When code tries to look up a pool by ID using
+# net_buf_pool_get(id), it reads garbage memory, resulting in invalid function pointers
+# (observed as r3=0x10 when calling pool->alloc->cb->alloc, causing HardFault).
+#
+# Files affected:
+# - buf.c: Defines net_buf_pool_get() which uses TYPE_SECTION_START(net_buf_pool)
+# - hci_core.c: Defines hci_cmd_pool using NET_BUF_POOL_FIXED_DEFINE
+# - buf.c (host): Defines additional BLE buffer pools
+#
+set_source_files_properties(
+    ${ZEPHYR_LIB_DIR}/lib/net_buf/buf.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/hci_core.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/buf.c
+    PROPERTIES COMPILE_FLAGS "-fno-data-sections"
+)
+
 # Debug output for Zephyr BLE (disabled by default)
 # Set ZEPHYR_BLE_DEBUG=1 in CMake command to enable debug output
 if(NOT DEFINED ZEPHYR_BLE_DEBUG)

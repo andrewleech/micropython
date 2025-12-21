@@ -70,7 +70,26 @@ FreeRTOS SMP Scheduler
     - Both hypotheses disproven - Zephyr sends identical init sequence to NimBLE
     - Event mask ordering does NOT affect LE Meta Event delivery
     - All Zephyr submodule changes reverted (lib/zephyr clean)
-- RP2 Pico 2 W: Not yet tested with these fixes
+- **RP2 Pico 2 W (RPI_PICO_W + RP2350): PARTIAL PROGRESS**
+  - **Fix #8: Net_buf allocation crash FIXED** (commit: 2025-12-22)
+    - Root cause: -fdata-sections breaking STRUCT_SECTION_ITERABLE
+    - Type mismatch: struct net_buf_pool** vs struct net_buf_pool[]
+    - Solution: Disabled -fdata-sections for Zephyr BLE sources, added linker section symbols
+    - See `docs/NET_BUF_CRASH_FIX.md` for complete analysis
+  - ✓ Firmware builds successfully (877KB text, 83KB BSS)
+  - ✓ Device boots and enters bt_init()
+  - ✓ Net_buf allocation working (no HardFault)
+  - ✓ Checkpoints printing correctly
+  - ✗ **NEW ISSUE: HCI init hang** (INVESTIGATING)
+    - Hangs during first HCI command (HCI_RESET) in common_init()
+    - FIFO operations work, but semaphore wait hangs
+    - Likely work queue processing issue
+    - See `docs/HCI_INIT_HANG_ANALYSIS.md` for detailed analysis
+  - ⚠ **probe-rs bug prevents GDB debugging**
+    - Error: "entered unreachable code: FullyQualifiedApAddress(...)"
+    - Affects RP2350 with both RP2350 and RP235x chip variants
+    - Prevents reset, flash, and GDB attach operations
+    - Workaround: Use USB bootloader for reflashing
 
 ## Test Hardware
 - **RP2**: Raspberry Pi Pico 2 W (RP2350) with CYW43 BT controller via SPI
@@ -684,17 +703,28 @@ SECTIONS
    - gap_peripheral_connect() and gap_peripheral_connect_cancel()
    - Connection role detection fixed
    - Connection structure management fixed
-8. **CRITICAL: Fix connection callback issue (Issue #6)** - IN PROGRESS
+8. ✓ **Fixed RP2 Pico 2 W net_buf crash (Fix #8)** (commit: 2025-12-22):
+   - Root cause: -fdata-sections breaking STRUCT_SECTION_ITERABLE pattern
+   - Type mismatch caused invalid function pointers (r3=0x10 HardFault)
+   - Solution: Disabled -fdata-sections for Zephyr BLE sources, added linker symbols
+   - Result: Device boots, bt_init() reached, net_buf allocation working
+   - Documented in `docs/NET_BUF_CRASH_FIX.md`
+9. **RP2 Pico 2 W: Fix HCI init hang** - IN PROGRESS
+   - Hangs during first HCI command (HCI_RESET) in common_init()
+   - Semaphore wait never returns (likely work queue not processing responses)
+   - GDB diagnosis blocked by probe-rs bug with RP2350
+   - Next: Add HCI/work queue instrumentation to trace response processing
+   - Documented in `docs/HCI_INIT_HANG_ANALYSIS.md`
+10. **STM32WB55: Fix connection callback issue (Issue #6)** - LOWER PRIORITY
    - Create minimal test case to isolate callback issue
    - Compare with NimBLE callback registration mechanism
    - Check Zephyr documentation for callback requirements
    - Investigate missing Zephyr initialization steps
-9. **Test on RP2 Pico 2 W with all fixes applied** (after Issue #6 resolved)
-10. **Future optimization opportunity** (non-critical):
+11. **Future optimization opportunity** (non-critical):
    - Investigate why Zephyr detects ~30% of devices vs NimBLE (69 vs 227)
    - Likely work queue processing throughput limitation
    - See `docs/BUFFER_FIX_VERIFICATION.md` for analysis
    - Performance is acceptable for most use cases
-9. Consider long-term solution for SMP support with enhanced connection events
+12. Consider long-term solution for SMP support with enhanced connection events
 
 Use arm-none-eabi-gdb proactively to diagnose issues. The probe-rs agent or `~/.claude/agents/probe-rs-flash.md` has specific usage details.

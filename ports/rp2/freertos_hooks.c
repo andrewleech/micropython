@@ -30,6 +30,7 @@
 
 #include "FreeRTOS.h"
 #include "task.h"
+#include "py/mpprint.h"
 
 // ============================================================================
 // FreeRTOS interrupt handlers
@@ -87,9 +88,22 @@ void vApplicationGetPassiveIdleTaskMemory(StaticTask_t **ppxIdleTaskTCBBuffer,
 
 #if configCHECK_FOR_STACK_OVERFLOW
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {
-    (void)xTask;
-    (void)pcTaskName;
-    // Halt on stack overflow
+    // Print diagnostic information before halting
+    mp_printf(&mp_plat_print, "\n\n!!! STACK OVERFLOW DETECTED !!!\n");
+    mp_printf(&mp_plat_print, "Task: %s (handle=%p)\n", pcTaskName, xTask);
+
+    #if INCLUDE_uxTaskGetStackHighWaterMark
+    UBaseType_t highWaterMark = uxTaskGetStackHighWaterMark(xTask);
+    mp_printf(&mp_plat_print, "Stack high water mark: %u words remaining\n", (unsigned int)highWaterMark);
+    #endif
+
+    // Read current stack pointer (ARM Cortex-M)
+    register uint32_t sp_val __asm("sp");
+    mp_printf(&mp_plat_print, "Current SP: %p\n", (void *)sp_val);
+
+    mp_printf(&mp_plat_print, "System halted.\n\n");
+
+    // Halt CPU with interrupts disabled
     __asm volatile ("cpsid i");
     for (;;) {
     }

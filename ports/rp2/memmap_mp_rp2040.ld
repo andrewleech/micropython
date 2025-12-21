@@ -173,7 +173,10 @@ SECTIONS
         . = ALIGN(4);
 
         /* Zephyr BLE net_buf pools - must be in copied data section */
-        *(._net_buf_pool.static.*)
+        /* These symbols are required by Zephyr's TYPE_SECTION_START/END macros */
+        _net_buf_pool_list_start = .;
+        KEEP(*(SORT(._net_buf_pool.static.*)))
+        _net_buf_pool_list_end = .;
         . = ALIGN(4);
 
         /* All data end */

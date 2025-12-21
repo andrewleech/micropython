@@ -87,20 +87,20 @@ void mp_net_buf_pool_reset(void) {
     num_pools = 0;
 }
 
-// Provide linker symbols expected by Zephyr's pool lookup code
-// These point to our registry array
-// CRITICAL FIX: Use custom section name ".data.pool_list" to force both variables
-// into the same named section, preventing -fdata-sections from separating them AND
-// maintaining declaration order (GCC places variables within a custom section in
-// declaration order, not alphabetically).
-__attribute__((section(".data.pool_list"))) struct net_buf_pool **_net_buf_pool_list_start = registered_pools;
-__attribute__((section(".data.pool_list"))) struct net_buf_pool **_net_buf_pool_list_end = registered_pools;
-
-// Update end pointer after registration
-// Should be called after all pools are registered
-void mp_net_buf_pool_update_end(void) {
-    _net_buf_pool_list_end = registered_pools + num_pools;
-}
+// REMOVED: These conflicting definitions are no longer needed.
+//
+// The linker script now properly defines _net_buf_pool_list_start and _net_buf_pool_list_end
+// symbols by collecting all ._net_buf_pool.static.* sections. With -fno-data-sections applied
+// to the Zephyr BLE sources, pools defined via NET_BUF_POOL_FIXED_DEFINE will be placed in
+// the correct section and Zephyr's TYPE_SECTION_START/END macros will work correctly.
+//
+// Previously, these symbols pointed to our registry array (struct net_buf_pool **), but
+// Zephyr expects them to be a contiguous array of pool structures (struct net_buf_pool[]).
+// This type mismatch caused crashes when Zephyr tried to index into what it thought was
+// an array of structures.
+//
+// The registry system (mp_net_buf_pool_register/get) is retained for potential future use
+// if dynamic pool registration is needed, but is not currently used.
 
 // ============================================================================
 // Section list stubs for Zephyr STRUCT_SECTION_ITERABLE macros
