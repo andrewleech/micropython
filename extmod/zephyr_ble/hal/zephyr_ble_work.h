@@ -187,8 +187,13 @@ void mp_bluetooth_zephyr_work_process(void);
 // This processes only the init work queue and has a separate recursion guard
 void mp_bluetooth_zephyr_work_process_init(void);
 
+// Init phase control - used to process work synchronously during bt_enable()
+void mp_bluetooth_zephyr_init_phase_enter(void);  // Call before bt_enable()
+void mp_bluetooth_zephyr_init_phase_exit(void);   // Call after bt_enable() completes
+bool mp_bluetooth_zephyr_in_init_phase(void);     // Check if in init phase
+
 // Check if initialization work is pending
-// Returns true if init work is available in the init work queue
+// Returns true if init work is available in the work queue
 bool mp_bluetooth_zephyr_init_work_pending(void);
 
 // Get and dequeue init work without executing it

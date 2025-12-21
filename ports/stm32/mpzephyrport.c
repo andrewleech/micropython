@@ -668,4 +668,18 @@ void mp_bluetooth_zephyr_debug_device(const struct device *dev) {
     #endif
 }
 
+// HCI RX task stubs for non-FreeRTOS builds
+// STM32 uses polling-based HCI reception, not a dedicated task
+void mp_bluetooth_zephyr_hci_rx_task_start(void) {
+    // No-op: STM32 uses IPCC interrupts and soft timer polling
+}
+
+void mp_bluetooth_zephyr_hci_rx_task_stop(void) {
+    // No-op
+}
+
+bool mp_bluetooth_zephyr_hci_rx_task_active(void) {
+    return false;  // Always use polling mode on STM32
+}
+
 #endif // MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR

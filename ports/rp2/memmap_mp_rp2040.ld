@@ -171,6 +171,11 @@ SECTIONS
 
         *(.jcr)
         . = ALIGN(4);
+
+        /* Zephyr BLE net_buf pools - must be in copied data section */
+        *(._net_buf_pool.static.*)
+        . = ALIGN(4);
+
         /* All data end */
         __data_end__ = .;
     } > RAM AT> FLASH

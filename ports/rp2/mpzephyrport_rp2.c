@@ -67,17 +67,21 @@
 #endif
 
 // Debug output controlled by ZEPHYR_BLE_DEBUG
+// Note: debug_printf is NOT thread-safe. Only call from main task context.
+// For HCI RX task on core1, use debug_printf_hci_task which is disabled.
 #if ZEPHYR_BLE_DEBUG
 #define debug_printf(...) mp_printf(&mp_plat_print, "mpzephyrport_rp2: " __VA_ARGS__)
 #else
 #define debug_printf(...) do {} while (0)
 #endif
+// HCI RX task debug is always disabled to prevent multicore printf races
+#define debug_printf_hci_task(...) do {} while (0)
 #define error_printf(...) mp_printf(&mp_plat_print, "mpzephyrport_rp2 ERROR: " __VA_ARGS__)
 
 // CYW43 SPI btbus HCI transport
 #if MICROPY_PY_NETWORK_CYW43
 
-static bt_hci_recv_t recv_cb = NULL;  // Returns int: 0 on success, negative on error
+static volatile bt_hci_recv_t recv_cb = NULL;  // Returns int: 0 on success, negative on error
 static const struct device *hci_dev = NULL;
 
 // Soft timer for scheduling HCI poll (zero-initialized to prevent startup crashes)
@@ -88,6 +92,171 @@ static mp_sched_node_t mp_zephyr_hci_sched_node = {0};
 #define CYW43_HCI_HEADER_SIZE 4
 #define HCI_MAX_PACKET_SIZE 1024
 static uint8_t hci_rx_buffer[CYW43_HCI_HEADER_SIZE + HCI_MAX_PACKET_SIZE];
+
+// ============================================================================
+// FreeRTOS HCI RX Task (Phase 6)
+// ============================================================================
+#if MICROPY_PY_THREAD
+#include "FreeRTOS.h"
+#include "task.h"
+
+#define HCI_RX_TASK_STACK_SIZE 1024  // 4KB (in words)
+#define HCI_RX_TASK_PRIORITY (configMAX_PRIORITIES - 1)
+
+static TaskHandle_t hci_rx_task_handle = NULL;
+static volatile bool hci_rx_task_running = false;      // Signal task to stop
+static volatile bool hci_rx_task_started = false;      // Task has started and is ready
+static volatile bool hci_rx_task_exited = false;       // Task has exited
+static StaticTask_t hci_rx_task_tcb;
+static StackType_t hci_rx_task_stack[HCI_RX_TASK_STACK_SIZE];
+
+// Separate buffer for HCI RX task to avoid race with polling code
+static uint8_t hci_rx_task_buffer[CYW43_HCI_HEADER_SIZE + HCI_MAX_PACKET_SIZE];
+
+// Process a single HCI packet from the given buffer
+static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len) {
+    if (recv_cb == NULL || len <= CYW43_HCI_HEADER_SIZE) {
+        return;
+    }
+
+    // Extract packet type from CYW43 header (byte 3)
+    uint8_t pkt_type = rx_buf[3];
+    uint8_t *pkt_data = &rx_buf[CYW43_HCI_HEADER_SIZE];
+    uint32_t pkt_len = len - CYW43_HCI_HEADER_SIZE;
+
+    // Allocate Zephyr net_buf based on packet type
+    struct net_buf *buf = NULL;
+
+    switch (pkt_type) {
+        case BT_HCI_H4_EVT:
+            if (pkt_len >= 2) {
+                buf = bt_buf_get_evt(pkt_data[0], false, K_NO_WAIT);
+            }
+            break;
+        case BT_HCI_H4_ACL:
+            buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_NO_WAIT);
+            break;
+        default:
+            debug_printf("HCI RX: unknown packet type 0x%02x\n", pkt_type);
+            return;
+    }
+
+    if (buf == NULL) {
+        error_printf("HCI RX: failed to allocate buffer for type 0x%02x\n", pkt_type);
+        return;
+    }
+
+    // Copy packet data to net_buf and deliver to Zephyr
+    net_buf_add_mem(buf, pkt_data, pkt_len);
+    int ret = recv_cb(hci_dev, buf);
+    if (ret < 0) {
+        debug_printf("HCI RX: recv_cb failed %d\n", ret);
+        net_buf_unref(buf);
+    }
+}
+
+// HCI RX task - runs continuously, polls CYW43 for incoming HCI data
+// NOTE: This runs on core1, don't use debug_printf (printf race condition)
+static void hci_rx_task_func(void *arg) {
+    (void)arg;
+    debug_printf_hci_task("HCI RX task started\n");
+
+    extern int cyw43_bluetooth_hci_read(uint8_t *buf, uint32_t max_size, uint32_t *len);
+
+    // Signal that we've started and are ready
+    hci_rx_task_started = true;
+
+    while (hci_rx_task_running) {
+        if (recv_cb != NULL) {
+            uint32_t len = 0;
+            // Use task-local buffer to avoid race with polling code
+            int ret = cyw43_bluetooth_hci_read(hci_rx_task_buffer, sizeof(hci_rx_task_buffer), &len);
+
+            if (ret == 0 && len > CYW43_HCI_HEADER_SIZE) {
+                process_hci_rx_packet(hci_rx_task_buffer, len);
+            }
+        }
+
+        // Yield to other tasks - 1ms poll interval
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+
+    debug_printf_hci_task("HCI RX task exiting\n");
+
+    // Signal exit before deleting (avoids undefined eTaskGetState behavior)
+    hci_rx_task_exited = true;
+    vTaskDelete(NULL);
+}
+
+// Start HCI RX task - called during BLE initialization
+void mp_bluetooth_zephyr_hci_rx_task_start(void) {
+    if (hci_rx_task_handle != NULL) {
+        debug_printf("HCI RX task already running\n");
+        return;
+    }
+
+    debug_printf("Starting HCI RX task\n");
+    hci_rx_task_running = true;
+    hci_rx_task_started = false;
+    hci_rx_task_exited = false;
+
+    hci_rx_task_handle = xTaskCreateStatic(
+        hci_rx_task_func,
+        "hci_rx",
+        HCI_RX_TASK_STACK_SIZE,
+        NULL,
+        HCI_RX_TASK_PRIORITY,
+        hci_rx_task_stack,
+        &hci_rx_task_tcb
+        );
+
+    if (hci_rx_task_handle == NULL) {
+        error_printf("Failed to create HCI RX task\n");
+        hci_rx_task_running = false;
+    }
+}
+
+// Stop HCI RX task - called during BLE deinitialization
+void mp_bluetooth_zephyr_hci_rx_task_stop(void) {
+    if (hci_rx_task_handle == NULL) {
+        return;
+    }
+
+    debug_printf("Stopping HCI RX task\n");
+
+    // Signal task to exit
+    hci_rx_task_running = false;
+
+    // Wait for task to signal exit (avoids undefined behavior of eTaskGetState after vTaskDelete)
+    for (int i = 0; i < 100 && !hci_rx_task_exited; i++) {  // 100 * 10ms = 1s max
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    hci_rx_task_handle = NULL;
+    debug_printf("HCI RX task stopped\n");
+}
+
+// Check if HCI RX task is active and ready
+bool mp_bluetooth_zephyr_hci_rx_task_active(void) {
+    // Only return true once task has fully started and is processing HCI data
+    return hci_rx_task_handle != NULL && hci_rx_task_running && hci_rx_task_started;
+}
+
+#else // !MICROPY_PY_THREAD
+
+// Stubs for non-FreeRTOS builds
+void mp_bluetooth_zephyr_hci_rx_task_start(void) {
+}
+
+void mp_bluetooth_zephyr_hci_rx_task_stop(void) {
+}
+
+bool mp_bluetooth_zephyr_hci_rx_task_active(void) {
+    return false;
+}
+
+#endif // MICROPY_PY_THREAD
+// ============================================================================
 
 // Forward declarations
 static void mp_zephyr_hci_poll_now(void);
@@ -107,6 +276,14 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
     if (recv_cb == NULL) {
         return;
     }
+
+    // Skip HCI reading if dedicated HCI RX task is active
+    // The task handles HCI reception with its own buffer
+    #if MICROPY_PY_THREAD
+    if (mp_bluetooth_zephyr_hci_rx_task_active()) {
+        return;
+    }
+    #endif
 
     // Read from CYW43 via shared SPI bus
     extern int cyw43_bluetooth_hci_read(uint8_t *buf, uint32_t max_size, uint32_t *len);
@@ -156,6 +333,7 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
 }
 
 static void mp_zephyr_hci_poll_now(void) {
+    // Note: mp_printf can crash during BLE init - avoid debug output here
     mp_sched_schedule_node(&mp_zephyr_hci_sched_node, run_zephyr_hci_task);
 }
 
@@ -167,11 +345,18 @@ static int hci_cyw43_open(const struct device *dev, bt_hci_recv_t recv) {
     recv_cb = recv;
 
     // CYW43 BT is already initialized via cyw43_bluetooth_hci_init() in bt_hci_transport_setup()
-    // No additional setup needed - just start polling for incoming HCI packets
+    // Start HCI RX task now that CYW43 is ready and recv_cb is set
+    // The task runs independently and handles all HCI reception, signaling semaphores
+    #if MICROPY_PY_THREAD
+    mp_bluetooth_zephyr_hci_rx_task_start();
 
-    // Start polling
-    debug_printf("Starting HCI polling\n");
-    mp_zephyr_hci_poll_now();
+    // Wait for HCI RX task to actually start (synchronize with task creation)
+    // This ensures k_sem_take() will use true blocking instead of polling
+    for (int i = 0; i < 100 && !mp_bluetooth_zephyr_hci_rx_task_active(); i++) {
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    debug_printf("HCI RX task ready: %d\n", mp_bluetooth_zephyr_hci_rx_task_active());
+    #endif
 
     debug_printf("hci_cyw43_open completed\n");
     return 0;
@@ -180,6 +365,12 @@ static int hci_cyw43_open(const struct device *dev, bt_hci_recv_t recv) {
 static int hci_cyw43_close(const struct device *dev) {
     (void)dev;
     debug_printf("hci_cyw43_close\n");
+
+    // Stop HCI RX task before clearing recv_cb
+    #if MICROPY_PY_THREAD
+    mp_bluetooth_zephyr_hci_rx_task_stop();
+    #endif
+
     recv_cb = NULL;
     soft_timer_remove(&mp_zephyr_hci_soft_timer);
     return 0;
@@ -303,10 +494,59 @@ void mp_bluetooth_zephyr_port_poll_in_ms(uint32_t ms) {
     soft_timer_reinsert(&mp_zephyr_hci_soft_timer, ms);
 }
 
-// No-op for CYW43 (uses SPI via scheduled task, not UART polling)
+// Poll HCI from CYW43 SPI - called from k_sem_take() wait loop
+// This reads any pending HCI data from the CYW43 chip and passes it to Zephyr
+static volatile bool poll_uart_in_progress = false;
+
 void mp_bluetooth_zephyr_poll_uart(void) {
-    // CYW43 uses SPI transport via run_zephyr_hci_task() scheduled by soft timer
-    // No UART polling needed
+    // Prevent recursion
+    if (poll_uart_in_progress || recv_cb == NULL) {
+        return;
+    }
+
+    // Skip if HCI RX task is handling reception
+    #if MICROPY_PY_THREAD
+    if (mp_bluetooth_zephyr_hci_rx_task_active()) {
+        return;
+    }
+    #endif
+
+    poll_uart_in_progress = true;
+
+    // Read from CYW43 via shared SPI bus
+    extern int cyw43_bluetooth_hci_read(uint8_t *buf, uint32_t max_size, uint32_t *len);
+    uint32_t len = 0;
+    int ret = cyw43_bluetooth_hci_read(hci_rx_buffer, sizeof(hci_rx_buffer), &len);
+
+    if (ret == 0 && len > CYW43_HCI_HEADER_SIZE) {
+        // Extract packet type from CYW43 header (byte 3)
+        uint8_t pkt_type = hci_rx_buffer[3];
+        uint8_t *pkt_data = &hci_rx_buffer[CYW43_HCI_HEADER_SIZE];
+        uint32_t pkt_len = len - CYW43_HCI_HEADER_SIZE;
+
+        // Allocate Zephyr net_buf based on packet type
+        struct net_buf *buf = NULL;
+
+        switch (pkt_type) {
+            case BT_HCI_H4_EVT:
+                if (pkt_len >= 2) {
+                    buf = bt_buf_get_evt(pkt_data[0], false, K_NO_WAIT);
+                }
+                break;
+            case BT_HCI_H4_ACL:
+                buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_NO_WAIT);
+                break;
+            default:
+                break;
+        }
+
+        if (buf != NULL) {
+            net_buf_add_mem(buf, pkt_data, pkt_len);
+            recv_cb(hci_dev, buf);
+        }
+    }
+
+    poll_uart_in_progress = false;
 }
 
 #else // !MICROPY_PY_NETWORK_CYW43

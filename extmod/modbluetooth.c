@@ -274,28 +274,38 @@ static mp_obj_t bluetooth_ble_make_new(const mp_obj_type_t *type, size_t n_args,
     (void)n_args;
     (void)n_kw;
     (void)all_args;
+    mp_printf(&mp_plat_print, "BLE_NEW: enter, bluetooth=%p\n", MP_STATE_VM(bluetooth));
     if (MP_STATE_VM(bluetooth) == MP_OBJ_NULL) {
+        mp_printf(&mp_plat_print, "BLE_NEW: allocating object\n");
         mp_obj_bluetooth_ble_t *o = m_new0(mp_obj_bluetooth_ble_t, 1);
+        mp_printf(&mp_plat_print, "BLE_NEW: object at %p\n", o);
         o->base.type = &mp_type_bluetooth_ble;
 
         o->irq_handler = mp_const_none;
 
         #if !MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS
         // Pre-allocate the event data tuple to prevent needing to allocate in the IRQ handler.
+        mp_printf(&mp_plat_print, "BLE_NEW: allocating tuple\n");
         o->irq_data_tuple = mp_obj_new_tuple(MICROPY_PY_BLUETOOTH_MAX_EVENT_DATA_TUPLE_LEN, NULL);
+        mp_printf(&mp_plat_print, "BLE_NEW: tuple done\n");
 
         // Pre-allocated buffers for address, payload and uuid.
         mp_obj_memoryview_init(&o->irq_data_addr, 'B', 0, 0, o->irq_data_addr_bytes);
         o->irq_data_data_alloc = MICROPY_PY_BLUETOOTH_MAX_EVENT_DATA_BYTES_LEN(MICROPY_PY_BLUETOOTH_RINGBUF_SIZE);
+        mp_printf(&mp_plat_print, "BLE_NEW: allocating data buffer (%d bytes)\n", (int)o->irq_data_data_alloc);
         mp_obj_memoryview_init(&o->irq_data_data, 'B', 0, 0, m_new(uint8_t, o->irq_data_data_alloc));
+        mp_printf(&mp_plat_print, "BLE_NEW: data buffer done\n");
         o->irq_data_uuid.base.type = &mp_type_bluetooth_uuid;
 
         // Allocate the default ringbuf.
+        mp_printf(&mp_plat_print, "BLE_NEW: allocating ringbuf\n");
         ringbuf_alloc(&o->ringbuf, MICROPY_PY_BLUETOOTH_RINGBUF_SIZE);
+        mp_printf(&mp_plat_print, "BLE_NEW: ringbuf done\n");
         #endif
 
         MP_STATE_VM(bluetooth) = MP_OBJ_FROM_PTR(o);
     }
+    mp_printf(&mp_plat_print, "BLE_NEW: returning %p\n", MP_STATE_VM(bluetooth));
     return MP_STATE_VM(bluetooth);
 }
 

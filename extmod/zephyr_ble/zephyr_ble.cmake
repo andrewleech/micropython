@@ -67,10 +67,10 @@ target_sources(micropy_extmod_zephyr_ble INTERFACE
     # which provides stub implementations that work without PSA Crypto
 )
 
-# Debug output for Zephyr BLE (enabled by default for development)
-# Set ZEPHYR_BLE_DEBUG=0 in CMake command to disable debug output
+# Debug output for Zephyr BLE (disabled by default)
+# Set ZEPHYR_BLE_DEBUG=1 in CMake command to enable debug output
 if(NOT DEFINED ZEPHYR_BLE_DEBUG)
-    set(ZEPHYR_BLE_DEBUG 1)
+    set(ZEPHYR_BLE_DEBUG 0)
 endif()
 
 target_compile_definitions(micropy_extmod_zephyr_ble INTERFACE

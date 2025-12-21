@@ -59,13 +59,9 @@ static volatile bool ble_work_thread_running = false;
 static void ble_work_thread_func(void *param);
 #endif
 
-// Forward declare bt_dev to detect initialization work
-// bt_dev is defined in Zephyr's hci_core.c
-struct bt_dev {
-    struct k_work init;
-    // ... other fields not relevant for detection
-};
-extern struct bt_dev bt_dev;
+// Flag to indicate we're in the bt_enable() init phase
+// During this phase, mp_bluetooth_zephyr_init_work_get() will get work from k_sys_work_q
+static volatile bool in_bt_enable_init = false;
 
 // Use CONTAINER_OF from zephyr_ble_work.h (already defined there)
 
@@ -184,17 +180,14 @@ static int k_work_submit_internal(struct k_work_q *queue, struct k_work *work) {
 }
 
 int k_work_submit(struct k_work *work) {
-    // Route bt_dev.init to initialization queue
-    // This allows synchronous processing from mp_bluetooth_init() wait loop
-    if (work == &bt_dev.init) {
-        if (!k_init_work_q.head && !k_init_work_q.nextq) {
-            k_work_queue_init(&k_init_work_q);
-            k_init_work_q.name = "INIT WQ";
-        }
-        return k_work_submit_internal(&k_init_work_q, work);
+    // All work goes to system work queue
+    // During bt_enable() init phase, mp_bluetooth_zephyr_init_work_get() reads from here
+    DEBUG_WORK_printf("k_work_submit: work=%p\n", work);
+    if (work == NULL) {
+        DEBUG_WORK_printf("  ERROR: work is NULL!\n");
+        return -22;  // EINVAL
     }
-
-    // All other work goes to system work queue
+    DEBUG_WORK_printf("  handler=%p, pending=%d\n", work->handler, work->pending);
     if (!k_sys_work_q.head && !k_sys_work_q.nextq) {
         k_work_queue_init(&k_sys_work_q);
         k_sys_work_q.name = "SYS WQ";
@@ -514,10 +507,28 @@ void mp_bluetooth_zephyr_work_process_init(void) {
 // --- Init Work Helper Functions ---
 
 // Check if initialization work is pending in the init work queue
+// Set init phase flag - call before bt_enable()
+void mp_bluetooth_zephyr_init_phase_enter(void) {
+    in_bt_enable_init = true;
+    DEBUG_WORK_printf("Entering init phase\n");
+}
+
+// Clear init phase flag - call after bt_enable() completes
+void mp_bluetooth_zephyr_init_phase_exit(void) {
+    in_bt_enable_init = false;
+    DEBUG_WORK_printf("Exiting init phase\n");
+}
+
+// Check if in init phase
+bool mp_bluetooth_zephyr_in_init_phase(void) {
+    return in_bt_enable_init;
+}
+
 // Called from mp_bluetooth_init() wait loop to check if init work is available
 bool mp_bluetooth_zephyr_init_work_pending(void) {
     MICROPY_PY_BLUETOOTH_ENTER
-    bool pending = (k_init_work_q.head != NULL);
+    // During init phase, check system work queue
+    bool pending = (k_sys_work_q.head != NULL);
     MICROPY_PY_BLUETOOTH_EXIT
     return pending;
 }
@@ -529,23 +540,24 @@ bool mp_bluetooth_zephyr_init_work_pending(void) {
 struct k_work *mp_bluetooth_zephyr_init_work_get(void) {
     MICROPY_PY_BLUETOOTH_ENTER
 
-    struct k_work *work = k_init_work_q.head;
+    // During init phase, get work from system work queue
+    struct k_work *work = k_sys_work_q.head;
     if (work == NULL) {
         MICROPY_PY_BLUETOOTH_EXIT
         return NULL;
     }
 
     // Dequeue work item (remove from queue, mark as not pending)
-    k_init_work_q.head = work->next;
-    if (k_init_work_q.head) {
-        k_init_work_q.head->prev = NULL;
+    k_sys_work_q.head = work->next;
+    if (k_sys_work_q.head) {
+        k_sys_work_q.head->prev = NULL;
     }
 
     work->next = NULL;
     work->prev = NULL;
     work->pending = false;
 
-    DEBUG_WORK_printf("init_work_get: dequeued work=%p, handler=%p\n", work, work->handler);
+    DEBUG_WORK_printf("init_work_get: dequeued work=%p, handler=%p from SYS WQ\n", work, work->handler);
 
     MICROPY_PY_BLUETOOTH_EXIT
     return work;

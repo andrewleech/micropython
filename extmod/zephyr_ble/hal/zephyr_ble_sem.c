@@ -49,6 +49,12 @@
 #include "semphr.h"
 #include "task.h"
 
+// Forward declaration of HCI processing function (implemented in port mpzephyrport.c)
+extern void mp_bluetooth_zephyr_hci_uart_wfi(void);
+
+// Check if HCI RX task is running (true blocking is safe when task handles HCI)
+extern bool mp_bluetooth_zephyr_hci_rx_task_active(void);
+
 void k_sem_init(struct k_sem *sem, unsigned int initial_count, unsigned int limit) {
     DEBUG_SEM_printf("k_sem_init(%p, count=%u, limit=%u)\n", sem, initial_count, limit);
 
@@ -68,30 +74,57 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
         return -EINVAL;
     }
 
-    // Convert timeout to FreeRTOS ticks
-    TickType_t ticks;
+    // K_NO_WAIT: Non-blocking attempt
     if (timeout.ticks == 0) {
-        // K_NO_WAIT
-        ticks = 0;
-    } else if (timeout.ticks == 0xFFFFFFFF) {
-        // K_FOREVER
-        ticks = portMAX_DELAY;
-    } else {
-        // Convert milliseconds to ticks
-        ticks = pdMS_TO_TICKS(timeout.ticks);
-        if (ticks == 0 && timeout.ticks > 0) {
-            ticks = 1;  // Ensure at least 1 tick for non-zero timeout
+        if (xSemaphoreTake(sem->handle, 0) == pdTRUE) {
+            DEBUG_SEM_printf("  --> acquired (no wait)\n");
+            return 0;
         }
+        DEBUG_SEM_printf("  --> busy\n");
+        return -EBUSY;
     }
 
-    BaseType_t result = xSemaphoreTake(sem->handle, ticks);
+    // When HCI RX task is running, use true FreeRTOS blocking
+    // The HCI RX task processes incoming packets and signals semaphores independently
+    if (mp_bluetooth_zephyr_hci_rx_task_active()) {
+        TickType_t ticks;
+        if (timeout.ticks == 0xFFFFFFFF) {
+            ticks = portMAX_DELAY;
+        } else {
+            ticks = pdMS_TO_TICKS(timeout.ticks);
+        }
 
-    if (result == pdTRUE) {
-        DEBUG_SEM_printf("  --> acquired\n");
-        return 0;
-    } else {
-        DEBUG_SEM_printf("  --> timeout/busy\n");
-        return (timeout.ticks == 0) ? -EBUSY : -EAGAIN;
+        DEBUG_SEM_printf("  --> true blocking (HCI RX task active)\n");
+        if (xSemaphoreTake(sem->handle, ticks) == pdTRUE) {
+            DEBUG_SEM_printf("  --> acquired\n");
+            return 0;
+        }
+        DEBUG_SEM_printf("  --> timeout\n");
+        return -EAGAIN;
+    }
+
+    // Fallback: poll with short timeouts for HCI processing
+    // This is used before HCI RX task is started (during bt_enable setup)
+    uint32_t start_ms = mp_hal_ticks_ms();
+    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? UINT32_MAX : timeout.ticks;
+
+    DEBUG_SEM_printf("  --> polling mode (HCI RX task not active)\n");
+    while (1) {
+        // Try to take with short timeout (10ms)
+        if (xSemaphoreTake(sem->handle, pdMS_TO_TICKS(10)) == pdTRUE) {
+            DEBUG_SEM_printf("  --> acquired\n");
+            return 0;
+        }
+
+        // Process HCI data that might signal this semaphore
+        mp_bluetooth_zephyr_hci_uart_wfi();
+
+        // Check for timeout
+        uint32_t elapsed = mp_hal_ticks_ms() - start_ms;
+        if (timeout_ms != UINT32_MAX && elapsed >= timeout_ms) {
+            DEBUG_SEM_printf("  --> timeout after %u ms\n", elapsed);
+            return -EAGAIN;
+        }
     }
 }
 

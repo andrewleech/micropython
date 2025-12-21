@@ -54,23 +54,11 @@ void mp_bluetooth_hci_poll(void) {
     }
 }
 
-// Wait-for-interrupt during Zephyr semaphore waits
-// This is called from k_sem_take busy-wait loops
+// Called during k_sem_take wait loops to process HCI data
+// This prevents deadlock when main task is blocked waiting for HCI response
 void mp_bluetooth_zephyr_hci_uart_wfi(void) {
-    #if defined(__WFE)
-    // Use WFE (Wait For Event) for efficient sleeping on ARM
-    // Timeout after 1ms to check for HCI data and other events
-    extern void best_effort_wfe_or_timeout(absolute_time_t t);
-    extern absolute_time_t make_timeout_time_ms(uint32_t ms);
-    best_effort_wfe_or_timeout(make_timeout_time_ms(1));
-    #else
-    // Fallback for non-ARM: just delay
-    mp_hal_delay_us(1000);
-    #endif
-
-    // Process any pending HCI UART data during wait
-    // This ensures HCI responses don't get delayed
-    // Note: This must not invoke Python code or raise exceptions
+    // Process any pending HCI data during wait
+    // This reads from HCI transport and passes to Zephyr BLE stack
     extern void mp_bluetooth_zephyr_poll_uart(void);
     mp_bluetooth_zephyr_poll_uart();
 }

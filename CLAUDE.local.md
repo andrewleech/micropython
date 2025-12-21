@@ -3,6 +3,44 @@
 ## Goal
 Add Zephyr BLE stack as an alternative to NimBLE/BTstack for all MicroPython ports.
 
+---
+
+## Active Work: FreeRTOS Integration
+
+**Plan File**: `~/.claude/plans/agile-strolling-lighthouse.md`
+
+**Objective**: Replace polling-based Zephyr BLE HAL with FreeRTOS primitives to solve Issue #6 (connection callbacks not firing) and eliminate timing hacks.
+
+**Status** (2025-12-19):
+| Phase | Status | Notes |
+|-------|--------|-------|
+| 1. Git Setup | ✓ Complete | Merged `freertos` into `zephy_ble` (commit e3f85a69cf) |
+| 2. HAL Primitives | Pending | Replace k_sem, k_mutex, k_timer with FreeRTOS |
+| 3. Work Queue Thread | Pending | Dedicated BLE work thread |
+| 4. HCI Integration | Pending | Service task dispatch for RP2 |
+| 5. Cleanup | Pending | Remove polling code |
+
+**Key Changes**:
+- FreeRTOS-Kernel submodule added
+- Target: RPI_PICO_W (RP2040) - RP2350 has FreeRTOS SMP port issues
+- Build verified: 886KB text, 70KB bss
+
+**Architecture**:
+```
+FreeRTOS SMP Scheduler
+├── Priority MAX-1: Service Task (HCI RX dispatch)
+├── Priority MAX-2: BLE Work Queue Thread
+└── Priority 1: Python Main Thread
+```
+
+**Why FreeRTOS?**
+- Current HAL uses polling loops with debug printf "timing magic"
+- `mp_bluetooth_zephyr_in_wait_loop` flag prevents deadlock but is fragile
+- Real FreeRTOS semaphores provide true blocking/waking semantics
+- Service task framework handles ISR-to-task bridging cleanly
+
+---
+
 ## Current Status
 - OS abstraction layer implemented (k_work, k_sem, k_mutex, atomic ops)
 - Build system integration complete
