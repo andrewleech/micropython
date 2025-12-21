@@ -493,6 +493,16 @@ if(MICROPY_BLUETOOTH_ZEPHYR)
 
     include(${MICROPY_DIR}/extmod/zephyr_ble/zephyr_ble.cmake)
     target_link_libraries(${MICROPY_TARGET} micropy_extmod_zephyr_ble)
+
+    # Link CMSIS headers to Zephyr BLE (provides __enable_irq, __disable_irq, __ISB, __get_PRIMASK)
+    # These intrinsics are required by Zephyr's arch/arm/asm_inline_gcc.h
+    if(TARGET cmsis_core_headers)
+        target_link_libraries(micropy_extmod_zephyr_ble INTERFACE cmsis_core_headers)
+    endif()
+
+    # Define port-specific macro for cmsis_core.h stub header
+    target_compile_definitions(micropy_extmod_zephyr_ble INTERFACE __ZEPHYR_BLE_RP2_PORT__)
+
     get_target_property(ZEPHYR_INCLUDE micropy_extmod_zephyr_ble INTERFACE_INCLUDE_DIRECTORIES)
     list(APPEND MICROPY_INC_CORE ${ZEPHYR_INCLUDE})
 
