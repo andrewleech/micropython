@@ -345,18 +345,8 @@ static int hci_cyw43_open(const struct device *dev, bt_hci_recv_t recv) {
     recv_cb = recv;
 
     // CYW43 BT is already initialized via cyw43_bluetooth_hci_init() in bt_hci_transport_setup()
-    // Start HCI RX task now that CYW43 is ready and recv_cb is set
-    // The task runs independently and handles all HCI reception, signaling semaphores
-    #if MICROPY_PY_THREAD
-    mp_bluetooth_zephyr_hci_rx_task_start();
-
-    // Wait for HCI RX task to actually start (synchronize with task creation)
-    // This ensures k_sem_take() will use true blocking instead of polling
-    for (int i = 0; i < 100 && !mp_bluetooth_zephyr_hci_rx_task_active(); i++) {
-        vTaskDelay(pdMS_TO_TICKS(1));
-    }
-    debug_printf("HCI RX task ready: %d\n", mp_bluetooth_zephyr_hci_rx_task_active());
-    #endif
+    // NOTE: HCI RX task is started BEFORE bt_enable() (from mp_bluetooth_init())
+    // This allows HCI responses to be processed during initialization
 
     debug_printf("hci_cyw43_open completed\n");
     return 0;

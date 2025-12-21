@@ -441,11 +441,22 @@ int mp_bluetooth_init(void) {
         // Initialize Zephyr BLE host stack
         // Note: After bt_disable(), we can call bt_enable() again to reinitialize
 
-        // Note: HCI RX task is started from hci_*_open() after transport setup
-        // This ensures CYW43/controller is ready before we start reading HCI data
-
         // Reset completion flag
         mp_bluetooth_zephyr_bt_enable_result = -1;
+
+        // CRITICAL: Start HCI RX task BEFORE bt_enable()
+        // This allows HCI responses to be processed during initialization
+        // Without this, k_sem_take() uses polling mode which causes deadlock
+        #if MICROPY_PY_THREAD
+        extern void mp_bluetooth_zephyr_hci_rx_task_start(void);
+        mp_bluetooth_zephyr_hci_rx_task_start();
+        DEBUG_printf("HCI RX task started for initialization\n");
+        #endif
+
+        // Start the dedicated BLE work queue thread (FreeRTOS builds only)
+        // This must also be started before bt_enable() to process work items
+        mp_bluetooth_zephyr_work_thread_start();
+        DEBUG_printf("BLE work thread started for initialization\n");
 
         // Enter init phase - work will be processed synchronously in this loop
         extern void mp_bluetooth_zephyr_init_phase_enter(void);
@@ -456,7 +467,6 @@ int mp_bluetooth_init(void) {
         int ret = bt_enable(mp_bluetooth_zephyr_bt_ready_cb);
         DEBUG_printf("bt_enable returned %d\n", ret);
         if (ret) {
-            mp_printf(&mp_plat_print, "ERROR: bt_enable failed with code %d\n", ret);
             return bt_err_to_errno(ret);
         }
 
@@ -506,6 +516,7 @@ int mp_bluetooth_init(void) {
             mp_event_wait_ms(1);
         }
 
+    skip_bt_enable:
         // Exit init phase - work thread can now process work
         extern void mp_bluetooth_zephyr_init_phase_exit(void);
         mp_bluetooth_zephyr_init_phase_exit();
@@ -534,10 +545,6 @@ int mp_bluetooth_init(void) {
     // Register scan callback every time we activate (it was unregistered during deinit)
     bt_le_scan_cb_register(&mp_bluetooth_zephyr_gap_scan_cb_struct);
     #endif
-
-    // Start the dedicated BLE work queue thread (FreeRTOS builds only)
-    // This processes Zephyr work items in a high-priority thread
-    mp_bluetooth_zephyr_work_thread_start();
 
     mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE;
 

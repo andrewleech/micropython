@@ -28,6 +28,11 @@
 #define MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_KERNEL_H
 
 #include "zephyr_ble_work.h"
+
+#if MICROPY_PY_THREAD
+#include "FreeRTOS.h"
+#include "task.h"
+#endif
 #include "py/mphal.h"
 
 // Zephyr kernel miscellaneous abstractions for MicroPython
@@ -82,14 +87,20 @@ static inline uint32_t k_cycle_get_32(void) {
 // Thread ID type
 typedef void *k_tid_t;
 
-// Get current thread ID (returns &k_sys_work_q.thread in MicroPython)
-// CRITICAL: Must return &k_sys_work_q.thread so that bt_hci_cmd_send_sync()
-// comparison at hci_core.c:478 succeeds and enters the synchronous command
-// processing path. Without this, commands are queued but never processed,
-// causing deadlock at k_sem_take().
+// Get current thread ID
+// With FreeRTOS, return the actual current task handle so Zephyr can correctly
+// determine which thread context it's running in. This prevents the deadlock
+// that occurred when we always returned work_q thread (causing Zephyr to use
+// the synchronous command path when it shouldn't).
 static inline k_tid_t k_current_get(void) {
+    #if MICROPY_PY_THREAD
+    // Return the actual current FreeRTOS task handle
+    return (k_tid_t)xTaskGetCurrentTaskHandle();
+    #else
+    // Non-FreeRTOS builds: return work queue thread (polling mode)
     extern struct k_work_q k_sys_work_q;
     return (k_tid_t)&k_sys_work_q.thread;
+    #endif
 }
 
 // Check if in ISR context (always returns false in MicroPython scheduler)
