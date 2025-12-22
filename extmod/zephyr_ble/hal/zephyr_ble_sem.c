@@ -109,15 +109,28 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
     uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? UINT32_MAX : timeout.ticks;
 
     DEBUG_SEM_printf("  --> polling mode (HCI RX task not active)\n");
+    int poll_count = 0;
     while (1) {
         // Try to take with short timeout (10ms)
         if (xSemaphoreTake(sem->handle, pdMS_TO_TICKS(10)) == pdTRUE) {
-            DEBUG_SEM_printf("  --> acquired\n");
+            DEBUG_SEM_printf("  --> acquired after %d polls\n", poll_count);
             return 0;
         }
 
+        poll_count++;
+        if (poll_count % 10 == 0) {
+            mp_printf(&mp_plat_print, "SEM_POLL: count=%d\n", poll_count);
+        }
+
         // Process HCI data that might signal this semaphore
+        mp_printf(&mp_plat_print, "SEM_POLL: calling hci_uart_wfi\n");
         mp_bluetooth_zephyr_hci_uart_wfi();
+
+        // Process work items that might signal this semaphore
+        // This is critical during init - bt_enable() submits work that must execute
+        extern void mp_bluetooth_zephyr_work_process(void);
+        mp_printf(&mp_plat_print, "SEM_POLL: calling work_process\n");
+        mp_bluetooth_zephyr_work_process();
 
         // Check for timeout
         uint32_t elapsed = mp_hal_ticks_ms() - start_ms;

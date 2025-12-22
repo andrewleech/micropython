@@ -261,10 +261,14 @@ static void rp2_main_loop(void *arg) {
     // conflicts during scheduler initialization. Before this change, cyw43_irq_init()
     // registered GPIO handlers BEFORE vTaskStartScheduler, causing corruption when
     // IRQs fired during scheduler init.
+    //
+    // CRITICAL: Do NOT enable IRQ (cyw43_post_poll_hook) until AFTER mp_bluetooth_hci_init()
+    // completes. If CYW43 IRQ fires before Bluetooth subsystem is ready, it can cause
+    // hard faults during boot (PC jumps to 0x000020e0 with corrupted stack).
     {
         cyw43_init(&cyw43_state);
         cyw43_irq_init();
-        cyw43_post_poll_hook(); // enable the irq
+        // NOTE: cyw43_post_poll_hook() moved to after mp_bluetooth_hci_init()
         uint8_t buf[8];
         memcpy(&buf[0], "PICO", 4);
 
@@ -329,6 +333,12 @@ soft_reset:
     #if MICROPY_PY_BLUETOOTH
     mp_bluetooth_hci_init();
     #endif
+
+    #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_CYW43
+    // Now it's safe to enable CYW43 IRQ - Bluetooth subsystem is initialized
+    cyw43_post_poll_hook();
+    #endif
+
     #if MICROPY_PY_NETWORK
     mod_network_init();
     #endif
