@@ -30,8 +30,8 @@
 #include "zephyr_ble_work.h"
 #include "zephyr_ble_atomic.h"
 
-// Debug flag (enabled after first successful print to avoid boot issues)
-static volatile int debug_enabled = 1;  // Enable debug immediately
+// Debug flag (disabled for FreeRTOS - mp_printf not thread-safe in work thread)
+static volatile int debug_enabled = 0;  // Disable debug to prevent NLR crashes
 
 #define DEBUG_FIFO(fmt, ...) \
     do { \
