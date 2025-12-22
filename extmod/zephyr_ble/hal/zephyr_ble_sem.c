@@ -118,18 +118,16 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
         }
 
         poll_count++;
-        if (poll_count % 10 == 0) {
-            mp_printf(&mp_plat_print, "SEM_POLL: count=%d\n", poll_count);
-        }
+        DEBUG_SEM_printf("SEM_POLL: count=%d\n", poll_count);
 
         // Process HCI data that might signal this semaphore
-        mp_printf(&mp_plat_print, "SEM_POLL: calling hci_uart_wfi\n");
+        DEBUG_SEM_printf("SEM_POLL: calling hci_uart_wfi\n");
         mp_bluetooth_zephyr_hci_uart_wfi();
 
         // Process work items that might signal this semaphore
         // This is critical during init - bt_enable() submits work that must execute
         extern void mp_bluetooth_zephyr_work_process(void);
-        mp_printf(&mp_plat_print, "SEM_POLL: calling work_process\n");
+        DEBUG_SEM_printf("SEM_POLL: calling work_process\n");
         mp_bluetooth_zephyr_work_process();
 
         // Check for timeout

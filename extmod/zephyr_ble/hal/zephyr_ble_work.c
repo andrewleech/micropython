@@ -396,7 +396,7 @@ static int work_items_processed = 0;
 // Called by mp_bluetooth_hci_poll() to process all pending work (regular work queues only)
 void mp_bluetooth_zephyr_work_process(void) {
     work_process_call_count++;
-    mp_printf(&mp_plat_print, "WORK_PROCESS: entered, count=%d\n", work_process_call_count);
+    DEBUG_WORK_printf("work_process: entered, count=%d\n", work_process_call_count);
 
 #if MICROPY_PY_THREAD
     // On FreeRTOS, the dedicated work thread handles work processing.
@@ -404,11 +404,10 @@ void mp_bluetooth_zephyr_work_process(void) {
     // Check ble_work_sem as the authoritative indicator - it's cleared first during shutdown,
     // ensuring no race where both thread and polling process work simultaneously.
     if (ble_work_sem != NULL) {
-        mp_printf(&mp_plat_print, "WORK_PROCESS: skipping (work thread active, sem=%p)\n", ble_work_sem);
         DEBUG_WORK_printf("work_process: skipping (work thread active)\n");
         return;
     }
-    mp_printf(&mp_plat_print, "WORK_PROCESS: thread not active (sem=NULL), processing...\n");
+    DEBUG_WORK_printf("work_process: thread not active, processing...\n");
 #endif
 
     // ARCHITECTURAL FIX for Issue #6 recursion deadlock:

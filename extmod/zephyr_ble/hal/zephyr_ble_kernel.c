@@ -80,18 +80,15 @@ NORETURN void assert_post_action(const char *file, unsigned int line) {
 }
 
 NORETURN void k_panic(void) {
-    // Fatal error in BLE stack - report location if available
-    if (panic_file) {
-        mp_printf(&mp_plat_print, "ASSERT FAILED at %s:%d\n", panic_file, panic_line);
-    } else {
-        mp_printf(&mp_plat_print, "BLE k_panic (location unknown)\n");
-    }
+    // Fatal error in BLE stack
+    // NOTE: Cannot use mp_printf here - may be called from work thread without NLR context
+    // Location info is stored in panic_file/panic_line for debugging if needed
     mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("BLE stack fatal error (k_panic)"));
 }
 
 void k_oops(void) {
-    // Recoverable error in BLE stack - log and continue
-    // In MicroPython, we can't easily continue after an assertion failure,
-    // so we raise an exception but mark it as non-fatal
-    mp_printf(&mp_plat_print, "WARNING: BLE stack assertion failed (k_oops)\n");
+    // Recoverable error in BLE stack
+    // NOTE: Cannot use mp_printf here - may be called from work thread without NLR context
+    // In MicroPython, we treat this as non-fatal but log nothing to avoid thread safety issues
+    // The calling code will handle the error condition
 }

@@ -56,17 +56,17 @@
 // SMP (Symmetric Multiprocessing) configuration
 // ============================================================================
 
-// RP2040 has 2 cores - use both for true SMP
-#define configNUMBER_OF_CORES (2)
+// RP2040 has 2 cores - use single core for testing
+#define configNUMBER_OF_CORES (1)
 #if configNUMBER_OF_CORES > 1
 #define configUSE_CORE_AFFINITY (1)
 #define configRUN_MULTIPLE_PRIORITIES (1)
 #endif
 #define configUSE_PASSIVE_IDLE_HOOK (0)
 
-// RP2040 has 32 hardware spinlocks - assign two for FreeRTOS SMP
-#define configSMP_SPINLOCK_0 (0)
-#define configSMP_SPINLOCK_1 (1)
+// RP2040 has 32 hardware spinlocks - use SDK-reserved OS spinlocks (14, 15)
+#define configSMP_SPINLOCK_0 (14)
+#define configSMP_SPINLOCK_1 (15)
 
 // ============================================================================
 // Pico SDK Interoperability
