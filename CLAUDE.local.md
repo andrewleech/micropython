@@ -189,17 +189,18 @@ make BOARD=RPI_PICO2_W BOARD_VARIANT=zephyr
 
 ### Flash
 
-**IMPORTANT**: Always use the `flash-pico-w` skill for flashing Raspberry Pi Pico W boards. This skill handles the complete flash process including proper USB bootloader entry, firmware upload via picotool, and device reset.
+**IMPORTANT**: Always use the `flash-pico-w` skill for flashing Raspberry Pi Pico W boards. The skill uses pyocd with the Pico probe for reliable firmware upload.
 
-**Usage:**
+**If device is hung or flashing fails:**
 ```bash
-# Invoke the flash-pico-w skill (it will handle all steps automatically)
-# The skill manages: bootloader entry, picotool flashing, and board reset
+# Power cycle the device to reset to a consistent state
+~/usb-replug.py 2-3 1
+# Then use the flash-pico-w skill
 ```
 
 **Manual flash methods (for reference only - prefer using the skill):**
 
-#### Via probe-rs (unreliable - may not write flash correctly)
+#### Via probe-rs/pyocd
 ```bash
 # Flash and reset
 probe-rs run --chip RP2350 --probe 0d28:0204 build-RPI_PICO2_W-zephyr/firmware.elf
@@ -209,7 +210,7 @@ probe-rs reset --chip RP2350 --probe 0d28:0204
 probe-rs download --chip RP2350 --probe 0d28:0204 build-RPI_PICO2_W-zephyr/firmware.elf --format elf --reset-halt
 ```
 
-#### Via USB Bootloader (most reliable manual method)
+#### Via USB Bootloader
 ```bash
 # Hold BOOTSEL button while connecting USB
 # Device appears as RP2350 Boot (2e8a:000f)
