@@ -72,17 +72,28 @@ void k_sched_unlock(void) {
 // --- Fatal Error Handlers ---
 
 #include "py/runtime.h"
+#include <stdarg.h>
 
 // For debugging, we'll track the panic location
 static const char *panic_file = NULL;
 static unsigned int panic_line = 0;
 
+// Called by __ASSERT_PRINT from Zephyr assert macros when CONFIG_ASSERT_VERBOSE is enabled
+// This overrides the weak definition in lib/zephyr/lib/os/assert.c
+void assert_print(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    // Use vprintf since mp_vprintf is not readily available
+    vprintf(fmt, ap);
+    va_end(ap);
+}
+
 // Called by __ASSERT_POST_ACTION from Zephyr assert macros
 NORETURN void assert_post_action(const char *file, unsigned int line) {
     panic_file = file;
     panic_line = line;
-    // Print assertion location before panic using stdio (more reliable in thread context)
-    printf("ASSERT FAILED: %s:%u\n", file, line);
+    // Print assertion location using mp_printf for reliable output in all contexts
+    mp_printf(&mp_plat_print, "\n*** ASSERT FAILED: %s:%u ***\n", file, line);
     k_panic();
 }
 
@@ -111,6 +122,9 @@ NORETURN void k_panic(void) {
     mp_bluetooth_zephyr_hci_rx_task_debug(&rx_task_polls, &rx_task_packets);
 
     mp_printf(&mp_plat_print, "\n=== k_panic Debug Info ===\n");
+    if (panic_file) {
+        mp_printf(&mp_plat_print, "Assert location: %s:%u\n", panic_file, panic_line);
+    }
     mp_printf(&mp_plat_print, "ncmd_sem: %p count=%u\n", ncmd_sem_addr, ncmd_count);
     mp_printf(&mp_plat_print, "GPIO IRQ: %lu  post_poll: %lu\n",
            (unsigned long)cyw43_debug_get_gpio_irq_count(),
@@ -123,8 +137,10 @@ NORETURN void k_panic(void) {
     mp_printf(&mp_plat_print, "HCI: tx=%lu tx_cmd=%lu bt_process=%lu\n",
            (unsigned long)hci_tx_count, (unsigned long)hci_tx_cmd_count,
            (unsigned long)cyw43_bt_hci_process_count);
-    mp_printf(&mp_plat_print, "HCI RX task: polls=%lu packets=%lu\n",
-           (unsigned long)rx_task_polls, (unsigned long)rx_task_packets);
+    extern uint32_t mp_bluetooth_zephyr_hci_rx_queue_dropped(void);
+    uint32_t queue_dropped = mp_bluetooth_zephyr_hci_rx_queue_dropped();
+    mp_printf(&mp_plat_print, "HCI RX task: polls=%lu packets=%lu queue_dropped=%lu\n",
+           (unsigned long)rx_task_polls, (unsigned long)rx_task_packets, (unsigned long)queue_dropped);
     mp_printf(&mp_plat_print, "==========================\n");
     #endif
 

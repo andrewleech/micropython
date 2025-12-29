@@ -588,6 +588,7 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_ASSERT 1  // Re-enable to capture assertion location
 #endif
 #define CONFIG_ASSERT_LEVEL 2  // Maximum verbosity
+#define CONFIG_ASSERT_VERBOSE 1  // Print assertion condition and location
 
 // Bluetooth-specific assert macros (from subsys/bluetooth/common/assert.h)
 // These must be undefined (not 0) because Zephyr checks with #if defined()

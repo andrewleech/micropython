@@ -700,8 +700,21 @@ int mp_bluetooth_gap_advertise_start(bool connectable, int32_t interval_us, cons
 }
 
 void mp_bluetooth_gap_advertise_stop(void) {
+    DEBUG_printf("mp_bluetooth_gap_advertise_stop: enter, mp_bt_zephyr_next_conn=%p\n",
+                 mp_bt_zephyr_next_conn);
+
+    // Clean up pre-allocated connection object that was created for potential incoming connections
+    // This prevents Zephyr's le_adv_stop_free_conn() from finding stale connection state
+    if (mp_bt_zephyr_next_conn != NULL) {
+        DEBUG_printf("mp_bluetooth_gap_advertise_stop: cleaning up pre-allocated connection\n");
+        // Note: The object is in objs_list so will be GC'd later, just clear our reference
+        mp_bt_zephyr_next_conn = NULL;
+    }
+
     // Note: bt_le_adv_stop returns 0 if adv is already stopped.
+    DEBUG_printf("mp_bluetooth_gap_advertise_stop: calling bt_le_adv_stop\n");
     int ret = bt_le_adv_stop();
+    DEBUG_printf("mp_bluetooth_gap_advertise_stop: bt_le_adv_stop returned %d\n", ret);
     if (ret != 0) {
         mp_raise_OSError(bt_err_to_errno(ret));
     }

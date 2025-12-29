@@ -115,18 +115,21 @@ static inline atomic_val_t atomic_get(const atomic_t *target) {
     return ret;
 }
 
-// Atomic increment and return new value
+// Atomic increment and return OLD value (before increment)
+// Note: Zephyr's atomic_inc returns the old value, not the new value!
 static inline atomic_val_t atomic_inc(atomic_t *target) {
     MICROPY_PY_BLUETOOTH_ENTER
-    atomic_val_t ret = ++(*target);
+    atomic_val_t ret = (*target)++;
     MICROPY_PY_BLUETOOTH_EXIT
     return ret;
 }
 
-// Atomic decrement and return new value
+// Atomic decrement and return OLD value (before decrement)
+// Note: Zephyr's atomic_dec returns the old value, not the new value!
+// This is critical for reference counting (e.g., bt_conn_unref checks old > 0)
 static inline atomic_val_t atomic_dec(atomic_t *target) {
     MICROPY_PY_BLUETOOTH_ENTER
-    atomic_val_t ret = --(*target);
+    atomic_val_t ret = (*target)--;
     MICROPY_PY_BLUETOOTH_EXIT
     return ret;
 }
