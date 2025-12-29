@@ -402,16 +402,18 @@ int mp_bluetooth_init(void) {
     #endif
 
     // Only initialize the BLE stack if not already ACTIVE
-    // If state is SUSPENDED (bt_disable was called), we need to call bt_enable again
-    DEBUG_printf("About to check BLE state, state_ptr=%p\n", &mp_bluetooth_zephyr_ble_state);
     int current_state = mp_bluetooth_zephyr_ble_state;
-    DEBUG_printf("BLE state value=%d\n", current_state);
     if (current_state != MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE) {
-        DEBUG_printf("Starting BLE initialization\n");
+        // Check if BLE was previously activated and then deactivated
+        // Zephyr's bt_enable() can only be called once per process lifetime
+        if (current_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_SUSPENDED) {
+            mp_raise_msg(&mp_type_RuntimeError,
+                MP_ERROR_TEXT("BLE reactivation not supported. "
+                "After ble.active(False), BLE cannot be reactivated. "
+                "Use ble.active(True) once per session and leave active."));
+        }
 
         // First-time initialization: port resources and controller
-        // Only do this when coming from OFF state, not when reinitializing from SUSPENDED
-        DEBUG_printf("Checking if state is OFF\n");
         if (current_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF) {
             // Initialize port-specific resources (soft timers, sched nodes, etc.)
             #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI
@@ -422,10 +424,8 @@ int mp_bluetooth_init(void) {
             // Initialize HCI controller (CYW43 BT via WEAK override from pico-sdk)
             // This must be called before bt_enable()
             #if MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI
-            DEBUG_printf("Calling mp_bluetooth_hci_controller_init()...\n");
             extern int mp_bluetooth_hci_controller_init(void);
             int ctrl_ret = mp_bluetooth_hci_controller_init();
-            DEBUG_printf("mp_bluetooth_hci_controller_init returned %d\n", ctrl_ret);
             if (ctrl_ret != 0) {
                 mp_printf(&mp_plat_print, "ERROR: Controller init failed with code %d\n", ctrl_ret);
                 return ctrl_ret;
@@ -434,8 +434,6 @@ int mp_bluetooth_init(void) {
 
             // Register connection callbacks (only on first init, not when reinitializing from SUSPENDED)
             bt_conn_cb_register(&mp_bt_zephyr_conn_callbacks);
-            DEBUG_printf("Registered connection callbacks: connected=%p disconnected=%p\n",
-                         mp_bt_zephyr_conn_callbacks.connected, mp_bt_zephyr_conn_callbacks.disconnected);
         }
 
         // Initialize Zephyr BLE host stack
@@ -444,26 +442,19 @@ int mp_bluetooth_init(void) {
         // Reset completion flag
         mp_bluetooth_zephyr_bt_enable_result = -1;
 
-        // CRITICAL: Start HCI RX task BEFORE bt_enable()
-        // This allows HCI responses to be processed during initialization
-        // Without this, k_sem_take() uses polling mode which causes deadlock
-        #if MICROPY_PY_THREAD
-        extern void mp_bluetooth_zephyr_hci_rx_task_start(void);
-        mp_bluetooth_zephyr_hci_rx_task_start();
-        DEBUG_printf("HCI RX task started for initialization\n");
-        #endif
+        // NOTE: HCI RX task is started AFTER bt_enable() completes
+        // During bt_enable(), polling mode is used for HCI reception
+        // After bt_enable(), HCI RX task takes over for better performance
 
         // Start the dedicated BLE work queue thread (FreeRTOS builds only)
         // This must also be started before bt_enable() to process work items
         mp_bluetooth_zephyr_work_thread_start();
-        DEBUG_printf("BLE work thread started for initialization\n");
 
         // Enter init phase - work will be processed synchronously in this loop
         extern void mp_bluetooth_zephyr_init_phase_enter(void);
         mp_bluetooth_zephyr_init_phase_enter();
 
         // Call bt_enable() with ready callback
-        DEBUG_printf("Calling bt_enable()...\n");
         int ret = bt_enable(mp_bluetooth_zephyr_bt_ready_cb);
         DEBUG_printf("bt_enable returned %d\n", ret);
         if (ret) {
@@ -480,6 +471,8 @@ int mp_bluetooth_init(void) {
         extern struct k_work *mp_bluetooth_zephyr_init_work_get(void);
         struct k_work *init_work = NULL;
 
+        // Debug: check HCI RX task status
+        extern bool mp_bluetooth_zephyr_hci_rx_task_active(void);
         while (mp_bluetooth_zephyr_bt_enable_result < 0) {  // -1 = pending
             uint32_t elapsed = mp_hal_ticks_ms() - timeout_start_ticks_ms;
             if (elapsed > ZEPHYR_BLE_STARTUP_TIMEOUT) {
@@ -498,7 +491,12 @@ int mp_bluetooth_init(void) {
                     DEBUG_printf("Got init work=%p, handler=%p\n", init_work, init_work->handler);
                     DEBUG_SEQ_printf("Executing init work handler\n");
                     DEBUG_ENTER("init_work->handler");
+                    // Set work queue context so k_current_get() returns &k_sys_work_q.thread
+                    // This enables Zephyr's synchronous HCI command path
+                    extern void mp_bluetooth_zephyr_set_sys_work_q_context(bool in_context);
+                    mp_bluetooth_zephyr_set_sys_work_q_context(true);
                     init_work->handler(init_work);
+                    mp_bluetooth_zephyr_set_sys_work_q_context(false);
                     DEBUG_EXIT("init_work->handler");
                     DEBUG_printf("Init work handler completed\n");
                     DEBUG_SEQ_printf("Init work handler done\n");
@@ -516,7 +514,6 @@ int mp_bluetooth_init(void) {
             mp_event_wait_ms(1);
         }
 
-    skip_bt_enable:
         // Exit init phase - work thread can now process work
         extern void mp_bluetooth_zephyr_init_phase_exit(void);
         mp_bluetooth_zephyr_init_phase_exit();
@@ -537,6 +534,14 @@ int mp_bluetooth_init(void) {
         }
 
         DEBUG_printf("BLE initialization successful!\n");
+
+        // Start HCI RX task for continuous polling of incoming HCI data
+        // This is required for BLE operations after init (scan, connect, etc.)
+        #if MICROPY_PY_THREAD
+        extern void mp_bluetooth_zephyr_hci_rx_task_start(void);
+        mp_bluetooth_zephyr_hci_rx_task_start();
+        DEBUG_printf("HCI RX task started\n");
+        #endif
     } else {
         DEBUG_printf("BLE already ACTIVE (state=%d)\n", mp_bluetooth_zephyr_ble_state);
     }
@@ -1079,6 +1084,8 @@ int mp_bluetooth_set_preferred_mtu(uint16_t mtu) {
 #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
 
 int mp_bluetooth_gap_scan_start(int32_t duration_ms, int32_t interval_us, int32_t window_us, bool active_scan) {
+    DEBUG_printf("gap_scan_start: dur=%d\n", (int)duration_ms);
+
     // Stop any ongoing GAP scan.
     int ret = mp_bluetooth_gap_scan_stop();
     if (ret) {
@@ -1094,6 +1101,7 @@ int mp_bluetooth_gap_scan_start(int32_t duration_ms, int32_t interval_us, int32_
     k_timer_start(&mp_bluetooth_zephyr_gap_scan_timer, K_MSEC(duration_ms), K_NO_WAIT);
     mp_bluetooth_zephyr_gap_scan_state = MP_BLUETOOTH_ZEPHYR_GAP_SCAN_STATE_ACTIVE;
     int err = bt_le_scan_start(&param, NULL);
+    DEBUG_printf("gap_scan_start: err=%d\n", err);
     return bt_err_to_errno(err);
 }
 
