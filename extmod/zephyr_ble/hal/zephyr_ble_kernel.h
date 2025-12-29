@@ -88,17 +88,24 @@ static inline uint32_t k_cycle_get_32(void) {
 typedef void *k_tid_t;
 
 // Get current thread ID
-// With FreeRTOS, return the actual current task handle so Zephyr can correctly
-// determine which thread context it's running in. This prevents the deadlock
-// that occurred when we always returned work_q thread (causing Zephyr to use
-// the synchronous command path when it shouldn't).
+// Returns &k_sys_work_q.thread when executing work from the system work queue
+// This allows Zephyr's hci_core.c to correctly detect it's in work queue context
+// and use the synchronous command sending path (process_pending_cmd).
 static inline k_tid_t k_current_get(void) {
+    extern struct k_work_q k_sys_work_q;
+    extern bool mp_bluetooth_zephyr_in_sys_work_q_context(void);
+
+    // When executing system work queue items, return the work queue thread
+    // This makes k_current_get() == &k_sys_work_q.thread return true
+    if (mp_bluetooth_zephyr_in_sys_work_q_context()) {
+        return (k_tid_t)&k_sys_work_q.thread;
+    }
+
     #if MICROPY_PY_THREAD
-    // Return the actual current FreeRTOS task handle
+    // Outside work context, return actual FreeRTOS task handle
     return (k_tid_t)xTaskGetCurrentTaskHandle();
     #else
     // Non-FreeRTOS builds: return work queue thread (polling mode)
-    extern struct k_work_q k_sys_work_q;
     return (k_tid_t)&k_sys_work_q.thread;
     #endif
 }

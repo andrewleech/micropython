@@ -84,6 +84,10 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
         return -EBUSY;
     }
 
+    // NOTE: True FreeRTOS blocking disabled for debugging.
+    // The HCI RX task polls cyw43_bluetooth_hci_read() but wasn't receiving data.
+    // Force polling mode to see if interrupt-driven path (via poll_uart) works.
+    #if 0  // Temporarily disabled - HCI RX task not receiving data
     // When HCI RX task is running, use true FreeRTOS blocking
     // The HCI RX task processes incoming packets and signals semaphores independently
     if (mp_bluetooth_zephyr_hci_rx_task_active()) {
@@ -102,6 +106,7 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
         DEBUG_SEM_printf("  --> timeout\n");
         return -EAGAIN;
     }
+    #endif
 
     // Fallback: poll with short timeouts for HCI processing
     // This is used before HCI RX task is started (during bt_enable setup)
@@ -134,6 +139,9 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
         uint32_t elapsed = mp_hal_ticks_ms() - start_ms;
         if (timeout_ms != UINT32_MAX && elapsed >= timeout_ms) {
             DEBUG_SEM_printf("  --> timeout after %u ms\n", elapsed);
+            // Print which semaphore timed out
+            mp_printf(&mp_plat_print, "k_sem_take TIMEOUT: sem=%p count=%u polls=%d\n",
+                sem, (unsigned)uxSemaphoreGetCount(sem->handle), poll_count);
             return -EAGAIN;
         }
     }

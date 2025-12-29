@@ -59,9 +59,29 @@ static volatile bool ble_work_thread_running = false;
 static void ble_work_thread_func(void *param);
 #endif
 
+// Debug counter for tracking execution (avoids printf blocking issues)
+// Declared outside MICROPY_PY_THREAD to be accessible from init_phase_exit
+volatile int ble_work_debug_step = 0;
+
 // Flag to indicate we're in the bt_enable() init phase
 // During this phase, mp_bluetooth_zephyr_init_work_get() will get work from k_sys_work_q
 static volatile bool in_bt_enable_init = false;
+
+// Flag to indicate we're currently executing work from k_sys_work_q
+// Used by k_current_get() to return &k_sys_work_q.thread when in work context
+static volatile bool in_sys_work_q_context = false;
+
+// Check if currently executing work from system work queue
+// Used by k_current_get() to properly identify work queue thread context
+bool mp_bluetooth_zephyr_in_sys_work_q_context(void) {
+    return in_sys_work_q_context;
+}
+
+// Set the system work queue context flag
+// Call with true before executing work from k_sys_work_q, false after
+void mp_bluetooth_zephyr_set_sys_work_q_context(bool in_context) {
+    in_sys_work_q_context = in_context;
+}
 
 // Use CONTAINER_OF from zephyr_ble_work.h (already defined there)
 
@@ -450,7 +470,15 @@ void mp_bluetooth_zephyr_work_process(void) {
             work_items_processed++;
             DEBUG_WORK_printf("work_execute(%p, handler=%p) [total: %d]\n", work, work->handler, work_items_processed);
             if (work->handler) {
+                // Set context flag if processing system work queue
+                bool is_sys_wq = (q == &k_sys_work_q);
+                if (is_sys_wq) {
+                    in_sys_work_q_context = true;
+                }
                 work->handler(work);
+                if (is_sys_wq) {
+                    in_sys_work_q_context = false;
+                }
             }
             DEBUG_WORK_printf("work_execute(%p) done\n", work);
 
@@ -519,8 +547,23 @@ void mp_bluetooth_zephyr_init_phase_enter(void) {
 
 // Clear init phase flag - call after bt_enable() completes
 void mp_bluetooth_zephyr_init_phase_exit(void) {
-    in_bt_enable_init = false;
     DEBUG_WORK_printf("Exiting init phase\n");
+    in_bt_enable_init = false;
+
+#if MICROPY_PY_THREAD
+    // Signal work thread to process any pending work left over from init.
+    // During init, the synchronous HCI path is used (k_current_get() == &k_sys_work_q.thread),
+    // which calls process_pending_cmd() directly. However, bt_tx_irq_raise() still submits
+    // tx_work via k_work_submit(). This tx_work is marked pending but never processed
+    // because ble_work_process_all() returns early during init phase.
+    // After init, new k_work_submit() calls return 0 (work already pending) without
+    // signaling the semaphore, causing the work thread to stay blocked.
+    // Signaling here ensures pending work is processed.
+    if (ble_work_sem != NULL) {
+        xSemaphoreGive(ble_work_sem);
+        DEBUG_WORK_printf("Signaled work thread to process pending work\n");
+    }
+#endif
 }
 
 // Check if in init phase
@@ -578,9 +621,19 @@ void mp_bluetooth_zephyr_work_debug_stats(void) {
 // ============================================================================
 #if MICROPY_PY_THREAD
 
-// Process all pending work in all queues (except init queue)
+// Process all pending work in all queues (except during init phase)
 // Called by the work queue thread
 static void ble_work_process_all(void) {
+    ble_work_debug_step = 10;  // Entered ble_work_process_all
+
+    // During init phase, main loop handles all work processing
+    // to ensure proper sequencing of bt_enable() initialization
+    if (mp_bluetooth_zephyr_in_init_phase()) {
+        ble_work_debug_step = 11;  // Skip due to init phase
+        return;
+    }
+    ble_work_debug_step = 12;  // Processing work
+
     for (struct k_work_q *q = global_work_q; q != NULL; q = q->nextq) {
         // Skip initialization work queue (processed separately)
         if (q == &k_init_work_q) {
@@ -608,14 +661,23 @@ static void ble_work_process_all(void) {
 
             // Execute work handler outside critical section
             work_items_processed++;
-            DEBUG_WORK_printf("work_thread: execute(%p, handler=%p) [total: %d]\n",
-                work, work->handler, work_items_processed);
+            ble_work_debug_step = 20;  // About to execute work handler
 
             if (work->handler) {
+                // Set context flag if processing system work queue
+                bool is_sys_wq = (q == &k_sys_work_q);
+                if (is_sys_wq) {
+                    in_sys_work_q_context = true;
+                }
+                ble_work_debug_step = 21;  // Calling handler
                 work->handler(work);
+                ble_work_debug_step = 22;  // Handler returned
+                if (is_sys_wq) {
+                    in_sys_work_q_context = false;
+                }
             }
 
-            DEBUG_WORK_printf("work_thread: execute(%p) done\n", work);
+            ble_work_debug_step = 23;  // Work done
         }
     }
 }
@@ -625,13 +687,15 @@ static void ble_work_process_all(void) {
 static void ble_work_thread_func(void *param) {
     (void)param;
 
-    DEBUG_WORK_printf("work_thread: started\n");
+    ble_work_debug_step = 1;  // Work thread started
 
     while (ble_work_thread_running) {
         // Block waiting for work (with timeout to check shutdown flag)
         if (xSemaphoreTake(ble_work_sem, pdMS_TO_TICKS(100)) == pdTRUE) {
+            ble_work_debug_step = 2;  // Got semaphore
             // Process all pending work
             ble_work_process_all();
+            ble_work_debug_step = 3;  // Returned from ble_work_process_all
         }
         // Timeout: loop back to check ble_work_thread_running flag
     }
@@ -643,6 +707,10 @@ static void ble_work_thread_func(void *param) {
 // Start the BLE work queue thread
 // Called from mp_bluetooth_init() after basic initialization
 void mp_bluetooth_zephyr_work_thread_start(void) {
+    // DISABLED: Work thread causes GIL issues with SYNC_EVENTS_WITH_INTERLOCK
+    // Instead, work is processed via polling in mp_bluetooth_zephyr_poll()
+    return;
+
     if (ble_work_thread_handle != NULL) {
         DEBUG_WORK_printf("work_thread: already running\n");
         return;

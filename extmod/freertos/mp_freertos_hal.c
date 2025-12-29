@@ -32,6 +32,7 @@
 #include "task.h"
 
 #include "py/mpthread.h"
+#include "py/runtime.h"
 #include "extmod/freertos/mp_freertos_hal.h"
 
 // FreeRTOS-aware millisecond delay.
@@ -45,6 +46,8 @@ void mp_freertos_delay_ms(mp_uint_t ms) {
             taskYIELD();
         }
         MP_THREAD_GIL_ENTER();
+        // Run pending scheduler callbacks (including BLE work processing)
+        mp_handle_pending(true);
     } else {
         // Scheduler not running, use busy-wait fallback.
         // This path is used during early init before vTaskStartScheduler().

@@ -28,6 +28,11 @@
 #include "py/mphal.h"
 #include <zephyr/device.h>
 
+// For bt_dev ncmd_sem debugging
+#if MICROPY_PY_NETWORK_CYW43
+#include "hci_core.h"
+#endif
+
 // --- Sleep ---
 
 void k_sleep(k_timeout_t timeout) {
@@ -76,13 +81,54 @@ static unsigned int panic_line = 0;
 NORETURN void assert_post_action(const char *file, unsigned int line) {
     panic_file = file;
     panic_line = line;
+    // Print assertion location before panic using stdio (more reliable in thread context)
+    printf("ASSERT FAILED: %s:%u\n", file, line);
     k_panic();
 }
 
 NORETURN void k_panic(void) {
-    // Fatal error in BLE stack
-    // NOTE: Cannot use mp_printf here - may be called from work thread without NLR context
-    // Location info is stored in panic_file/panic_line for debugging if needed
+    // Fatal error in BLE stack - print debug info before raising exception
+    #if MICROPY_PY_NETWORK_CYW43
+    // Debug counters from mpzephyrport_rp2.c / mphalport.c / mpnetworkport.c
+    extern volatile uint32_t poll_uart_count;
+    extern volatile uint32_t poll_uart_hci_reads;
+    extern volatile uint32_t poll_uart_skipped_recursion;
+    extern volatile uint32_t poll_uart_skipped_no_cb;
+    extern volatile uint32_t poll_uart_cyw43_calls;
+    extern volatile uint32_t hci_tx_count;
+    extern volatile uint32_t hci_tx_cmd_count;
+    extern volatile uint32_t cyw43_bt_hci_process_count;
+    extern void mp_bluetooth_zephyr_hci_rx_task_debug(uint32_t *polls, uint32_t *packets);
+    extern uint32_t cyw43_debug_get_gpio_irq_count(void);
+    extern uint32_t cyw43_debug_get_post_poll_count(void);
+
+    // Get ncmd_sem count from bt_dev structure
+    extern struct bt_dev bt_dev;
+    unsigned int ncmd_count = k_sem_count_get(&bt_dev.ncmd_sem);
+    void *ncmd_sem_addr = &bt_dev.ncmd_sem;
+
+    uint32_t rx_task_polls = 0, rx_task_packets = 0;
+    mp_bluetooth_zephyr_hci_rx_task_debug(&rx_task_polls, &rx_task_packets);
+
+    mp_printf(&mp_plat_print, "\n=== k_panic Debug Info ===\n");
+    mp_printf(&mp_plat_print, "ncmd_sem: %p count=%u\n", ncmd_sem_addr, ncmd_count);
+    mp_printf(&mp_plat_print, "GPIO IRQ: %lu  post_poll: %lu\n",
+           (unsigned long)cyw43_debug_get_gpio_irq_count(),
+           (unsigned long)cyw43_debug_get_post_poll_count());
+    mp_printf(&mp_plat_print, "poll_uart: calls=%lu cyw43=%lu hci_reads=%lu\n",
+           (unsigned long)poll_uart_count, (unsigned long)poll_uart_cyw43_calls,
+           (unsigned long)poll_uart_hci_reads);
+    mp_printf(&mp_plat_print, "poll_uart skipped: recursion=%lu no_cb=%lu\n",
+           (unsigned long)poll_uart_skipped_recursion, (unsigned long)poll_uart_skipped_no_cb);
+    mp_printf(&mp_plat_print, "HCI: tx=%lu tx_cmd=%lu bt_process=%lu\n",
+           (unsigned long)hci_tx_count, (unsigned long)hci_tx_cmd_count,
+           (unsigned long)cyw43_bt_hci_process_count);
+    mp_printf(&mp_plat_print, "HCI RX task: polls=%lu packets=%lu\n",
+           (unsigned long)rx_task_polls, (unsigned long)rx_task_packets);
+    mp_printf(&mp_plat_print, "==========================\n");
+    #endif
+
+    // Raise Python exception to allow cleanup
     mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("BLE stack fatal error (k_panic)"));
 }
 
