@@ -402,6 +402,8 @@ if(MICROPY_PY_BLUETOOTH)
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
         MICROPY_PY_BLUETOOTH=1
         MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS=1
+        MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS_WITH_INTERLOCK=1
+        MICROPY_PY_BLUETOOTH_SYNC_EVENT_STACK_SIZE=2048
         MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE=1
     )
 endif()
@@ -544,6 +546,21 @@ if (MICROPY_PY_NETWORK_CYW43)
         CYW43_USE_STATS=1
     )
     endif()
+
+    # Override cyw43_malloc/free to use MicroPython's tracked allocator.
+    # This is critical because the pico-sdk's default uses C malloc which
+    # panics with "Out of memory" during BT firmware download.
+    # The compile definitions are set on cyw43_driver which is an INTERFACE
+    # library, so they propagate to all targets that link it.
+    target_compile_definitions(cyw43_driver INTERFACE
+        cyw43_malloc=m_tracked_calloc_wrapper
+        cyw43_free=m_tracked_free
+    )
+    # Force-include header with function declarations for the above.
+    # Use generator expression to only apply to C files, not assembly.
+    target_compile_options(cyw43_driver INTERFACE
+        $<$<COMPILE_LANGUAGE:C>:-include${MICROPY_PORT_DIR}/cyw43_mp_malloc.h>
+    )
 
     # Link CYW43 WiFi driver (for both BTstack and Zephyr BLE)
     target_link_libraries(${MICROPY_TARGET}

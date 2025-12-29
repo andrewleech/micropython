@@ -141,7 +141,7 @@
 // GIL disabled for true SMP parallelism. Users must use _thread.allocate_lock() to
 // protect shared mutable objects (dict, list, set). FreeRTOS locks are SMP-safe.
 // This matches master's approach but with N threads instead of 2.
-#define MICROPY_PY_THREAD_GIL                   (0)
+#define MICROPY_PY_THREAD_GIL                   (1)
 #define MICROPY_STACK_CHECK_MARGIN              (1024)
 #define MICROPY_MPTHREADPORT_H                  "extmod/freertos/mpthreadport.h"
 // Enable shared service task framework for deferred callbacks

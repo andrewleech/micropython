@@ -51,7 +51,9 @@
 #endif
 
 #define CYW43_IOCTL_TIMEOUT_US          (1000000)
+#ifndef CYW43_PRINTF
 #define CYW43_PRINTF(...)               mp_printf(MP_PYTHON_PRINTER, __VA_ARGS__)
+#endif
 
 #define CYW43_EPERM                     MP_EPERM // Operation not permitted
 #define CYW43_EIO                       MP_EIO // I/O error

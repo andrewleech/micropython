@@ -343,7 +343,24 @@ bool cyw43_poll_is_pending(void) {
 // Wait with background processing
 // Required by pico-SDK's cyw43_driver_picow library.
 void cyw43_await_background_or_timeout_us(uint32_t timeout_us) {
+    // For short waits (IOCTL polling), use a simple busy-wait to avoid
+    // FreeRTOS scheduler + GIL overhead which makes BLE init very slow
+    if (timeout_us <= 1000) {
+        uint32_t start = mp_hal_ticks_us();
+        while (mp_hal_ticks_us() - start < timeout_us) {
+            // Allow interrupt processing
+            mp_event_handle_nowait();
+        }
+        return;
+    }
     mp_event_wait_ms(timeout_us / 1000);
+}
+
+// Wrapper for m_tracked_calloc with malloc-compatible signature.
+// Used by CYW43 driver (via compile definition cyw43_malloc=m_tracked_calloc_wrapper)
+// because pico-sdk's default cyw43_malloc uses C malloc which has no heap in MicroPython.
+void *m_tracked_calloc_wrapper(size_t size) {
+    return m_tracked_calloc(size, 1);
 }
 
 // CYW43 HAL function implementations for Zephyr BLE only
@@ -381,12 +398,14 @@ void cyw43_hal_generate_laa_mac(int idx, uint8_t buf[6]) {
     mp_hal_generate_laa_mac(idx, buf);
 }
 
-// Bluetooth HCI process stub
-// Only needed for Zephyr BLE (BTstack provides its own in btstack_hci_transport_cyw43.c).
-// Only used if CYW43_ENABLE_BLUETOOTH is set (SPI/SDIO transport).
-// For UART transport (CYW43_ENABLE_BLUETOOTH_OVER_UART), this is not used.
+// Bluetooth HCI process callback - called by CYW43 driver when BT data is available.
+// This is the entry point for HCI RX processing in the Zephyr BLE stack.
+// BTstack provides its own implementation in btstack_hci_transport_cyw43.c.
+volatile uint32_t cyw43_bt_hci_process_count = 0;
+extern void mp_bluetooth_zephyr_poll_uart(void);
 void cyw43_bluetooth_hci_process(void) {
-    // Not used with UART BT transport
+    cyw43_bt_hci_process_count++;
+    mp_bluetooth_zephyr_poll_uart();
 }
 
 #endif // MICROPY_BLUETOOTH_ZEPHYR

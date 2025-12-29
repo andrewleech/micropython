@@ -26,6 +26,16 @@
 #ifndef MICROPY_INCLUDED_RP2_CYW43_CONFIGPORT_H
 #define MICROPY_INCLUDED_RP2_CYW43_CONFIGPORT_H
 
+// Include mpconfig.h first to get MICROPY_BLUETOOTH_ZEPHYR definition
+#include "py/mpconfig.h"
+
+// For Zephyr BLE debugging, use unbuffered mp_plat_print to ensure debug
+// output is visible before crashes. Define before including common config.
+#if MICROPY_BLUETOOTH_ZEPHYR
+#include "py/mpprint.h"
+#define CYW43_PRINTF(...)               mp_printf(&mp_plat_print, __VA_ARGS__)
+#endif
+
 #include "extmod/cyw43_config_common.h"
 
 #ifndef CYW43_INCLUDE_LEGACY_F1_OVERFLOW_WORKAROUND_VARIABLES
@@ -40,25 +50,15 @@
 bool cyw43_poll_is_pending(void);
 
 static inline void cyw43_yield(void) {
-    #if MICROPY_PY_THREAD
-    // With FreeRTOS, always yield to scheduler even if poll is pending.
-    // The pending poll can't be processed while we hold CYW43_THREAD_LOCK
-    // (which suspends the service task), so we must yield to allow other
-    // tasks (including timers) to run.
-    extern long xTaskGetSchedulerState(void);
-    extern void vTaskDelay(const unsigned long);
-    // taskSCHEDULER_RUNNING == 2 in FreeRTOS
-    if (xTaskGetSchedulerState() == 2) {
-        vTaskDelay(1);  // Yield and wait 1 tick
-    } else {
-        best_effort_wfe_or_timeout(make_timeout_time_ms(1));
+    // Use simple busy-wait for IOCTL polling instead of FreeRTOS vTaskDelay
+    // or best_effort_wfe_or_timeout (which uses alarm pools that may not be
+    // ready during early init or may conflict with FreeRTOS).
+    // SPI responses come directly from the chip via polling, not from the
+    // service task, so yielding to scheduler doesn't help anyway.
+    uint32_t start = time_us_32();
+    while (time_us_32() - start < 1000) {
+        tight_loop_contents();
     }
-    #else
-    // Without threading, skip wait if poll is pending (will be processed soon)
-    if (!cyw43_poll_is_pending()) {
-        best_effort_wfe_or_timeout(make_timeout_time_ms(1));
-    }
-    #endif
 }
 
 #define CYW43_POST_POLL_HOOK            cyw43_post_poll_hook();
