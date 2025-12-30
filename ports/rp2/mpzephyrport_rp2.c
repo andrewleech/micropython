@@ -79,7 +79,7 @@ extern int cybt_get_bt_buf_index(cybt_fw_membuf_index_t *p_buf_index);
 // Note: debug_printf is NOT thread-safe. Only call from main task context.
 // For HCI RX task on core1, use debug_printf_hci_task which is disabled.
 // TEMPORARILY enabled for debugging
-#define ZEPHYR_BLE_DEBUG_TEMP 1
+#define ZEPHYR_BLE_DEBUG_TEMP 0
 #if ZEPHYR_BLE_DEBUG || ZEPHYR_BLE_DEBUG_TEMP
 #define debug_printf(...) mp_printf(&mp_plat_print, "mpzephyrport_rp2: " __VA_ARGS__)
 #else
@@ -149,16 +149,37 @@ static volatile uint32_t hci_rx_evt_le_adv_report = 0; // 0x3E subevent 0x02 (ad
 static volatile uint32_t hci_rx_evt_other = 0;         // Other event codes
 static volatile uint32_t hci_rx_acl = 0;               // ACL data packets
 
+// Rejection counters (for debugging validation) - non-static for k_panic debug output
+volatile uint32_t hci_rx_rejected_len = 0;       // Invalid length
+volatile uint32_t hci_rx_rejected_param_len = 0; // param_len mismatch
+volatile uint32_t hci_rx_rejected_oversize = 0;  // Oversized packet
+volatile uint32_t hci_rx_rejected_event = 0;     // Unknown event code
+volatile uint32_t hci_rx_rejected_acl = 0;       // Invalid ACL
+volatile uint32_t hci_rx_rejected_type = 0;      // Unknown packet type
+volatile uint32_t hci_rx_buf_failed = 0;         // Buffer alloc failed
+volatile uint32_t hci_rx_total_processed = 0;    // Total packets processed
+
 // Process a single HCI packet from the given buffer
 static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len) {
     if (recv_cb == NULL || len <= CYW43_HCI_HEADER_SIZE) {
         return;
     }
 
+    hci_rx_total_processed++;
+
     // Extract packet type from CYW43 header (byte 3)
     uint8_t pkt_type = rx_buf[3];
     uint8_t *pkt_data = &rx_buf[CYW43_HCI_HEADER_SIZE];
     uint32_t pkt_len = len - CYW43_HCI_HEADER_SIZE;
+
+    // Validate packet length - HCI event packets should be reasonable size
+    // Event header is: event_code(1) + param_len(1) + params(param_len)
+    // Maximum reasonable size is ~255 bytes (param_len is uint8)
+    if (pkt_len > 260 || pkt_len < 2) {
+        // Invalid packet length - likely garbage data, skip it
+        hci_rx_rejected_len++;
+        return;
+    }
 
     // Allocate Zephyr net_buf based on packet type
     struct net_buf *buf = NULL;
@@ -168,34 +189,93 @@ static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len) {
             if (pkt_len >= 2) {
                 // Track event types for debugging
                 uint8_t evt_code = pkt_data[0];
+                uint8_t param_len = pkt_data[1];
+
+                // Validate: param_len should match actual packet length
+                // pkt_len = event_code(1) + param_len(1) + params(param_len)
+                if (param_len + 2 != pkt_len) {
+                    // Length mismatch - corrupted packet, skip
+                    hci_rx_rejected_param_len++;
+                    return;
+                }
+
+                // Validate event code - must be a known HCI event
+                // Check event code BEFORE size check because different events use
+                // different buffer pools with different size limits:
+                // - CMD_COMPLETE (0x0E), CMD_STATUS (0x0F): hci_cmd_pool (larger, ~255 bytes)
+                // - Other events: hci_rx_pool (CONFIG_BT_BUF_EVT_RX_SIZE = 68)
+                bool valid_event = false;
+                bool is_cmd_event = false;
                 if (evt_code == 0x0E) {
                     hci_rx_evt_cmd_complete++;
+                    valid_event = true;
+                    is_cmd_event = true;
                 } else if (evt_code == 0x0F) {
                     hci_rx_evt_cmd_status++;
+                    valid_event = true;
+                    is_cmd_event = true;
                 } else if (evt_code == 0x3E) {
                     hci_rx_evt_le_meta++;
+                    valid_event = true;
                     // Check LE subevent code (at pkt_data[2] after evt_code and length)
                     if (pkt_len >= 3 && pkt_data[2] == 0x02) {
                         hci_rx_evt_le_adv_report++;
                     }
-                } else {
+                } else if (evt_code == 0x05 || evt_code == 0x08 ||
+                           evt_code == 0x13 || evt_code == 0x1A ||
+                           evt_code == 0x04 || evt_code == 0x03) {
+                    // Other valid events
                     hci_rx_evt_other++;
+                    valid_event = true;
                 }
-                buf = bt_buf_get_evt(pkt_data[0], false, K_NO_WAIT);
+                // Skip unknown event codes - likely garbage
+                if (!valid_event) {
+                    hci_rx_rejected_event++;
+                    return;
+                }
+
+                // Check packet fits in buffer pool
+                // CMD_COMPLETE/CMD_STATUS use hci_cmd_pool (255 bytes)
+                // Other events use hci_rx_pool (CONFIG_BT_BUF_EVT_RX_SIZE = 68)
+                uint32_t max_evt_size = is_cmd_event ? 255 : 68;
+                if (pkt_len > max_evt_size) {
+                    hci_rx_rejected_oversize++;
+                    return;
+                }
+
+                buf = bt_buf_get_evt(pkt_data[0], false, K_MSEC(50));
             }
             break;
         case BT_HCI_H4_ACL:
+            // ACL data: handle(2) + length(2) + data
+            if (pkt_len < 4) {
+                hci_rx_rejected_acl++;
+                return;  // Too short
+            }
+            // Check declared length matches actual
+            uint16_t acl_len = pkt_data[2] | (pkt_data[3] << 8);
+            if (acl_len + 4 != pkt_len) {
+                hci_rx_rejected_acl++;
+                return;  // Length mismatch
+            }
+            // Check fits in buffer (CONFIG_BT_BUF_ACL_RX_SIZE = 27)
+            if (pkt_len > 27 + 4) {  // 27 data + 4 header
+                hci_rx_rejected_acl++;
+                return;  // Oversized
+            }
             hci_rx_acl++;
-            buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_NO_WAIT);
+            buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_MSEC(50));
             break;
         default:
-            // Unknown packet type - silently ignore
+            // Unknown packet type - silently ignore (catches garbage H4 types)
+            hci_rx_rejected_type++;
             return;
     }
 
     if (buf == NULL) {
         // Don't use mp_printf here - HCI RX task doesn't hold GIL
         // Just silently drop the packet
+        hci_rx_buf_failed++;
         return;
     }
 
@@ -276,8 +356,8 @@ static void hci_rx_task_func(void *arg) {
             }
         }
 
-        // Yield to other tasks - 1ms poll interval
-        vTaskDelay(pdMS_TO_TICKS(1));
+        // Yield to other tasks - 10ms poll interval (was 1ms, increased to reduce SPI activity)
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     debug_printf_hci_task("HCI RX task exiting\n");
@@ -386,6 +466,11 @@ void mp_bluetooth_zephyr_hci_rx_task_debug(uint32_t *polls, uint32_t *packets) {
     }
 }
 
+// Get HCI RX queue dropped counter
+uint32_t mp_bluetooth_zephyr_hci_rx_queue_dropped(void) {
+    return hci_rx_queue_dropped;
+}
+
 #else // !MICROPY_PY_THREAD
 
 // Stubs for non-FreeRTOS builds
@@ -397,6 +482,10 @@ void mp_bluetooth_zephyr_hci_rx_task_stop(void) {
 
 bool mp_bluetooth_zephyr_hci_rx_task_active(void) {
     return false;
+}
+
+uint32_t mp_bluetooth_zephyr_hci_rx_queue_dropped(void) {
+    return 0;
 }
 
 #endif // MICROPY_PY_THREAD
@@ -433,50 +522,15 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
     }
     #endif
 
-    // Read from CYW43 via shared SPI bus
+    // Fallback: Read directly from CYW43 via shared SPI bus
+    // This path is only used when HCI RX task is not active
     extern int cyw43_bluetooth_hci_read(uint8_t *buf, uint32_t max_size, uint32_t *len);
     uint32_t len = 0;
     int ret = cyw43_bluetooth_hci_read(hci_rx_buffer, sizeof(hci_rx_buffer), &len);
 
-    if (ret != 0 || len <= CYW43_HCI_HEADER_SIZE) {
-        return; // No data or error
-    }
-
-    // Extract packet type from CYW43 header (byte 3)
-    uint8_t pkt_type = hci_rx_buffer[3];
-    uint8_t *pkt_data = &hci_rx_buffer[CYW43_HCI_HEADER_SIZE];
-    uint32_t pkt_len = len - CYW43_HCI_HEADER_SIZE;
-
-    // Allocate Zephyr net_buf based on packet type
-    struct net_buf *buf = NULL;
-
-    switch (pkt_type) {
-        case BT_HCI_H4_EVT:
-            if (pkt_len >= 2) {
-                buf = bt_buf_get_evt(pkt_data[0], false, K_NO_WAIT);
-            }
-            break;
-        case BT_HCI_H4_ACL:
-            buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_NO_WAIT);
-            break;
-        default:
-            error_printf("Unknown HCI packet type: 0x%02x\n", pkt_type);
-            return;
-    }
-
-    if (!buf) {
-        error_printf("Failed to allocate buffer for HCI packet\n");
-        return;
-    }
-
-    // Copy packet data to net_buf
-    net_buf_add_mem(buf, pkt_data, pkt_len);
-
-    // Pass buffer to Zephyr BLE stack
-    int recv_ret = recv_cb(hci_dev, buf);
-    if (recv_ret < 0) {
-        error_printf("recv_cb failed: %d\n", recv_ret);
-        net_buf_unref(buf);
+    if (ret == 0 && len > CYW43_HCI_HEADER_SIZE) {
+        // Use process_hci_rx_packet for consistent validation
+        process_hci_rx_packet(hci_rx_buffer, len);
     }
 }
 
@@ -725,12 +779,20 @@ void mp_bluetooth_zephyr_poll_uart(void) {
     // This is critical for timely command credit return
     #if MICROPY_PY_THREAD
     mp_bluetooth_zephyr_process_hci_queue();
+
+    // If HCI RX task is running, it handles all packet reading from CYW43.
+    // We only process the queue here to avoid race condition.
+    if (hci_rx_task_running) {
+        poll_uart_in_progress = false;
+        return;
+    }
     #endif
 
     poll_uart_cyw43_calls++;
 
     // Read ALL available HCI packets from CYW43 (like BTstack does)
     // Loop until no more data available
+    // NOTE: This path is only used when HCI RX task is NOT running
     extern int cyw43_bluetooth_hci_read(uint8_t *buf, uint32_t max_size, uint32_t *len);
     bool has_work;
     do {
@@ -741,31 +803,8 @@ void mp_bluetooth_zephyr_poll_uart(void) {
             poll_uart_hci_reads++;  // Track successful HCI reads
             has_work = true;
 
-            // Extract packet type from CYW43 header (byte 3)
-            uint8_t pkt_type = hci_rx_buffer[3];
-            uint8_t *pkt_data = &hci_rx_buffer[CYW43_HCI_HEADER_SIZE];
-            uint32_t pkt_len = len - CYW43_HCI_HEADER_SIZE;
-
-            // Allocate Zephyr net_buf based on packet type
-            struct net_buf *buf = NULL;
-
-            switch (pkt_type) {
-                case BT_HCI_H4_EVT:
-                    if (pkt_len >= 2) {
-                        buf = bt_buf_get_evt(pkt_data[0], false, K_NO_WAIT);
-                    }
-                    break;
-                case BT_HCI_H4_ACL:
-                    buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_NO_WAIT);
-                    break;
-                default:
-                    break;
-            }
-
-            if (buf != NULL) {
-                net_buf_add_mem(buf, pkt_data, pkt_len);
-                recv_cb(hci_dev, buf);
-            }
+            // Use process_hci_rx_packet for consistent validation
+            process_hci_rx_packet(hci_rx_buffer, len);
         } else {
             has_work = false;
         }

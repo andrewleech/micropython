@@ -112,6 +112,15 @@ NORETURN void k_panic(void) {
     extern void mp_bluetooth_zephyr_hci_rx_task_debug(uint32_t *polls, uint32_t *packets);
     extern uint32_t cyw43_debug_get_gpio_irq_count(void);
     extern uint32_t cyw43_debug_get_post_poll_count(void);
+    // HCI RX validation counters
+    extern volatile uint32_t hci_rx_total_processed;
+    extern volatile uint32_t hci_rx_rejected_len;
+    extern volatile uint32_t hci_rx_rejected_param_len;
+    extern volatile uint32_t hci_rx_rejected_oversize;
+    extern volatile uint32_t hci_rx_rejected_event;
+    extern volatile uint32_t hci_rx_rejected_acl;
+    extern volatile uint32_t hci_rx_rejected_type;
+    extern volatile uint32_t hci_rx_buf_failed;
 
     // Get ncmd_sem count from bt_dev structure
     extern struct bt_dev bt_dev;
@@ -141,6 +150,12 @@ NORETURN void k_panic(void) {
     uint32_t queue_dropped = mp_bluetooth_zephyr_hci_rx_queue_dropped();
     mp_printf(&mp_plat_print, "HCI RX task: polls=%lu packets=%lu queue_dropped=%lu\n",
            (unsigned long)rx_task_polls, (unsigned long)rx_task_packets, (unsigned long)queue_dropped);
+    mp_printf(&mp_plat_print, "HCI RX: total=%lu rejected: len=%lu param=%lu size=%lu evt=%lu acl=%lu type=%lu buf=%lu\n",
+           (unsigned long)hci_rx_total_processed,
+           (unsigned long)hci_rx_rejected_len, (unsigned long)hci_rx_rejected_param_len,
+           (unsigned long)hci_rx_rejected_oversize, (unsigned long)hci_rx_rejected_event,
+           (unsigned long)hci_rx_rejected_acl, (unsigned long)hci_rx_rejected_type,
+           (unsigned long)hci_rx_buf_failed);
     mp_printf(&mp_plat_print, "==========================\n");
     #endif
 
