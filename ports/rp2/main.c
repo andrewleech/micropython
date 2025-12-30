@@ -74,6 +74,7 @@
 #if MICROPY_PY_THREAD
 #include "FreeRTOS.h"
 #include "task.h"
+#include "extmod/freertos/mp_freertos_hal.h"
 #endif
 
 extern uint8_t __StackTop, __StackBottom;
@@ -309,6 +310,9 @@ soft_reset:
     // Initialize FreeRTOS threading backend with main task stack for GC scanning.
     // This must be called first as it sets up Thread Local Storage.
     mp_thread_init(main_task_stack, sizeof(main_task_stack));
+
+    // Initialize FreeRTOS HAL (stores main task handle for scheduler notifications).
+    mp_freertos_hal_init();
 
     // Initialize stack extents using the FreeRTOS task stack.
     // Must be after mp_thread_init() because MP_STATE_THREAD() requires TLS setup.

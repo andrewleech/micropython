@@ -158,6 +158,9 @@
 #if MICROPY_PY_THREAD
 void mp_freertos_delay_ms(unsigned int ms);
 #define mp_hal_delay_ms mp_freertos_delay_ms
+// Scheduler hook - signal the Python thread when a callback is scheduled
+void mp_freertos_signal_sched_event(void);
+#define MICROPY_SCHED_HOOK_SCHEDULED mp_freertos_signal_sched_event()
 #endif
 
 // Recursive mutexes needed for PendSV on dual-core RP2040

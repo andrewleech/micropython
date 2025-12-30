@@ -32,13 +32,21 @@
 
 #include "py/obj.h"
 
-// FreeRTOS-aware delay functions
-void mp_freertos_delay_ms(mp_uint_t ms);
-void mp_freertos_delay_us(mp_uint_t us);
+// Initialize the FreeRTOS HAL. Must be called from the main Python task.
+void mp_freertos_hal_init(void);
 
-// Tick functions
+// Signal a scheduler event. Called from MICROPY_SCHED_HOOK_SCHEDULED.
+void mp_freertos_signal_sched_event(void);
+
+// FreeRTOS-aware delay (wakes on scheduler events)
+void mp_freertos_delay_ms(mp_uint_t ms);
+
+// Tick functions (see .c file for overflow warnings)
 mp_uint_t mp_freertos_ticks_ms(void);
 mp_uint_t mp_freertos_ticks_us(void);
+
+// Yield to scheduler
+void mp_freertos_yield(void);
 
 #endif // MICROPY_PY_THREAD
 
