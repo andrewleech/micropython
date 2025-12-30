@@ -555,15 +555,16 @@ int mp_bluetooth_init(void) {
         DEBUG_printf("HCI RX task started\n");
         #endif
 
-        // Allow USB CDC to settle after FreeRTOS task creation.
-        // Without this, the first Python print after BLE init may be corrupted
-        // due to timing interactions between the new FreeRTOS tasks and USB CDC.
-        mp_hal_delay_ms(50);
     } else {
         DEBUG_printf("BLE already ACTIVE (state=%d)\n", mp_bluetooth_zephyr_ble_state);
     }
 
     mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE;
+
+    // Start the HCI polling cycle by triggering the first poll
+    // This must be done after state is ACTIVE so mp_bluetooth_hci_poll() will run
+    extern void mp_bluetooth_hci_poll_now(void);
+    mp_bluetooth_hci_poll_now();
 
     DEBUG_printf("mp_bluetooth_init: ready\n");
 
