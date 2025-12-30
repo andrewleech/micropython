@@ -446,16 +446,18 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_BUF_ACL_RX_SIZE 27
 #define CONFIG_BT_BUF_ACL_RX_COUNT_EXTRA CONFIG_BT_MAX_CONN
 
-// Event buffers - Increased for scanning workload
+// Event buffers - Increased for scanning workload and connectable advertising
 // Advertising reports are event packets, need larger pool to handle bursts
-#define CONFIG_BT_BUF_EVT_RX_COUNT 32  // Increased from 16 to 32 for scanning
+// Connection-related events also need buffering during connectable advertising
+#define CONFIG_BT_BUF_EVT_RX_COUNT 64  // Increased from 32 to 64 for connectable advertising
 #define CONFIG_BT_BUF_EVT_RX_SIZE 68
-#define CONFIG_BT_BUF_EVT_DISCARDABLE_COUNT 8  // Increased from 3 to 8 for ad reports
+#define CONFIG_BT_BUF_EVT_DISCARDABLE_COUNT 16  // Increased from 8 to 16 for ad reports
 #define CONFIG_BT_BUF_EVT_DISCARDABLE_SIZE 43
 
-// Command buffers
-#define CONFIG_BT_BUF_CMD_TX_COUNT 4
-#define CONFIG_BT_BUF_CMD_TX_SIZE 68
+// Command buffers - Increased for connectable advertising command flow
+// Size must be 255 to accommodate HCI command responses (e.g., Read Local Supported Commands = 69 bytes)
+#define CONFIG_BT_BUF_CMD_TX_COUNT 8  // Increased from 4 to 8
+#define CONFIG_BT_BUF_CMD_TX_SIZE 255
 
 // Flow control (disabled - STM32WB controller doesn't support HOST_BUFFER_SIZE command)
 // Note: Must use #undef, not define to 0, because Zephyr uses #if defined() checks
