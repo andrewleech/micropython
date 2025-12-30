@@ -50,17 +50,18 @@ void mp_bluetooth_zephyr_poll_deinit(void) {
 }
 
 void mp_bluetooth_zephyr_poll(void) {
+    // Process HCI UART first (if implemented)
+    // This receives incoming HCI packets from controller and queues rx_work
+    // MUST be done before work processing so callbacks fire in the same poll cycle
+    mp_bluetooth_zephyr_hci_uart_process();
+
     // Process timers (k_timer, k_work_delayable)
     // This fires expired timers and may enqueue work items
     mp_bluetooth_zephyr_timer_process();
 
     // Process work queues (k_work)
-    // This executes pending work handlers
+    // This executes pending work handlers including rx_work from HCI events
     mp_bluetooth_zephyr_work_process();
-
-    // Process HCI UART (if implemented)
-    // This handles incoming HCI packets from controller
-    mp_bluetooth_zephyr_hci_uart_process();
 
     // Note: Rescheduling is handled by port's mp_bluetooth_hci_poll_in_ms()
     // Port should call mp_bluetooth_hci_poll_in_ms(128) after this function

@@ -243,7 +243,7 @@ static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len) {
                     return;
                 }
 
-                buf = bt_buf_get_evt(pkt_data[0], false, K_MSEC(50));
+                buf = bt_buf_get_evt(pkt_data[0], false, K_FOREVER);
             }
             break;
         case BT_HCI_H4_ACL:
@@ -264,7 +264,7 @@ static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len) {
                 return;  // Oversized
             }
             hci_rx_acl++;
-            buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_MSEC(50));
+            buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_FOREVER);
             break;
         default:
             // Unknown packet type - silently ignore (catches garbage H4 types)
@@ -315,9 +315,38 @@ static bool hci_rx_queue_packet(uint8_t *data, uint32_t len) {
     return true;
 }
 
+// Check if Zephyr BT buffer pools have free buffers available
+// Returns true if at least one buffer can be allocated without blocking
+static bool mp_bluetooth_zephyr_buffers_available(void) {
+    // Try to allocate a buffer with K_NO_WAIT to test availability
+    // If successful, immediately free it and return true
+    struct net_buf *buf = bt_buf_get_rx(BT_BUF_EVT, K_NO_WAIT);
+    if (buf) {
+        net_buf_unref(buf);
+        return true;
+    }
+    return false;
+}
+
 // Process all queued HCI packets - called from main task context
 void mp_bluetooth_zephyr_process_hci_queue(void) {
     while (hci_rx_queue_tail != hci_rx_queue_head) {
+        // Check buffer availability before processing
+        // If no buffers free, process work to release some
+        if (!mp_bluetooth_zephyr_buffers_available()) {
+            // Process pending Zephyr work items which may free buffers
+            extern void mp_bluetooth_zephyr_work_process(void);
+            mp_bluetooth_zephyr_work_process();
+
+            // Check again - if still no buffers, stop processing and let
+            // the next poll cycle handle the remaining queue
+            if (!mp_bluetooth_zephyr_buffers_available()) {
+                // This is unusual - buffer exhaustion shouldn't happen
+                // in normal operation. Return and retry on next poll.
+                return;
+            }
+        }
+
         uint8_t *pkt = hci_rx_queue[hci_rx_queue_tail];
         uint32_t len = hci_rx_queue_len[hci_rx_queue_tail];
 
@@ -524,6 +553,19 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
 
     // Fallback: Read directly from CYW43 via shared SPI bus
     // This path is only used when HCI RX task is not active
+
+    // Check buffer availability before reading HCI data
+    if (!mp_bluetooth_zephyr_buffers_available()) {
+        // No buffers - process work to free some
+        extern void mp_bluetooth_zephyr_work_process(void);
+        mp_bluetooth_zephyr_work_process();
+
+        // If still no buffers, skip this poll cycle
+        if (!mp_bluetooth_zephyr_buffers_available()) {
+            return;
+        }
+    }
+
     extern int cyw43_bluetooth_hci_read(uint8_t *buf, uint32_t max_size, uint32_t *len);
     uint32_t len = 0;
     int ret = cyw43_bluetooth_hci_read(hci_rx_buffer, sizeof(hci_rx_buffer), &len);
@@ -796,6 +838,19 @@ void mp_bluetooth_zephyr_poll_uart(void) {
     extern int cyw43_bluetooth_hci_read(uint8_t *buf, uint32_t max_size, uint32_t *len);
     bool has_work;
     do {
+        // Check buffer availability before reading more HCI data
+        // This prevents reading data we can't process
+        if (!mp_bluetooth_zephyr_buffers_available()) {
+            // No buffers - process work to free some
+            extern void mp_bluetooth_zephyr_work_process(void);
+            mp_bluetooth_zephyr_work_process();
+
+            // If still no buffers, stop reading and let next poll handle it
+            if (!mp_bluetooth_zephyr_buffers_available()) {
+                break;
+            }
+        }
+
         uint32_t len = 0;
         int ret = cyw43_bluetooth_hci_read(hci_rx_buffer, sizeof(hci_rx_buffer), &len);
 

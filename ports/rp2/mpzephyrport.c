@@ -63,4 +63,15 @@ void mp_bluetooth_zephyr_hci_uart_wfi(void) {
     mp_bluetooth_zephyr_poll_uart();
 }
 
+// Called by mp_bluetooth_zephyr_poll() to process HCI packets from the queue
+// This is the main path for delivering HCI events to the Zephyr stack during normal operation
+void mp_bluetooth_zephyr_hci_uart_process(void) {
+    // Process HCI packets queued by the HCI RX task
+    // This calls recv_cb (bt_recv) which queues rx_work for event processing
+    #if MICROPY_PY_THREAD
+    extern void mp_bluetooth_zephyr_process_hci_queue(void);
+    mp_bluetooth_zephyr_process_hci_queue();
+    #endif
+}
+
 #endif // MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR

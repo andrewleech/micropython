@@ -548,11 +548,17 @@ int mp_bluetooth_init(void) {
 
         // Start HCI RX task for continuous polling of incoming HCI data
         // This is required for BLE operations after init (scan, connect, etc.)
-        #if MICROPY_PY_THREAD
+        // TEMPORARILY DISABLED - causes hang during time.sleep() after gap_scan()
+        #if MICROPY_PY_THREAD && 0
         extern void mp_bluetooth_zephyr_hci_rx_task_start(void);
         mp_bluetooth_zephyr_hci_rx_task_start();
         DEBUG_printf("HCI RX task started\n");
         #endif
+
+        // Allow USB CDC to settle after FreeRTOS task creation.
+        // Without this, the first Python print after BLE init may be corrupted
+        // due to timing interactions between the new FreeRTOS tasks and USB CDC.
+        mp_hal_delay_ms(50);
     } else {
         DEBUG_printf("BLE already ACTIVE (state=%d)\n", mp_bluetooth_zephyr_ble_state);
     }
