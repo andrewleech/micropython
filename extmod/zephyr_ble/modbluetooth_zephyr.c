@@ -404,16 +404,8 @@ int mp_bluetooth_init(void) {
     // Only initialize the BLE stack if not already ACTIVE
     int current_state = mp_bluetooth_zephyr_ble_state;
     if (current_state != MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE) {
-        // Check if BLE was previously activated and then deactivated
-        // Zephyr's bt_enable() can only be called once per process lifetime
-        if (current_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_SUSPENDED) {
-            mp_raise_msg(&mp_type_RuntimeError,
-                MP_ERROR_TEXT("BLE reactivation not supported. "
-                "After ble.active(False), BLE cannot be reactivated. "
-                "Use ble.active(True) once per session and leave active."));
-        }
-
         // First-time initialization: port resources and controller
+        // Only do this when coming from OFF state, not when reinitializing from SUSPENDED
         if (current_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF) {
             // Initialize port-specific resources (soft timers, sched nodes, etc.)
             #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI
@@ -433,7 +425,13 @@ int mp_bluetooth_init(void) {
             #endif
 
             // Register connection callbacks (only on first init, not when reinitializing from SUSPENDED)
+            // Zephyr docs: callbacks persist across bt_disable()/bt_enable() cycles
             bt_conn_cb_register(&mp_bt_zephyr_conn_callbacks);
+
+            #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
+            // Register scan callback (only on first init)
+            bt_le_scan_cb_register(&mp_bluetooth_zephyr_gap_scan_cb_struct);
+            #endif
         }
 
         // Initialize Zephyr BLE host stack
@@ -457,6 +455,18 @@ int mp_bluetooth_init(void) {
         // Call bt_enable() with ready callback
         int ret = bt_enable(mp_bluetooth_zephyr_bt_ready_cb);
         DEBUG_printf("bt_enable returned %d\n", ret);
+
+        // Handle -EALREADY: stack is already enabled (reactivation from SUSPENDED)
+        // In this case, skip the init loop and just restart our tasks
+        if (ret == -EALREADY) {
+            DEBUG_printf("BLE stack already enabled (reactivation)\n");
+            mp_bluetooth_zephyr_bt_enable_result = 0;  // Mark as success
+            // Exit init phase since we're not going through the loop
+            extern void mp_bluetooth_zephyr_init_phase_exit(void);
+            mp_bluetooth_zephyr_init_phase_exit();
+            goto init_complete;
+        }
+
         if (ret) {
             return bt_err_to_errno(ret);
         }
@@ -533,6 +543,7 @@ int mp_bluetooth_init(void) {
             }
         }
 
+    init_complete:
         DEBUG_printf("BLE initialization successful!\n");
 
         // Start HCI RX task for continuous polling of incoming HCI data
@@ -545,11 +556,6 @@ int mp_bluetooth_init(void) {
     } else {
         DEBUG_printf("BLE already ACTIVE (state=%d)\n", mp_bluetooth_zephyr_ble_state);
     }
-
-    #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
-    // Register scan callback every time we activate (it was unregistered during deinit)
-    bt_le_scan_cb_register(&mp_bluetooth_zephyr_gap_scan_cb_struct);
-    #endif
 
     mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE;
 
@@ -565,24 +571,15 @@ int mp_bluetooth_deinit(void) {
         return 0;
     }
 
-    // Stop the HCI RX task first (stop receiving new HCI packets)
-    mp_bluetooth_zephyr_hci_rx_task_stop();
-
-    // Stop the dedicated BLE work queue thread (FreeRTOS builds only)
-    // Must be done before other cleanup to prevent work from being processed during teardown
-    mp_bluetooth_zephyr_work_thread_stop();
-
-    // Set state to SUSPENDED first to prevent disconnect callbacks from unreffing connections
-    // that will be unreffed by Zephyr's deferred_work (triggered by advertise_stop/scan_stop).
-    //
-    // LIMITATION: Reinit from SUSPENDED is not supported. Zephyr's bt_enable() can only be
-    // called once (uses atomic CAS on bt_dev.enabled). Since we don't call bt_disable() here
-    // (matching vanilla's approach - see ports/zephyr/modbluetooth_zephyr.c:331), the stack
-    // remains enabled and bt_enable() will return -EALREADY on subsequent calls.
-    // BLE can only be initialized once per process lifetime.
+    // Set state to SUSPENDED to prevent callbacks during shutdown
     mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_SUSPENDED;
 
+    // Stop advertising/scanning before bt_disable()
     mp_bluetooth_gap_advertise_stop();
+
+    #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
+    mp_bluetooth_gap_scan_stop();
+    #endif
 
     #if CONFIG_BT_GATT_DYNAMIC_DB
     for (size_t i = 0; i < MP_STATE_PORT(bluetooth_zephyr_root_pointers)->n_services; ++i) {
@@ -591,10 +588,14 @@ int mp_bluetooth_deinit(void) {
     }
     #endif
 
-    #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
-    mp_bluetooth_gap_scan_stop();
-    bt_le_scan_cb_unregister(&mp_bluetooth_zephyr_gap_scan_cb_struct);
-    #endif
+    // Note: We do NOT call bt_disable() here. Like the vanilla Zephyr port,
+    // we leave the BLE stack enabled. On reactivation, bt_enable() returns
+    // -EALREADY which we handle as success (stack is already running).
+    // This avoids complex HCI shutdown/restart issues with the CYW43 controller.
+
+    // Stop HCI RX task and work thread
+    mp_bluetooth_zephyr_hci_rx_task_stop();
+    mp_bluetooth_zephyr_work_thread_stop();
 
     MP_STATE_PORT(bluetooth_zephyr_root_pointers) = NULL;
     mp_bt_zephyr_next_conn = NULL;
