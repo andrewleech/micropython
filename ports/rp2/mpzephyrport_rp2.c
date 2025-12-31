@@ -522,6 +522,7 @@ uint32_t mp_bluetooth_zephyr_hci_rx_queue_dropped(void) {
 
 // Forward declarations
 static void mp_zephyr_hci_poll_now(void);
+void mp_bluetooth_zephyr_port_poll_in_ms(uint32_t ms);
 
 // This is called by soft_timer and executes at PendSV level
 static void mp_zephyr_hci_soft_timer_callback(soft_timer_entry_t *self) {
@@ -560,8 +561,9 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
         extern void mp_bluetooth_zephyr_work_process(void);
         mp_bluetooth_zephyr_work_process();
 
-        // If still no buffers, skip this poll cycle
+        // If still no buffers, skip this poll cycle but reschedule
         if (!mp_bluetooth_zephyr_buffers_available()) {
+            mp_bluetooth_zephyr_port_poll_in_ms(10);
             return;
         }
     }
@@ -574,6 +576,10 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
         // Use process_hci_rx_packet for consistent validation
         process_hci_rx_packet(hci_rx_buffer, len);
     }
+
+    // Reschedule soft timer for continuous HCI polling (10ms interval)
+    // This is critical for receiving scan results and other HCI events
+    mp_bluetooth_zephyr_port_poll_in_ms(10);
 }
 
 static void mp_zephyr_hci_poll_now(void) {
@@ -801,6 +807,40 @@ volatile uint32_t poll_uart_skipped_recursion = 0;
 volatile uint32_t poll_uart_skipped_no_cb = 0;
 volatile uint32_t poll_uart_skipped_task = 0;
 volatile uint32_t poll_uart_cyw43_calls = 0;
+
+// Deinitialize Zephyr port - called during ble.active(False)
+void mp_bluetooth_zephyr_port_deinit(void) {
+    // Remove soft timer (may already be removed by hci_cyw43_close, but safe to call)
+    soft_timer_remove(&mp_zephyr_hci_soft_timer);
+
+    // DO NOT reset bt_loaded - the CYW43 BT firmware should stay loaded.
+    // bt_disable() sends HCI_Reset which resets the controller state.
+    // On reinit, bt_enable() will send another HCI_Reset to the already-loaded firmware.
+    // Re-downloading firmware to an already-running controller corrupts its state.
+
+    // Reset the HOST_CTRL register cache in the shared bus driver.
+    // This is critical because cybt_reg_read() returns cached values for HOST_CTRL_REG_ADDR.
+    // After bt_disable(), the BT controller state may have changed but the cache is stale.
+    // This affects wake signaling in cybt_set_bt_awake() used by cybt_bus_request().
+    //
+    // Must reset to SW_RDY (1 << 24) not 0, because:
+    // - btbus_init sets SW_RDY to tell firmware host is ready
+    // - cybt_toggle_bt_intr() XORs DATA_VALID based on cached value
+    // - If cache is 0, the toggle will clear SW_RDY which breaks firmware comms
+    extern volatile uint32_t host_ctrl_cache_reg;
+    host_ctrl_cache_reg = (1 << 24);  // BTSDIO_REG_SW_RDY_BITMASK
+
+    // Reset state variables for clean re-initialization
+    poll_uart_in_progress = false;
+    poll_uart_count = 0;
+    poll_uart_hci_reads = 0;
+    hci_tx_count = 0;
+    hci_tx_cmd_count = 0;
+    poll_uart_skipped_recursion = 0;
+    poll_uart_skipped_no_cb = 0;
+    poll_uart_skipped_task = 0;
+    poll_uart_cyw43_calls = 0;
+}
 
 void mp_bluetooth_zephyr_poll_uart(void) {
     poll_uart_count++;

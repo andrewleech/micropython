@@ -80,6 +80,10 @@ void mp_freertos_signal_sched_event(void) {
     }
 }
 
+// Poll interval for BLE processing during delays (in ticks).
+// 10ms provides responsive BLE event handling without excessive CPU usage.
+#define MP_FREERTOS_BLE_POLL_TICKS pdMS_TO_TICKS(10)
+
 // FreeRTOS-aware millisecond delay.
 // Releases the GIL during the delay to allow other threads to run.
 // Wakes immediately when callbacks are scheduled via mp_sched_schedule().
@@ -115,6 +119,15 @@ void mp_freertos_delay_ms(mp_uint_t ms) {
         }
         TickType_t remaining = target_ticks - elapsed;
 
+        // Limit wait time to allow periodic BLE polling.
+        // Soft timers don't fire during ulTaskNotifyTake(), so we need to
+        // explicitly poll the Zephyr BLE work queue during long delays.
+        #if MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR
+        if (remaining > MP_FREERTOS_BLE_POLL_TICKS) {
+            remaining = MP_FREERTOS_BLE_POLL_TICKS;
+        }
+        #endif
+
         // Release GIL and wait for notification or timeout
         MP_THREAD_GIL_EXIT();
         ulTaskNotifyTake(pdTRUE, remaining);
@@ -122,6 +135,13 @@ void mp_freertos_delay_ms(mp_uint_t ms) {
 
         // Process callbacks after waking (notification or timeout)
         mp_handle_pending(true);
+
+        // Poll Zephyr BLE work queue to process HCI events during delay.
+        // This is critical because soft timers don't fire during ulTaskNotifyTake().
+        #if MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR
+        extern void mp_bluetooth_zephyr_poll(void);
+        mp_bluetooth_zephyr_poll();
+        #endif
     }
 }
 

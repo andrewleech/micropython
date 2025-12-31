@@ -49,10 +49,11 @@ mpremote connect /dev/ttyACM* repl
   - Issue #6: Connection callbacks not firing (under investigation)
 
 ### RP2 Pico W (RP2040)
-- **FreeRTOS Integration**: ✓ Active development
-  - ✓ Device boots successfully
-  - ✓ BLE object creation works
-  - ⚠ BLE initialization needs verification
+- **Zephyr BLE**: Partially working
+  - ✓ Device boots, BLE init works
+  - ✓ Scanning works (36-48 devices per 1.5s scan)
+  - ✓ Advertising starts successfully
+  - ✗ Connection callbacks not firing (Issue #6)
   - See: `docs/FREERTOS_INTEGRATION.md`
 
 ### RP2 Pico 2 W (RP2350)
@@ -82,14 +83,73 @@ FreeRTOS Scheduler
 ## Test Hardware
 - **RP2**: Raspberry Pi Pico W (RP2040), Pico 2 W (RP2350) with CYW43 BT controller
 - **STM32**: NUCLEO_WB55 (STM32WB55RGVx) with internal BT controller via IPCC
+- **PYBD**: PYBD-SF6W with internal BT controller (NimBLE)
+
+---
+
+## Running BLE Multitests
+
+BLE multitests require two devices communicating over Bluetooth. The test framework runs Python scripts on both devices simultaneously and compares output.
+
+### Finding Serial Ports
+
+Always use `/dev/serial/by-id/` paths to reliably identify devices. These paths are stable across reboots and USB re-enumeration:
+
+```bash
+# List all connected serial devices
+ls -la /dev/serial/by-id/
+
+# Common patterns:
+# Pico W:  usb-MicroPython_Board_in_FS_mode_<serial>-if00
+# PYBD:    usb-MicroPython_Pyboard_Virtual_Comm_Port_in_FS_Mode_<serial>-if01
+# STLink:  usb-STMicroelectronics_STM32_STLink_<serial>-if02
+```
+
+### Running Tests
+
+```bash
+# Run a single BLE multitest (Pico W as instance0, PYBD as instance1)
+./tests/run-multitests.py \
+    -t /dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6614c311b7e6f35-if00 \
+    -t /dev/serial/by-id/usb-MicroPython_Pyboard_Virtual_Comm_Port_in_FS_Mode_3254335D3037-if01 \
+    tests/multi_bluetooth/ble_gap_advertise.py
+
+# Run all BLE multitests
+./tests/run-multitests.py \
+    -t /dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6614c311b7e6f35-if00 \
+    -t /dev/serial/by-id/usb-MicroPython_Pyboard_Virtual_Comm_Port_in_FS_Mode_3254335D3037-if01 \
+    tests/multi_bluetooth/
+```
+
+### Test Instance Roles
+
+- **instance0** (`-t` first): Usually the peripheral/advertiser (device under test)
+- **instance1** (`-t` second): Usually the central/scanner (reference device with known-working BLE)
+
+For Zephyr BLE testing, use Pico W (Zephyr) as instance0 and PYBD (NimBLE) as instance1 to validate Zephyr against a known-working stack.
+
+### Key BLE Multitests
+
+| Test | Description |
+|------|-------------|
+| `ble_gap_advertise.py` | Basic advertising start/stop |
+| `ble_gap_connect.py` | Connection establishment and disconnect |
+| `ble_characteristic.py` | GATT read/write/notify |
 
 ---
 
 ## Known Issues
 
-### Issue #6: Connection Callbacks Not Invoked (STM32WB55 Zephyr)
-- Connection succeeds but peripheral never receives callback
+### Issue #6: Connection Callbacks Not Invoked (Zephyr BLE)
+- **STM32WB55**: Connection callback fires but spurious disconnect follows immediately
+- **RP2 Pico W**: Connection callback never fires (peripheral times out waiting)
 - See: `ISSUE_6_FINAL_ANALYSIS.md`, `ISSUE_6_ROOT_CAUSE_SUMMARY.md`
+- Status: Still open - scanning works, connections do not
+
+### Issue #9: HCI RX Task Causes Hangs (RP2 Pico W)
+- HCI RX task disabled; causes hangs during `gap_scan(None)` or `ble.active(False)`
+- Polling via soft timer works reliably (36-48 devices per 1.5s scan)
+- Root cause: Race condition between HCI RX task and main task during cleanup
 
 ---
 

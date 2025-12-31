@@ -29,7 +29,7 @@
 #include "py/mpprint.h"
 #include "pendsv.h"
 
-#if MICROPY_PY_THREAD
+#if MICROPY_PY_THREAD && MICROPY_PY_LWIP
 #include "FreeRTOS.h"
 #include "semphr.h"
 
@@ -52,7 +52,7 @@ static void cyw43_smp_mutex_init(void) {
         taskEXIT_CRITICAL();
     }
 }
-#endif // MICROPY_PY_THREAD
+#endif // MICROPY_PY_THREAD && MICROPY_PY_LWIP
 
 #if MICROPY_PY_LWIP
 

@@ -546,10 +546,9 @@ int mp_bluetooth_init(void) {
     init_complete:
         DEBUG_printf("BLE initialization successful!\n");
 
-        // Start HCI RX task for continuous polling of incoming HCI data
-        // This is required for BLE operations after init (scan, connect, etc.)
-        // TEMPORARILY DISABLED - causes hang during time.sleep() after gap_scan()
-        #if MICROPY_PY_THREAD && 0
+        // HCI RX task disabled - causes hangs during scan stop
+        // TODO: Investigate why gap_scan(None) or active(False) hangs with HCI RX task
+        #if 0 && MICROPY_PY_THREAD
         extern void mp_bluetooth_zephyr_hci_rx_task_start(void);
         mp_bluetooth_zephyr_hci_rx_task_start();
         DEBUG_printf("HCI RX task started\n");
@@ -595,17 +594,33 @@ int mp_bluetooth_deinit(void) {
     }
     #endif
 
-    // Note: We do NOT call bt_disable() here. Like the vanilla Zephyr port,
-    // we leave the BLE stack enabled. On reactivation, bt_enable() returns
-    // -EALREADY which we handle as success (stack is already running).
-    // This avoids complex HCI shutdown/restart issues with the CYW43 controller.
+    // Call bt_disable() to fully reset the Zephyr BLE stack.
+    // This ensures clean re-initialization on next ble.active(True).
+    // Without this, stale work items and internal state cause issues.
+    // This must be done BEFORE stopping HCI tasks since bt_disable()
+    // sends HCI reset commands that require HCI transport to be working.
+    int ret = bt_disable();
+    DEBUG_printf("bt_disable returned %d\n", ret);
+    (void)ret;  // Unused when DEBUG_printf is no-op
 
-    // Stop HCI RX task and work thread
+    // Now stop HCI RX task and work thread
     mp_bluetooth_zephyr_hci_rx_task_stop();
     mp_bluetooth_zephyr_work_thread_stop();
 
+    // Deinit port-specific resources (CYW43 cleanup, soft timers, etc.)
+    // This must be done after bt_disable() completes.
+    #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI
+    extern void mp_bluetooth_zephyr_port_deinit(void);
+    mp_bluetooth_zephyr_port_deinit();
+    #endif
+
     MP_STATE_PORT(bluetooth_zephyr_root_pointers) = NULL;
     mp_bt_zephyr_next_conn = NULL;
+
+    // Set state to OFF so next init does full re-initialization
+    // (including controller init and callback registration)
+    mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF;
+
     return 0;
 }
 
