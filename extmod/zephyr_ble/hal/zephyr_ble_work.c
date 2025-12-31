@@ -789,3 +789,44 @@ void mp_bluetooth_zephyr_work_thread_stop(void) {
 }
 
 #endif // MICROPY_PY_THREAD
+
+// Drain any pending work items before shutdown
+// Called from mp_bluetooth_deinit() before stopping work thread
+// This ensures connection events and other pending work is processed before cleanup
+bool mp_bluetooth_zephyr_work_drain(void) {
+    bool any_work = false;
+    mp_uint_t timeout_start = mp_hal_ticks_ms();
+
+    DEBUG_WORK_printf("work_drain: starting\n");
+
+    // Process work for up to 100ms
+    while (mp_hal_ticks_ms() - timeout_start < 100) {
+        bool found_work = false;
+
+        // Check if any work queue has pending items
+        for (struct k_work_q *q = global_work_q; q != NULL; q = q->nextq) {
+            // Skip initialization work queue
+            if (q == &k_init_work_q) {
+                continue;
+            }
+            if (q->head != NULL) {
+                found_work = true;
+                break;
+            }
+        }
+
+        if (!found_work) {
+            break;  // No more pending work
+        }
+
+        // Process work (this will handle one batch of items)
+        mp_bluetooth_zephyr_work_process();
+        any_work = true;
+
+        // Brief yield to allow other work to be submitted
+        mp_event_wait_ms(1);
+    }
+
+    DEBUG_WORK_printf("work_drain: done, processed=%d\n", any_work);
+    return any_work;
+}

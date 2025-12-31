@@ -810,7 +810,10 @@ volatile uint32_t poll_uart_cyw43_calls = 0;
 
 // Deinitialize Zephyr port - called during ble.active(False)
 void mp_bluetooth_zephyr_port_deinit(void) {
-    // Remove soft timer (may already be removed by hci_cyw43_close, but safe to call)
+    // Remove soft timer to stop HCI polling during shutdown
+    // Note: recv_cb is NOT cleared - since we don't call bt_disable(),
+    // the HCI transport remains valid and recv_cb will be used on reinit
+    // when bt_enable() returns -EALREADY (stack already running)
     soft_timer_remove(&mp_zephyr_hci_soft_timer);
 
     // DO NOT reset bt_loaded - the CYW43 BT firmware should stay loaded.

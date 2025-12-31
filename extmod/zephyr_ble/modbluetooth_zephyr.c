@@ -144,6 +144,9 @@ static int mp_bluetooth_zephyr_ble_state;
 // BLE initialization completion tracking (-1 = pending, 0 = success, >0 = error code)
 static volatile int mp_bluetooth_zephyr_bt_enable_result = -1;
 
+// Track if Zephyr callbacks are registered (persists across bt_enable/bt_disable cycles)
+static bool mp_bt_zephyr_callbacks_registered = false;
+
 // Timeout for BLE initialization (milliseconds)
 #define ZEPHYR_BLE_STARTUP_TIMEOUT 5000
 
@@ -424,14 +427,19 @@ int mp_bluetooth_init(void) {
             }
             #endif
 
-            // Register connection callbacks (only on first init, not when reinitializing from SUSPENDED)
-            // Zephyr docs: callbacks persist across bt_disable()/bt_enable() cycles
-            bt_conn_cb_register(&mp_bt_zephyr_conn_callbacks);
+            // Register Zephyr callbacks only once per session
+            // Callbacks persist across bt_disable()/bt_enable() cycles, so we track
+            // registration separately from BLE state to avoid duplicate registration
+            if (!mp_bt_zephyr_callbacks_registered) {
+                bt_conn_cb_register(&mp_bt_zephyr_conn_callbacks);
 
-            #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
-            // Register scan callback (only on first init)
-            bt_le_scan_cb_register(&mp_bluetooth_zephyr_gap_scan_cb_struct);
-            #endif
+                #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
+                bt_le_scan_cb_register(&mp_bluetooth_zephyr_gap_scan_cb_struct);
+                #endif
+
+                mp_bt_zephyr_callbacks_registered = true;
+                DEBUG_printf("Zephyr callbacks registered\n");
+            }
         }
 
         // Initialize Zephyr BLE host stack
@@ -594,14 +602,19 @@ int mp_bluetooth_deinit(void) {
     }
     #endif
 
-    // Call bt_disable() to fully reset the Zephyr BLE stack.
-    // This ensures clean re-initialization on next ble.active(True).
-    // Without this, stale work items and internal state cause issues.
-    // This must be done BEFORE stopping HCI tasks since bt_disable()
-    // sends HCI reset commands that require HCI transport to be working.
-    int ret = bt_disable();
-    DEBUG_printf("bt_disable returned %d\n", ret);
-    (void)ret;  // Unused when DEBUG_printf is no-op
+    // TEMPORARILY DISABLED: bt_disable() may cause issues with CYW43 reinit
+    // Note: We do NOT call bt_disable() here. Like the vanilla Zephyr port,
+    // we leave the BLE stack enabled. On reactivation, bt_enable() returns
+    // -EALREADY which we handle as success (stack is already running).
+    // This avoids complex HCI shutdown/restart issues with the CYW43 controller.
+    // int ret = bt_disable();
+    // DEBUG_printf("bt_disable returned %d\n", ret);
+    // (void)ret;  // Unused when DEBUG_printf is no-op
+
+    // Drain any pending work items before stopping threads
+    // This ensures connection events and other callbacks are processed
+    extern bool mp_bluetooth_zephyr_work_drain(void);
+    mp_bluetooth_zephyr_work_drain();
 
     // Now stop HCI RX task and work thread
     mp_bluetooth_zephyr_hci_rx_task_stop();

@@ -210,6 +210,11 @@ void mp_bluetooth_zephyr_work_debug_stats(void);
 void mp_bluetooth_zephyr_work_thread_start(void);
 void mp_bluetooth_zephyr_work_thread_stop(void);
 
+// Drain any pending work items before shutdown
+// Called from mp_bluetooth_deinit() before stopping work thread
+// Returns true if any work was processed
+bool mp_bluetooth_zephyr_work_drain(void);
+
 // Get delayable work from work (for internal use)
 // work is embedded in the delayable work structure
 static inline struct k_work_delayable *k_work_delayable_from_work(struct k_work *work) {
