@@ -462,7 +462,6 @@ int mp_bluetooth_init(void) {
 
         // Call bt_enable() with ready callback
         int ret = bt_enable(mp_bluetooth_zephyr_bt_ready_cb);
-        DEBUG_printf("bt_enable returned %d\n", ret);
 
         // Handle -EALREADY: stack is already enabled (reactivation from SUSPENDED)
         // In this case, skip the init loop and just restart our tasks
@@ -602,14 +601,10 @@ int mp_bluetooth_deinit(void) {
     }
     #endif
 
-    // TEMPORARILY DISABLED: bt_disable() may cause issues with CYW43 reinit
-    // Note: We do NOT call bt_disable() here. Like the vanilla Zephyr port,
-    // we leave the BLE stack enabled. On reactivation, bt_enable() returns
-    // -EALREADY which we handle as success (stack is already running).
-    // This avoids complex HCI shutdown/restart issues with the CYW43 controller.
-    // int ret = bt_disable();
-    // DEBUG_printf("bt_disable returned %d\n", ret);
-    // (void)ret;  // Unused when DEBUG_printf is no-op
+    // Call bt_disable() to properly shutdown the BLE stack
+    // This sends HCI_Reset to the controller and cleans up internal state
+    // Without this, bt_enable() returns -EALREADY on reinit and skips initialization
+    bt_disable();
 
     // Drain any pending work items before stopping threads
     // This ensures connection events and other callbacks are processed
