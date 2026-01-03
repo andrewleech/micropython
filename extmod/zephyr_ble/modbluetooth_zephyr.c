@@ -41,6 +41,15 @@
 #include "extmod/modbluetooth.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_work.h"
 
+// Access Zephyr's internal bt_dev for force-reset on deinit failure
+// The include path should have lib/zephyr/subsys/bluetooth/host already
+#include "hci_core.h"
+
+#if MICROPY_PY_NETWORK_CYW43
+// For cyw43_t definition (bt_loaded reset on deinit failure)
+#include "lib/cyw43-driver/src/cyw43.h"
+#endif
+
 // HCI RX task functions (implemented in port-specific mpzephyrport_*.c)
 extern void mp_bluetooth_zephyr_hci_rx_task_start(void);
 extern void mp_bluetooth_zephyr_hci_rx_task_stop(void);
@@ -422,7 +431,7 @@ int mp_bluetooth_init(void) {
             extern int mp_bluetooth_hci_controller_init(void);
             int ctrl_ret = mp_bluetooth_hci_controller_init();
             if (ctrl_ret != 0) {
-                mp_printf(&mp_plat_print, "ERROR: Controller init failed with code %d\n", ctrl_ret);
+                DEBUG_printf("Controller init failed with code %d\n", ctrl_ret);
                 return ctrl_ret;
             }
             #endif
@@ -578,20 +587,40 @@ int mp_bluetooth_init(void) {
 }
 
 int mp_bluetooth_deinit(void) {
+    mp_printf(&mp_plat_print, "DBG: mp_bluetooth_deinit entry, state=%d\n", mp_bluetooth_zephyr_ble_state);
     DEBUG_printf("mp_bluetooth_deinit %d\n", mp_bluetooth_zephyr_ble_state);
     if (mp_bluetooth_zephyr_ble_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF
         || mp_bluetooth_zephyr_ble_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_SUSPENDED) {
+        mp_printf(&mp_plat_print, "DBG: mp_bluetooth_deinit already off/suspended\n");
         return 0;
     }
 
-    // Set state to SUSPENDED to prevent callbacks during shutdown
-    mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_SUSPENDED;
+    // NOTE: Do NOT set state to SUSPENDED yet - we need polling to continue
+    // working so that HCI commands in bt_le_adv_stop() and bt_disable() can
+    // complete. The state will be set to SUSPENDED after bt_disable().
 
     // Stop advertising/scanning before bt_disable()
-    mp_bluetooth_gap_advertise_stop();
+    // Note: These may fail during soft reset if stack is in bad state.
+    // We ignore errors here to ensure cleanup continues.
+
+    // Clean up pre-allocated connection object
+    if (mp_bt_zephyr_next_conn != NULL) {
+        DEBUG_printf("mp_bluetooth_deinit: cleaning up pre-allocated connection\n");
+        mp_bt_zephyr_next_conn = NULL;
+    }
+
+    DEBUG_printf("mp_bluetooth_deinit: stopping advertising\n");
+    int ret = bt_le_adv_stop();
+    if (ret != 0 && ret != -EALREADY) {
+        DEBUG_printf("mp_bluetooth_deinit: bt_le_adv_stop returned %d (ignored)\n", ret);
+    }
 
     #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
-    mp_bluetooth_gap_scan_stop();
+    DEBUG_printf("mp_bluetooth_deinit: stopping scan\n");
+    ret = bt_le_scan_stop();
+    if (ret != 0 && ret != -EALREADY) {
+        DEBUG_printf("mp_bluetooth_deinit: bt_le_scan_stop returned %d (ignored)\n", ret);
+    }
     #endif
 
     #if CONFIG_BT_GATT_DYNAMIC_DB
@@ -604,16 +633,51 @@ int mp_bluetooth_deinit(void) {
     // Call bt_disable() to properly shutdown the BLE stack
     // This sends HCI_Reset to the controller and cleans up internal state
     // Without this, bt_enable() returns -EALREADY on reinit and skips initialization
-    bt_disable();
+    // Note: bt_disable() may timeout (max 5s) if HCI transport is broken.
+    // We continue cleanup regardless of the result.
+    mp_printf(&mp_plat_print, "DBG: calling bt_disable()\n");
+    DEBUG_printf("mp_bluetooth_deinit: calling bt_disable\n");
+    ret = bt_disable();
+    mp_printf(&mp_plat_print, "DBG: bt_disable() returned %d\n", ret);
+    DEBUG_printf("mp_bluetooth_deinit: bt_disable returned %d\n", ret);
+
+    // If bt_disable() failed (e.g. timeout), force-clear all state
+    // so that bt_enable() can start fresh on next init.
+    if (ret != 0) {
+        DEBUG_printf("mp_bluetooth_deinit: bt_disable failed, force-clearing state\n");
+        // Clear BT_DEV_ENABLE, BT_DEV_DISABLE, BT_DEV_READY flags
+        // These are defined in hci_core.h as enum values 0, 1, 2
+        atomic_clear_bit(bt_dev.flags, BT_DEV_ENABLE);
+        atomic_clear_bit(bt_dev.flags, BT_DEV_DISABLE);
+        atomic_clear_bit(bt_dev.flags, BT_DEV_READY);
+
+        // On CYW43, also reset bt_loaded to force firmware re-download
+        // The controller is in an unknown state if HCI_Reset didn't complete
+        #if MICROPY_PY_NETWORK_CYW43
+        extern cyw43_t cyw43_state;
+        DEBUG_printf("mp_bluetooth_deinit: resetting cyw43_state.bt_loaded\n");
+        cyw43_state.bt_loaded = false;
+        #endif
+
+        // Re-initialize the command credit semaphore so bt_enable can start fresh.
+        // After a timeout, ncmd_sem may be depleted (0 credits) preventing new commands.
+        DEBUG_printf("mp_bluetooth_deinit: reinitializing bt_dev.ncmd_sem\n");
+        k_sem_init(&bt_dev.ncmd_sem, 1, 1);
+    }
 
     // Drain any pending work items before stopping threads
     // This ensures connection events and other callbacks are processed
+    mp_printf(&mp_plat_print, "DBG: calling work_drain()\n");
     extern bool mp_bluetooth_zephyr_work_drain(void);
     mp_bluetooth_zephyr_work_drain();
+    mp_printf(&mp_plat_print, "DBG: work_drain() done\n");
 
     // Now stop HCI RX task and work thread
+    mp_printf(&mp_plat_print, "DBG: stopping HCI RX task\n");
     mp_bluetooth_zephyr_hci_rx_task_stop();
+    mp_printf(&mp_plat_print, "DBG: stopping work thread\n");
     mp_bluetooth_zephyr_work_thread_stop();
+    mp_printf(&mp_plat_print, "DBG: threads stopped\n");
 
     // Deinit port-specific resources (CYW43 cleanup, soft timers, etc.)
     // This must be done after bt_disable() completes.
@@ -629,6 +693,7 @@ int mp_bluetooth_deinit(void) {
     // (including controller init and callback registration)
     mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF;
 
+    mp_printf(&mp_plat_print, "DBG: mp_bluetooth_deinit exit\n");
     return 0;
 }
 

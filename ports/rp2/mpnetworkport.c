@@ -52,6 +52,18 @@ static void cyw43_smp_mutex_init(void) {
         taskEXIT_CRITICAL();
     }
 }
+
+// Reset the SMP mutex - must be called during soft reset to clear stale owner.
+// After soft reset, the task handle stored in the recursive mutex is stale,
+// causing the mutex to block forever when acquired by the new task.
+void cyw43_smp_mutex_reset(void) {
+    if (cyw43_smp_mutex_initialized) {
+        // Clear the static buffer and recreate the mutex
+        memset(&cyw43_smp_mutex_buffer, 0, sizeof(cyw43_smp_mutex_buffer));
+        cyw43_smp_mutex = xSemaphoreCreateRecursiveMutexStatic(&cyw43_smp_mutex_buffer);
+    }
+}
+
 #endif // MICROPY_PY_THREAD && MICROPY_PY_LWIP
 
 #if MICROPY_PY_LWIP

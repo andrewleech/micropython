@@ -304,6 +304,7 @@ void mp_freertos_wfe_or_timeout(uint32_t timeout_ms) {
         MP_THREAD_GIL_EXIT();
         vTaskDelay(ticks);
         MP_THREAD_GIL_ENTER();
+
     } else {
         // Scheduler not running, fall back to bare-metal WFE
         best_effort_wfe_or_timeout(delayed_by_ms(get_absolute_time(), timeout_ms));

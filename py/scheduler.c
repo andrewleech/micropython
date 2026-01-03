@@ -100,7 +100,10 @@ static inline void mp_sched_run_pending(void) {
             mp_sched_callback_t callback = node->callback;
             node->callback = NULL;
             MICROPY_END_ATOMIC_SECTION(atomic_state);
-            callback(node);
+            // Safety check: skip NULL callbacks (can happen after soft reset with stale scheduler state)
+            if (callback != NULL) {
+                callback(node);
+            }
             atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
         } while (node != original_tail); // Don't execute any callbacks scheduled during this run
     }

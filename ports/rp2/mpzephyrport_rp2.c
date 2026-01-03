@@ -172,6 +172,17 @@ static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len) {
     uint8_t *pkt_data = &rx_buf[CYW43_HCI_HEADER_SIZE];
     uint32_t pkt_len = len - CYW43_HCI_HEADER_SIZE;
 
+    // Debug: log CMD_COMPLETE and CMD_STATUS events (important for init)
+    // NOTE: Disabled - excessive logging during init causes timing issues
+    #if 0
+    if (pkt_type == BT_HCI_H4_EVT && pkt_len >= 2) {
+        uint8_t evt = pkt_data[0];
+        if (evt == 0x0E || evt == 0x0F) {  // CMD_COMPLETE or CMD_STATUS
+            mp_printf(&mp_plat_print, "[HCI_RX] evt=0x%02x len=%lu\n", evt, (unsigned long)pkt_len);
+        }
+    }
+    #endif
+
     // Validate packet length - HCI event packets should be reasonable size
     // Event header is: event_code(1) + param_len(1) + params(param_len)
     // Maximum reasonable size is ~255 bytes (param_len is uint8)
@@ -533,12 +544,15 @@ static void mp_zephyr_hci_soft_timer_callback(soft_timer_entry_t *self) {
 static void run_zephyr_hci_task(mp_sched_node_t *node) {
     (void)node;
 
-    // Process Zephyr BLE work queues and semaphores
-    mp_bluetooth_zephyr_poll();
-
+    // Early exit if BLE is not active (recv_cb is set by hci_cyw43_open)
+    // This prevents processing stale Zephyr state after soft reset
     if (recv_cb == NULL) {
+        // Don't use mp_printf here - it can trigger scheduler recursion
         return;
     }
+
+    // Process Zephyr BLE work queues and semaphores
+    mp_bluetooth_zephyr_poll();
 
     // Process any queued HCI packets from the HCI RX task
     // This must be done in main task context for thread safety with Zephyr
@@ -817,9 +831,12 @@ void mp_bluetooth_zephyr_port_deinit(void) {
     // On reinit, bt_enable() will set up a fresh HCI transport
     recv_cb = NULL;
 
-    // Reset the scheduler node to prevent stale linked list pointers
-    // after soft reset when the scheduler queue is cleared
-    memset(&mp_zephyr_hci_sched_node, 0, sizeof(mp_zephyr_hci_sched_node));
+    // DO NOT zero mp_zephyr_hci_sched_node!
+    // The scheduler queue (sched_head/sched_tail in MP_STATE_VM) persists across soft reset.
+    // If the node was scheduled and we zero it, the scheduler will try to call a NULL
+    // callback pointer, causing a crash. Leave the node alone - when the scheduler runs
+    // after soft reset, it will call run_zephyr_hci_task() which checks recv_cb (now NULL)
+    // and returns safely.
 
     // DO NOT reset bt_loaded - the CYW43 BT firmware should stay loaded.
     // bt_disable() sends HCI_Reset which resets the controller state.
