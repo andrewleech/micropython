@@ -40,7 +40,7 @@
 #include "extmod/freertos/mp_freertos_service.h"
 
 // BLE Work Queue Thread Configuration
-#define BLE_WORK_THREAD_STACK_SIZE (4096 / sizeof(StackType_t))  // 4KB stack
+#define BLE_WORK_THREAD_STACK_SIZE (8192 / sizeof(StackType_t))  // 8KB stack
 #define BLE_WORK_THREAD_PRIORITY   (configMAX_PRIORITIES - 2)    // High priority
 
 // Static allocation for work queue thread

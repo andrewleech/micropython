@@ -82,7 +82,7 @@ extern uint8_t __GcHeapStart, __GcHeapEnd;
 
 #if MICROPY_PY_THREAD
 // FreeRTOS main task static allocation
-#define FREERTOS_MAIN_TASK_STACK_SIZE (8192 / sizeof(StackType_t))
+#define FREERTOS_MAIN_TASK_STACK_SIZE (16384 / sizeof(StackType_t))
 static StaticTask_t main_task_tcb;
 static StackType_t main_task_stack[FREERTOS_MAIN_TASK_STACK_SIZE];
 #endif
