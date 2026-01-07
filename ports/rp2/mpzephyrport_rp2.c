@@ -831,12 +831,12 @@ void mp_bluetooth_zephyr_port_deinit(void) {
     // On reinit, bt_enable() will set up a fresh HCI transport
     recv_cb = NULL;
 
-    // DO NOT zero mp_zephyr_hci_sched_node!
-    // The scheduler queue (sched_head/sched_tail in MP_STATE_VM) persists across soft reset.
-    // If the node was scheduled and we zero it, the scheduler will try to call a NULL
-    // callback pointer, causing a crash. Leave the node alone - when the scheduler runs
-    // after soft reset, it will call run_zephyr_hci_task() which checks recv_cb (now NULL)
-    // and returns safely.
+    // Clear the scheduler node callback to prevent execution after deinit.
+    // The scheduler queue persists across soft reset, and scheduler.c:103-106 has a safety
+    // check that skips NULL callbacks. This prevents the callback from trying to access
+    // BLE state or CYW43 after deinitialization, which could cause hangs during soft reset.
+    // We're in main thread context here, so it's safe to modify the node.
+    mp_zephyr_hci_sched_node.callback = NULL;
 
     // DO NOT reset bt_loaded - the CYW43 BT firmware should stay loaded.
     // bt_disable() sends HCI_Reset which resets the controller state.

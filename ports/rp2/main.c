@@ -397,21 +397,16 @@ soft_reset_exit:
     // The mutex may be locked by a task that was deleted or is in an unknown state
     #if MICROPY_PY_LWIP && MICROPY_PY_THREAD
     extern void cyw43_smp_mutex_reset(void);
-    mp_printf(MP_PYTHON_PRINTER, "SR: cyw43_mutex_reset (1)\n");
     cyw43_smp_mutex_reset();
     #endif
 
     // BLE must be deinitialized first to ensure work queue draining completes
     // before mp_thread_deinit() forcefully deletes threads.
     #if MICROPY_PY_BLUETOOTH
-    mp_printf(MP_PYTHON_PRINTER, "SR: mp_bluetooth_deinit\n");
     mp_bluetooth_deinit();
-    mp_printf(MP_PYTHON_PRINTER, "SR: mp_bluetooth_deinit done\n");
     #endif
     #if MICROPY_PY_NETWORK
-    mp_printf(MP_PYTHON_PRINTER, "SR: mod_network_deinit\n");
     mod_network_deinit();
-    mp_printf(MP_PYTHON_PRINTER, "SR: mod_network_deinit done\n");
     #endif
     #if MICROPY_PY_MACHINE_I2S
     machine_i2s_deinit_all();
@@ -429,13 +424,9 @@ soft_reset_exit:
     mp_machine_i2c_target_deinit_all();
     #endif
     #if MICROPY_PY_THREAD
-    mp_printf(MP_PYTHON_PRINTER, "SR: mp_thread_deinit\n");
     mp_thread_deinit();
-    mp_printf(MP_PYTHON_PRINTER, "SR: mp_thread_deinit done\n");
     #endif
-    mp_printf(MP_PYTHON_PRINTER, "SR: soft_timer_deinit\n");
     soft_timer_deinit();
-    mp_printf(MP_PYTHON_PRINTER, "SR: soft_timer_deinit done\n");
     #if MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
     mp_usbd_deinit();
     #endif

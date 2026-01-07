@@ -51,6 +51,33 @@
 #define RP2_RESET_PWRON (1)
 #define RP2_RESET_WDT (3)
 
+// Port-specific soft_reset implementation that ensures CYW43 mutex is reset
+// before raising SystemExit. This prevents USB CDC hang when EOF is printed
+// during exception handling (Issue #10).
+#if MICROPY_PY_THREAD && (MICROPY_PY_LWIP || MICROPY_PY_BLUETOOTH_CYW43)
+MP_NORETURN static mp_obj_t machine_soft_reset_rp2(void) {
+    // Reset CYW43 mutex before raising SystemExit to prevent deadlock
+    // when EOF is printed via USB CDC during exception handling.
+    // This is safe to call even if CYW43 hasn't been initialized.
+    extern void cyw43_smp_mutex_reset(void);
+    cyw43_smp_mutex_reset();
+
+    // Clear scheduler queue to prevent stale callbacks from interfering
+    // with USB CDC during EOF printing (Issue #10)
+    #if MICROPY_ENABLE_SCHEDULER
+    mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
+    MP_STATE_VM(sched_state) = MP_SCHED_IDLE;
+    MP_STATE_VM(sched_head) = NULL;
+    MP_STATE_VM(sched_tail) = NULL;
+    MICROPY_END_ATOMIC_SECTION(atomic_state);
+    #endif
+
+    mp_raise_type(&mp_type_SystemExit);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(machine_soft_reset_rp2_obj, machine_soft_reset_rp2);
+#define MICROPY_MACHINE_SOFT_RESET_OBJ &machine_soft_reset_rp2_obj
+#endif
+
 #define MICROPY_PY_MACHINE_EXTRA_GLOBALS \
     { MP_ROM_QSTR(MP_QSTR_Pin),                 MP_ROM_PTR(&machine_pin_type) }, \
     { MP_ROM_QSTR(MP_QSTR_RTC),                 MP_ROM_PTR(&machine_rtc_type) }, \

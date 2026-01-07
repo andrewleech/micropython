@@ -587,11 +587,9 @@ int mp_bluetooth_init(void) {
 }
 
 int mp_bluetooth_deinit(void) {
-    mp_printf(&mp_plat_print, "DBG: mp_bluetooth_deinit entry, state=%d\n", mp_bluetooth_zephyr_ble_state);
     DEBUG_printf("mp_bluetooth_deinit %d\n", mp_bluetooth_zephyr_ble_state);
     if (mp_bluetooth_zephyr_ble_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF
         || mp_bluetooth_zephyr_ble_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_SUSPENDED) {
-        mp_printf(&mp_plat_print, "DBG: mp_bluetooth_deinit already off/suspended\n");
         return 0;
     }
 
@@ -635,10 +633,8 @@ int mp_bluetooth_deinit(void) {
     // Without this, bt_enable() returns -EALREADY on reinit and skips initialization
     // Note: bt_disable() may timeout (max 5s) if HCI transport is broken.
     // We continue cleanup regardless of the result.
-    mp_printf(&mp_plat_print, "DBG: calling bt_disable()\n");
     DEBUG_printf("mp_bluetooth_deinit: calling bt_disable\n");
     ret = bt_disable();
-    mp_printf(&mp_plat_print, "DBG: bt_disable() returned %d\n", ret);
     DEBUG_printf("mp_bluetooth_deinit: bt_disable returned %d\n", ret);
 
     // If bt_disable() failed (e.g. timeout), force-clear all state
@@ -667,17 +663,12 @@ int mp_bluetooth_deinit(void) {
 
     // Drain any pending work items before stopping threads
     // This ensures connection events and other callbacks are processed
-    mp_printf(&mp_plat_print, "DBG: calling work_drain()\n");
     extern bool mp_bluetooth_zephyr_work_drain(void);
     mp_bluetooth_zephyr_work_drain();
-    mp_printf(&mp_plat_print, "DBG: work_drain() done\n");
 
     // Now stop HCI RX task and work thread
-    mp_printf(&mp_plat_print, "DBG: stopping HCI RX task\n");
     mp_bluetooth_zephyr_hci_rx_task_stop();
-    mp_printf(&mp_plat_print, "DBG: stopping work thread\n");
     mp_bluetooth_zephyr_work_thread_stop();
-    mp_printf(&mp_plat_print, "DBG: threads stopped\n");
 
     // Deinit port-specific resources (CYW43 cleanup, soft timers, etc.)
     // This must be done after bt_disable() completes.
@@ -693,7 +684,6 @@ int mp_bluetooth_deinit(void) {
     // (including controller init and callback registration)
     mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF;
 
-    mp_printf(&mp_plat_print, "DBG: mp_bluetooth_deinit exit\n");
     return 0;
 }
 

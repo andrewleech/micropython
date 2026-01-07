@@ -35,6 +35,7 @@
 #include "py/gc.h"
 #include "py/frozenmod.h"
 #include "py/mphal.h"
+#include "py/stream.h"
 #include "shared/readline/readline.h"
 #include "shared/runtime/pyexec.h"
 #include "extmod/modplatform.h"

@@ -156,7 +156,11 @@ static const mp_rom_map_elem_t machine_module_globals_table[] = {
     #endif
 
     // Reset related functions.
+    #ifndef MICROPY_MACHINE_SOFT_RESET_OBJ
     { MP_ROM_QSTR(MP_QSTR_soft_reset), MP_ROM_PTR(&mp_sys_exit_obj) },
+    #else
+    { MP_ROM_QSTR(MP_QSTR_soft_reset), MP_ROM_PTR(MICROPY_MACHINE_SOFT_RESET_OBJ) },
+    #endif
     #if MICROPY_PY_MACHINE_BOOTLOADER
     { MP_ROM_QSTR(MP_QSTR_bootloader), MP_ROM_PTR(&machine_bootloader_obj) },
     #endif

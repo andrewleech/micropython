@@ -284,13 +284,7 @@ void mp_wfe_or_timeout(uint32_t timeout_ms) {
 // the delay to allow other Python threads to run, matching the behavior
 // of MICROPY_EVENT_POLL_HOOK.
 
-// Debug counter for wfe calls
-static volatile uint32_t wfe_call_count = 0;
-static volatile uint32_t wfe_delay_count = 0;
-
 void mp_freertos_wfe_or_timeout(uint32_t timeout_ms) {
-    wfe_call_count++;
-
     // Check if scheduler is running (it won't be during early init)
     if (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING) {
         // Convert ms to ticks, minimum 1 tick to actually yield
@@ -298,30 +292,15 @@ void mp_freertos_wfe_or_timeout(uint32_t timeout_ms) {
         if (ticks == 0) {
             ticks = 1;
         }
-        wfe_delay_count++;
         // Release GIL before blocking to allow other Python threads to run.
         // This matches the legacy MICROPY_EVENT_POLL_HOOK behavior.
         MP_THREAD_GIL_EXIT();
         vTaskDelay(ticks);
         MP_THREAD_GIL_ENTER();
-
     } else {
         // Scheduler not running, fall back to bare-metal WFE
         best_effort_wfe_or_timeout(delayed_by_ms(get_absolute_time(), timeout_ms));
     }
-}
-
-uint32_t mp_freertos_get_wfe_call_count(void) {
-    return wfe_call_count;
-}
-
-uint32_t mp_freertos_get_wfe_delay_count(void) {
-    return wfe_delay_count;
-}
-
-void mp_freertos_reset_wfe_counters(void) {
-    wfe_call_count = 0;
-    wfe_delay_count = 0;
 }
 #endif
 

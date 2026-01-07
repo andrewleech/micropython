@@ -103,7 +103,8 @@ mp_uint_t mp_usbd_cdc_tx_strn(const char *str, mp_uint_t len) {
     while (i < len) {
         uint32_t n = len - i;
 
-        if (tud_cdc_connected()) {
+        bool connected = tud_cdc_connected();
+        if (connected) {
             // Limit write to available space in tx buffer when connected.
             //
             // (If not connected then we write everything to the fifo, expecting
@@ -125,7 +126,7 @@ mp_uint_t mp_usbd_cdc_tx_strn(const char *str, mp_uint_t len) {
                     break; // Timeout
                 }
 
-                if (tud_cdc_connected()) {
+                if (connected) {
                     // If we know we're connected then we can wait for host to make
                     // more space
                     mp_event_wait_ms(1);

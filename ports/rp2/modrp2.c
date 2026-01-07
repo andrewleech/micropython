@@ -133,27 +133,6 @@ static mp_obj_t rp2_cyw43_gpio_reset(void) {
 MP_DEFINE_CONST_FUN_OBJ_0(rp2_cyw43_gpio_reset_obj, rp2_cyw43_gpio_reset);
 #endif
 
-#if MICROPY_PY_THREAD
-extern uint32_t mp_freertos_get_wfe_call_count(void);
-extern uint32_t mp_freertos_get_wfe_delay_count(void);
-extern void mp_freertos_reset_wfe_counters(void);
-
-static mp_obj_t rp2_wfe_debug(void) {
-    mp_printf(&mp_plat_print, "=== WFE Debug ===\n");
-    mp_printf(&mp_plat_print, "WFE calls: %lu\n", (unsigned long)mp_freertos_get_wfe_call_count());
-    mp_printf(&mp_plat_print, "WFE delays: %lu\n", (unsigned long)mp_freertos_get_wfe_delay_count());
-    mp_printf(&mp_plat_print, "=================\n");
-    return mp_const_none;
-}
-MP_DEFINE_CONST_FUN_OBJ_0(rp2_wfe_debug_obj, rp2_wfe_debug);
-
-static mp_obj_t rp2_wfe_reset(void) {
-    mp_freertos_reset_wfe_counters();
-    return mp_const_none;
-}
-MP_DEFINE_CONST_FUN_OBJ_0(rp2_wfe_reset_obj, rp2_wfe_reset);
-#endif
-
 #if MICROPY_PY_THREAD && MICROPY_FREERTOS_SERVICE_TASKS && MP_FREERTOS_SERVICE_DEBUG
 static mp_obj_t rp2_service_stats(void) {
     mp_freertos_service_debug_print();
@@ -188,10 +167,6 @@ static const mp_rom_map_elem_t rp2_module_globals_table[] = {
     #if MICROPY_PY_NETWORK_CYW43
     { MP_ROM_QSTR(MP_QSTR_cyw43_gpio_debug),    MP_ROM_PTR(&rp2_cyw43_gpio_debug_obj) },
     { MP_ROM_QSTR(MP_QSTR_cyw43_gpio_reset),    MP_ROM_PTR(&rp2_cyw43_gpio_reset_obj) },
-    #endif
-    #if MICROPY_PY_THREAD
-    { MP_ROM_QSTR(MP_QSTR_wfe_debug),           MP_ROM_PTR(&rp2_wfe_debug_obj) },
-    { MP_ROM_QSTR(MP_QSTR_wfe_reset),           MP_ROM_PTR(&rp2_wfe_reset_obj) },
     #endif
     #if MICROPY_PY_THREAD && MICROPY_FREERTOS_SERVICE_TASKS && MP_FREERTOS_SERVICE_DEBUG
     { MP_ROM_QSTR(MP_QSTR_service_stats),       MP_ROM_PTR(&rp2_service_stats_obj) },
