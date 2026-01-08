@@ -40,6 +40,7 @@
 #include <zephyr/device.h>
 #include "extmod/modbluetooth.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_work.h"
+#include "extmod/zephyr_ble/net_buf_pool_registry.h"
 
 // Access Zephyr's internal bt_dev for force-reset on deinit failure
 // The include path should have lib/zephyr/subsys/bluetooth/host already
@@ -464,6 +465,12 @@ int mp_bluetooth_init(void) {
         // Start the dedicated BLE work queue thread (FreeRTOS builds only)
         // This must also be started before bt_enable() to process work items
         mp_bluetooth_zephyr_work_thread_start();
+
+        // Reset net_buf pool state before BLE initialization.
+        // After a soft reset, pools retain stale runtime state (free list,
+        // uninit_count) from the previous session. This causes crashes when
+        // bt_enable() tries to allocate buffers from corrupted pools.
+        mp_net_buf_pool_state_reset();
 
         // Enter init phase - work will be processed synchronously in this loop
         extern void mp_bluetooth_zephyr_init_phase_enter(void);

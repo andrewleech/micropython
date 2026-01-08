@@ -45,4 +45,9 @@ void mp_net_buf_pool_update_end(void);
 // Reset registration (for testing)
 void mp_net_buf_pool_reset(void);
 
+// Reset all net_buf pool runtime state for soft reset support.
+// This must be called before bt_enable() when reinitializing BLE after
+// a soft reset, to restore pools to their initial state.
+void mp_net_buf_pool_state_reset(void);
+
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_NET_BUF_POOL_REGISTRY_H

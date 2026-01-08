@@ -103,6 +103,49 @@ void mp_net_buf_pool_reset(void) {
 // if dynamic pool registration is needed, but is not currently used.
 
 // ============================================================================
+// Pool State Reset for Soft Reset Support
+// ============================================================================
+// Net_buf pools are statically initialized but maintain runtime state:
+// - .free: k_lifo containing free buffers
+// - .uninit_count: number of uninitialized buffers remaining
+// - .lock: spinlock for concurrent access
+//
+// After a MicroPython soft reset, these pools retain stale state from the
+// previous BLE session. When bt_enable() runs again, it assumes pools are
+// in their initial state (all buffers uninitialized, free list empty).
+// This mismatch causes crashes when allocating/freeing buffers.
+//
+// mp_net_buf_pool_state_reset() restores pools to their initial state,
+// allowing clean BLE reinitialization after soft reset.
+
+#include <zephyr/net_buf.h>
+#include <zephyr/sys/iterable_sections.h>
+
+void mp_net_buf_pool_state_reset(void) {
+    // Iterate over all statically-defined net_buf pools
+    STRUCT_SECTION_FOREACH(net_buf_pool, pool) {
+        // Reset the free list (k_lifo) to empty
+        // k_lifo contains a k_queue with sys_slist_t data_q
+        pool->free._queue.data_q.head = NULL;
+        pool->free._queue.data_q.tail = NULL;
+        pool->free._queue.lock.unused = 0;
+
+        // Reset uninit_count to buf_count so all buffers are re-initialized
+        // on first allocation (this is how pools start after static init)
+        pool->uninit_count = pool->buf_count;
+
+        // Reset the pool spinlock
+        pool->lock.unused = 0;
+
+#if defined(CONFIG_NET_BUF_POOL_USAGE)
+        // Reset usage tracking counters
+        atomic_set(&pool->avail_count, pool->buf_count);
+        pool->max_used = 0;
+#endif
+    }
+}
+
+// ============================================================================
 // Note on Zephyr iterable sections
 // ============================================================================
 // Zephyr uses linker sections to collect statically defined structures.
