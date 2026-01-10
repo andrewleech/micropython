@@ -25,7 +25,7 @@ Local directory ${TMP} is mounted at /remote
 a=b
 -----
 Hello 世界
-'日本語'
+'\u65e5\u672c\u8a9e'
 -----
 Hello World
 你好
