@@ -61,7 +61,7 @@ echo -----
 $MPREMOTE resume exec "x = 'a=b'; print(x)"
 
 echo -----
-# Test eval with Unicode strings
+# Test eval with Unicode strings  
 $MPREMOTE resume eval "'Hello 世界'"
 $MPREMOTE resume eval "repr('日本語')"
 
