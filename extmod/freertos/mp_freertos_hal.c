@@ -136,11 +136,16 @@ void mp_freertos_delay_ms(mp_uint_t ms) {
         // Process callbacks after waking (notification or timeout)
         mp_handle_pending(true);
 
-        // Poll Zephyr BLE work queue to process HCI events during delay.
-        // This is critical because soft timers don't fire during ulTaskNotifyTake().
+        // Poll Zephyr BLE during delay. This is critical because soft timers
+        // don't fire during ulTaskNotifyTake().
+        // Two steps:
+        // 1. Read HCI data from CYW43 hardware (mp_bluetooth_zephyr_hci_uart_wfi)
+        // 2. Process work queues/timers (mp_bluetooth_zephyr_poll)
         #if MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR
+        extern void mp_bluetooth_zephyr_hci_uart_wfi(void);
         extern void mp_bluetooth_zephyr_poll(void);
-        mp_bluetooth_zephyr_poll();
+        mp_bluetooth_zephyr_hci_uart_wfi();  // Read HCI from CYW43
+        mp_bluetooth_zephyr_poll();           // Process queues/work
         #endif
     }
 }
