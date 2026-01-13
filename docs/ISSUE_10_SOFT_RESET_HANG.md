@@ -257,12 +257,49 @@ All BLE multitest files are affected when run in sequence:
 
 Power cycle the device between test batches to ensure clean state.
 
-### Next Investigation Steps
+## Resolution (2026-01-13)
 
-1. Add instrumentation to track resource allocation/deallocation across soft resets
-2. Monitor net_buf pool usage across multiple test cycles
-3. Check for FreeRTOS task/queue leaks
-4. Investigate CYW43 HCI state after multiple BLE init/deinit cycles
+The intermittent hang after multiple BLE test cycles has been **FIXED** in commit 1cad43a469.
+
+### Root Causes Identified
+
+1. **GATT Service Memory Leak**: Service attributes, UUIDs, and bt_gatt_chrc structs
+   allocated via `malloc()` were never freed on deinit.
+
+2. **Static Flags Not Reset**: Several flags persisted across soft resets:
+   - `mp_bt_zephyr_callbacks_registered` - caused callback re-registration issues
+   - `mp_bt_zephyr_indicate_pool[].in_use` - leaked indication slots
+   - `hci_rx_task_started/exited` - stale HCI RX task state
+
+3. **Work Queue Linkage Bug**: `k_sys_work_q.nextq` retained stale value after soft
+   reset, causing `k_work_queue_init()` to return early without reinitializing.
+
+### Fixes Applied
+
+1. **Memory Cleanup**: Added `mp_bt_zephyr_free_service()` to properly free:
+   - Service and characteristic declaration UUIDs (all malloc'd by gatt_db_add)
+   - Service declaration user_data (malloc'd UUID copy)
+   - Characteristic declaration user_data (malloc'd bt_gatt_chrc struct)
+   - Attributes array and service struct
+
+2. **Immediate UUID Freeing**: Free temporary UUIDs from `create_zephyr_uuid()`
+   right after `gatt_db_add()` copies them.
+
+3. **Static Flag Reset**: Reset all static flags in `mp_bluetooth_deinit()`:
+   - Reset `mp_bt_zephyr_callbacks_registered = false`
+   - Clear `mp_bt_zephyr_indicate_pool[].in_use` flags
+   - Reset HCI RX task flags in `mp_bluetooth_zephyr_port_deinit()`
+
+4. **Work Queue Reset**: Added `mp_bluetooth_zephyr_work_reset()` to clear:
+   - `global_work_q` linked list
+   - `k_sys_work_q` and `k_init_work_q` head/nextq pointers
+   - Recursion guards and init phase flags
+
+### Verification
+
+- 20+ consecutive BLE multitest cycles completed without hang
+- Tests: ble_gap_advertise, ble_gap_connect, ble_characteristic, ble_gatt_data_transfer
+- Previous failure point was 4-5 cumulative tests
 
 ## Action Items
 
@@ -271,12 +308,12 @@ Power cycle the device between test batches to ensure clean state.
 3. ✅ Discuss with code review agent for architectural guidance
 4. ✅ Fix net_buf pool_id mismatch (86e96dd6dd)
 5. ✅ Fix net_buf pool state crash (a8c176ebf0)
-6. ⏳ Investigate cumulative resource leak after multiple soft resets
-7. ⏳ Implement deferred EOF solution
-8. ⏳ Test with mpremote to verify EOF delivery
+6. ✅ Fix cumulative resource leak after multiple soft resets (1cad43a469)
+7. ~~Implement deferred EOF solution~~ (not needed - resource cleanup fixed the issue)
+8. ~~Test with mpremote to verify EOF delivery~~ (not needed)
 
 ## References
 
-- Plan file: `/home/corona/.claude/plans/mutable-imagining-nygaard.md`
+- Fix commit: 1cad43a469
 - Test script: `test_soft_reset_hang.py`
 - Related: Issue #9 (HCI RX task hangs during cleanup)
