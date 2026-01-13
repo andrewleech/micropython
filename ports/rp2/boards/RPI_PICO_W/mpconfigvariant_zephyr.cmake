@@ -2,6 +2,10 @@
 # Build with: make BOARD=RPI_PICO_W BOARD_VARIANT=zephyr
 message(STATUS "Loading Zephyr BLE variant for Pico W")
 
+# Allocate 16KB C heap for GATT service/UUID allocations
+# (default is 0, which uses tiny 8KB FreeRTOS heap)
+set(MICROPY_C_HEAP_SIZE 16384)
+
 # Override bluetooth stack selection
 set(MICROPY_BLUETOOTH_BTSTACK OFF)
 set(MICROPY_BLUETOOTH_ZEPHYR ON)

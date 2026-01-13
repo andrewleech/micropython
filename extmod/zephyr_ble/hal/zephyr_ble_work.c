@@ -482,11 +482,12 @@ void mp_bluetooth_zephyr_work_process(void) {
             }
             DEBUG_WORK_printf("work_execute(%p) done\n", work);
 
-            // Check if work was re-enqueued during execution
-            if (work->pending) {
-                DEBUG_WORK_printf("  --> work re-enqueued, stopping queue processing\n");
-                break;
-            }
+            // Note: We intentionally do NOT break if work was re-enqueued.
+            // Zephyr's tx_processor re-submits tx_work to continue processing TX data.
+            // If we broke here, subsequent work items (like rx_work) wouldn't run,
+            // and the re-submitted tx_work wouldn't process until next poll cycle.
+            // Let the loop continue naturally - the re-enqueued work will be
+            // processed in subsequent iterations.
         }
     }
 

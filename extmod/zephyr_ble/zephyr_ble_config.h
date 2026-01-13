@@ -639,7 +639,7 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_CONN_DISABLE_SECURITY 0
 #define CONFIG_BT_CONN_CHECK_NULL_BEFORE_CREATE 0
 #define CONFIG_BT_CONN_PARAM_ANY 0
-#define CONFIG_BT_CONN_TX 0
+#define CONFIG_BT_CONN_TX 1
 #define CONFIG_BT_CONN_DYNAMIC_CALLBACKS 1  // CRITICAL: Enable dynamic callback registration (bt_conn_cb_register)
 #define CONFIG_BT_ATT_RETRY_ON_SEC_ERR 0
 

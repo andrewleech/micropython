@@ -29,6 +29,8 @@
 #include "py/mperrno.h"
 #include "py/mphal.h"
 
+#include <stdlib.h>  // For malloc() - UUID/GATT memory outside GC heap
+
 #if MICROPY_PY_BLUETOOTH
 
 #include <zephyr/types.h>
@@ -118,6 +120,11 @@ union uuid_u {
     struct bt_uuid_128 u128;
 };
 
+// Debug watchpoint code removed after UUID corruption fix verified.
+// The issue was using m_new() (GC heap) with MP_OBJ_FROM_PTR() for non-object pointers.
+// Fixed by using malloc() to keep GATT data outside GC control.
+#define debug_check_uuid(where) ((void)0)
+
 struct add_characteristic {
     uint8_t properties;
     uint8_t permissions;
@@ -147,6 +154,37 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
 
     // active connections
     mp_bt_zephyr_conn_t *connections;
+
+    #if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+    // GATT client discovery state
+    struct bt_gatt_discover_params gattc_discover_params;
+    uint16_t gattc_discover_conn_handle;
+    uint16_t gattc_discover_start_handle;
+    uint16_t gattc_discover_end_handle;
+
+    // Pending characteristic (for end_handle calculation - NimBLE pattern)
+    struct {
+        uint16_t value_handle;
+        uint16_t def_handle;
+        uint8_t properties;
+        mp_obj_bluetooth_uuid_t uuid;
+        bool pending;
+    } gattc_pending_char;
+
+    // GATT client read state
+    struct bt_gatt_read_params gattc_read_params;
+    uint16_t gattc_read_conn_handle;
+    uint16_t gattc_read_value_handle;
+
+    // GATT client write state
+    struct bt_gatt_write_params gattc_write_params;
+    uint16_t gattc_write_conn_handle;
+    uint16_t gattc_write_value_handle;
+
+    // MTU exchange state
+    struct bt_gatt_exchange_params gattc_mtu_params;
+    uint16_t gattc_mtu_conn_handle;
+    #endif // MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
 } mp_bluetooth_zephyr_root_pointers_t;
 
 static int mp_bluetooth_zephyr_ble_state;
@@ -171,6 +209,15 @@ static size_t bt_ad_len = 0;
 static struct bt_data bt_sd_data[8];
 static size_t bt_sd_len = 0;
 
+// Pool of indication params - must persist until callback fires
+// One indication per connection can be in flight at a time
+typedef struct _mp_bt_zephyr_indicate_params_t {
+    struct bt_gatt_indicate_params params;
+    bool in_use;
+} mp_bt_zephyr_indicate_params_t;
+
+static mp_bt_zephyr_indicate_params_t mp_bt_zephyr_indicate_pool[CONFIG_BT_MAX_CONN];
+
 static mp_bt_zephyr_conn_t *mp_bt_zephyr_next_conn;
 
 static mp_bt_zephyr_conn_t *mp_bt_zephyr_find_connection(uint8_t conn_handle);
@@ -186,6 +233,7 @@ static void add_ccc(struct bt_gatt_attr *attr, struct bt_gatt_attr *attr_desc);
 static void add_cep(const struct bt_gatt_attr *attr_chrc, struct bt_gatt_attr *attr_desc);
 static void add_descriptor(struct bt_gatt_attr *chrc, struct add_descriptor *d, struct bt_gatt_attr *attr_desc);
 static void mp_bt_zephyr_gatt_indicate_done(struct bt_conn *conn, struct bt_gatt_indicate_params *params, uint8_t err);
+static void mp_bt_zephyr_gatt_indicate_destroy(struct bt_gatt_indicate_params *params);
 static struct bt_gatt_attr *mp_bt_zephyr_find_attr_by_handle(uint16_t value_handle);
 
 static struct bt_conn_cb mp_bt_zephyr_conn_callbacks = {
@@ -234,12 +282,13 @@ static void mp_bt_zephyr_remove_connection(uint8_t conn_handle) {
 }
 
 static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
-    DEBUG_printf("mp_bt_zephyr_connected: conn=%p err=%u state=%d\n", conn, err, mp_bluetooth_zephyr_ble_state);
+    DEBUG_printf("mp_bt_zephyr_connected: conn=%p err=%u state=%d\n",
+        conn, err, mp_bluetooth_zephyr_ble_state);
 
     // Safety check: only process if BLE is fully active and initialized
     if (mp_bluetooth_zephyr_ble_state != MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE
         || MP_STATE_PORT(bluetooth_zephyr_root_pointers) == NULL) {
-        DEBUG_printf("  Connection callback ignored - BLE not active (state=%d)\n",
+        DEBUG_printf("  IGNORED - BLE not active (state=%d)\n",
                      mp_bluetooth_zephyr_ble_state);
         return;
     }
@@ -283,7 +332,9 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
             // Outgoing connection: already have ref from bt_conn_le_create()
             DEBUG_printf("  Using EXISTING connection ref %p\n", mp_bt_zephyr_next_conn->conn);
         }
+        debug_check_uuid("before_connect_cb");
         mp_bluetooth_gap_on_connected_disconnected(connect_event, info.id, info.le.dst->type, info.le.dst->a.val);
+        debug_check_uuid("after_connect_cb");
         mp_bt_zephyr_insert_connection(mp_bt_zephyr_next_conn);
         // Reset pointer so next connection allocates fresh structure
         mp_bt_zephyr_next_conn = NULL;
@@ -291,13 +342,14 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
 }
 
 static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
-    DEBUG_printf("mp_bt_zephyr_disconnected: conn=%p reason=%u state=%d\n", conn, reason, mp_bluetooth_zephyr_ble_state);
+    DEBUG_printf("mp_bt_zephyr_disconnected: conn=%p reason=%u state=%d\n",
+        conn, reason, mp_bluetooth_zephyr_ble_state);
 
     // Safety check: only process if BLE is fully active and initialized
     // Ignore callbacks during deinit (SUSPENDED state) to prevent double-unref race
     if (mp_bluetooth_zephyr_ble_state != MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE
         || MP_STATE_PORT(bluetooth_zephyr_root_pointers) == NULL) {
-        DEBUG_printf("  Disconnect callback ignored - BLE not active (state=%d)\n",
+        DEBUG_printf("Disconnected callback ignored - BLE not active (state=%d)\n",
                      mp_bluetooth_zephyr_ble_state);
         return;
     }
@@ -868,8 +920,8 @@ int mp_bluetooth_gatts_register_service(mp_obj_bluetooth_uuid_t *service_uuid, m
     size_t total_attributes = 1 + (num_characteristics * 2) + total_descriptors;
 
     // allocate one extra so that we can know later where the final attribute is
-    struct bt_gatt_attr *svc_attributes = m_new(struct bt_gatt_attr, total_attributes + 1);
-    mp_obj_list_append(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->objs_list, MP_OBJ_FROM_PTR(svc_attributes));
+    // Use malloc() to keep outside GC heap - raw pointers in objs_list aren't traced.
+    struct bt_gatt_attr *svc_attributes = malloc((total_attributes + 1) * sizeof(struct bt_gatt_attr));
 
     size_t handle_index = 0;
     size_t descriptor_index = 0;
@@ -952,8 +1004,8 @@ int mp_bluetooth_gatts_register_service(mp_obj_bluetooth_uuid_t *service_uuid, m
         }
     }
 
-    struct bt_gatt_service *service = m_new(struct bt_gatt_service, 1);
-    mp_obj_list_append(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->objs_list, MP_OBJ_FROM_PTR(service));
+    // Use malloc() to keep service outside GC heap.
+    struct bt_gatt_service *service = malloc(sizeof(struct bt_gatt_service));
     service->attrs = svc_attributes;
     service->attr_count = attr_index;
     // invalidate the last attribute uuid pointer so that we new this is the end of attributes for this service
@@ -1032,18 +1084,45 @@ int mp_bluetooth_gatts_write(uint16_t value_handle, const uint8_t *value, size_t
         if (ccc_entry && (ccc_entry->data[0] == BT_GATT_CCC_NOTIFY)) {
             err = bt_gatt_notify(NULL, attr_val, value, value_len);
         } else if (ccc_entry && (ccc_entry->data[0] == BT_GATT_CCC_INDICATE)) {
-            struct bt_gatt_indicate_params params = {
-                .uuid = NULL,
-                .attr = attr_val,
-                .func = mp_bt_zephyr_gatt_indicate_done,
-                .destroy = NULL,
-                .data = value,
-                .len = value_len
-            };
-            err = bt_gatt_indicate(NULL, &params);
+            // Find a free indication params slot from the pool
+            mp_bt_zephyr_indicate_params_t *ind_slot = NULL;
+            for (int i = 0; i < CONFIG_BT_MAX_CONN; i++) {
+                if (!mp_bt_zephyr_indicate_pool[i].in_use) {
+                    ind_slot = &mp_bt_zephyr_indicate_pool[i];
+                    ind_slot->in_use = true;
+                    break;
+                }
+            }
+            if (ind_slot == NULL) {
+                // All slots in use - indication in progress for all connections
+                err = -ENOMEM;
+            } else {
+                ind_slot->params.uuid = NULL;
+                ind_slot->params.attr = attr_val;
+                ind_slot->params.func = mp_bt_zephyr_gatt_indicate_done;
+                ind_slot->params.destroy = mp_bt_zephyr_gatt_indicate_destroy;
+                ind_slot->params.data = value;
+                ind_slot->params.len = value_len;
+                err = bt_gatt_indicate(NULL, &ind_slot->params);
+                if (err != 0) {
+                    // bt_gatt_indicate failed, free the slot
+                    ind_slot->in_use = false;
+                }
+            }
         }
     }
     return err;
+}
+
+// Destroy callback frees the indication params slot back to the pool
+static void mp_bt_zephyr_gatt_indicate_destroy(struct bt_gatt_indicate_params *params) {
+    // Find which pool slot this params belongs to
+    for (int i = 0; i < CONFIG_BT_MAX_CONN; i++) {
+        if (&mp_bt_zephyr_indicate_pool[i].params == params) {
+            mp_bt_zephyr_indicate_pool[i].in_use = false;
+            break;
+        }
+    }
 }
 
 static void mp_bt_zephyr_gatt_indicate_done(struct bt_conn *conn, struct bt_gatt_indicate_params *params, uint8_t err) {
@@ -1135,6 +1214,17 @@ int mp_bluetooth_gatts_notify_indicate(uint16_t conn_handle, uint16_t value_hand
         return ERRNO_BLUETOOTH_NOT_ACTIVE;
     }
 
+    // If no data provided, read from the characteristic database.
+    // This matches the behavior of NimBLE and BTstack.
+    if (value == NULL || value_len == 0) {
+        mp_bluetooth_gatts_db_entry_t *entry = mp_bluetooth_gatts_db_lookup(
+            MP_STATE_PORT(bluetooth_zephyr_root_pointers)->gatts_db, value_handle);
+        if (entry != NULL) {
+            value = entry->data;
+            value_len = entry->data_len;
+        }
+    }
+
     int err = MP_ENOENT;
     mp_bt_zephyr_conn_t *connection = mp_bt_zephyr_find_connection(conn_handle);
 
@@ -1148,15 +1238,29 @@ int mp_bluetooth_gatts_notify_indicate(uint16_t conn_handle, uint16_t value_hand
                     break;
                 }
                 case MP_BLUETOOTH_GATTS_OP_INDICATE: {
-                    struct bt_gatt_indicate_params params = {
-                        .uuid = NULL,
-                        .attr = attr_val,
-                        .func = mp_bt_zephyr_gatt_indicate_done,
-                        .destroy = NULL,
-                        .data = value,
-                        .len = value_len
-                    };
-                    err = bt_gatt_indicate(connection->conn, &params);
+                    // Find a free indication params slot from the pool
+                    mp_bt_zephyr_indicate_params_t *ind_slot = NULL;
+                    for (int i = 0; i < CONFIG_BT_MAX_CONN; i++) {
+                        if (!mp_bt_zephyr_indicate_pool[i].in_use) {
+                            ind_slot = &mp_bt_zephyr_indicate_pool[i];
+                            ind_slot->in_use = true;
+                            break;
+                        }
+                    }
+                    if (ind_slot == NULL) {
+                        err = -ENOMEM;
+                    } else {
+                        ind_slot->params.uuid = NULL;
+                        ind_slot->params.attr = attr_val;
+                        ind_slot->params.func = mp_bt_zephyr_gatt_indicate_done;
+                        ind_slot->params.destroy = mp_bt_zephyr_gatt_indicate_destroy;
+                        ind_slot->params.data = value;
+                        ind_slot->params.len = value_len;
+                        err = bt_gatt_indicate(connection->conn, &ind_slot->params);
+                        if (err != 0) {
+                            ind_slot->in_use = false;
+                        }
+                    }
                     break;
                 }
             }
@@ -1326,9 +1430,10 @@ int mp_bluetooth_gap_peripheral_connect_cancel(void) {
 #endif // MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
 
 // Note: modbluetooth UUIDs store their data in LE.
+// UUIDs are allocated with malloc() to keep them outside GC-managed heap.
+// GC cannot trace raw pointers stored via MP_OBJ_FROM_PTR() in objs_list.
 static struct bt_uuid *create_zephyr_uuid(const mp_obj_bluetooth_uuid_t *uuid) {
-    struct bt_uuid *result = (struct bt_uuid *)m_new(union uuid_u, 1);
-    mp_obj_list_append(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->objs_list, MP_OBJ_FROM_PTR(result));
+    struct bt_uuid *result = (struct bt_uuid *)malloc(sizeof(union uuid_u));
     if (uuid->type == MP_BLUETOOTH_UUID_TYPE_16) {
         bt_uuid_create(result, uuid->data, 2);
     } else if (uuid->type == MP_BLUETOOTH_UUID_TYPE_32) {
@@ -1338,6 +1443,50 @@ static struct bt_uuid *create_zephyr_uuid(const mp_obj_bluetooth_uuid_t *uuid) {
     }
     return result;
 }
+
+#if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+// Convert Zephyr UUID to MicroPython UUID format.
+// Note: modbluetooth UUIDs store their data in LE.
+static mp_obj_bluetooth_uuid_t zephyr_uuid_to_mp(const struct bt_uuid *uuid) {
+    mp_obj_bluetooth_uuid_t result;
+    result.base.type = &mp_type_bluetooth_uuid;
+    switch (uuid->type) {
+        case BT_UUID_TYPE_16: {
+            const struct bt_uuid_16 *u16 = (const struct bt_uuid_16 *)uuid;
+            result.type = MP_BLUETOOTH_UUID_TYPE_16;
+            result.data[0] = u16->val & 0xff;
+            result.data[1] = (u16->val >> 8) & 0xff;
+            break;
+        }
+        case BT_UUID_TYPE_32: {
+            const struct bt_uuid_32 *u32 = (const struct bt_uuid_32 *)uuid;
+            result.type = MP_BLUETOOTH_UUID_TYPE_32;
+            result.data[0] = u32->val & 0xff;
+            result.data[1] = (u32->val >> 8) & 0xff;
+            result.data[2] = (u32->val >> 16) & 0xff;
+            result.data[3] = (u32->val >> 24) & 0xff;
+            break;
+        }
+        case BT_UUID_TYPE_128: {
+            const struct bt_uuid_128 *u128 = (const struct bt_uuid_128 *)uuid;
+            result.type = MP_BLUETOOTH_UUID_TYPE_128;
+            memcpy(result.data, u128->val, 16);
+            break;
+        }
+        default:
+            // Should not happen - set to invalid state
+            result.type = 0;
+            break;
+    }
+    return result;
+}
+
+// Get bt_conn pointer from connection handle, returns NULL if not found.
+static struct bt_conn *mp_bt_zephyr_get_conn(uint16_t conn_handle) {
+    mp_bt_zephyr_conn_t *connection = mp_bt_zephyr_find_connection(conn_handle);
+    return connection ? connection->conn : NULL;
+}
+#endif // MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
 
 static void gatt_db_add(const struct bt_gatt_attr *pattern, struct bt_gatt_attr *attr, size_t user_data_len) {
     const union uuid_u *u = CONTAINER_OF(pattern->uuid, union uuid_u, uuid);
@@ -1351,15 +1500,14 @@ static void gatt_db_add(const struct bt_gatt_attr *pattern, struct bt_gatt_attr 
 
     memcpy(attr, pattern, sizeof(*attr));
 
-    // Store the UUID.
-    attr->uuid = (const struct bt_uuid *)m_new(union uuid_u, 1);
-    mp_obj_list_append(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->objs_list, MP_OBJ_FROM_PTR(attr->uuid));
+    // Store the UUID - use malloc() to keep outside GC heap.
+    // GC cannot trace raw pointers stored in objs_list.
+    attr->uuid = (const struct bt_uuid *)malloc(sizeof(union uuid_u));
     memcpy((void *)attr->uuid, &u->uuid, uuid_size);
 
-    // Copy user_data to the buffer.
+    // Copy user_data to the buffer - use malloc() to keep outside GC heap.
     if (user_data_len) {
-        attr->user_data = m_new(uint8_t, user_data_len);
-        mp_obj_list_append(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->objs_list, MP_OBJ_FROM_PTR(attr->user_data));
+        attr->user_data = malloc(user_data_len);
         memcpy(attr->user_data, pattern->user_data, user_data_len);
     }
 }
@@ -1452,35 +1600,375 @@ static void add_descriptor(struct bt_gatt_attr *chrc, struct add_descriptor *d, 
     }
 }
 
-// GATT Client stubs (Phase 1: Server-only)
+// GATT Client implementation
+#if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+
+// Service discovery callback
+static uint8_t gattc_service_discover_cb(struct bt_conn *conn,
+    const struct bt_gatt_attr *attr, struct bt_gatt_discover_params *params) {
+
+    if (!mp_bluetooth_is_active()) {
+        return BT_GATT_ITER_STOP;
+    }
+
+    uint16_t conn_handle = MP_STATE_PORT(bluetooth_zephyr_root_pointers)->gattc_discover_conn_handle;
+
+    if (attr == NULL) {
+        // Discovery complete
+        mp_bluetooth_gattc_on_discover_complete(MP_BLUETOOTH_IRQ_GATTC_SERVICE_DONE, conn_handle, 0);
+        return BT_GATT_ITER_STOP;
+    }
+
+    // Extract service info from attribute
+    const struct bt_gatt_service_val *svc = (const struct bt_gatt_service_val *)attr->user_data;
+    mp_obj_bluetooth_uuid_t service_uuid = zephyr_uuid_to_mp(svc->uuid);
+
+    // Report service: start_handle from attr->handle, end_handle from service_val
+    mp_bluetooth_gattc_on_primary_service_result(conn_handle, attr->handle, svc->end_handle, &service_uuid);
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
+// Characteristic discovery callback
+static uint8_t gattc_characteristic_discover_cb(struct bt_conn *conn,
+    const struct bt_gatt_attr *attr, struct bt_gatt_discover_params *params) {
+
+    if (!mp_bluetooth_is_active()) {
+        return BT_GATT_ITER_STOP;
+    }
+
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    uint16_t conn_handle = rp->gattc_discover_conn_handle;
+
+    // If there's a pending characteristic, emit it now (we now know its end_handle)
+    if (rp->gattc_pending_char.pending) {
+        rp->gattc_pending_char.pending = false;
+
+        // end_handle is either one before current char's def_handle, or the discovery end_handle
+        uint16_t end_handle = rp->gattc_discover_end_handle;
+        if (attr != NULL) {
+            end_handle = attr->handle - 1;
+        }
+
+        mp_bluetooth_gattc_on_characteristic_result(conn_handle,
+            rp->gattc_pending_char.value_handle,
+            end_handle,
+            rp->gattc_pending_char.properties,
+            &rp->gattc_pending_char.uuid);
+    }
+
+    if (attr == NULL) {
+        // Discovery complete
+        mp_bluetooth_gattc_on_discover_complete(MP_BLUETOOTH_IRQ_GATTC_CHARACTERISTIC_DONE, conn_handle, 0);
+        return BT_GATT_ITER_STOP;
+    }
+
+    // Extract characteristic info
+    const struct bt_gatt_chrc *chrc = (const struct bt_gatt_chrc *)attr->user_data;
+    mp_obj_bluetooth_uuid_t char_uuid = zephyr_uuid_to_mp(chrc->uuid);
+
+    // Buffer this characteristic - we'll emit it when we see the next one (to get end_handle)
+    rp->gattc_pending_char.value_handle = chrc->value_handle;
+    rp->gattc_pending_char.def_handle = attr->handle;
+    rp->gattc_pending_char.properties = chrc->properties;
+    rp->gattc_pending_char.uuid = char_uuid;
+    rp->gattc_pending_char.pending = true;
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
+// Descriptor discovery callback
+static uint8_t gattc_descriptor_discover_cb(struct bt_conn *conn,
+    const struct bt_gatt_attr *attr, struct bt_gatt_discover_params *params) {
+
+    if (!mp_bluetooth_is_active()) {
+        return BT_GATT_ITER_STOP;
+    }
+
+    uint16_t conn_handle = MP_STATE_PORT(bluetooth_zephyr_root_pointers)->gattc_discover_conn_handle;
+
+    if (attr == NULL) {
+        // Discovery complete
+        mp_bluetooth_gattc_on_discover_complete(MP_BLUETOOTH_IRQ_GATTC_DESCRIPTOR_DONE, conn_handle, 0);
+        return BT_GATT_ITER_STOP;
+    }
+
+    // Report descriptor
+    mp_obj_bluetooth_uuid_t desc_uuid = zephyr_uuid_to_mp(attr->uuid);
+    mp_bluetooth_gattc_on_descriptor_result(conn_handle, attr->handle, &desc_uuid);
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
+// Read callback
+static uint8_t gattc_read_cb(struct bt_conn *conn, uint8_t err,
+    struct bt_gatt_read_params *params, const void *data, uint16_t length) {
+
+    if (!mp_bluetooth_is_active()) {
+        return BT_GATT_ITER_STOP;
+    }
+
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    uint16_t conn_handle = rp->gattc_read_conn_handle;
+    uint16_t value_handle = rp->gattc_read_value_handle;
+
+    if (data != NULL && length > 0) {
+        // Data available
+        const uint8_t *data_ptr = (const uint8_t *)data;
+        mp_bluetooth_gattc_on_data_available(MP_BLUETOOTH_IRQ_GATTC_READ_RESULT,
+            conn_handle, value_handle, &data_ptr, &length, 1);
+    }
+
+    if (data == NULL) {
+        // Read complete
+        mp_bluetooth_gattc_on_read_write_status(MP_BLUETOOTH_IRQ_GATTC_READ_DONE,
+            conn_handle, value_handle, err);
+        return BT_GATT_ITER_STOP;
+    }
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
+// Write callback
+static void gattc_write_cb(struct bt_conn *conn, uint8_t err,
+    struct bt_gatt_write_params *params) {
+
+    if (!mp_bluetooth_is_active()) {
+        return;
+    }
+
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    mp_bluetooth_gattc_on_read_write_status(MP_BLUETOOTH_IRQ_GATTC_WRITE_DONE,
+        rp->gattc_write_conn_handle, rp->gattc_write_value_handle, err);
+}
+
+// MTU exchange callback
+static void gattc_mtu_exchange_cb(struct bt_conn *conn, uint8_t err,
+    struct bt_gatt_exchange_params *params) {
+
+    if (!mp_bluetooth_is_active()) {
+        return;
+    }
+
+    if (err == 0) {
+        uint16_t mtu = bt_gatt_get_mtu(conn);
+        mp_bluetooth_gatts_on_mtu_exchanged(
+            MP_STATE_PORT(bluetooth_zephyr_root_pointers)->gattc_mtu_conn_handle, mtu);
+    }
+}
+
+#endif // MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+
 int mp_bluetooth_gattc_discover_primary_services(uint16_t conn_handle, const mp_obj_bluetooth_uuid_t *uuid) {
-    (void)conn_handle; (void)uuid;
-    return MP_EOPNOTSUPP; // Phase 1: GATT server only
+    #if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+    if (!mp_bluetooth_is_active()) {
+        return ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    struct bt_conn *conn = mp_bt_zephyr_get_conn(conn_handle);
+    if (conn == NULL) {
+        return MP_ENOTCONN;
+    }
+
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+
+    // Set up discovery params
+    memset(&rp->gattc_discover_params, 0, sizeof(rp->gattc_discover_params));
+    rp->gattc_discover_params.func = gattc_service_discover_cb;
+    rp->gattc_discover_params.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
+    rp->gattc_discover_params.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
+    rp->gattc_discover_params.type = BT_GATT_DISCOVER_PRIMARY;
+
+    if (uuid != NULL) {
+        rp->gattc_discover_params.uuid = create_zephyr_uuid(uuid);
+    } else {
+        rp->gattc_discover_params.uuid = NULL;
+    }
+
+    rp->gattc_discover_conn_handle = conn_handle;
+
+    int err = bt_gatt_discover(conn, &rp->gattc_discover_params);
+    return bt_err_to_errno(err);
+    #else
+    (void)conn_handle;
+    (void)uuid;
+    return MP_EOPNOTSUPP;
+    #endif
 }
 
 int mp_bluetooth_gattc_discover_characteristics(uint16_t conn_handle, uint16_t start_handle, uint16_t end_handle, const mp_obj_bluetooth_uuid_t *uuid) {
-    (void)conn_handle; (void)start_handle; (void)end_handle; (void)uuid;
+    #if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+    if (!mp_bluetooth_is_active()) {
+        return ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    struct bt_conn *conn = mp_bt_zephyr_get_conn(conn_handle);
+    if (conn == NULL) {
+        return MP_ENOTCONN;
+    }
+
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+
+    // Clear any pending characteristic from previous discovery
+    rp->gattc_pending_char.pending = false;
+
+    // Set up discovery params
+    memset(&rp->gattc_discover_params, 0, sizeof(rp->gattc_discover_params));
+    rp->gattc_discover_params.func = gattc_characteristic_discover_cb;
+    rp->gattc_discover_params.start_handle = start_handle;
+    rp->gattc_discover_params.end_handle = end_handle;
+    rp->gattc_discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
+
+    // Note: Zephyr doesn't support UUID filtering directly for characteristics,
+    // so we discover all and could filter in callback if needed.
+    // For now, we don't filter (uuid parameter is ignored).
+    rp->gattc_discover_params.uuid = NULL;
+    (void)uuid;
+
+    rp->gattc_discover_conn_handle = conn_handle;
+    rp->gattc_discover_end_handle = end_handle;
+
+    int err = bt_gatt_discover(conn, &rp->gattc_discover_params);
+    return bt_err_to_errno(err);
+    #else
+    (void)conn_handle;
+    (void)start_handle;
+    (void)end_handle;
+    (void)uuid;
     return MP_EOPNOTSUPP;
+    #endif
 }
 
 int mp_bluetooth_gattc_discover_descriptors(uint16_t conn_handle, uint16_t start_handle, uint16_t end_handle) {
-    (void)conn_handle; (void)start_handle; (void)end_handle;
+    #if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+    if (!mp_bluetooth_is_active()) {
+        return ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    struct bt_conn *conn = mp_bt_zephyr_get_conn(conn_handle);
+    if (conn == NULL) {
+        return MP_ENOTCONN;
+    }
+
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+
+    // Set up discovery params
+    memset(&rp->gattc_discover_params, 0, sizeof(rp->gattc_discover_params));
+    rp->gattc_discover_params.func = gattc_descriptor_discover_cb;
+    rp->gattc_discover_params.start_handle = start_handle;
+    rp->gattc_discover_params.end_handle = end_handle;
+    rp->gattc_discover_params.type = BT_GATT_DISCOVER_DESCRIPTOR;
+    rp->gattc_discover_params.uuid = NULL;
+
+    rp->gattc_discover_conn_handle = conn_handle;
+
+    int err = bt_gatt_discover(conn, &rp->gattc_discover_params);
+    return bt_err_to_errno(err);
+    #else
+    (void)conn_handle;
+    (void)start_handle;
+    (void)end_handle;
     return MP_EOPNOTSUPP;
+    #endif
 }
 
 int mp_bluetooth_gattc_read(uint16_t conn_handle, uint16_t value_handle) {
-    (void)conn_handle; (void)value_handle;
+    #if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+    if (!mp_bluetooth_is_active()) {
+        return ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    struct bt_conn *conn = mp_bt_zephyr_get_conn(conn_handle);
+    if (conn == NULL) {
+        return MP_ENOTCONN;
+    }
+
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+
+    // Set up read params
+    memset(&rp->gattc_read_params, 0, sizeof(rp->gattc_read_params));
+    rp->gattc_read_params.func = gattc_read_cb;
+    rp->gattc_read_params.handle_count = 1;
+    rp->gattc_read_params.single.handle = value_handle;
+    rp->gattc_read_params.single.offset = 0;
+
+    rp->gattc_read_conn_handle = conn_handle;
+    rp->gattc_read_value_handle = value_handle;
+
+    int err = bt_gatt_read(conn, &rp->gattc_read_params);
+    return bt_err_to_errno(err);
+    #else
+    (void)conn_handle;
+    (void)value_handle;
     return MP_EOPNOTSUPP;
+    #endif
 }
 
 int mp_bluetooth_gattc_write(uint16_t conn_handle, uint16_t value_handle, const uint8_t *value, size_t value_len, unsigned int mode) {
-    (void)conn_handle; (void)value_handle; (void)value; (void)value_len; (void)mode;
+    #if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+    if (!mp_bluetooth_is_active()) {
+        return ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    struct bt_conn *conn = mp_bt_zephyr_get_conn(conn_handle);
+    if (conn == NULL) {
+        return MP_ENOTCONN;
+    }
+
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    int err;
+
+    if (mode == MP_BLUETOOTH_WRITE_MODE_NO_RESPONSE) {
+        // Write without response
+        err = bt_gatt_write_without_response(conn, value_handle, value, value_len, false);
+    } else {
+        // Write with response
+        memset(&rp->gattc_write_params, 0, sizeof(rp->gattc_write_params));
+        rp->gattc_write_params.func = gattc_write_cb;
+        rp->gattc_write_params.handle = value_handle;
+        rp->gattc_write_params.data = value;
+        rp->gattc_write_params.length = value_len;
+
+        rp->gattc_write_conn_handle = conn_handle;
+        rp->gattc_write_value_handle = value_handle;
+
+        err = bt_gatt_write(conn, &rp->gattc_write_params);
+    }
+
+    return bt_err_to_errno(err);
+    #else
+    (void)conn_handle;
+    (void)value_handle;
+    (void)value;
+    (void)value_len;
+    (void)mode;
     return MP_EOPNOTSUPP;
+    #endif
 }
 
 int mp_bluetooth_gattc_exchange_mtu(uint16_t conn_handle) {
+    #if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+    if (!mp_bluetooth_is_active()) {
+        return ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    struct bt_conn *conn = mp_bt_zephyr_get_conn(conn_handle);
+    if (conn == NULL) {
+        return MP_ENOTCONN;
+    }
+
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+
+    memset(&rp->gattc_mtu_params, 0, sizeof(rp->gattc_mtu_params));
+    rp->gattc_mtu_params.func = gattc_mtu_exchange_cb;
+    rp->gattc_mtu_conn_handle = conn_handle;
+
+    int err = bt_gatt_exchange_mtu(conn, &rp->gattc_mtu_params);
+    return bt_err_to_errno(err);
+    #else
     (void)conn_handle;
     return MP_EOPNOTSUPP;
+    #endif
 }
 
 // Pairing/Bonding stubs (Phase 1: No persistent storage)

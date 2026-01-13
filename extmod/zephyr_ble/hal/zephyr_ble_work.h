@@ -221,10 +221,11 @@ static inline struct k_work_delayable *k_work_delayable_from_work(struct k_work 
     return CONTAINER_OF(work, struct k_work_delayable, work);
 }
 
-// Get thread from work queue (returns NULL in MicroPython)
+// Get thread from work queue
+// Returns &queue->thread so k_current_get() == k_work_queue_thread_get(queue)
+// comparison works correctly when in work queue context.
 static inline void *k_work_queue_thread_get(struct k_work_q *queue) {
-    (void)queue;
-    return NULL;
+    return &queue->thread;
 }
 
 // Flush work (wait for completion) - no-op in MicroPython

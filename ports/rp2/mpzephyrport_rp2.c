@@ -292,7 +292,17 @@ static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len) {
 
     // Copy packet data to net_buf and deliver to Zephyr
     net_buf_add_mem(buf, pkt_data, pkt_len);
+
+    // Set work queue context flag so priority HCI events (like Number of Completed Packets)
+    // can directly process TX notify instead of queuing work. This is needed because
+    // priority events are processed immediately in bt_recv_unsafe(), not via work queue.
+    extern void mp_bluetooth_zephyr_set_sys_work_q_context(bool in_context);
+    mp_bluetooth_zephyr_set_sys_work_q_context(true);
+
     int ret = recv_cb(hci_dev, buf);
+
+    mp_bluetooth_zephyr_set_sys_work_q_context(false);
+
     if (ret < 0) {
         // Error - unref the buffer (no mp_printf from HCI RX task)
         net_buf_unref(buf);
