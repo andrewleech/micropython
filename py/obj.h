@@ -419,6 +419,7 @@ typedef struct _mp_rom_obj_t { mp_const_obj_t o; } mp_rom_obj_t;
         .is_ordered = 1, \
         .used = MP_ARRAY_SIZE(table_name), \
         .alloc = MP_ARRAY_SIZE(table_name), \
+        .filled = MP_ARRAY_SIZE(table_name), \
         .table = (mp_map_elem_t *)(mp_rom_map_elem_t *)table_name, \
     }
 
@@ -431,6 +432,7 @@ typedef struct _mp_rom_obj_t { mp_const_obj_t o; } mp_rom_obj_t;
             .is_ordered = 1, \
             .used = n, \
             .alloc = n, \
+            .filled = n, \
             .table = (mp_map_elem_t *)(mp_rom_map_elem_t *)table_name, \
         }, \
     }
@@ -482,8 +484,9 @@ typedef struct _mp_map_t {
     size_t all_keys_are_qstrs : 1;
     size_t is_fixed : 1;    // if set, table is fixed/read-only and can't be modified
     size_t is_ordered : 1;  // if set, table is an ordered array, not a hash map
-    size_t used : (8 * sizeof(size_t) - 3);
+    size_t used : (8 * sizeof(size_t) - 3); // next insertion index in dense array
     size_t alloc;
+    size_t filled; // number of non-deleted entries (for O(1) len())
     mp_map_elem_t *table;
 } mp_map_t;
 
@@ -508,6 +511,7 @@ void mp_map_deinit(mp_map_t *map);
 void mp_map_free(mp_map_t *map);
 mp_map_elem_t *mp_map_lookup(mp_map_t *map, mp_obj_t index, mp_map_lookup_kind_t lookup_kind);
 void mp_map_clear(mp_map_t *map);
+void mp_map_compact(mp_map_t *map);
 void mp_map_dump(mp_map_t *map);
 
 // Underlying set implementation (not set object)

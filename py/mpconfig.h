@@ -1613,6 +1613,11 @@ typedef time_t mp_timestamp_t;
 #define MICROPY_PY_COLLECTIONS_ORDEREDDICT (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
 #endif
 
+// Whether to support dicts with >65535 elements (requires uint32_t hash indices)
+#ifndef MICROPY_PY_MAP_LARGE
+#define MICROPY_PY_MAP_LARGE (1)
+#endif
+
 // Whether to provide the _asdict function for namedtuple
 #ifndef MICROPY_PY_COLLECTIONS_NAMEDTUPLE__ASDICT
 #define MICROPY_PY_COLLECTIONS_NAMEDTUPLE__ASDICT (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EVERYTHING)
