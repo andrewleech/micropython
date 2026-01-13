@@ -42,23 +42,25 @@ mpremote connect /dev/ttyACM* repl
 
 ## Current Status
 
+### RP2 Pico W (RP2040) - ✓ Fully Working
+- **Zephyr BLE**: All features working, all multitests pass
+  - ✓ Scanning (36-48 devices per 1.5s scan)
+  - ✓ Advertising
+  - ✓ Connections (central and peripheral roles)
+  - ✓ GATT server (read/write/notify/indicate)
+  - ✓ GATT client (service discovery, read/write)
+  - ✓ Soft reset stability (20+ test cycles verified)
+
 ### STM32WB55
 - **NimBLE**: ✓ Fully working (all features)
-- **Zephyr BLE**: ✓ Working (scanning: 69 devices, advertising, peripheral role)
-  - Known: ~30% device detection vs NimBLE (work queue throughput - acceptable)
-  - Issue #6: Connection callbacks not firing (under investigation)
-
-### RP2 Pico W (RP2040)
-- **Zephyr BLE**: Partially working
-  - ✓ Device boots, BLE init works
-  - ✓ Scanning works (36-48 devices per 1.5s scan)
-  - ✓ Advertising starts successfully
-  - ✗ Connection callbacks not firing (Issue #6)
-  - See: `docs/FREERTOS_INTEGRATION.md`
+- **Zephyr BLE**: Partial - scanning and advertising work
+  - ✓ Scanning (69 devices, ~30% vs NimBLE due to work queue throughput)
+  - ✓ Advertising
+  - ✗ Connections have spurious disconnect (Issue #11)
 
 ### RP2 Pico 2 W (RP2350)
 - Fix #8: Net_buf crash FIXED (see `docs/NET_BUF_CRASH_FIX.md`)
-- Status: HCI init hang under investigation
+- Status: HCI init hang - untested recently
 
 ---
 
@@ -140,16 +142,26 @@ For Zephyr BLE testing, use Pico W (Zephyr) as instance0 and PYBD (NimBLE) as in
 
 ## Known Issues
 
-### Issue #6: Connection Callbacks Not Invoked (Zephyr BLE)
-- **STM32WB55**: Connection callback fires but spurious disconnect follows immediately
-- **RP2 Pico W**: Connection callback never fires (peripheral times out waiting)
-- See: `ISSUE_6_FINAL_ANALYSIS.md`, `ISSUE_6_ROOT_CAUSE_SUMMARY.md`
-- Status: Still open - scanning works, connections do not
-
-### Issue #9: HCI RX Task Causes Hangs (RP2 Pico W)
+### Issue #9: HCI RX Task Causes Hangs (RP2 Pico W) - Low Priority
 - HCI RX task disabled; causes hangs during `gap_scan(None)` or `ble.active(False)`
-- Polling via soft timer works reliably (36-48 devices per 1.5s scan)
+- Polling via soft timer works reliably as workaround
 - Root cause: Race condition between HCI RX task and main task during cleanup
+
+### Issue #11: STM32WB55 Spurious Disconnect (Zephyr BLE)
+- Connection callback fires but spurious disconnect follows immediately
+- See: `docs/ISSUE_11_STM32WB55_SPURIOUS_DISCONNECT.md`
+- Status: Open - STM32WB55 Zephyr variant not production-ready
+
+## Resolved Issues
+
+### Issue #6: Connection Callbacks - FIXED (RP2 Pico W)
+- Fixed via GATT client implementation and TX context management
+- Commit: 2fe8901cec
+
+### Issue #10: Soft Reset Hang - FIXED
+- Resource leaks caused hang after 4-5 BLE test cycles
+- Fixed: static flags reset, work queue reset, GATT memory freed
+- Commit: 1cad43a469
 
 ---
 
