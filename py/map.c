@@ -108,18 +108,6 @@ static inline void mp_map_hash_table_put(const mp_map_t *map, void *hash_table, 
     #endif
 }
 
-// Fixed empty map. Useful when need to call kw-receiving functions
-// without any keywords from C, etc.
-const mp_map_t mp_const_empty_map = {
-    .all_keys_are_qstrs = 0,
-    .is_fixed = 1,
-    .is_ordered = 1,
-    .used = 0,
-    .alloc = 0,
-    .filled = 0,
-    .table = NULL,
-};
-
 // This table of sizes is used to control the growth of hash tables.
 // The first set of sizes are chosen so the allocation fits exactly in a
 // 4-word GC block, and it's not so important for these small values to be
@@ -203,7 +191,7 @@ void mp_map_clear(mp_map_t *map) {
 }
 
 // Rehash map to a larger size (used when table is full during insert).
-STATIC void mp_map_rehash(mp_map_t *map) {
+static void mp_map_rehash(mp_map_t *map) {
     size_t old_alloc = map->alloc;
     size_t new_alloc = get_hash_alloc_greater_or_equal_to(map->alloc + 1);
     DEBUG_printf("mp_map_rehash(%p): " UINT_FMT " -> " UINT_FMT "\n", map, old_alloc, new_alloc);

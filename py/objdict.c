@@ -45,6 +45,7 @@ const mp_obj_dict_t mp_const_empty_dict_obj = {
         .is_ordered = 1,
         .used = 0,
         .alloc = 0,
+        .filled = 0,
         .table = NULL,
     }
 };
