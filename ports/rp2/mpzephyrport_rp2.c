@@ -875,6 +875,12 @@ void mp_bluetooth_zephyr_port_deinit(void) {
     poll_uart_skipped_no_cb = 0;
     poll_uart_skipped_task = 0;
     poll_uart_cyw43_calls = 0;
+
+    #if MICROPY_PY_THREAD
+    // Reset HCI RX task flags so next init starts fresh
+    hci_rx_task_started = false;
+    hci_rx_task_exited = false;
+    #endif
 }
 
 void mp_bluetooth_zephyr_poll_uart(void) {

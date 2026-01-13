@@ -235,6 +235,7 @@ static void add_descriptor(struct bt_gatt_attr *chrc, struct add_descriptor *d, 
 static void mp_bt_zephyr_gatt_indicate_done(struct bt_conn *conn, struct bt_gatt_indicate_params *params, uint8_t err);
 static void mp_bt_zephyr_gatt_indicate_destroy(struct bt_gatt_indicate_params *params);
 static struct bt_gatt_attr *mp_bt_zephyr_find_attr_by_handle(uint16_t value_handle);
+static void mp_bt_zephyr_free_service(struct bt_gatt_service *service);
 
 static struct bt_conn_cb mp_bt_zephyr_conn_callbacks = {
     .connected = mp_bt_zephyr_connected,
@@ -682,9 +683,14 @@ int mp_bluetooth_deinit(void) {
 
     #if CONFIG_BT_GATT_DYNAMIC_DB
     for (size_t i = 0; i < MP_STATE_PORT(bluetooth_zephyr_root_pointers)->n_services; ++i) {
-        bt_gatt_service_unregister(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->services[i]);
-        MP_STATE_PORT(bluetooth_zephyr_root_pointers)->services[i] = NULL;
+        struct bt_gatt_service *service = MP_STATE_PORT(bluetooth_zephyr_root_pointers)->services[i];
+        if (service != NULL) {
+            bt_gatt_service_unregister(service);
+            mp_bt_zephyr_free_service(service);
+            MP_STATE_PORT(bluetooth_zephyr_root_pointers)->services[i] = NULL;
+        }
     }
+    MP_STATE_PORT(bluetooth_zephyr_root_pointers)->n_services = 0;
     #endif
 
     // Call bt_disable() to properly shutdown the BLE stack
@@ -729,6 +735,10 @@ int mp_bluetooth_deinit(void) {
     mp_bluetooth_zephyr_hci_rx_task_stop();
     mp_bluetooth_zephyr_work_thread_stop();
 
+    // Reset work queue state to clear stale queue linkages
+    extern void mp_bluetooth_zephyr_work_reset(void);
+    mp_bluetooth_zephyr_work_reset();
+
     // Deinit port-specific resources (CYW43 cleanup, soft timers, etc.)
     // This must be done after bt_disable() completes.
     #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI
@@ -738,6 +748,16 @@ int mp_bluetooth_deinit(void) {
 
     MP_STATE_PORT(bluetooth_zephyr_root_pointers) = NULL;
     mp_bt_zephyr_next_conn = NULL;
+
+    // Reset indication pool - all indications should be done by now
+    for (int i = 0; i < CONFIG_BT_MAX_CONN; i++) {
+        mp_bt_zephyr_indicate_pool[i].in_use = false;
+    }
+
+    // Reset callback registration flag so callbacks will be re-registered on next init.
+    // This is necessary because Zephyr's internal callback list may have been corrupted
+    // by the soft reset, and we want a clean slate.
+    mp_bt_zephyr_callbacks_registered = false;
 
     // Set state to OFF so next init does full re-initialization
     // (including controller init and callback registration)
@@ -877,10 +897,14 @@ int mp_bluetooth_gatts_register_service_begin(bool append) {
         return MP_EOPNOTSUPP;
     }
 
-    // Unregister and unref any previous service definitions.
+    // Unregister and free any previous service definitions.
     for (size_t i = 0; i < MP_STATE_PORT(bluetooth_zephyr_root_pointers)->n_services; ++i) {
-        bt_gatt_service_unregister(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->services[i]);
-        MP_STATE_PORT(bluetooth_zephyr_root_pointers)->services[i] = NULL;
+        struct bt_gatt_service *service = MP_STATE_PORT(bluetooth_zephyr_root_pointers)->services[i];
+        if (service != NULL) {
+            bt_gatt_service_unregister(service);
+            mp_bt_zephyr_free_service(service);
+            MP_STATE_PORT(bluetooth_zephyr_root_pointers)->services[i] = NULL;
+        }
     }
     MP_STATE_PORT(bluetooth_zephyr_root_pointers)->n_services = 0;
 
@@ -931,7 +955,10 @@ int mp_bluetooth_gatts_register_service(mp_obj_bluetooth_uuid_t *service_uuid, m
     uint64_t attrs_are_chrs = 0;
     uint64_t chr_has_ccc = 0;
 
-    add_service(create_zephyr_uuid(service_uuid), &svc_attributes[attr_index]);
+    // Create and add service, then free the temporary UUID (gatt_db_add copies it)
+    struct bt_uuid *svc_uuid = create_zephyr_uuid(service_uuid);
+    add_service(svc_uuid, &svc_attributes[attr_index]);
+    free(svc_uuid);
     attr_index += 1;
 
     for (size_t i = 0; i < num_characteristics; ++i) {
@@ -956,6 +983,8 @@ int mp_bluetooth_gatts_register_service(mp_obj_bluetooth_uuid_t *service_uuid, m
         }
 
         add_characteristic(&add_char, &svc_attributes[attr_index], &svc_attributes[attr_index + 1]);
+        // Free the temporary UUID (gatt_db_add copied it)
+        free((void *)add_char.uuid);
 
         struct bt_gatt_attr *curr_char = &svc_attributes[attr_index];
         attrs_are_chrs |= (1 << attr_index);
@@ -980,6 +1009,8 @@ int mp_bluetooth_gatts_register_service(mp_obj_bluetooth_uuid_t *service_uuid, m
                 }
 
                 add_descriptor(curr_char, &add_desc, &svc_attributes[attr_index]);
+                // Free the temporary UUID (gatt_db_add copied it)
+                free((void *)add_desc.uuid);
                 attr_index += 1;
 
                 descriptor_index++;
@@ -1000,6 +1031,8 @@ int mp_bluetooth_gatts_register_service(mp_obj_bluetooth_uuid_t *service_uuid, m
             attrs_to_ignore |= (1 << attr_index);
 
             add_descriptor(curr_char, &add_desc, &svc_attributes[attr_index]);
+            // Free the temporary UUID (gatt_db_add copied it)
+            free((void *)add_desc.uuid);
             attr_index += 1;
         }
     }
@@ -1598,6 +1631,56 @@ static void add_descriptor(struct bt_gatt_attr *chrc, struct add_descriptor *d, 
                 d->permissions & GATT_PERM_MASK,
                 mp_bt_zephyr_gatts_attr_read, mp_bt_zephyr_gatts_attr_write, NULL), attr_desc, 0);
     }
+}
+
+// Free all memory associated with a GATT service.
+// Called when unregistering services to prevent memory leaks.
+//
+// Memory allocation pattern in GATT registration:
+// - gatt_db_add() allocates attr->uuid via malloc for ALL attributes
+// - gatt_db_add() allocates attr->user_data via malloc ONLY when user_data_len > 0:
+//   - Service declaration (index 0): user_data = malloc'd copy of service UUID
+//   - Characteristic declaration: user_data = malloc'd bt_gatt_chrc struct
+//   - Other attrs: user_data is either NULL or later assigned to gatts_db entry (GC heap)
+// - Service struct and attrs array are malloc'd in mp_bluetooth_gatts_register_service
+//
+// We must NOT free user_data that points to gatts_db entries (GC managed).
+// We identify characteristic declarations by their read callback (bt_gatt_attr_read_chrc).
+static void mp_bt_zephyr_free_service(struct bt_gatt_service *service) {
+    if (service == NULL) {
+        return;
+    }
+
+    if (service->attrs != NULL) {
+        // First: free user_data for service declaration (index 0) and characteristic declarations
+        // Service declaration is always at index 0
+        if (service->attr_count > 0 && service->attrs[0].user_data != NULL) {
+            free(service->attrs[0].user_data);
+        }
+
+        // Characteristic declarations have read callback = bt_gatt_attr_read_chrc
+        extern ssize_t bt_gatt_attr_read_chrc(struct bt_conn *conn,
+            const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset);
+        for (size_t i = 1; i < service->attr_count; i++) {
+            struct bt_gatt_attr *attr = &service->attrs[i];
+            if (attr->read == bt_gatt_attr_read_chrc && attr->user_data != NULL) {
+                free(attr->user_data);
+            }
+        }
+
+        // Second: free all UUIDs (all were malloc'd by gatt_db_add)
+        for (size_t i = 0; i < service->attr_count; i++) {
+            if (service->attrs[i].uuid != NULL) {
+                free((void *)service->attrs[i].uuid);
+            }
+        }
+
+        // Free the attributes array itself
+        free(service->attrs);
+    }
+
+    // Free the service struct itself
+    free(service);
 }
 
 // GATT Client implementation

@@ -215,6 +215,10 @@ void mp_bluetooth_zephyr_work_thread_stop(void);
 // Returns true if any work was processed
 bool mp_bluetooth_zephyr_work_drain(void);
 
+// Reset work queue state for clean re-initialization
+// Called from mp_bluetooth_deinit() to clear stale queue linkages
+void mp_bluetooth_zephyr_work_reset(void);
+
 // Get delayable work from work (for internal use)
 // work is embedded in the delayable work structure
 static inline struct k_work_delayable *k_work_delayable_from_work(struct k_work *work) {

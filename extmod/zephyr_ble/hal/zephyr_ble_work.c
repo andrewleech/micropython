@@ -831,3 +831,35 @@ bool mp_bluetooth_zephyr_work_drain(void) {
     DEBUG_WORK_printf("work_drain: done, processed=%d\n", any_work);
     return any_work;
 }
+
+// Reset work queue state for clean re-initialization
+// This clears the global work queue list and resets the system work queue
+// Called from mp_bluetooth_deinit() to prevent stale queue linkages
+void mp_bluetooth_zephyr_work_reset(void) {
+    DEBUG_WORK_printf("work_reset: clearing work queue state\n");
+
+    // Clear the global work queue list
+    global_work_q = NULL;
+
+    // Reset system work queue
+    k_sys_work_q.head = NULL;
+    k_sys_work_q.nextq = NULL;
+    k_sys_work_q.name = NULL;
+
+    // Reset init work queue
+    k_init_work_q.head = NULL;
+    k_init_work_q.nextq = NULL;
+    k_init_work_q.name = NULL;
+
+    // Reset recursion guards
+    regular_work_processor_running = false;
+    init_work_processor_running = false;
+
+    // Reset init phase flag
+    in_bt_enable_init = false;
+    in_sys_work_q_context = false;
+
+    // Reset debug counters
+    work_process_call_count = 0;
+    work_items_processed = 0;
+}
