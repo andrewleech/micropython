@@ -622,9 +622,9 @@ int mp_bluetooth_init(void) {
     init_complete:
         DEBUG_printf("BLE initialization successful!\n");
 
-        // HCI RX task disabled - causes hangs during scan stop
-        // TODO: Investigate why gap_scan(None) or active(False) hangs with HCI RX task
-        #if 0 && MICROPY_PY_THREAD
+        // Start HCI RX task for continuous HCI polling in background
+        // The task is stopped first in mp_bluetooth_deinit() to prevent race conditions
+        #if MICROPY_PY_THREAD
         extern void mp_bluetooth_zephyr_hci_rx_task_start(void);
         mp_bluetooth_zephyr_hci_rx_task_start();
         DEBUG_printf("HCI RX task started\n");
@@ -653,19 +653,23 @@ int mp_bluetooth_deinit(void) {
         return 0;
     }
 
-    // NOTE: Do NOT set state to SUSPENDED yet - we need polling to continue
-    // working so that HCI commands in bt_le_adv_stop() and bt_disable() can
-    // complete. The state will be set to SUSPENDED after bt_disable().
-
-    // Stop advertising/scanning before bt_disable()
-    // Note: These may fail during soft reset if stack is in bad state.
-    // We ignore errors here to ensure cleanup continues.
+    // === PHASE 1: Stop HCI RX task FIRST ===
+    // This MUST happen before bt_le_adv_stop/bt_le_scan_stop/bt_disable to prevent race:
+    // - Those functions send HCI commands and wait for responses
+    // - If HCI RX task is running, it queues responses as work items
+    // - This can cause deadlock: work_drain can't keep up with new work
+    // By stopping HCI RX task first, all HCI operations fall back to polling mode.
+    mp_bluetooth_zephyr_hci_rx_task_stop();
 
     // Clean up pre-allocated connection object
     if (mp_bt_zephyr_next_conn != NULL) {
         DEBUG_printf("mp_bluetooth_deinit: cleaning up pre-allocated connection\n");
         mp_bt_zephyr_next_conn = NULL;
     }
+
+    // === PHASE 2: Stop active BLE operations ===
+    // These may fail during soft reset if stack is in bad state.
+    // We ignore errors here to ensure cleanup continues.
 
     DEBUG_printf("mp_bluetooth_deinit: stopping advertising\n");
     int ret = bt_le_adv_stop();
@@ -693,11 +697,9 @@ int mp_bluetooth_deinit(void) {
     MP_STATE_PORT(bluetooth_zephyr_root_pointers)->n_services = 0;
     #endif
 
-    // Call bt_disable() to properly shutdown the BLE stack
-    // This sends HCI_Reset to the controller and cleans up internal state
-    // Without this, bt_enable() returns -EALREADY on reinit and skips initialization
-    // Note: bt_disable() may timeout (max 5s) if HCI transport is broken.
-    // We continue cleanup regardless of the result.
+    // === PHASE 3: bt_disable() with polling mode ===
+    // HCI RX task is stopped, so k_sem_take uses polling for HCI reception.
+    // This is reliable for the few HCI commands bt_disable() needs.
     DEBUG_printf("mp_bluetooth_deinit: calling bt_disable\n");
     ret = bt_disable();
     DEBUG_printf("mp_bluetooth_deinit: bt_disable returned %d\n", ret);
@@ -726,13 +728,12 @@ int mp_bluetooth_deinit(void) {
         k_sem_init(&bt_dev.ncmd_sem, 1, 1);
     }
 
-    // Drain any pending work items before stopping threads
-    // This ensures connection events and other callbacks are processed
+    // === PHASE 4: Drain remaining work ===
+    // Now safe to drain - no new work will be added (HCI RX task is stopped)
     extern bool mp_bluetooth_zephyr_work_drain(void);
     mp_bluetooth_zephyr_work_drain();
 
-    // Now stop HCI RX task and work thread
-    mp_bluetooth_zephyr_hci_rx_task_stop();
+    // Stop work thread
     mp_bluetooth_zephyr_work_thread_stop();
 
     // Reset work queue state to clear stale queue linkages

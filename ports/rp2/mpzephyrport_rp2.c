@@ -120,6 +120,7 @@ static TaskHandle_t hci_rx_task_handle = NULL;
 static volatile bool hci_rx_task_running = false;      // Signal task to stop
 static volatile bool hci_rx_task_started = false;      // Task has started and is ready
 static volatile bool hci_rx_task_exited = false;       // Task has exited
+static volatile bool hci_rx_task_shutdown_requested = false;  // Shutdown in progress
 static StaticTask_t hci_rx_task_tcb;
 static StackType_t hci_rx_task_stack[HCI_RX_TASK_STACK_SIZE];
 
@@ -380,7 +381,7 @@ void mp_bluetooth_zephyr_process_hci_queue(void) {
 }
 
 // HCI RX task - runs continuously, polls CYW43 for incoming HCI data
-// NOTE: This runs on core1, don't use debug_printf (printf race condition)
+// NOTE: This runs on core0, don't use debug_printf (printf race condition)
 static void hci_rx_task_func(void *arg) {
     (void)arg;
     debug_printf_hci_task("HCI RX task started\n");
@@ -391,7 +392,17 @@ static void hci_rx_task_func(void *arg) {
     hci_rx_task_started = true;
 
     while (hci_rx_task_running) {
-        if (recv_cb != NULL) {
+        // Check for shutdown notification (non-blocking)
+        // This allows immediate wakeup instead of waiting for vTaskDelay timeout
+        uint32_t notification = ulTaskNotifyTake(pdTRUE, 0);
+        if (notification && hci_rx_task_shutdown_requested) {
+            debug_printf_hci_task("HCI RX task shutdown requested\n");
+            break;
+        }
+
+        // Take local copy of recv_cb for consistency (avoid TOCTOU race)
+        bt_hci_recv_t cb = recv_cb;
+        if (cb != NULL) {
             // Poll for HCI data
             uint32_t len = 0;
             hci_rx_task_polls++;  // Track poll count
@@ -406,7 +417,7 @@ static void hci_rx_task_func(void *arg) {
             }
         }
 
-        // Yield to other tasks - 10ms poll interval (was 1ms, increased to reduce SPI activity)
+        // Yield to other tasks - 10ms poll interval
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 
@@ -475,6 +486,7 @@ void mp_bluetooth_zephyr_hci_rx_task_start(void) {
 }
 
 // Stop HCI RX task - called during BLE deinitialization
+// Uses task notification for immediate wakeup to avoid 10ms delay
 void mp_bluetooth_zephyr_hci_rx_task_stop(void) {
     if (hci_rx_task_handle == NULL) {
         return;
@@ -488,15 +500,37 @@ void mp_bluetooth_zephyr_hci_rx_task_stop(void) {
         (unsigned long)hci_rx_evt_le_meta, (unsigned long)hci_rx_evt_le_adv_report,
         (unsigned long)hci_rx_evt_other, (unsigned long)hci_rx_acl);
 
-    // Signal task to exit
-    hci_rx_task_running = false;
+    // Phase 1: Signal shutdown intent (but keep recv_cb set for polling fallback)
+    // After task stops, bt_disable() and other HCI operations will use polling mode
+    // which needs recv_cb to be valid. recv_cb will be cleared in port_deinit().
+    hci_rx_task_shutdown_requested = true;
 
-    // Wait for task to signal exit (avoids undefined behavior of eTaskGetState after vTaskDelete)
-    for (int i = 0; i < 100 && !hci_rx_task_exited; i++) {  // 100 * 10ms = 1s max
-        vTaskDelay(pdMS_TO_TICKS(10));
+    // Phase 2: Signal task to stop and ensure visibility
+    hci_rx_task_running = false;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+
+    // Phase 3: Notify task to wake immediately (don't wait for vTaskDelay timeout)
+    xTaskNotifyGive(hci_rx_task_handle);
+
+    // Phase 4: Wait for clean exit with shorter timeout (task wakes immediately)
+    TickType_t start = xTaskGetTickCount();
+    const TickType_t max_wait = pdMS_TO_TICKS(200);  // 200ms timeout (was 1s)
+
+    while (!hci_rx_task_exited) {
+        if ((xTaskGetTickCount() - start) > max_wait) {
+            error_printf("HCI RX task exit timeout!\n");
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 
+    // Phase 5: Reset state for next init cycle
     hci_rx_task_handle = NULL;
+    hci_rx_task_shutdown_requested = false;
+
+    // Drain any stale packets from queue (they won't be processed anyway)
+    hci_rx_queue_head = hci_rx_queue_tail;
+
     debug_printf("HCI RX task stopped\n");
 }
 
@@ -880,6 +914,7 @@ void mp_bluetooth_zephyr_port_deinit(void) {
     // Reset HCI RX task flags so next init starts fresh
     hci_rx_task_started = false;
     hci_rx_task_exited = false;
+    hci_rx_task_shutdown_requested = false;
     #endif
 }
 
