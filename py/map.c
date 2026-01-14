@@ -344,7 +344,7 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
     for (;;) {
         size_t idx = mp_map_hash_table_get(map, hash_table, pos);
         mp_map_elem_t *slot = NULL;
-        if (idx != 0) {
+        if (idx != 0 && idx <= map->used) {
             slot = &map->table[idx - 1];
         }
         if (slot == NULL) {
@@ -395,6 +395,15 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
         if (pos == start_pos) {
             // search got back to starting position, so index is not in table
             if (lookup_kind == MP_MAP_LOOKUP_ADD_IF_NOT_FOUND) {
+                #if MICROPY_PY_MAP_REUSE_TAIL_TOMBSTONE
+                // If tail slot is tombstone, reclaim it (common in exception handling).
+                // Decrementing used makes stale hash entry point beyond used, treated as empty.
+                if (map->used > 0 && map->table[map->used - 1].key == MP_OBJ_SENTINEL) {
+                    map->used--;
+                    start_pos = pos = hash % map->alloc;
+                    continue;
+                }
+                #endif
                 // not enough room in table, rehash it
                 mp_map_rehash(map);
                 // restart the search for the new element

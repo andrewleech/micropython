@@ -1618,6 +1618,13 @@ typedef time_t mp_timestamp_t;
 #define MICROPY_PY_MAP_LARGE (1)
 #endif
 
+// Whether to reclaim tail tombstones when adding to a full dict.
+// This allows dict adds to succeed when heap is locked if the last
+// slot is a tombstone (common in exception handling). Costs ~50 bytes.
+#ifndef MICROPY_PY_MAP_REUSE_TAIL_TOMBSTONE
+#define MICROPY_PY_MAP_REUSE_TAIL_TOMBSTONE (1)
+#endif
+
 // Whether to provide the _asdict function for namedtuple
 #ifndef MICROPY_PY_COLLECTIONS_NAMEDTUPLE__ASDICT
 #define MICROPY_PY_COLLECTIONS_NAMEDTUPLE__ASDICT (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EVERYTHING)
