@@ -142,11 +142,6 @@ For Zephyr BLE testing, use Pico W (Zephyr) as instance0 and PYBD (NimBLE) as in
 
 ## Known Issues
 
-### Issue #9: HCI RX Task Causes Hangs (RP2 Pico W) - Low Priority
-- HCI RX task disabled; causes hangs during `gap_scan(None)` or `ble.active(False)`
-- Polling via soft timer works reliably as workaround
-- Root cause: Race condition between HCI RX task and main task during cleanup
-
 ### Issue #11: STM32WB55 Spurious Disconnect (Zephyr BLE)
 - Connection callback fires but spurious disconnect follows immediately
 - See: `docs/ISSUE_11_STM32WB55_SPURIOUS_DISCONNECT.md`
@@ -157,6 +152,11 @@ For Zephyr BLE testing, use Pico W (Zephyr) as instance0 and PYBD (NimBLE) as in
 ### Issue #6: Connection Callbacks - FIXED (RP2 Pico W)
 - Fixed via GATT client implementation and TX context management
 - Commit: 2fe8901cec
+
+### Issue #9: HCI RX Task Hang - FIXED
+- HCI RX task caused hangs during shutdown (gap_scan(None) or ble.active(False))
+- Fixed: Stop task BEFORE bt_disable(), use task notification for immediate wakeup
+- Commit: 82741d16dc
 
 ### Issue #10: Soft Reset Hang - FIXED
 - Resource leaks caused hang after 4-5 BLE test cycles
