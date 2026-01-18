@@ -53,10 +53,12 @@ mpremote connect /dev/ttyACM* repl
 
 ### STM32WB55
 - **NimBLE**: ✓ Fully working (all features)
-- **Zephyr BLE**: Partial - scanning and advertising work
+- **Zephyr BLE**: ✓ Fully working (all features except NOTIFY/INDICATE callbacks)
   - ✓ Scanning (69 devices, ~30% vs NimBLE due to work queue throughput)
   - ✓ Advertising
-  - ✗ Connections have spurious disconnect (Issue #11)
+  - ✓ Connections (both roles)
+  - ✓ GATT server (read/write/notify/indicate)
+  - ✓ GATT client (service discovery, read/write)
 
 ### RP2 Pico 2 W (RP2350)
 - Fix #8: Net_buf crash FIXED (see `docs/NET_BUF_CRASH_FIX.md`)
@@ -142,12 +144,19 @@ For Zephyr BLE testing, use Pico W (Zephyr) as instance0 and PYBD (NimBLE) as in
 
 ## Known Issues
 
-### Issue #11: STM32WB55 Spurious Disconnect (Zephyr BLE)
-- Connection callback fires but spurious disconnect follows immediately
-- See: `docs/ISSUE_11_STM32WB55_SPURIOUS_DISCONNECT.md`
-- Status: Open - STM32WB55 Zephyr variant not production-ready
+(None - all major issues resolved)
+
+---
 
 ## Resolved Issues
+
+### Issue #12: STM32WB55 GATTC 5-Second Delay - FIXED
+- 5-second delay between connection and GATT discovery on STM32WB55
+- Root cause: `machine.idle()` uses `__WFI()` but doesn't process Zephyr work queue
+- Python test calls `machine.idle()` in wait loops, work items never run
+- Fixed: `machine.idle()` now calls `mp_bluetooth_zephyr_hci_uart_wfi()` when BLE active
+- Result: Delay reduced from 5+ seconds to ~14ms, GATTC fully working
+- Files: `ports/stm32/modmachine.c`
 
 ### Issue #6: Connection Callbacks - FIXED (RP2 Pico W)
 - Fixed via GATT client implementation and TX context management
@@ -162,6 +171,11 @@ For Zephyr BLE testing, use Pico W (Zephyr) as instance0 and PYBD (NimBLE) as in
 - Resource leaks caused hang after 4-5 BLE test cycles
 - Fixed: static flags reset, work queue reset, GATT memory freed
 - Commit: 1cad43a469
+
+### Issue #11: STM32WB55 Spurious Disconnect - FIXED
+- Connection callbacks not firing on STM32WB55 Zephyr variant
+- Root cause: `mp_bluetooth_hci_poll()` called `mp_bluetooth_zephyr_poll()` but not `run_zephyr_hci_task()`, so HCI packets from IPCC were never processed during the wait loop
+- Fixed: `mp_bluetooth_hci_poll()` now calls `run_zephyr_hci_task()` to process HCI events
 
 ---
 
@@ -243,7 +257,7 @@ See `docs/PERFORMANCE.md` for detailed analysis.
 
 1. **RP2 Pico W (RP2040)**: Verify BLE initialization with FreeRTOS
 2. **RP2 Pico 2 W (RP2350)**: Fix HCI init hang
-3. **STM32WB55**: Investigate Issue #6 (connection callbacks)
+3. **GATT client**: Implement NOTIFY/INDICATE callbacks via `bt_gatt_subscribe()` (feature gap)
 4. **Performance**: Optimize work queue throughput (non-critical)
 
 ---

@@ -45,7 +45,10 @@
 #if MICROPY_BLUETOOTH_NIMBLE
 // For mp_bluetooth_nimble_hci_uart_wfi
 #include "nimble/nimble_npl.h"
-#elif !MICROPY_BLUETOOTH_ZEPHYR
+#elif MICROPY_BLUETOOTH_ZEPHYR
+// For mp_bluetooth_zephyr_hci_uart_wfi
+extern void mp_bluetooth_zephyr_hci_uart_wfi(void);
+#else
 #error "STM32WB must use NimBLE or Zephyr BLE."
 #endif
 
@@ -59,6 +62,15 @@
 
 // Define to 1 to print traces of HCI packets
 #define HCI_TRACE (0)
+
+// Define to 1 to trace ACL flow control (for debugging GATTC issues)
+#define ACL_FLOW_DEBUG (0)
+
+#if ACL_FLOW_DEBUG
+#define ACL_DEBUG_printf(...) mp_printf(&mp_plat_print, "RFCORE: " __VA_ARGS__)
+#else
+#define ACL_DEBUG_printf(...) (void)0
+#endif
 
 #define IPCC_CH_BLE         (LL_IPCC_CHANNEL_1) // BLE HCI command and response
 #define IPCC_CH_SYS         (LL_IPCC_CHANNEL_2) // system HCI command and response
@@ -312,6 +324,7 @@ static size_t tl_parse_hci_msg(const uint8_t *buf, parse_hci_info_t *parse) {
             info = "HCI_ACL";
 
             len = 5 + buf[3] + (buf[4] << 8);
+            ACL_DEBUG_printf("HCI_ACL_RX: len=%d handle=%02x%02x\n", (int)len, buf[2], buf[1]);
             if (parse != NULL) {
                 parse->cb_fun(parse->cb_env, buf, len);
             }
@@ -322,6 +335,7 @@ static size_t tl_parse_hci_msg(const uint8_t *buf, parse_hci_info_t *parse) {
 
             // Acknowledgment of a pending ACL request, allow another one to be sent.
             if (buf[1] == HCI_EVENT_NUMBER_OF_COMPLETED_PACKETS) {
+                ACL_DEBUG_printf("NUM_COMPLETED_PACKETS: pending=%d->0\n", hci_acl_cmd_pending);
                 hci_acl_cmd_pending = false;
             }
 
@@ -445,7 +459,9 @@ static size_t tl_check_msg(volatile tl_list_node_t *head, unsigned int ch, parse
     size_t len = 0;
     if (LL_C2_IPCC_IsActiveFlag_CHx(IPCC, ch)) {
         // Process new data.
+        ACL_DEBUG_printf("tl_check_msg: IPCC ch=%d has data\n", ch);
         len = tl_process_msg(head, ch, parse);
+        ACL_DEBUG_printf("tl_check_msg: processed len=%d\n", (int)len);
 
         // Clear receive channel (allows RF core to send more data to us).
         LL_C1_IPCC_ClearFlag_CHx(IPCC, ch);
@@ -668,15 +684,25 @@ void rfcore_ble_hci_cmd(size_t len, const uint8_t *src) {
 
         // Give the previous ACL command up to 100ms to complete.
         mp_uint_t timeout_start_ticks_ms = mp_hal_ticks_ms();
+        #if ACL_FLOW_DEBUG
+        if (hci_acl_cmd_pending) {
+            ACL_DEBUG_printf("ACL_SEND: waiting for pending=%d\n", hci_acl_cmd_pending);
+        }
+        #endif
         while (hci_acl_cmd_pending) {
             if (mp_hal_ticks_ms() - timeout_start_ticks_ms > 100) {
+                ACL_DEBUG_printf("ACL_SEND: TIMEOUT! pending still=%d after 100ms\n", hci_acl_cmd_pending);
                 break;
             }
+            // Pump HCI messages while waiting for ACL completion
             #if MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_NIMBLE
             mp_bluetooth_nimble_hci_uart_wfi();
+            #elif MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR
+            mp_bluetooth_zephyr_hci_uart_wfi();
             #endif
         }
 
+        ACL_DEBUG_printf("ACL_SEND: setting pending=1 (was %d)\n", hci_acl_cmd_pending);
         // Prevent sending another command until this one returns with HCI_EVENT_COMMAND_{COMPLETE,STATUS}.
         hci_acl_cmd_pending = true;
     } else {

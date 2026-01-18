@@ -45,8 +45,8 @@
 #include "extmod/zephyr_ble/net_buf_pool_registry.h"
 
 // Access Zephyr's internal bt_dev for force-reset on deinit failure
-// The include path should have lib/zephyr/subsys/bluetooth/host already
-#include "hci_core.h"
+// Include path has lib/zephyr/subsys/bluetooth, so use host/ prefix
+#include "host/hci_core.h"
 
 #if MICROPY_PY_NETWORK_CYW43
 // For cyw43_t definition (bt_loaded reset on deinit failure)
@@ -740,9 +740,9 @@ int mp_bluetooth_deinit(void) {
     extern void mp_bluetooth_zephyr_work_reset(void);
     mp_bluetooth_zephyr_work_reset();
 
-    // Deinit port-specific resources (CYW43 cleanup, soft timers, etc.)
+    // Deinit port-specific resources (CYW43 cleanup, soft timers, GATT pool, etc.)
     // This must be done after bt_disable() completes.
-    #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI
+    #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI || defined(STM32WB)
     extern void mp_bluetooth_zephyr_port_deinit(void);
     mp_bluetooth_zephyr_port_deinit();
     #endif
@@ -1734,6 +1734,9 @@ static uint8_t gattc_characteristic_discover_cb(struct bt_conn *conn,
             end_handle = attr->handle - 1;
         }
 
+        DEBUG_printf("gattc_char_discover: value_handle=0x%04x end_handle=0x%04x props=0x%02x\n",
+            rp->gattc_pending_char.value_handle, end_handle, rp->gattc_pending_char.properties);
+
         mp_bluetooth_gattc_on_characteristic_result(conn_handle,
             rp->gattc_pending_char.value_handle,
             end_handle,
@@ -1788,6 +1791,14 @@ static uint8_t gattc_descriptor_discover_cb(struct bt_conn *conn,
 static uint8_t gattc_read_cb(struct bt_conn *conn, uint8_t err,
     struct bt_gatt_read_params *params, const void *data, uint16_t length) {
 
+    struct bt_conn_info conn_info;
+    int state = -1;
+    if (conn && bt_conn_get_info(conn, &conn_info) == 0) {
+        state = conn_info.state;
+    }
+    DEBUG_printf("gattc_read_cb: err=%d data=%p length=%d conn=%p conn_state=%d\n",
+        err, data, length, conn, state);
+
     if (!mp_bluetooth_is_active()) {
         return BT_GATT_ITER_STOP;
     }
@@ -1795,6 +1806,8 @@ static uint8_t gattc_read_cb(struct bt_conn *conn, uint8_t err,
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
     uint16_t conn_handle = rp->gattc_read_conn_handle;
     uint16_t value_handle = rp->gattc_read_value_handle;
+
+    DEBUG_printf("gattc_read_cb: conn_handle=%d value_handle=0x%04x\n", conn_handle, value_handle);
 
     if (data != NULL && length > 0) {
         // Data available
@@ -1805,6 +1818,7 @@ static uint8_t gattc_read_cb(struct bt_conn *conn, uint8_t err,
 
     if (data == NULL) {
         // Read complete
+        DEBUG_printf("gattc_read_cb: read complete, err=%d\n", err);
         mp_bluetooth_gattc_on_read_write_status(MP_BLUETOOTH_IRQ_GATTC_READ_DONE,
             conn_handle, value_handle, err);
         return BT_GATT_ITER_STOP;
@@ -1979,7 +1993,14 @@ int mp_bluetooth_gattc_read(uint16_t conn_handle, uint16_t value_handle) {
     rp->gattc_read_conn_handle = conn_handle;
     rp->gattc_read_value_handle = value_handle;
 
+    struct bt_conn_info conn_info;
+    bt_conn_get_info(conn, &conn_info);
+    DEBUG_printf("gattc_read: conn_handle=%d value_handle=0x%04x conn_state=%d\n",
+        conn_handle, value_handle, conn_info.state);
+
     int err = bt_gatt_read(conn, &rp->gattc_read_params);
+    bt_conn_get_info(conn, &conn_info);
+    DEBUG_printf("gattc_read: bt_gatt_read returned %d (conn_state=%d)\n", err, conn_info.state);
     return bt_err_to_errno(err);
     #else
     (void)conn_handle;

@@ -409,6 +409,10 @@ static volatile bool init_work_processor_running = false;
 // Set by k_sem_take() during its wait loop (exported in zephyr_ble_work.h)
 volatile bool mp_bluetooth_zephyr_in_wait_loop = false;
 
+// HCI event processing depth: Prevents work_process from k_sem_take() during post-recv_cb work
+// Incremented by run_zephyr_hci_task() during post-batch work processing (exported in zephyr_ble_work.h)
+volatile int mp_bluetooth_zephyr_hci_processing_depth = 0;
+
 // Debug counters for work processing investigation
 static int work_process_call_count = 0;
 static int work_items_processed = 0;
@@ -436,12 +440,7 @@ void mp_bluetooth_zephyr_work_process(void) {
     // because k_sem_take() is waiting for an HCI response that will arrive via work queue.
     // Without this exception, the recursion prevention creates a deadlock.
     if (regular_work_processor_running && !mp_bluetooth_zephyr_in_wait_loop) {
-        DEBUG_WORK_printf("work_process: already running, skipping (recursion prevention)\n");
         return;
-    }
-
-    if (regular_work_processor_running && mp_bluetooth_zephyr_in_wait_loop) {
-        DEBUG_WORK_printf("work_process: allowing re-entry due to wait loop context\n");
     }
 
     regular_work_processor_running = true;
@@ -468,7 +467,6 @@ void mp_bluetooth_zephyr_work_process(void) {
 
             // Execute work handler
             work_items_processed++;
-            DEBUG_WORK_printf("work_execute(%p, handler=%p) [total: %d]\n", work, work->handler, work_items_processed);
             if (work->handler) {
                 // Set context flag if processing system work queue
                 bool is_sys_wq = (q == &k_sys_work_q);
@@ -480,7 +478,6 @@ void mp_bluetooth_zephyr_work_process(void) {
                     in_sys_work_q_context = false;
                 }
             }
-            DEBUG_WORK_printf("work_execute(%p) done\n", work);
 
             // Note: We intentionally do NOT break if work was re-enqueued.
             // Zephyr's tx_processor re-submits tx_work to continue processing TX data.
@@ -858,6 +855,9 @@ void mp_bluetooth_zephyr_work_reset(void) {
     // Reset init phase flag
     in_bt_enable_init = false;
     in_sys_work_q_context = false;
+
+    // Reset HCI event processing depth
+    mp_bluetooth_zephyr_hci_processing_depth = 0;
 
     // Reset debug counters
     work_process_call_count = 0;

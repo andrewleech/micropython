@@ -39,7 +39,11 @@
 #include "extmod/modbluetooth.h"
 #include "extmod/mpbthci.h"
 #include "shared/runtime/softtimer.h"
-#include "mpbthciport.h"
+
+// Don't include mpbthciport.h - it defines mp_bluetooth_hci_poll_now as static inline
+// which conflicts with our non-inline definition needed by modbluetooth_zephyr.c.
+// Instead, declare the specific functions we need from mpbthciport.c:
+extern void mp_bluetooth_hci_poll_now_default(void);
 
 #include <string.h>
 
@@ -87,9 +91,6 @@ static struct net_buf *rx_queue[RX_QUEUE_SIZE];
 static volatile size_t rx_queue_head = 0;
 static volatile size_t rx_queue_tail = 0;
 
-// Timing instrumentation: Track packet arrival timestamps (microseconds)
-static uint32_t rx_queue_timestamps[RX_QUEUE_SIZE];
-uint32_t timing_baseline_us = 0;  // First packet arrival time (exported for callbacks)
 
 // H:4 packet parser state
 typedef enum {
@@ -125,12 +126,7 @@ static bool rx_queue_put(struct net_buf *buf) {
         MICROPY_PY_BLUETOOTH_EXIT
         return false;
     }
-    uint32_t now_us = mp_hal_ticks_us();
-    if (timing_baseline_us == 0) {
-        timing_baseline_us = now_us;  // Initialize baseline on first packet
-    }
     rx_queue[rx_queue_head] = buf;
-    rx_queue_timestamps[rx_queue_head] = now_us;
     rx_queue_head = (rx_queue_head + 1) % RX_QUEUE_SIZE;
     MICROPY_PY_BLUETOOTH_EXIT
     return true;
@@ -143,26 +139,142 @@ static struct net_buf *rx_queue_get(void) {
         return NULL;
     }
     struct net_buf *buf = rx_queue[rx_queue_tail];
-    uint32_t enqueue_timestamp_us = rx_queue_timestamps[rx_queue_tail];
-    size_t queue_depth = (rx_queue_head - rx_queue_tail + RX_QUEUE_SIZE) % RX_QUEUE_SIZE;
     rx_queue_tail = (rx_queue_tail + 1) % RX_QUEUE_SIZE;
-
-    // Calculate and report timing
-    uint32_t now_us = mp_hal_ticks_us();
-    uint32_t queue_latency_us = now_us - enqueue_timestamp_us;
-    uint32_t relative_time_ms = (enqueue_timestamp_us - timing_baseline_us) / 1000;
-
-    // Only report timing for connection-related events to reduce noise
-    // NOTE: buf->data[0] now contains H4 packet type, buf->data[1] is event code
-    const uint8_t *data = buf->data;
-    if (buf->len >= 4 && data[0] == H4_EVT && data[1] == 0x3E && data[3] == 0x01) {
-        // LE Connection Complete event
-        mp_printf(&mp_plat_print, "[HCI_TIMING] RX_QUEUE: Dequeued LE Connection Complete at T+%ums (queue_latency=%uus, depth=%u)\n",
-            relative_time_ms, queue_latency_us, queue_depth);
-    }
-
     MICROPY_PY_BLUETOOTH_EXIT
     return buf;
+}
+
+// Check if Zephyr BT buffer pools have free buffers available.
+// Returns true if at least one buffer can be allocated without blocking.
+// This prevents silent packet drops when buffer pool is exhausted.
+static bool mp_bluetooth_zephyr_buffers_available(void) {
+    // Try to allocate a buffer with K_NO_WAIT to test availability
+    // If successful, immediately free it and return true
+    struct net_buf *buf = bt_buf_get_rx(BT_BUF_EVT, K_NO_WAIT);
+    if (buf) {
+        net_buf_unref(buf);
+        return true;
+    }
+    return false;
+}
+
+// HCI Event Priority Sorting for STM32WB55 IPCC
+// The RF coprocessor can send CONNECTION_COMPLETE and DISCONNECT_COMPLETE
+// in the same IPCC transaction, causing wrong event ordering.
+// We batch-collect events and sort so connection events precede disconnect.
+
+// HCI event codes
+#define HCI_EVT_DISCONNECT_COMPLETE 0x05
+#define HCI_EVT_CMD_COMPLETE        0x0E
+#define HCI_EVT_LE_META             0x3E
+#define HCI_LE_SUBEVENT_CONN_COMPLETE           0x01
+#define HCI_LE_SUBEVENT_ENHANCED_CONN_COMPLETE  0x0A
+
+// Event priority: lower number = higher priority (processed first)
+#define HCI_PRIO_CONNECTION  1  // LE Connection Complete
+#define HCI_PRIO_DEFAULT     5  // Most events
+#define HCI_PRIO_DISCONNECT  9  // Disconnect Complete (process last)
+
+// Get event priority for sorting (connection events before disconnect)
+static int hci_event_get_priority(struct net_buf *buf) {
+    if (buf == NULL || buf->len < 4) {
+        return HCI_PRIO_DEFAULT;
+    }
+
+    const uint8_t *data = buf->data;
+    // H4 packet: [type][evt_code][len][params...]
+    if (data[0] != H4_EVT) {
+        return HCI_PRIO_DEFAULT;  // Not an event
+    }
+
+    uint8_t evt_code = data[1];
+
+    // LE Meta Event - check subevent
+    if (evt_code == HCI_EVT_LE_META && buf->len >= 4) {
+        uint8_t subevent = data[3];
+        if (subevent == HCI_LE_SUBEVENT_CONN_COMPLETE ||
+            subevent == HCI_LE_SUBEVENT_ENHANCED_CONN_COMPLETE) {
+            return HCI_PRIO_CONNECTION;  // High priority
+        }
+    }
+
+    // Disconnect Complete
+    if (evt_code == HCI_EVT_DISCONNECT_COMPLETE) {
+        return HCI_PRIO_DISCONNECT;  // Low priority
+    }
+
+    return HCI_PRIO_DEFAULT;
+}
+
+// Get connection handle from HCI event (for grouping related events)
+static uint16_t hci_event_get_conn_handle(struct net_buf *buf) {
+    if (buf == NULL || buf->len < 6) {
+        return 0xFFFF;  // Invalid handle
+    }
+
+    const uint8_t *data = buf->data;
+    if (data[0] != H4_EVT) {
+        return 0xFFFF;
+    }
+
+    uint8_t evt_code = data[1];
+
+    // LE Connection Complete: [type=04][evt=3E][len][subevent=01][status][handle_lo][handle_hi]...
+    if (evt_code == HCI_EVT_LE_META && buf->len >= 7) {
+        uint8_t subevent = data[3];
+        if (subevent == HCI_LE_SUBEVENT_CONN_COMPLETE ||
+            subevent == HCI_LE_SUBEVENT_ENHANCED_CONN_COMPLETE) {
+            // Handle is at offset 5-6 (after subevent and status)
+            return (data[5] | (data[6] << 8)) & 0x0FFF;
+        }
+    }
+
+    // Disconnect Complete: [type=04][evt=05][len=4][status][handle_lo][handle_hi][reason]
+    if (evt_code == HCI_EVT_DISCONNECT_COMPLETE && buf->len >= 6) {
+        // Handle is at offset 4-5 (after status)
+        return (data[4] | (data[5] << 8)) & 0x0FFF;
+    }
+
+    return 0xFFFF;
+}
+
+// Sort batch of HCI events by priority (simple insertion sort, batch is small)
+// Events with same connection handle are grouped, with connection events first
+static void hci_event_sort_batch(struct net_buf **batch, int count) {
+    if (count <= 1) {
+        return;
+    }
+
+    // Simple insertion sort - batch is typically 2-4 events
+    for (int i = 1; i < count; i++) {
+        struct net_buf *key = batch[i];
+        int key_prio = hci_event_get_priority(key);
+        uint16_t key_handle = hci_event_get_conn_handle(key);
+
+        int j = i - 1;
+        while (j >= 0) {
+            int j_prio = hci_event_get_priority(batch[j]);
+            uint16_t j_handle = hci_event_get_conn_handle(batch[j]);
+
+            // Sort by: (1) connection handle, (2) priority within same handle
+            bool should_swap = false;
+            if (key_handle == j_handle && key_handle != 0xFFFF) {
+                // Same connection: sort by priority
+                should_swap = (key_prio < j_prio);
+            } else if (key_prio < j_prio) {
+                // Different connections: connection events first overall
+                should_swap = (key_prio == HCI_PRIO_CONNECTION && j_prio == HCI_PRIO_DISCONNECT);
+            }
+
+            if (should_swap) {
+                batch[j + 1] = batch[j];
+                j--;
+            } else {
+                break;
+            }
+        }
+        batch[j + 1] = key;
+    }
 }
 
 // Reset H:4 parser state
@@ -215,8 +327,9 @@ static bool h4_parser_process_byte(uint8_t byte) {
                         // Allocate net_buf for event
                         h4_buf = bt_buf_get_evt(h4_header_buf[0], false, K_NO_WAIT);
                         if (!h4_buf) {
-                            error_printf("Failed to allocate event buffer\n");
-                            h4_parser_reset();
+                            // Buffer exhaustion - don't reset parser, keep state for retry.
+                            // Caller should process work queue to free buffers and retry.
+                            error_printf("Failed to allocate event buffer (Issue #12)\n");
                             return false;
                         }
 
@@ -231,8 +344,9 @@ static bool h4_parser_process_byte(uint8_t byte) {
                         // Allocate net_buf for ACL
                         h4_buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_NO_WAIT);
                         if (!h4_buf) {
-                            error_printf("Failed to allocate ACL buffer\n");
-                            h4_parser_reset();
+                            // Buffer exhaustion - don't reset parser, keep state for retry.
+                            // Caller should process work queue to free buffers and retry.
+                            error_printf("Failed to allocate ACL buffer (Issue #12)\n");
                             return false;
                         }
 
@@ -288,22 +402,38 @@ static void h4_uart_byte_callback(uint8_t byte) {
             struct net_buf *buf = h4_buf;
             h4_buf = NULL;  // Ownership transferred
 
+            #if ZEPHYR_BLE_DEBUG
+            // Debug: Trace HCI packets (type is first byte in buffer)
+            uint8_t pkt_type = buf->data[0];
+            if (pkt_type == H4_ACL) {
+                // ACL data packet - decode handle and L2CAP/ATT info
+                uint16_t handle = (buf->data[1] | (buf->data[2] << 8)) & 0x0FFF;
+                uint16_t acl_len = buf->data[3] | (buf->data[4] << 8);
+                DEBUG_HCI_printf("RX ACL: handle=0x%03x len=%d, first_byte=0x%02x\n",
+                    handle, acl_len, (buf->len > 9) ? buf->data[9] : 0);
+            } else if (pkt_type == H4_EVT) {
+                // HCI Event - decode event code
+                uint8_t evt_code = buf->data[1];
+                if (evt_code == HCI_EVT_DISCONNECT_COMPLETE) {
+                    // Disconnect Complete: [type=04][evt=05][len=4][status][handle_lo][handle_hi][reason]
+                    uint8_t status = buf->data[3];
+                    uint16_t handle = (buf->data[4] | (buf->data[5] << 8)) & 0x0FFF;
+                    uint8_t reason = buf->data[6];
+                    DEBUG_HCI_printf("RX DISCONNECT: handle=0x%03x status=%d reason=0x%02x\n",
+                        handle, status, reason);
+                } else if (evt_code == HCI_EVT_CMD_COMPLETE) {
+                    uint16_t opcode = buf->data[4] | (buf->data[5] << 8);
+                    DEBUG_HCI_printf("RX CMD_COMPLETE: opcode=0x%04x\n", opcode);
+                }
+            }
+            #endif
+
             // Queue the buffer for processing in scheduler context
             // This avoids calling bt_hci_recv() from interrupt context
             if (!rx_queue_put(buf)) {
                 error_printf("RX queue full\n");
                 net_buf_unref(buf);
             } else {
-                // Timing instrumentation: Log packet enqueue (only for connection events)
-                // NOTE: buf->data[0] now contains H4 packet type, buf->data[1] is event code
-                const uint8_t *data = buf->data;
-                if (buf->len >= 4 && data[0] == H4_EVT && data[1] == 0x3E && data[3] == 0x01) {
-                    // LE Connection Complete event
-                    uint32_t relative_time_ms = (mp_hal_ticks_us() - timing_baseline_us) / 1000;
-                    mp_printf(&mp_plat_print, "[HCI_TIMING] IPCC_IRQ: LE Connection Complete enqueued at T+%ums\n",
-                        relative_time_ms);
-                }
-
                 // Schedule task to process queued packets
                 // This is safe from IRQ context (same as NimBLE UART IRQ)
                 mp_zephyr_hci_poll_now();
@@ -339,15 +469,6 @@ static void mp_zephyr_hci_soft_timer_callback(soft_timer_entry_t *self) {
 // HCI packet reception handler - called when data arrives
 static void run_zephyr_hci_task(mp_sched_node_t *node) {
     (void)node;
-    #if ZEPHYR_BLE_DEBUG
-    static int call_count = 0;
-    call_count++;
-
-    // Trace first 5 calls
-    if (call_count <= 5) {
-        DEBUG_HCI_printf("[HCI_TASK #%d]\n", call_count);
-    }
-    #endif
 
     // Process Zephyr BLE work queues and semaphores
     mp_bluetooth_zephyr_poll();
@@ -357,44 +478,52 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
     }
 
     // Process any queued RX buffers (from interrupt context)
+    // STM32WB55 IPCC Fix: Batch collect and sort events to ensure CONNECTION_COMPLETE
+    // is processed before DISCONNECT_COMPLETE when both arrive in same transaction.
+    #define HCI_EVENT_BATCH_SIZE 16
+    struct net_buf *batch[HCI_EVENT_BATCH_SIZE];
+    int batch_count = 0;
+
+    // Phase 1: Collect all queued events into batch
     struct net_buf *buf;
-    while ((buf = rx_queue_get()) != NULL) {
-        // Timing instrumentation: Measure Zephyr BLE host processing time
-        // NOTE: buf->data[0] now contains H4 packet type, buf->data[1] is event code
-        bool is_conn_event = false;
-        if (buf->len >= 4) {
-            const uint8_t *data = buf->data;
-            if (data[0] == H4_EVT && data[1] == 0x3E && data[3] == 0x01) {
-                // LE Connection Complete event
-                is_conn_event = true;
-            }
-        }
+    while (batch_count < HCI_EVENT_BATCH_SIZE && (buf = rx_queue_get()) != NULL) {
+        batch[batch_count++] = buf;
+    }
 
-        uint32_t before_us = 0;
-        if (is_conn_event) {
-            before_us = mp_hal_ticks_us();
-            uint32_t relative_time_ms = (before_us - timing_baseline_us) / 1000;
-            mp_printf(&mp_plat_print, "[HCI_TIMING] BT_RECV: Passing LE Connection Complete to Zephyr at T+%ums\n",
-                relative_time_ms);
-        }
+    // Phase 2: Sort batch by priority (connection events before disconnect)
+    if (batch_count > 1) {
+        hci_event_sort_batch(batch, batch_count);
+    }
 
-        // DO NOT strip H4 packet type byte - Zephyr expects it!
-        // bt_hci_recv() -> bt_recv_unsafe() pulls the type byte itself.
-        // See comment at hci_core.c:4474-4477
-
+    // Phase 3: Process sorted batch
+    for (int i = 0; i < batch_count; i++) {
+        buf = batch[i];
         int ret = recv_cb(hci_dev, buf);
-
-        if (is_conn_event && before_us > 0) {
-            uint32_t after_us = mp_hal_ticks_us();
-            uint32_t processing_time_us = after_us - before_us;
-            uint32_t relative_time_ms = (after_us - timing_baseline_us) / 1000;
-            mp_printf(&mp_plat_print, "[HCI_TIMING] BT_RECV: Zephyr processing complete at T+%ums (took %uus)\n",
-                relative_time_ms, processing_time_us);
-        }
-
         if (ret < 0) {
             error_printf("recv_cb failed: %d\n", ret);
             net_buf_unref(buf);
+        }
+    }
+
+    // Phase 4: Process work queue to trigger rx_work (connection callbacks etc)
+    // Only the outermost call (depth==0) should process work to prevent re-entrancy.
+    // Nested calls via k_sem_take→hci_uart_wfi→run_zephyr_hci_task skip work processing.
+    extern volatile int mp_bluetooth_zephyr_hci_processing_depth;
+    if (batch_count > 0 && mp_bluetooth_zephyr_hci_processing_depth == 0) {
+        mp_bluetooth_zephyr_hci_processing_depth++;
+        mp_bluetooth_zephyr_work_process();
+        mp_bluetooth_zephyr_hci_processing_depth--;
+    }
+
+    // Check buffer availability before reading from IPCC.
+    // If no buffers available, process work queue to free some.
+    // This prevents silent packet drops when buffer pool is exhausted (Issue #12).
+    if (!mp_bluetooth_zephyr_buffers_available()) {
+        mp_bluetooth_zephyr_work_process();
+        if (!mp_bluetooth_zephyr_buffers_available()) {
+            // Still no buffers - skip reading, will retry on next poll
+            mp_bluetooth_zephyr_port_poll_in_ms(10);
+            return;
         }
     }
 
@@ -404,13 +533,16 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
     // are queued rather than processed immediately
     while (mp_bluetooth_hci_uart_readpacket(h4_uart_byte_callback) > 0) {
         // Keep reading while packets are available
+        // Re-check buffer availability after each packet to prevent exhaustion
+        if (!mp_bluetooth_zephyr_buffers_available()) {
+            mp_bluetooth_zephyr_work_process();
+            if (!mp_bluetooth_zephyr_buffers_available()) {
+                // No buffers - stop reading, will retry on next poll
+                mp_bluetooth_zephyr_port_poll_in_ms(10);
+                break;
+            }
+        }
     }
-
-    #if ZEPHYR_BLE_DEBUG
-    if (call_count <= 5) {
-        DEBUG_HCI_printf("[HCI_TASK #%d] Done\n", call_count);
-    }
-    #endif
 }
 
 static void mp_zephyr_hci_poll_now(void) {
@@ -435,9 +567,37 @@ void mp_bluetooth_zephyr_hci_uart_wfi(void) {
 
     // Process any remaining queued RX buffers directly
     // This handles buffers that arrived after run_zephyr_hci_task() completed
+    // Apply same batching/sorting as run_zephyr_hci_task for consistency
+    struct net_buf *wfi_batch[HCI_EVENT_BATCH_SIZE];
+    int wfi_batch_count = 0;
     struct net_buf *buf;
-    while ((buf = rx_queue_get()) != NULL) {
-        recv_cb(hci_dev, buf);
+    while (wfi_batch_count < HCI_EVENT_BATCH_SIZE && (buf = rx_queue_get()) != NULL) {
+        wfi_batch[wfi_batch_count++] = buf;
+    }
+
+    // CRITICAL: Process work queue BEFORE processing events
+    // This ensures connection callbacks fire before disconnect events are processed
+    if (wfi_batch_count > 0) {
+        mp_bluetooth_zephyr_poll();
+    }
+
+    // Sort batch by priority (connection events before disconnect)
+    if (wfi_batch_count > 1) {
+        hci_event_sort_batch(wfi_batch, wfi_batch_count);
+    }
+
+    // Process events
+    for (int i = 0; i < wfi_batch_count; i++) {
+        recv_cb(hci_dev, wfi_batch[i]);
+    }
+
+    // Process work queue after wfi events (same pattern as run_zephyr_hci_task)
+    // Only outermost call processes work to prevent re-entrancy
+    extern volatile int mp_bluetooth_zephyr_hci_processing_depth;
+    if (wfi_batch_count > 0 && mp_bluetooth_zephyr_hci_processing_depth == 0) {
+        mp_bluetooth_zephyr_hci_processing_depth++;
+        mp_bluetooth_zephyr_work_process();
+        mp_bluetooth_zephyr_hci_processing_depth--;
     }
 
     // Give IPCC hardware minimal time to complete any ongoing transfers
@@ -516,14 +676,36 @@ static int hci_stm32_send(const struct device *dev, struct net_buf *buf) {
     h4_packet[0] = h4_type;
     memcpy(&h4_packet[1], buf->data, buf->len);
 
-    // Trace HCI commands being sent
+    // Trace HCI commands being sent (only when debug enabled)
+    #if ZEPHYR_BLE_DEBUG
     if (h4_type == 0x01 && buf->len >= 3) {  // HCI Command
         uint16_t opcode = buf->data[0] | (buf->data[1] << 8);
         uint8_t param_len = buf->data[2];
         DEBUG_HCI_printf("[SEND] HCI Command: opcode=0x%04x param_len=%u\n", opcode, param_len);
+    } else if (h4_type == 0x02 && buf->len >= 9) {  // ACL data
+        // ACL header: handle(2) + length(2) = 4 bytes
+        // L2CAP header: length(2) + CID(2) = 4 bytes
+        // ATT data starts at offset 8
+        uint16_t handle = (buf->data[0] | (buf->data[1] << 8)) & 0x0FFF;
+        uint16_t acl_len = buf->data[2] | (buf->data[3] << 8);
+        uint16_t l2cap_len = buf->data[4] | (buf->data[5] << 8);
+        uint16_t l2cap_cid = buf->data[6] | (buf->data[7] << 8);
+        uint8_t att_opcode = buf->data[8];
+        DEBUG_HCI_printf("[SEND] ACL: handle=0x%03x acl_len=%d l2cap_len=%d cid=0x%04x att_op=0x%02x\n",
+            handle, acl_len, l2cap_len, l2cap_cid, att_opcode);
+        // Hex dump first 16 bytes
+        int count = (buf->len > 16 ? 16 : buf->len);
+        mp_printf(&mp_plat_print, "[SEND] HEX:");
+        for (int i = 0; i < count; i++) {
+            mp_printf(&mp_plat_print, " %02x", buf->data[i]);
+        }
+        mp_printf(&mp_plat_print, " [done %d][A] t=%lu\n", count, (unsigned long)mp_hal_ticks_ms());
     } else {
         DEBUG_HCI_printf("[SEND] type=0x%02x len=%u\n", h4_type, (unsigned int)total_len);
     }
+
+    DEBUG_HCI_printf("HCI_SEND: uart_write len=%u h4=%02x t=%lu\n", (unsigned)total_len, h4_packet[0], (unsigned long)mp_hal_ticks_ms());
+    #endif
 
     // Send via port's transport abstraction (UART or IPCC)
     int ret = mp_bluetooth_hci_uart_write(h4_packet, total_len);
@@ -607,11 +789,12 @@ int bt_hci_transport_teardown(const struct device *dev) {
 
 // Main polling function (called by mpbthciport.c via mp_bluetooth_hci_poll)
 void mp_bluetooth_hci_poll(void) {
-    // Process Zephyr work queues and semaphores
-    mp_bluetooth_zephyr_poll();
+    // Call run_zephyr_hci_task directly to process HCI events
+    // This includes: mp_bluetooth_zephyr_poll(), RX queue processing,
+    // work queue processing, and reading HCI packets from transport
+    run_zephyr_hci_task(NULL);
 
     // Schedule next poll if stack is active
-    // The soft timer will re-trigger run_zephyr_hci_task
     mp_bluetooth_zephyr_port_poll_in_ms(128);
 }
 
@@ -680,6 +863,84 @@ void mp_bluetooth_zephyr_hci_rx_task_stop(void) {
 
 bool mp_bluetooth_zephyr_hci_rx_task_active(void) {
     return false;  // Always use polling mode on STM32
+}
+
+// Non-inline version of mp_bluetooth_hci_poll_now for extmod code.
+// modbluetooth_zephyr.c uses extern declaration, so we need a linkable symbol.
+void mp_bluetooth_hci_poll_now(void) {
+    mp_bluetooth_hci_poll_now_default();
+}
+
+// Port deinit - called during mp_bluetooth_deinit()
+void mp_bluetooth_zephyr_port_deinit(void) {
+    // Reset GATT memory pool for next init cycle
+    extern void mp_bluetooth_zephyr_gatt_pool_reset(void);
+    mp_bluetooth_zephyr_gatt_pool_reset();
+}
+
+// ============================================================================
+// Simple bump allocator for GATT structures (malloc/free shims)
+// ============================================================================
+// Zephyr BLE GATT requires memory that persists outside the GC heap.
+// This provides minimal malloc/free using a static pool. Memory is only
+// truly freed on BLE deinit (gatt_pool_reset).
+
+#define GATT_POOL_SIZE 4096  // 4KB for GATT services/attributes
+
+static uint8_t gatt_pool[GATT_POOL_SIZE];
+static size_t gatt_pool_offset = 0;
+
+// Simple allocation tracking for free() support
+#define MAX_GATT_ALLOCS 64
+static struct {
+    void *ptr;
+    size_t size;
+} gatt_alloc_table[MAX_GATT_ALLOCS];
+static int gatt_alloc_count = 0;
+
+void *malloc(size_t size) {
+    // Align to 4 bytes
+    size = (size + 3) & ~3;
+
+    if (gatt_pool_offset + size > GATT_POOL_SIZE) {
+        error_printf("GATT pool exhausted (need %u, have %u)\n",
+            (unsigned)size, (unsigned)(GATT_POOL_SIZE - gatt_pool_offset));
+        return NULL;
+    }
+
+    void *ptr = &gatt_pool[gatt_pool_offset];
+    gatt_pool_offset += size;
+
+    // Track allocation for potential free()
+    if (gatt_alloc_count < MAX_GATT_ALLOCS) {
+        gatt_alloc_table[gatt_alloc_count].ptr = ptr;
+        gatt_alloc_table[gatt_alloc_count].size = size;
+        gatt_alloc_count++;
+    }
+
+    return ptr;
+}
+
+void free(void *ptr) {
+    // In this bump allocator, individual frees don't reclaim memory.
+    // Memory is only reclaimed on pool reset (BLE deinit).
+    // We just mark the entry as freed for debugging.
+    if (ptr == NULL) {
+        return;
+    }
+
+    for (int i = 0; i < gatt_alloc_count; i++) {
+        if (gatt_alloc_table[i].ptr == ptr) {
+            gatt_alloc_table[i].ptr = NULL;  // Mark as freed
+            return;
+        }
+    }
+}
+
+// Called during BLE deinit to reset the pool for next init cycle
+void mp_bluetooth_zephyr_gatt_pool_reset(void) {
+    gatt_pool_offset = 0;
+    gatt_alloc_count = 0;
 }
 
 #endif // MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR

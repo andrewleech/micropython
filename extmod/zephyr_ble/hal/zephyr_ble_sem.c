@@ -144,9 +144,17 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
 
         // Process work items that might signal this semaphore
         // This is critical during init - bt_enable() submits work that must execute
+        // SKIP if we're already processing HCI events to prevent re-entrancy
+        // (tx_work running from here causes assertion in process_pending_cmd)
         extern void mp_bluetooth_zephyr_work_process(void);
-        DEBUG_SEM_printf("SEM_POLL: calling work_process\n");
-        mp_bluetooth_zephyr_work_process();
+        extern volatile int mp_bluetooth_zephyr_hci_processing_depth;
+        if (mp_bluetooth_zephyr_hci_processing_depth == 0) {
+            DEBUG_SEM_printf("SEM_POLL: calling work_process\n");
+            mp_bluetooth_zephyr_work_process();
+        } else {
+            DEBUG_SEM_printf("SEM_POLL: skipping work_process (HCI event processing depth=%d)\n",
+                mp_bluetooth_zephyr_hci_processing_depth);
+        }
 
         // Check for timeout
         uint32_t elapsed = mp_hal_ticks_ms() - start_ms;

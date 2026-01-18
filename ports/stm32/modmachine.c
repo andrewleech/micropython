@@ -392,7 +392,20 @@ static void mp_machine_set_freq(size_t n_args, const mp_obj_t *args) {
 // idle()
 // This executies a wfi machine instruction which reduces power consumption
 // of the MCU until an interrupt occurs, at which point execution continues.
+// When Zephyr BLE is active, also process the work queue to handle BLE events.
+#if MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR
+extern void mp_bluetooth_zephyr_hci_uart_wfi(void);
+extern bool mp_bluetooth_is_active(void);
+#endif
+
 static void mp_machine_idle(void) {
+    #if MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR
+    if (mp_bluetooth_is_active()) {
+        // Process Zephyr work queue and HCI packets, includes WFI
+        mp_bluetooth_zephyr_hci_uart_wfi();
+        return;
+    }
+    #endif
     __WFI();
 }
 

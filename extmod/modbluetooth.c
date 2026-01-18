@@ -303,7 +303,8 @@ static mp_obj_t bluetooth_ble_active(size_t n_args, const mp_obj_t *args) {
     if (n_args == 2) {
         // Boolean enable/disable argument supplied, set current state.
         int err;
-        if (mp_obj_is_true(args[1])) {
+        bool activate = mp_obj_is_true(args[1]);
+        if (activate) {
             err = mp_bluetooth_init();
         } else {
             err = mp_bluetooth_deinit();

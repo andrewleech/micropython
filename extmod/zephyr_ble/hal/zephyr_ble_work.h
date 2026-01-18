@@ -180,6 +180,12 @@ int k_work_delayable_busy_get(const struct k_work_delayable *dwork);
 // Set by k_sem_take() during its wait loop
 extern volatile bool mp_bluetooth_zephyr_in_wait_loop;
 
+// HCI event processing depth: When > 0, prevents work_process from k_sem_take()
+// This prevents re-entrancy where tx_work runs during k_sem_take() in process_pending_cmd()
+// Incremented by run_zephyr_hci_task() during post-recv_cb work processing
+// Uses counter (not bool) to support nested calls correctly
+extern volatile int mp_bluetooth_zephyr_hci_processing_depth;
+
 // Called by MicroPython scheduler to process all pending work (regular work queues only)
 void mp_bluetooth_zephyr_work_process(void);
 

@@ -527,6 +527,8 @@ endif
 
 ifeq ($(MICROPY_BLUETOOTH_ZEPHYR),1)
 SRC_C += mpzephyrport.c
+# Define STM32 port flag for Zephyr BLE CMSIS header selection
+CFLAGS += -D__ZEPHYR_BLE_STM32_PORT__
 include $(TOP)/extmod/zephyr_ble/zephyr_ble.mk
 endif
 
