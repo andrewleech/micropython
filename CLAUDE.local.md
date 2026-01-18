@@ -53,12 +53,18 @@ mpremote connect /dev/ttyACM* repl
 
 ### STM32WB55
 - **NimBLE**: ✓ Fully working (all features)
-- **Zephyr BLE**: ✓ Fully working (all features except NOTIFY/INDICATE callbacks)
+- **Zephyr BLE**: Core functionality working (scheduler-based integration)
   - ✓ Scanning (69 devices, ~30% vs NimBLE due to work queue throughput)
-  - ✓ Advertising
-  - ✓ Connections (both roles)
+  - ✓ Advertising (connectable/non-connectable)
+  - ✓ Connections (both roles, stable)
   - ✓ GATT server (read/write/notify/indicate)
-  - ✓ GATT client (service discovery, read/write)
+  - ✓ GATT client (service discovery, read/write, descriptor operations)
+  - ✓ Device name management
+  - ✓ 128-bit UUID support
+  - ✗ GATTC NOTIFY/INDICATE callbacks (missing `bt_gatt_subscribe()`)
+  - ✗ MTU exchange (not implemented)
+  - ✗ Pairing/bonding (not implemented)
+  - **Multitest Results**: 7/18 pass, 11 fail (missing features), 2 skip (L2CAP)
 
 ### RP2 Pico 2 W (RP2350)
 - Fix #8: Net_buf crash FIXED (see `docs/NET_BUF_CRASH_FIX.md`)
@@ -66,21 +72,30 @@ mpremote connect /dev/ttyACM* repl
 
 ---
 
-## Active Work: FreeRTOS Integration
+## Recent Work
 
-**Objective**: Replace polling-based HAL with FreeRTOS primitives
+### Scheduler Integration (STM32WB55)
+**Status**: ✓ Complete - Zephyr BLE working without FreeRTOS
 
-**Architecture**:
-```
-FreeRTOS Scheduler
-├── Priority MAX-1: HCI RX Task (CYW43 polling)
-├── Priority MAX-2: BLE Work Queue Thread
-└── Priority 1: Python Main Thread
-```
+**Implementation**:
+- `machine.idle()` calls `mp_handle_pending()` to process scheduler callbacks
+- BLE polling scheduled via `mp_sched_schedule_node()`
+- Works for all scheduled tasks (BLE, soft timers, etc.)
+- Architecture: Cooperative - Python must yield control for BLE processing
 
-**Status**: Testing RP2040 variant
-- Recent fixes: k_current_get(), CYW43 IRQ ordering, NLR thread safety
-- See: `docs/FREERTOS_INTEGRATION.md` for details
+**Results**:
+- Issue #12 resolved: 5-second GATTC delay eliminated (~14ms now)
+- Core BLE operations functional (7/18 multitests passing)
+- Missing features: NOTIFY callbacks, MTU exchange, pairing
+- Commits: 0c038fb536, 04e3919eaf
+
+### FreeRTOS Integration Plan
+**Status**: Documented (see `docs/ZEPHYR_BLE_FREERTOS_PLAN.md`)
+
+Long-term architecture for true asynchronous BLE processing:
+- RP2 already using FreeRTOS tasks (fully working)
+- Plan for STM32/other ports to adopt FreeRTOS
+- Removes dependency on Python yielding control
 
 ---
 
@@ -144,7 +159,31 @@ For Zephyr BLE testing, use Pico W (Zephyr) as instance0 and PYBD (NimBLE) as in
 
 ## Known Issues
 
-(None - all major issues resolved)
+### Missing Features (Zephyr BLE)
+
+**1. GATTC NOTIFY/INDICATE Callbacks**
+- **Impact**: Notifications/indications from peripherals not delivered to central
+- **Tests affected**: 5 tests (ble_characteristic, ble_subscribe, etc.)
+- **Root cause**: `bt_gatt_subscribe()` not implemented in Zephyr integration
+- **Priority**: High - common BLE feature
+
+**2. MTU Exchange**
+- **Impact**: Cannot negotiate larger MTU for efficient data transfer
+- **Tests affected**: 4 tests (ble_mtu, perf_gatt_char_write, etc.)
+- **Root cause**: `gattc_exchange_mtu()` returns `EOPNOTSUPP`
+- **Priority**: Medium - performance optimization
+
+**3. Pairing/Bonding**
+- **Impact**: No secure/encrypted connections
+- **Tests affected**: 2 tests (ble_gap_pair, ble_gap_pair_bond)
+- **Root cause**: Pairing APIs not implemented
+- **Priority**: Medium - security feature
+
+**4. L2CAP**
+- **Impact**: No connection-oriented channels
+- **Tests affected**: 2 tests (skipped)
+- **Root cause**: L2CAP not integrated
+- **Priority**: Low - advanced feature
 
 ---
 
@@ -152,10 +191,12 @@ For Zephyr BLE testing, use Pico W (Zephyr) as instance0 and PYBD (NimBLE) as in
 
 ### Issue #12: STM32WB55 GATTC 5-Second Delay - FIXED
 - 5-second delay between connection and GATT discovery on STM32WB55
-- Root cause: `machine.idle()` uses `__WFI()` but doesn't process Zephyr work queue
-- Python test calls `machine.idle()` in wait loops, work items never run
-- Fixed: `machine.idle()` now calls `mp_bluetooth_zephyr_hci_uart_wfi()` when BLE active
-- Result: Delay reduced from 5+ seconds to ~14ms, GATTC fully working
+- Root cause: `machine.idle()` uses `__WFI()` but doesn't process scheduler
+- Python test calls `machine.idle()` in wait loops, scheduled work items never run
+- Fixed (2 commits):
+  1. Initial: Call `mp_bluetooth_zephyr_hci_uart_wfi()` when BLE active (0c038fb536)
+  2. Refactor: Call `mp_handle_pending()` for generic scheduler processing (04e3919eaf)
+- Result: Delay reduced from 5+ seconds to ~14ms, GATTC fully functional
 - Files: `ports/stm32/modmachine.c`
 
 ### Issue #6: Connection Callbacks - FIXED (RP2 Pico W)
