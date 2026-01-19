@@ -1332,13 +1332,23 @@ int mp_bluetooth_get_preferred_mtu(void) {
     if (!mp_bluetooth_is_active()) {
         mp_raise_OSError(ERRNO_BLUETOOTH_NOT_ACTIVE);
     }
-    mp_raise_OSError(MP_EOPNOTSUPP);
+    // Return the compile-time configured L2CAP TX MTU
+    // This is the maximum MTU that will be proposed during MTU exchange
+    return CONFIG_BT_L2CAP_TX_MTU;
 }
 
 int mp_bluetooth_set_preferred_mtu(uint16_t mtu) {
     if (!mp_bluetooth_is_active()) {
         return ERRNO_BLUETOOTH_NOT_ACTIVE;
     }
+    // Zephyr's preferred MTU is determined by CONFIG_BT_L2CAP_TX_MTU at compile time.
+    // Zephyr hardcodes the proposed MTU in gatt_exchange_mtu_encode() to BT_LOCAL_ATT_MTU_UATT,
+    // which derives from CONFIG_BT_L2CAP_TX_MTU. There's no runtime API to change this without
+    // modifying Zephyr's gatt.c (violates "don't modify Zephyr submodule" constraint).
+    //
+    // For now, reject all runtime MTU configuration. To change the preferred MTU, adjust
+    // CONFIG_BT_L2CAP_TX_MTU in zephyr_ble_config.h and rebuild.
+    (void)mtu;
     return MP_EOPNOTSUPP;
 }
 

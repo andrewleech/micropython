@@ -421,7 +421,7 @@ extern const struct device __device_dts_ord_0;
 
 // --- L2CAP ---
 #define CONFIG_BT_L2CAP_TX_BUF_COUNT 4
-#define CONFIG_BT_L2CAP_TX_MTU 65  // Default L2CAP MTU size
+#define CONFIG_BT_L2CAP_TX_MTU 256  // L2CAP TX MTU (matches NimBLE default)
 
 // --- LE Feature Pages ---
 // BLE controllers report supported features across multiple 8-byte "pages".
