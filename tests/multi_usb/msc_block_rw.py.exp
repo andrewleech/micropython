@@ -1,0 +1,17 @@
+--- instance0 ---
+Host active
+Waiting for MSC...
+Found MSC device
+MSC ready
+Pre-read OK
+Write block 0...
+Write 0 OK
+Write block 1...
+Write 1 OK
+Verify 0 OK
+Verify 1 OK
+Host done
+--- instance1 ---
+Device init
+TinyUSB MSC active
+Device done

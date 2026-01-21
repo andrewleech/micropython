@@ -1,0 +1,13 @@
+--- instance0 ---
+Host active
+MSC device found
+Initial is_connected: True
+Mount OK
+Disconnect detected
+Final is_connected: False
+Unmount OK
+Host finished
+--- instance1 ---
+TinyUSB MSC active
+Deactivating device
+Device deactivated
