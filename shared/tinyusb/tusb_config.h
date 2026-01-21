@@ -63,16 +63,20 @@
 #define CFG_TUSB_RHPORT0_MODE   (OPT_MODE_DEVICE)
 #endif
 
+#ifndef CFG_TUD_CDC
 #if MICROPY_HW_USB_CDC
 #define CFG_TUD_CDC             (1)
 #else
 #define CFG_TUD_CDC             (0)
 #endif
+#endif
 
+#ifndef CFG_TUD_MSC
 #if MICROPY_HW_USB_MSC
 #define CFG_TUD_MSC             (1)
 #else
 #define CFG_TUD_MSC             (0)
+#endif
 #endif
 
 // CDC Configuration
@@ -144,6 +148,18 @@
 #define USBD_EP_BUILTIN_MAX (0)
 #endif
 
+#else // !MICROPY_HW_ENABLE_USBDEV
+// Provide fallback values when USB Device is disabled (e.g., USB Host only mode)
+#define USBD_ITF_BUILTIN_MAX (0)
+#define USBD_STR_BUILTIN_MAX (0)
+#define USBD_EP_BUILTIN_MAX (0)
+#define CFG_TUD_CDC (0)
+#define CFG_TUD_MSC (0)
+// Descriptor length constants - only needed as fallbacks when USB device is disabled.
+// When device mode is enabled, TinyUSB's device/usbd.h provides these.
+#define TUD_CONFIG_DESC_LEN   (9)
+#define TUD_CDC_DESC_LEN      (8 + 9 + 5 + 5 + 4 + 5 + 7 + 9 + 7 + 7)
+#define TUD_MSC_DESC_LEN      (9 + 7 + 7)
 #endif // MICROPY_HW_ENABLE_USBDEV
 
 #endif // MICROPY_INCLUDED_SHARED_TINYUSB_TUSB_CONFIG_H
