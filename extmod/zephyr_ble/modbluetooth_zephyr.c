@@ -2438,19 +2438,12 @@ static void zephyr_pairing_confirm_cb(struct bt_conn *conn) {
         return;
     }
 
-    // Store auth state
-    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
-    if (rp) {
-        rp->auth_conn_handle = conn_handle;
-        rp->auth_action = MP_BLUETOOTH_PASSKEY_ACTION_NONE;
-        rp->auth_passkey = 0;
-    }
-
-    // Auto-confirm Just Works pairing before firing IRQ (matches NimBLE behavior)
-    bt_conn_auth_pairing_confirm(conn);
-
-    // Fire _IRQ_PASSKEY_ACTION event: Just Works pairing (no MITM protection)
-    mp_bluetooth_gap_on_passkey_action(conn_handle, MP_BLUETOOTH_PASSKEY_ACTION_NONE, 0);
+    // For Just Works pairing, auto-confirm without firing _IRQ_PASSKEY_ACTION.
+    // This matches NimBLE behavior where Just Works is auto-accepted internally
+    // and applications don't need to handle the passkey action event.
+    // Applications that need to reject Just Works pairing can set a different IO capability.
+    int err = bt_conn_auth_pairing_confirm(conn);
+    DEBUG_printf("  bt_conn_auth_pairing_confirm returned %d\n", err);
 }
 
 static void zephyr_auth_cancel_cb(struct bt_conn *conn) {
@@ -2542,8 +2535,9 @@ struct bt_conn_auth_info_cb mp_bt_zephyr_auth_info_callbacks = {
 // ============================================================================
 
 int mp_bluetooth_gap_pair(uint16_t conn_handle) {
-    DEBUG_printf("mp_bluetooth_gap_pair: conn_handle=%d mitm=%d le_secure=%d bonding=%d\n",
-                 conn_handle, mp_bt_zephyr_mitm_protection, mp_bt_zephyr_le_secure, mp_bt_zephyr_bonding);
+    DEBUG_printf("mp_bluetooth_gap_pair: conn_handle=%d mitm=%d le_secure=%d bonding=%d io_cap=%d\n",
+                 conn_handle, mp_bt_zephyr_mitm_protection, mp_bt_zephyr_le_secure,
+                 mp_bt_zephyr_bonding, mp_bt_zephyr_io_capability);
 
     if (!mp_bluetooth_is_active()) {
         return ERRNO_BLUETOOTH_NOT_ACTIVE;
@@ -2554,25 +2548,39 @@ int mp_bluetooth_gap_pair(uint16_t conn_handle) {
         return MP_ENOTCONN;
     }
 
-    // Choose security level based on config flags:
-    // - le_secure=true, mitm=true: BT_SECURITY_L4 (SC required + MITM)
-    // - le_secure=false, mitm=true: BT_SECURITY_L3 (MITM required, legacy or SC)
-    // - mitm=false: BT_SECURITY_L2 (Just Works, legacy or SC)
+    // Determine if MITM protection is actually achievable based on IO capability.
+    // IO capability 0 (NO_INPUT_NO_OUTPUT) cannot provide MITM protection.
+    // When MITM is requested but not achievable, we downgrade to L2 (Just Works)
+    // to match NimBLE behavior which also downgrades in this case.
+    bool mitm_possible = (mp_bt_zephyr_io_capability != 0);
+    bool request_mitm = mp_bt_zephyr_mitm_protection && mitm_possible;
+
+    // Choose security level based on config flags and achievable MITM:
+    // - le_secure=true, mitm achievable: BT_SECURITY_L4 (SC required + MITM)
+    // - le_secure=false, mitm achievable: BT_SECURITY_L3 (MITM required, legacy or SC)
+    // - mitm not achievable/requested: BT_SECURITY_L2 (Just Works, legacy or SC)
     //
-    // Note: BT_SECURITY_L4 requires *both* SC and MITM. SC Just Works (no MITM)
-    // is achieved with L2 + CONFIG_BT_SMP_SC_ONLY=1, but we allow both legacy and SC
-    // (CONFIG_BT_SMP_SC_ONLY=0) to support maximum compatibility.
+    // Note: Zephyr doesn't have a security level for "SC without MITM". With L2,
+    // SC will be used if both devices support it. The le_secure flag indicates
+    // preference for SC, but can't be strictly enforced without MITM.
     bt_security_t sec_level;
 
-    if (mp_bt_zephyr_le_secure && mp_bt_zephyr_mitm_protection) {
+    if (mp_bt_zephyr_le_secure && request_mitm) {
         sec_level = BT_SECURITY_L4;  // SC required + MITM
-    } else if (mp_bt_zephyr_mitm_protection) {
+        DEBUG_printf("  Requesting BT_SECURITY_L4 (SC + MITM)\n");
+    } else if (request_mitm) {
         sec_level = BT_SECURITY_L3;  // MITM required (legacy or SC)
+        DEBUG_printf("  Requesting BT_SECURITY_L3 (MITM)\n");
     } else {
         sec_level = BT_SECURITY_L2;  // Just Works (legacy or SC)
+        DEBUG_printf("  Requesting BT_SECURITY_L2 (Just Works)\n");
+        if (mp_bt_zephyr_mitm_protection && !mitm_possible) {
+            DEBUG_printf("  Note: MITM requested but IO capability is NO_INPUT_NO_OUTPUT, using Just Works\n");
+        }
     }
 
     int err = bt_conn_set_security(conn, sec_level);
+    DEBUG_printf("  bt_conn_set_security returned %d\n", err);
     return bt_err_to_errno(err);
 }
 

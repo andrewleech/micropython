@@ -458,7 +458,12 @@ extern const struct device __device_dts_ord_0;
 // --- Buffer Configuration ---
 // ACL buffers
 #define CONFIG_BT_BUF_ACL_TX_COUNT 8
-#define CONFIG_BT_BUF_ACL_TX_SIZE 27
+// ACL TX buffer size must accommodate largest SMP packet without fragmentation:
+// - SMP Public Key (SC pairing): 4 (L2CAP hdr) + 1 (SMP code) + 64 (X+Y coords) = 69 bytes
+// Use 73 bytes (69 + 4 margin). This prevents TX packet count mismatch assert
+// (hci_core.c:669) that occurs when the Public Key is fragmented across multiple ACL packets.
+// Memory impact: 73 × 8 buffers = 584 bytes (was 27 × 8 = 216 bytes, delta +368 bytes)
+#define CONFIG_BT_BUF_ACL_TX_SIZE 73
 #define CONFIG_BT_BUF_ACL_RX_COUNT 16  // Increased from 8 to 16 for scanning
 // ACL RX buffer size must accommodate largest expected L2CAP packet:
 // - SMP Public Key (SC pairing): 4 (L2CAP hdr) + 1 (SMP code) + 64 (X+Y coords) = 69 bytes
