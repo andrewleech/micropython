@@ -1,0 +1,12 @@
+--- instance0 ---
+Host active
+HID device found
+Initial is_connected: True
+Disconnect detected
+Final is_connected: False
+Host finished
+--- instance1 ---
+Keyboard device configured
+HID device enumerated
+Deactivating device
+Device deactivated

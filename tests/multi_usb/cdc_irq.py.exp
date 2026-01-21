@@ -1,0 +1,13 @@
+--- instance0 ---
+Host active
+CDC device found
+IRQ handler registered
+IRQ: read 13 bytes: b'irq_test_data'
+IRQ triggered
+Data received via IRQ: b'irq_test_data'
+Host finished
+--- instance1 ---
+CDC device configured
+CDC device enumerated
+CDC write returned: 13 bytes
+Device finished
