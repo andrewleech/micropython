@@ -13,6 +13,8 @@ target_include_directories(micropy_extmod_zephyr_ble INTERFACE
     ${ZEPHYR_LIB_DIR}/include
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host
+    # TinyCrypt for AES-128 encryption
+    ${MICROPY_DIR}/lib/mynewt-nimble/ext/tinycrypt/include
 )
 
 target_sources(micropy_extmod_zephyr_ble INTERFACE
@@ -34,6 +36,7 @@ target_sources(micropy_extmod_zephyr_ble INTERFACE
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_psa_crypto.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_util.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_arch.c
+    ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_crypto.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_crypto_stubs.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_monitor_stubs.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_feature_stubs.c
@@ -63,8 +66,15 @@ target_sources(micropy_extmod_zephyr_ble INTERFACE
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/data.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/keys.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/smp.c
-    # ecc.c and crypto_psa.c are replaced by our zephyr_ble_crypto_stubs.c
-    # which provides stub implementations that work without PSA Crypto
+    # ecc.c and crypto_psa.c are replaced by zephyr_ble_crypto.c (TinyCrypt implementation)
+    # zephyr_ble_crypto_stubs.c provides stubs for unimplemented crypto (e.g., controller crypto)
+
+    # TinyCrypt crypto library for BLE pairing (Legacy + SC)
+    ${MICROPY_DIR}/lib/mynewt-nimble/ext/tinycrypt/src/aes_encrypt.c   # AES-128-ECB (Legacy pairing)
+    ${MICROPY_DIR}/lib/mynewt-nimble/ext/tinycrypt/src/cmac_mode.c     # AES-CMAC (SC crypto functions)
+    ${MICROPY_DIR}/lib/mynewt-nimble/ext/tinycrypt/src/ecc.c           # ECC P-256 (SC public key)
+    ${MICROPY_DIR}/lib/mynewt-nimble/ext/tinycrypt/src/ecc_dh.c        # ECDH (SC shared secret)
+    ${MICROPY_DIR}/lib/mynewt-nimble/ext/tinycrypt/src/utils.c         # Utility functions
 )
 
 # CRITICAL FIX: Disable -fdata-sections for Zephyr sources using STRUCT_SECTION_ITERABLE
@@ -89,6 +99,7 @@ set_source_files_properties(
     ${ZEPHYR_LIB_DIR}/lib/net_buf/buf.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/hci_core.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/buf.c
+    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/smp.c    # BT_L2CAP_FIXED_CHANNEL_DEFINE uses STRUCT_SECTION_ITERABLE
     PROPERTIES COMPILE_FLAGS "-fno-data-sections"
 )
 

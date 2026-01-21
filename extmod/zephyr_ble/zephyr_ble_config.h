@@ -27,6 +27,11 @@
 #ifndef MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_ZEPHYR_BLE_CONFIG_H
 #define MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_ZEPHYR_BLE_CONFIG_H
 
+// Enable debug output for Zephyr BLE implementation (Phase 1 development)
+#ifndef ZEPHYR_BLE_DEBUG
+#define ZEPHYR_BLE_DEBUG 1
+#endif
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -390,7 +395,6 @@ extern const struct device __device_dts_ord_0;
 
 // --- Connection Support ---
 #define CONFIG_BT_CONN 1
-#define CONFIG_BT_MAX_PAIRED 4
 
 // --- GATT Support ---
 #define CONFIG_BT_GATT_CLIENT 1
@@ -400,11 +404,16 @@ extern const struct device __device_dts_ord_0;
 #undef CONFIG_BT_GATT_CACHING  // Disable - requires PSA crypto API
 #define CONFIG_BT_ATT_PREPARE_COUNT 0
 
-// --- Security (SMP) ---
-#define CONFIG_BT_SMP 0  // Disabled: STM32WB55 controller doesn't send Enhanced Connection Complete events
+// --- Security (SMP) - Detailed Options ---
+// Note: Core SMP config (CONFIG_BT_SMP, CONFIG_BT_BONDABLE, etc.) is now in dedicated
+// "Security Manager Protocol (SMP) - Pairing/Bonding" section below. This section
+// contains additional SMP options.
+// #define CONFIG_BT_SMP 0  // OLD - now enabled in SMP section below for pairing/bonding
 #define CONFIG_BT_SIGNING 0
-#define CONFIG_BT_SMP_SC_PAIR_ONLY 0
-#define CONFIG_BT_SMP_SC_ONLY 0
+// CONFIG_BT_SMP_SC_PAIR_ONLY must NOT be defined (not even to 0) to enable legacy+SC pairing
+// When defined, Zephyr uses #if !defined() to check, so any definition disables the feature
+// #define CONFIG_BT_SMP_SC_PAIR_ONLY 0
+// #define CONFIG_BT_SMP_SC_ONLY 0  // Duplicate - defined in SMP section below
 #define CONFIG_BT_SMP_OOB_LEGACY_PAIR_ONLY 0
 #define CONFIG_BT_SMP_ENFORCE_MITM 0
 #define CONFIG_BT_SMP_USB_HCI_CTLR_WORKAROUND 0
@@ -422,6 +431,14 @@ extern const struct device __device_dts_ord_0;
 // --- L2CAP ---
 #define CONFIG_BT_L2CAP_TX_BUF_COUNT 4
 #define CONFIG_BT_L2CAP_TX_MTU 256  // L2CAP TX MTU (matches NimBLE default)
+
+// --- Security Manager Protocol (SMP) - Pairing/Bonding ---
+#define CONFIG_BT_SMP 1                        // Enable Security Manager Protocol
+#define CONFIG_BT_BONDABLE 1                   // Enable bonding by default (can be disabled per-connection)
+#define CONFIG_BT_SMP_SC_ONLY 0                // Allow both Legacy and LE Secure Connections pairing
+#define CONFIG_BT_MAX_PAIRED 8                 // Maximum number of bonded devices
+// Phase 1: Disable persistent storage (CONFIG_BT_SETTINGS) - will enable in Phase 3
+// #define CONFIG_BT_SETTINGS 1                // Enable Settings subsystem for bond storage
 
 // --- LE Feature Pages ---
 // BLE controllers report supported features across multiple 8-byte "pages".
@@ -443,7 +460,12 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_BUF_ACL_TX_COUNT 8
 #define CONFIG_BT_BUF_ACL_TX_SIZE 27
 #define CONFIG_BT_BUF_ACL_RX_COUNT 16  // Increased from 8 to 16 for scanning
-#define CONFIG_BT_BUF_ACL_RX_SIZE 27
+// ACL RX buffer size must accommodate largest expected L2CAP packet:
+// - SMP Public Key (SC pairing): 4 (L2CAP hdr) + 1 (SMP code) + 64 (X+Y coords) = 69 bytes
+// Use 72 bytes for alignment + small margin.
+// Note: Legacy pairing works with this size. SC pairing currently crashes with TX
+// packet count mismatch assert (hci_core.c:669) - needs deeper investigation.
+#define CONFIG_BT_BUF_ACL_RX_SIZE 72
 #define CONFIG_BT_BUF_ACL_RX_COUNT_EXTRA CONFIG_BT_MAX_CONN
 
 // Event buffers - Increased for scanning workload and connectable advertising
@@ -615,7 +637,7 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_CONN_LOG_LEVEL 0
 #define CONFIG_BT_GATT_LOG_LEVEL 0
 #define CONFIG_BT_ATT_LOG_LEVEL 0
-#define CONFIG_BT_SMP_LOG_LEVEL 0
+#define CONFIG_BT_SMP_LOG_LEVEL 4  // Enable SMP debug logging
 #define CONFIG_BT_KEYS_LOG_LEVEL 0
 #define CONFIG_BT_SETTINGS_LOG_LEVEL 0
 #define CONFIG_BT_RPA_LOG_LEVEL 0
@@ -631,7 +653,7 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_BACKGROUND_SCAN_WINDOW 18
 
 // Optional features (disabled)
-#define CONFIG_BT_BONDABLE 0
+// Note: CONFIG_BT_BONDABLE now enabled in SMP section above
 #define CONFIG_BT_BONDING_REQUIRED 0
 #define CONFIG_BT_BONDABLE_PER_CONNECTION 0
 #define CONFIG_BT_AUTO_PHY_UPDATE 0
@@ -698,11 +720,11 @@ extern const struct device __device_dts_ord_0;
 #include <stdio.h>  // For snprintf
 int lll_csrand_get(void *buf, size_t len);  // Controller crypto stub
 
-// Stub out printk and snprintk to prevent them from hanging during BLE initialization
-// printk may try to use UART or other console mechanisms that aren't ready
-// or require scheduler activity. Instead, use mp_printf or disable entirely.
+// Enable printk for BLE debugging - route to MicroPython's mp_printf
+// Note: Requires py/mphal.h to be included before this for mp_printf
 #ifndef printk
-#define printk(...) do { } while (0)
+#include "py/mpprint.h"
+#define printk(...) mp_printf(&mp_plat_print, __VA_ARGS__)
 #endif
 #ifndef snprintk
 #define snprintk snprintf

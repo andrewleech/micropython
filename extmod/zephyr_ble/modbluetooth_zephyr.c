@@ -193,6 +193,11 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
     uint16_t gattc_subscribe_ccc_handle;
     bool gattc_subscribe_active; // Track if subscription callback is registered
     #endif // MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+
+    // Pairing/bonding state (Phase 1: Basic pairing without persistent storage)
+    uint16_t auth_conn_handle;    // Connection undergoing authentication
+    uint8_t auth_action;          // Pending passkey action type
+    uint32_t auth_passkey;        // Passkey for display/comparison
 } mp_bluetooth_zephyr_root_pointers_t;
 
 static int mp_bluetooth_zephyr_ble_state;
@@ -233,6 +238,7 @@ static void mp_bt_zephyr_insert_connection(mp_bt_zephyr_conn_t *connection);
 static void mp_bt_zephyr_remove_connection(uint8_t conn_handle);
 static void mp_bt_zephyr_connected(struct bt_conn *connected, uint8_t err);
 static void mp_bt_zephyr_disconnected(struct bt_conn *disconn, uint8_t reason);
+static void mp_bt_zephyr_security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err);
 static struct bt_uuid *create_zephyr_uuid(const mp_obj_bluetooth_uuid_t *uuid);
 static void gatt_db_add(const struct bt_gatt_attr *pattern, struct bt_gatt_attr *attr, size_t user_data_len);
 static void add_service(const struct bt_uuid *u, struct bt_gatt_attr *attr);
@@ -248,16 +254,37 @@ static void mp_bt_zephyr_free_service(struct bt_gatt_service *service);
 static struct bt_conn_cb mp_bt_zephyr_conn_callbacks = {
     .connected = mp_bt_zephyr_connected,
     .disconnected = mp_bt_zephyr_disconnected,
+    .security_changed = mp_bt_zephyr_security_changed,
 };
 
+// Get a unique connection handle from a bt_conn pointer by searching the connection list
+// Returns the 0-based index of the connection in the list (0, 1, 2, ...)
+// Returns 0xFF if connection not found
+static uint8_t mp_bt_zephyr_conn_to_handle(struct bt_conn *conn) {
+    if (!conn || !MP_STATE_PORT(bluetooth_zephyr_root_pointers)) {
+        return 0xFF;
+    }
+
+    uint8_t handle = 0;
+    for (mp_bt_zephyr_conn_t *connection = MP_STATE_PORT(bluetooth_zephyr_root_pointers)->connections;
+         connection != NULL; connection = connection->next, handle++) {
+        if (connection->conn == conn) {
+            return handle;
+        }
+    }
+    return 0xFF;
+}
+
 static mp_bt_zephyr_conn_t *mp_bt_zephyr_find_connection(uint8_t conn_handle) {
-    struct bt_conn_info info;
-    for (mp_bt_zephyr_conn_t *connection = MP_STATE_PORT(bluetooth_zephyr_root_pointers)->connections; connection != NULL; connection = connection->next) {
-        if (connection->conn) {
-            bt_conn_get_info(connection->conn, &info);
-            if (info.id == conn_handle) {
-                return connection;
-            }
+    if (!MP_STATE_PORT(bluetooth_zephyr_root_pointers)) {
+        return NULL;
+    }
+
+    uint8_t idx = 0;
+    for (mp_bt_zephyr_conn_t *connection = MP_STATE_PORT(bluetooth_zephyr_root_pointers)->connections;
+         connection != NULL; connection = connection->next, idx++) {
+        if (idx == conn_handle) {
+            return connection;
         }
     }
     return NULL;
@@ -269,24 +296,25 @@ static void mp_bt_zephyr_insert_connection(mp_bt_zephyr_conn_t *connection) {
 }
 
 static void mp_bt_zephyr_remove_connection(uint8_t conn_handle) {
-    struct bt_conn_info info;
+    if (!MP_STATE_PORT(bluetooth_zephyr_root_pointers)) {
+        return;
+    }
+
     mp_bt_zephyr_conn_t *prev = NULL;
-    for (mp_bt_zephyr_conn_t *connection = MP_STATE_PORT(bluetooth_zephyr_root_pointers)->connections; connection != NULL; connection = connection->next) {
-        if (connection->conn) {
-            bt_conn_get_info(connection->conn, &info);
-            if (info.id == conn_handle) {
-                // unlink this item and the gc will eventually collect it
-                if (prev != NULL) {
-                    prev->next = connection->next;
-                } else {
-                    // move the start pointer
-                    MP_STATE_PORT(bluetooth_zephyr_root_pointers)->connections = connection->next;
-                }
-                break;
+    uint8_t idx = 0;
+    for (mp_bt_zephyr_conn_t *connection = MP_STATE_PORT(bluetooth_zephyr_root_pointers)->connections;
+         connection != NULL; connection = connection->next, idx++) {
+        if (idx == conn_handle) {
+            // unlink this item and the gc will eventually collect it
+            if (prev != NULL) {
+                prev->next = connection->next;
             } else {
-                prev = connection;
+                // move the start pointer
+                MP_STATE_PORT(bluetooth_zephyr_root_pointers)->connections = connection->next;
             }
+            break;
         }
+        prev = connection;
     }
 }
 
@@ -301,6 +329,9 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
                      mp_bluetooth_zephyr_ble_state);
         return;
     }
+
+    // Enable bondable flag for this connection (required for pairing)
+    bt_conn_set_bondable(conn, true);
 
     struct bt_conn_info info;
     bt_conn_get_info(conn, &info);
@@ -398,6 +429,51 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
     mp_bluetooth_gap_on_connected_disconnected(disconnect_event, info.id, info.le.dst->type, info.le.dst->a.val);
 }
 
+static void mp_bt_zephyr_security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err) {
+    DEBUG_printf("mp_bt_zephyr_security_changed: level=%d err=%d\n", level, err);
+
+    // Safety check: only process if BLE is fully active
+    if (mp_bluetooth_zephyr_ble_state != MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE
+        || MP_STATE_PORT(bluetooth_zephyr_root_pointers) == NULL) {
+        DEBUG_printf("Security changed callback ignored - BLE not active\n");
+        return;
+    }
+
+    // Get connection handle
+    uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
+    if (conn_handle == 0xFF) {
+        DEBUG_printf("Security changed: connection not found\n");
+        return;
+    }
+
+    // Get full security state
+    struct bt_conn_info info;
+    if (bt_conn_get_info(conn, &info) != 0) {
+        DEBUG_printf("Security changed: bt_conn_get_info failed\n");
+        return;
+    }
+
+    DEBUG_printf("  security.level=%d flags=0x%02x enc_key_size=%d\n",
+                 info.security.level, info.security.flags, info.security.enc_key_size);
+
+    // Determine encryption and authentication status from security level
+    // BT_SECURITY_L1 = No security (no encryption, no authentication)
+    // BT_SECURITY_L2 = Encryption only (unauthenticated pairing)
+    // BT_SECURITY_L3 = Authenticated pairing (MITM protection)
+    // BT_SECURITY_L4 = Authenticated LE Secure Connections (LESC)
+    bool encrypted = (info.security.level >= BT_SECURITY_L2);
+    bool authenticated = (info.security.level >= BT_SECURITY_L3);
+    uint8_t key_size = info.security.enc_key_size;
+
+    // For Phase 1, we don't support bonding (bond=False), so always report bonded=false
+    // Phase 3 will add bond storage and check if keys are stored
+    bool bonded = false;
+
+    DEBUG_printf("Firing _IRQ_ENCRYPTION_UPDATE: encrypted=%d authenticated=%d bonded=%d key_size=%d\n",
+                 encrypted, authenticated, bonded, key_size);
+    mp_bluetooth_gatts_on_encryption_update(conn_handle, encrypted, authenticated, bonded, key_size);
+}
+
 static int bt_err_to_errno(int err) {
     // Zephyr uses errno codes directly, but they are negative.
     return -err;
@@ -460,6 +536,19 @@ void gap_scan_cb_timeout(struct k_timer *timer_id) {
 }
 #endif
 
+// Forward declarations for authentication callbacks (defined later in file)
+extern struct bt_conn_auth_cb mp_bt_zephyr_auth_callbacks;
+extern struct bt_conn_auth_info_cb mp_bt_zephyr_auth_info_callbacks;
+
+// Helper to get conn_handle from bt_conn for auth callbacks
+// Returns 0xFF if BLE not active or connection not found
+static inline uint8_t mp_bt_zephyr_auth_get_conn_handle(struct bt_conn *conn) {
+    if (!mp_bluetooth_is_active()) {
+        return 0xFF;
+    }
+    return mp_bt_zephyr_conn_to_handle(conn);
+}
+
 int mp_bluetooth_init(void) {
     DEBUG_printf("mp_bluetooth_init\n");
 
@@ -516,6 +605,14 @@ int mp_bluetooth_init(void) {
                 #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
                 bt_le_scan_cb_register(&mp_bluetooth_zephyr_gap_scan_cb_struct);
                 #endif
+
+                // Configure default IO capability (Just Works / NO_INPUT_NO_OUTPUT)
+                // This must be called before registering auth callbacks
+                mp_bluetooth_set_io_capability(0);
+
+                // Register authentication callbacks for pairing/bonding
+                bt_conn_auth_cb_register(&mp_bt_zephyr_auth_callbacks);
+                bt_conn_auth_info_cb_register(&mp_bt_zephyr_auth_info_callbacks);
 
                 mp_bt_zephyr_callbacks_registered = true;
                 DEBUG_printf("Zephyr callbacks registered\n");
@@ -999,6 +1096,19 @@ int mp_bluetooth_gatts_register_service(mp_obj_bluetooth_uuid_t *service_uuid, m
             add_char.permissions |= BT_GATT_PERM_WRITE;
             add_char.properties |= (BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP);
         }
+        // Security permission flags - require encryption/authentication for read/write
+        if (characteristic_flags[i] & MP_BLUETOOTH_CHARACTERISTIC_FLAG_READ_ENCRYPTED) {
+            add_char.permissions |= BT_GATT_PERM_READ_ENCRYPT;
+        }
+        if (characteristic_flags[i] & MP_BLUETOOTH_CHARACTERISTIC_FLAG_READ_AUTHENTICATED) {
+            add_char.permissions |= BT_GATT_PERM_READ_AUTHEN;
+        }
+        if (characteristic_flags[i] & MP_BLUETOOTH_CHARACTERISTIC_FLAG_WRITE_ENCRYPTED) {
+            add_char.permissions |= BT_GATT_PERM_WRITE_ENCRYPT;
+        }
+        if (characteristic_flags[i] & MP_BLUETOOTH_CHARACTERISTIC_FLAG_WRITE_AUTHENTICATED) {
+            add_char.permissions |= BT_GATT_PERM_WRITE_AUTHEN;
+        }
 
         add_characteristic(&add_char, &svc_attributes[attr_index], &svc_attributes[attr_index + 1]);
         // Free the temporary UUID (gatt_db_add copied it)
@@ -1024,6 +1134,19 @@ int mp_bluetooth_gatts_register_service(mp_obj_bluetooth_uuid_t *service_uuid, m
                 }
                 if (descriptor_flags[descriptor_index] & (MP_BLUETOOTH_CHARACTERISTIC_FLAG_WRITE | MP_BLUETOOTH_CHARACTERISTIC_FLAG_WRITE_NO_RESPONSE)) {
                     add_desc.permissions |= BT_GATT_PERM_WRITE;
+                }
+                // Security permission flags for descriptors
+                if (descriptor_flags[descriptor_index] & MP_BLUETOOTH_CHARACTERISTIC_FLAG_READ_ENCRYPTED) {
+                    add_desc.permissions |= BT_GATT_PERM_READ_ENCRYPT;
+                }
+                if (descriptor_flags[descriptor_index] & MP_BLUETOOTH_CHARACTERISTIC_FLAG_READ_AUTHENTICATED) {
+                    add_desc.permissions |= BT_GATT_PERM_READ_AUTHEN;
+                }
+                if (descriptor_flags[descriptor_index] & MP_BLUETOOTH_CHARACTERISTIC_FLAG_WRITE_ENCRYPTED) {
+                    add_desc.permissions |= BT_GATT_PERM_WRITE_ENCRYPT;
+                }
+                if (descriptor_flags[descriptor_index] & MP_BLUETOOTH_CHARACTERISTIC_FLAG_WRITE_AUTHENTICATED) {
+                    add_desc.permissions |= BT_GATT_PERM_WRITE_AUTHEN;
                 }
 
                 add_descriptor(curr_char, &add_desc, &svc_attributes[attr_index]);
@@ -1542,12 +1665,14 @@ static mp_obj_bluetooth_uuid_t zephyr_uuid_to_mp(const struct bt_uuid *uuid) {
     return result;
 }
 
+#endif // MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+
 // Get bt_conn pointer from connection handle, returns NULL if not found.
+// Used by both GATT client and pairing/bonding operations
 static struct bt_conn *mp_bt_zephyr_get_conn(uint16_t conn_handle) {
     mp_bt_zephyr_conn_t *connection = mp_bt_zephyr_find_connection(conn_handle);
     return connection ? connection->conn : NULL;
 }
-#endif // MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
 
 static void gatt_db_add(const struct bt_gatt_attr *pattern, struct bt_gatt_attr *attr, size_t user_data_len) {
     const union uuid_u *u = CONTAINER_OF(pattern->uuid, union uuid_u, uuid);
@@ -2239,37 +2364,352 @@ int mp_bluetooth_gattc_exchange_mtu(uint16_t conn_handle) {
     #endif
 }
 
-// Pairing/Bonding stubs (Phase 1: No persistent storage)
+// ============================================================================
+// Pairing/Bonding Implementation (Phase 1: Basic pairing without persistent storage)
+// ============================================================================
+
+// Authentication callback handlers that translate Zephyr auth events to MicroPython IRQ events
+
+static void zephyr_passkey_display_cb(struct bt_conn *conn, unsigned int passkey) {
+    DEBUG_printf("zephyr_passkey_display_cb: passkey=%06u\n", passkey);
+
+    uint16_t conn_handle = mp_bt_zephyr_auth_get_conn_handle(conn);
+    if (conn_handle == 0xFF) {
+        return;
+    }
+
+    // Store auth state for tracking
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (rp) {
+        rp->auth_conn_handle = conn_handle;
+        rp->auth_action = MP_BLUETOOTH_PASSKEY_ACTION_DISPLAY;
+        rp->auth_passkey = passkey;
+    }
+
+    // Fire _IRQ_PASSKEY_ACTION event: user should display this passkey
+    mp_bluetooth_gap_on_passkey_action(conn_handle, MP_BLUETOOTH_PASSKEY_ACTION_DISPLAY, passkey);
+}
+
+static void zephyr_passkey_entry_cb(struct bt_conn *conn) {
+    DEBUG_printf("zephyr_passkey_entry_cb\n");
+
+    uint16_t conn_handle = mp_bt_zephyr_auth_get_conn_handle(conn);
+    if (conn_handle == 0xFF) {
+        return;
+    }
+
+    // Store auth state
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (rp) {
+        rp->auth_conn_handle = conn_handle;
+        rp->auth_action = MP_BLUETOOTH_PASSKEY_ACTION_INPUT;
+        rp->auth_passkey = 0;
+    }
+
+    // Fire _IRQ_PASSKEY_ACTION event: user should enter passkey
+    mp_bluetooth_gap_on_passkey_action(conn_handle, MP_BLUETOOTH_PASSKEY_ACTION_INPUT, 0);
+}
+
+static void zephyr_passkey_confirm_cb(struct bt_conn *conn, unsigned int passkey) {
+    DEBUG_printf("zephyr_passkey_confirm_cb: passkey=%06u\n", passkey);
+
+    uint16_t conn_handle = mp_bt_zephyr_auth_get_conn_handle(conn);
+    if (conn_handle == 0xFF) {
+        return;
+    }
+
+    // Store auth state
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (rp) {
+        rp->auth_conn_handle = conn_handle;
+        rp->auth_action = MP_BLUETOOTH_PASSKEY_ACTION_NUMERIC_COMPARISON;
+        rp->auth_passkey = passkey;
+    }
+
+    // Fire _IRQ_PASSKEY_ACTION event: user should confirm passkey matches
+    mp_bluetooth_gap_on_passkey_action(conn_handle, MP_BLUETOOTH_PASSKEY_ACTION_NUMERIC_COMPARISON, passkey);
+}
+
+static void zephyr_pairing_confirm_cb(struct bt_conn *conn) {
+    DEBUG_printf("zephyr_pairing_confirm_cb (Just Works)\n");
+
+    uint16_t conn_handle = mp_bt_zephyr_auth_get_conn_handle(conn);
+    if (conn_handle == 0xFF) {
+        return;
+    }
+
+    // Store auth state
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (rp) {
+        rp->auth_conn_handle = conn_handle;
+        rp->auth_action = MP_BLUETOOTH_PASSKEY_ACTION_NONE;
+        rp->auth_passkey = 0;
+    }
+
+    // Auto-confirm Just Works pairing before firing IRQ (matches NimBLE behavior)
+    bt_conn_auth_pairing_confirm(conn);
+
+    // Fire _IRQ_PASSKEY_ACTION event: Just Works pairing (no MITM protection)
+    mp_bluetooth_gap_on_passkey_action(conn_handle, MP_BLUETOOTH_PASSKEY_ACTION_NONE, 0);
+}
+
+static void zephyr_auth_cancel_cb(struct bt_conn *conn) {
+    DEBUG_printf("zephyr_auth_cancel_cb\n");
+
+    uint16_t conn_handle = mp_bt_zephyr_auth_get_conn_handle(conn);
+    if (conn_handle == 0xFF) {
+        return;
+    }
+
+    // Clear auth state
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (rp) {
+        rp->auth_conn_handle = 0;
+        rp->auth_action = 0;
+        rp->auth_passkey = 0;
+    }
+
+    DEBUG_printf("  Authentication cancelled for conn_handle=%d\n", conn_handle);
+}
+
+static void zephyr_pairing_complete_cb(struct bt_conn *conn, bool bonded) {
+    DEBUG_printf("zephyr_pairing_complete_cb: bonded=%d\n", bonded);
+
+    // Pairing complete callback fires when SMP key exchange completes
+    // Encryption status change is handled by security_changed callback
+    // This callback only clears the auth state
+
+    // Clear auth state
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (rp) {
+        rp->auth_conn_handle = 0;
+        rp->auth_action = 0;
+        rp->auth_passkey = 0;
+    }
+
+    DEBUG_printf("  Auth state cleared, waiting for security_changed callback\n");
+}
+
+static void zephyr_pairing_failed_cb(struct bt_conn *conn, enum bt_security_err reason) {
+    DEBUG_printf("zephyr_pairing_failed_cb: reason=%d\n", reason);
+
+    uint16_t conn_handle = mp_bt_zephyr_auth_get_conn_handle(conn);
+    if (conn_handle == 0xFF) {
+        return;
+    }
+
+    // Clear auth state
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (rp) {
+        rp->auth_conn_handle = 0;
+        rp->auth_action = 0;
+        rp->auth_passkey = 0;
+    }
+
+    // Fire _IRQ_ENCRYPTION_UPDATE with encrypted=false to indicate failure
+    mp_bluetooth_gatts_on_encryption_update(conn_handle, false, false, false, 0);
+}
+
+// Security configuration flags
+static bool mp_bt_zephyr_mitm_protection = false;  // Default: No MITM (Just Works)
+static bool mp_bt_zephyr_le_secure = false;       // Default: Allow legacy pairing
+static bool mp_bt_zephyr_bonding = true;          // Default: Bonding enabled (CONFIG_BT_BONDABLE=1)
+
+// IO capability setting (default: NO_INPUT_NO_OUTPUT for Just Works)
+// Note: This is NOT a Zephyr enum - it's the value used by mp_bluetooth_set_io_capability()
+// 0 = NO_INPUT_NO_OUTPUT (Just Works), 1 = DISPLAY_ONLY, 2 = KEYBOARD_ONLY, etc.
+static uint8_t mp_bt_zephyr_io_capability = 0;  // Default: Just Works
+
+// Authentication callback structures (forward declared earlier for use in mp_bluetooth_init)
+// These are dynamically configured based on IO capability to control pairing method
+struct bt_conn_auth_cb mp_bt_zephyr_auth_callbacks = {
+    // Initially NULL - configured by first call to mp_bluetooth_set_io_capability()
+    // or by default in mp_bluetooth_init() for Just Works (NO_INPUT_NO_OUTPUT)
+    .passkey_display = NULL,
+    .passkey_entry = NULL,
+    .passkey_confirm = NULL,
+    .pairing_confirm = NULL,  // Set to zephyr_pairing_confirm_cb for Just Works
+    .cancel = NULL,           // Set to zephyr_auth_cancel_cb when pairing_confirm is set
+};
+
+struct bt_conn_auth_info_cb mp_bt_zephyr_auth_info_callbacks = {
+    .pairing_complete = zephyr_pairing_complete_cb,
+    .pairing_failed = zephyr_pairing_failed_cb,
+};
+
+// ============================================================================
+// Pairing/Bonding API Implementation
+// ============================================================================
+
 int mp_bluetooth_gap_pair(uint16_t conn_handle) {
-    (void)conn_handle;
-    return MP_EOPNOTSUPP; // Phase 1: No pairing support
+    DEBUG_printf("mp_bluetooth_gap_pair: conn_handle=%d mitm=%d le_secure=%d bonding=%d\n",
+                 conn_handle, mp_bt_zephyr_mitm_protection, mp_bt_zephyr_le_secure, mp_bt_zephyr_bonding);
+
+    if (!mp_bluetooth_is_active()) {
+        return ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    struct bt_conn *conn = mp_bt_zephyr_get_conn(conn_handle);
+    if (conn == NULL) {
+        return MP_ENOTCONN;
+    }
+
+    // Choose security level based on config flags:
+    // - le_secure=true, mitm=true: BT_SECURITY_L4 (SC required + MITM)
+    // - le_secure=false, mitm=true: BT_SECURITY_L3 (MITM required, legacy or SC)
+    // - mitm=false: BT_SECURITY_L2 (Just Works, legacy or SC)
+    //
+    // Note: BT_SECURITY_L4 requires *both* SC and MITM. SC Just Works (no MITM)
+    // is achieved with L2 + CONFIG_BT_SMP_SC_ONLY=1, but we allow both legacy and SC
+    // (CONFIG_BT_SMP_SC_ONLY=0) to support maximum compatibility.
+    bt_security_t sec_level;
+
+    if (mp_bt_zephyr_le_secure && mp_bt_zephyr_mitm_protection) {
+        sec_level = BT_SECURITY_L4;  // SC required + MITM
+    } else if (mp_bt_zephyr_mitm_protection) {
+        sec_level = BT_SECURITY_L3;  // MITM required (legacy or SC)
+    } else {
+        sec_level = BT_SECURITY_L2;  // Just Works (legacy or SC)
+    }
+
+    int err = bt_conn_set_security(conn, sec_level);
+    return bt_err_to_errno(err);
 }
 
 int mp_bluetooth_gap_passkey(uint16_t conn_handle, uint8_t action, mp_int_t passkey) {
-    (void)conn_handle; (void)action; (void)passkey;
-    return MP_EOPNOTSUPP;
+    DEBUG_printf("mp_bluetooth_gap_passkey: conn_handle=%d action=%d passkey=%d\n",
+                 conn_handle, action, (int)passkey);
+
+    if (!mp_bluetooth_is_active()) {
+        return ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    struct bt_conn *conn = mp_bt_zephyr_get_conn(conn_handle);
+    if (conn == NULL) {
+        return MP_ENOTCONN;
+    }
+
+    int err = 0;
+
+    switch (action) {
+        case MP_BLUETOOTH_PASSKEY_ACTION_INPUT:
+            // User entered passkey that was displayed by the remote device
+            err = bt_conn_auth_passkey_entry(conn, (unsigned int)passkey);
+            break;
+
+        case MP_BLUETOOTH_PASSKEY_ACTION_DISPLAY:
+            // Passkey was already displayed to user via callback - nothing to submit
+            // The remote device will enter the passkey, and Zephyr verifies it automatically
+            err = 0;  // No-op, success
+            break;
+
+        case MP_BLUETOOTH_PASSKEY_ACTION_NUMERIC_COMPARISON:
+            // User confirmed numeric comparison
+            if (passkey != 0) {
+                // Non-zero means user confirmed passkey matches
+                err = bt_conn_auth_passkey_confirm(conn);
+            } else {
+                // Zero means user rejected/cancelled
+                err = bt_conn_auth_cancel(conn);
+            }
+            break;
+
+        case MP_BLUETOOTH_PASSKEY_ACTION_NONE:
+            // Just Works pairing - confirm
+            err = bt_conn_auth_pairing_confirm(conn);
+            break;
+
+        default:
+            return MP_EINVAL;
+    }
+
+    return bt_err_to_errno(err);
 }
 
 void mp_bluetooth_set_bonding(bool enabled) {
-    (void)enabled;
-    // Phase 1: No bonding (persistent storage) - no-op
+    mp_bt_zephyr_bonding = enabled;
+    DEBUG_printf("mp_bluetooth_set_bonding: enabled=%d\n", enabled);
+    // Note: CONFIG_BT_BONDABLE_PER_CONNECTION=0, so bonding is controlled globally
+    // This flag is stored for Phase 3 (persistent bond storage via _IRQ_GET/SET_SECRET)
 }
 
 void mp_bluetooth_set_le_secure(bool enabled) {
-    (void)enabled;
-    // Phase 1: No secure connections config - no-op
+    mp_bt_zephyr_le_secure = enabled;
+    DEBUG_printf("mp_bluetooth_set_le_secure: enabled=%d (SC %s)\n",
+                 enabled, enabled ? "required" : "optional");
+    // When enabled, mp_bluetooth_gap_pair() will use BT_SECURITY_L4 (SC required)
+    // When disabled, mp_bluetooth_gap_pair() will use BT_SECURITY_L3 (allow legacy)
 }
 
 void mp_bluetooth_set_mitm_protection(bool enabled) {
-    (void)enabled;
-    // Phase 1: MITM protection config - no-op
-    // TODO: Configure bt_conn_auth_cb or SMP settings
+    mp_bt_zephyr_mitm_protection = enabled;
+    DEBUG_printf("mp_bluetooth_set_mitm_protection: enabled=%d\n", enabled);
+    // When enabled, mp_bluetooth_gap_pair() will use BT_SECURITY_L3/L4 (MITM required)
+    // When disabled, mp_bluetooth_gap_pair() will use BT_SECURITY_L2 (Just Works)
 }
 
 void mp_bluetooth_set_io_capability(uint8_t capability) {
-    (void)capability;
-    // Phase 1: IO capability config - no-op
-    // TODO: Configure bt_conn_auth_cb io_capa field
+    DEBUG_printf("mp_bluetooth_set_io_capability: capability=%d\n", capability);
+
+    mp_bt_zephyr_io_capability = capability;
+
+    // Configure auth callbacks based on IO capability
+    // IO capability values (from MicroPython BLE API):
+    // 0 = NO_INPUT_NO_OUTPUT (Just Works)
+    // 1 = DISPLAY_ONLY (passkey display)
+    // 2 = KEYBOARD_ONLY (passkey entry)
+    // 3 = DISPLAY_YESNO (numeric comparison)
+    // 4 = KEYBOARD_DISPLAY (all methods)
+
+    switch (capability) {
+        case 0:  // NO_INPUT_NO_OUTPUT (Just Works)
+            mp_bt_zephyr_auth_callbacks.passkey_display = NULL;
+            mp_bt_zephyr_auth_callbacks.passkey_entry = NULL;
+            mp_bt_zephyr_auth_callbacks.passkey_confirm = NULL;
+            mp_bt_zephyr_auth_callbacks.pairing_confirm = zephyr_pairing_confirm_cb;
+            mp_bt_zephyr_auth_callbacks.cancel = zephyr_auth_cancel_cb;
+            break;
+
+        case 1:  // DISPLAY_ONLY
+            mp_bt_zephyr_auth_callbacks.passkey_display = zephyr_passkey_display_cb;
+            mp_bt_zephyr_auth_callbacks.passkey_entry = NULL;
+            mp_bt_zephyr_auth_callbacks.passkey_confirm = NULL;
+            mp_bt_zephyr_auth_callbacks.pairing_confirm = zephyr_pairing_confirm_cb;
+            mp_bt_zephyr_auth_callbacks.cancel = zephyr_auth_cancel_cb;
+            break;
+
+        case 2:  // KEYBOARD_ONLY
+            mp_bt_zephyr_auth_callbacks.passkey_display = NULL;
+            mp_bt_zephyr_auth_callbacks.passkey_entry = zephyr_passkey_entry_cb;
+            mp_bt_zephyr_auth_callbacks.passkey_confirm = NULL;
+            mp_bt_zephyr_auth_callbacks.pairing_confirm = zephyr_pairing_confirm_cb;
+            mp_bt_zephyr_auth_callbacks.cancel = zephyr_auth_cancel_cb;
+            break;
+
+        case 3:  // DISPLAY_YESNO (numeric comparison)
+            mp_bt_zephyr_auth_callbacks.passkey_display = zephyr_passkey_display_cb;
+            mp_bt_zephyr_auth_callbacks.passkey_entry = NULL;
+            mp_bt_zephyr_auth_callbacks.passkey_confirm = zephyr_passkey_confirm_cb;
+            mp_bt_zephyr_auth_callbacks.pairing_confirm = zephyr_pairing_confirm_cb;
+            mp_bt_zephyr_auth_callbacks.cancel = zephyr_auth_cancel_cb;
+            break;
+
+        case 4:  // KEYBOARD_DISPLAY (all methods)
+        default:
+            mp_bt_zephyr_auth_callbacks.passkey_display = zephyr_passkey_display_cb;
+            mp_bt_zephyr_auth_callbacks.passkey_entry = zephyr_passkey_entry_cb;
+            mp_bt_zephyr_auth_callbacks.passkey_confirm = zephyr_passkey_confirm_cb;
+            mp_bt_zephyr_auth_callbacks.pairing_confirm = zephyr_pairing_confirm_cb;
+            mp_bt_zephyr_auth_callbacks.cancel = zephyr_auth_cancel_cb;
+            break;
+    }
+
+    // Re-register callbacks if BLE is already active
+    // Note: bt_conn_auth_cb_register() can be called multiple times to update callbacks
+    if (mp_bluetooth_is_active()) {
+        bt_conn_auth_cb_register(&mp_bt_zephyr_auth_callbacks);
+        DEBUG_printf("Auth callbacks re-registered for IO capability %d\n", capability);
+    }
 }
 
 MP_REGISTER_ROOT_POINTER(struct _mp_bluetooth_zephyr_root_pointers_t *bluetooth_zephyr_root_pointers);
