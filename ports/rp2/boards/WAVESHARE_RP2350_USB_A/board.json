@@ -1,0 +1,18 @@
+{
+    "deploy": [
+        "../deploy_uf2.md"
+    ],
+    "docs": "",
+    "features": [
+        "16MB Flash",
+        "UART",
+        "USB-A Host",
+        "USB-C Device"
+    ],
+    "images": [],
+    "mcu": "rp2350",
+    "product": "RP2350-USB-A",
+    "thumbnail": "",
+    "url": "https://www.waveshare.com/wiki/RP2350-USB-A",
+    "vendor": "Waveshare"
+}

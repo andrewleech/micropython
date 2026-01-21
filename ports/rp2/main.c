@@ -41,6 +41,7 @@
 #include "shared/runtime/pyexec.h"
 #include "shared/runtime/softtimer.h"
 #include "shared/tinyusb/mp_usbd.h"
+#include "shared/tinyusb/mp_usbh.h"
 #include "uart.h"
 #include "modmachine.h"
 #include "modrp2.h"
@@ -275,6 +276,9 @@ int main(int argc, char **argv) {
         soft_timer_deinit();
         #if MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
         mp_usbd_deinit();
+        #endif
+        #if MICROPY_HW_USB_HOST
+        mp_usbh_deinit();
         #endif
 
         // Hook for resetting anything right at the end of a soft reset command.
