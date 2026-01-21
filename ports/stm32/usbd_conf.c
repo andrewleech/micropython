@@ -36,7 +36,9 @@
 #include "irq.h"
 #include "usb.h"
 
-#if MICROPY_HW_STM_USB_STACK || MICROPY_HW_TINYUSB_STACK
+// Only compile USB Device configuration when device mode is enabled
+// For TinyUSB, also check MICROPY_HW_ENABLE_USBDEV to support host-only mode
+#if MICROPY_HW_STM_USB_STACK || (MICROPY_HW_TINYUSB_STACK && MICROPY_HW_ENABLE_USBDEV)
 
 #if BUILDING_MBOOT
 // TinyUSB not used in mboot
@@ -64,7 +66,7 @@ PCD_HandleTypeDef pcd_hs_handle;
 #endif
 
 #if MICROPY_HW_USB_FS
-static void mp_usbd_ll_init_fs(void) {
+void mp_usbd_ll_init_fs(void) {
     {
         // Configure USB GPIO's.
 
@@ -118,6 +120,7 @@ static void mp_usbd_ll_init_fs(void) {
 
         #if defined(MICROPY_HW_USB_OTG_ID_PIN)
         // USB ID pin is always A10
+        // Always use pull-up to match TinyUSB BSP - OTG controller overrides pull direction for host mode
         mp_hal_pin_config(MICROPY_HW_USB_OTG_ID_PIN, MP_HAL_PIN_MODE_ALT_OPEN_DRAIN, MP_HAL_PIN_PULL_UP, otg_alt);
         #endif
 
@@ -187,6 +190,27 @@ static void mp_usbd_ll_init_fs(void) {
         #endif
     }
 }
+
+#if MICROPY_HW_USB_HOST
+// Configure host-mode-specific hardware (VBUS power switch)
+// This should be called when switching from device to host mode
+void mp_usbh_ll_init_vbus_fs(void) {
+    #ifdef MICROPY_HW_USB_VBUS_POWER_PIN
+    // Enable VBUS power output (PG6 on NUCLEO-F429ZI)
+    // Configure as push-pull output to match TinyUSB BSP
+    const machine_pin_obj_t *vbus_pin = MICROPY_HW_USB_VBUS_POWER_PIN;
+    GPIO_InitTypeDef gpio_vbus = {
+        .Pin = 1 << vbus_pin->pin,
+            .Mode = GPIO_MODE_OUTPUT_PP,
+            .Pull = GPIO_PULLDOWN,
+            .Speed = GPIO_SPEED_HIGH,
+    };
+    HAL_GPIO_Init(vbus_pin->gpio, &gpio_vbus);
+    HAL_GPIO_WritePin(vbus_pin->gpio, gpio_vbus.Pin, GPIO_PIN_SET);
+    #endif
+}
+#endif
+
 #endif // MICROPY_HW_USB_FS
 
 #if MICROPY_HW_USB_HS
@@ -267,7 +291,13 @@ static void mp_usbd_ll_init_hs(void) {
 
         #if defined(MICROPY_HW_USB_OTG_ID_PIN)
         // Configure ID pin
+        #if MICROPY_HW_USB_HOST
+        // For host mode: configure as alternate function with pull-down (A-device, ID=low)
+        mp_hal_pin_config(MICROPY_HW_USB_OTG_ID_PIN, MP_HAL_PIN_MODE_ALT_OPEN_DRAIN, MP_HAL_PIN_PULL_DOWN, otg_alt);
+        #else
+        // For device mode: configure as alternate function with pull-up (B-device, ID=high)
         mp_hal_pin_config(MICROPY_HW_USB_OTG_ID_PIN, MP_HAL_PIN_MODE_ALT_OPEN_DRAIN, MP_HAL_PIN_PULL_UP, otg_alt);
+        #endif
         #endif
 
         #if defined(STM32N6)
@@ -279,6 +309,8 @@ static void mp_usbd_ll_init_hs(void) {
 
         LL_AHB5_GRP1_EnableClock(LL_AHB5_GRP1_PERIPH_OTG1);
         LL_AHB5_GRP1_EnableClock(LL_AHB5_GRP1_PERIPH_OTGPHY1);
+        LL_AHB5_GRP1_EnableClockLowPower(LL_AHB5_GRP1_PERIPH_OTG1);
+        LL_AHB5_GRP1_EnableClockLowPower(LL_AHB5_GRP1_PERIPH_OTGPHY1);
 
         // Select 24MHz clock.
         MODIFY_REG(USB1_HS_PHYC->USBPHYC_CR, USB_USBPHYC_CR_FSEL, 2 << USB_USBPHYC_CR_FSEL_Pos);

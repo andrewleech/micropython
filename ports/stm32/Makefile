@@ -221,6 +221,26 @@ SHARED_SRC_C += $(addprefix shared/,\
 	tinyusb/mp_usbd_runtime.c \
 	)
 
+# USB Host support (requires TinyUSB stack)
+# Note: USB Host only mode - disables USB Device to free the port for host mode
+# Uses UART for REPL instead of USB CDC
+ifeq ($(MICROPY_HW_USB_HOST),1)
+CFLAGS += -DMICROPY_HW_USB_HOST=1 -DMICROPY_HW_TINYUSB_STACK=1 -DMICROPY_HW_ENABLE_USBDEV=0 -DMICROPY_HW_ENABLE_USB_RUNTIME_DEVICE=0 -DMICROPY_HW_USB_CDC=0 -DMICROPY_HW_USB_MSC=0
+INC += -Itinyusb_port
+LDFLAGS += -Wl,--wrap=hcd_event_handler
+SHARED_SRC_C += shared/tinyusb/mp_usbh.c
+SRC_EXTMOD_C += extmod/machine_usb_host.c
+SRC_C += tinyusb_port/tusb_port.c
+endif
+
+# TinyUSB Device mode (without Host)
+# Enables machine.USBDevice for runtime USB device configuration
+ifeq ($(MICROPY_HW_TINYUSB_STACK),1)
+ifneq ($(MICROPY_HW_USB_HOST),1)
+CFLAGS += -DMICROPY_HW_TINYUSB_STACK=1
+endif
+endif
+
 ifeq ($(MICROPY_FLOAT_IMPL),double)
 LIBM_SRC_C += $(SRC_LIB_LIBM_DBL_C)
 ifeq ($(SUPPORTS_HARDWARE_FP_DOUBLE),1)
@@ -477,6 +497,9 @@ TINYUSB_SRC_C := $(addprefix lib/tinyusb/, \
 	src/portable/synopsys/dwc2/dwc2_common.c \
 	src/portable/synopsys/dwc2/hcd_dwc2.c \
 	)
+
+# Disable warnings for TinyUSB code
+$(BUILD)/lib/tinyusb/src/%.o: CFLAGS += -Wno-unused-variable
 
 ifeq ($(MICROPY_SSL_MBEDTLS),1)
 LIB_SRC_C += mbedtls/mbedtls_port.c
