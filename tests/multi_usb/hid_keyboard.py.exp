@@ -1,0 +1,14 @@
+--- instance0 ---
+Host active
+HID device found
+IRQ handler registered
+IRQ: HID report (8 bytes): b'\x00\x00\x04\x00\x00\x00\x00\x00'
+IRQ: HID report (8 bytes): b'\x00\x00\x00\x00\x00\x00\x00\x00'
+HID IRQ triggered
+Key press detected
+Host finished
+--- instance1 ---
+Keyboard device configured
+HID device enumerated
+Key press sent
+Device finished

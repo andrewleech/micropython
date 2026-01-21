@@ -1,0 +1,14 @@
+--- instance0 ---
+Host active
+CDC device found
+Initial is_connected: True
+Disconnect detected
+Final data received: b'before_disconnect'
+Final is_connected: False
+Host finished
+--- instance1 ---
+CDC device configured
+CDC device enumerated
+Data sent
+Deactivating device
+Device deactivated

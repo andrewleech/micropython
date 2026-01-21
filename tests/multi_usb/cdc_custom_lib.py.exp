@@ -1,0 +1,13 @@
+--- instance0 ---
+Host active
+CDC device found
+is_connected: True
+Bytes written: 18
+Host received: b'DeviceToHostCustom'
+Host finished
+--- instance1 ---
+CDC device configured
+CDC device enumerated
+Device received: b'HostToDeviceCustom'
+Device write returned: 18
+Device finished

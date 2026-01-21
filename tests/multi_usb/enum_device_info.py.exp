@@ -1,0 +1,19 @@
+--- instance0 ---
+Host active
+devices type: tuple
+devices count: 1
+vid type: int
+pid type: int
+vid nonzero: True
+pid nonzero: True
+manufacturer type: str
+product type: str
+serial type: str
+cdc is_connected: True
+cdc_devices type: tuple
+msc_devices empty: True
+hid_devices empty: True
+Host finished
+--- instance1 ---
+CDC device configured
+Device finished
