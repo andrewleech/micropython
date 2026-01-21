@@ -73,3 +73,60 @@ void mp_usbd_port_get_serial_number(char *serial_buf) {
 }
 
 #endif // MICROPY_HW_ENABLE_USBDEV
+
+#if MICROPY_HW_USB_HOST
+
+#include "esp_private/usb_phy.h"
+#include "py/mphal.h"
+
+static usb_phy_handle_t phy_hdl_host;
+
+void usb_phy_init_host(void) {
+    // Skip if already initialized (e.g., after soft reset).
+    if (phy_hdl_host != NULL) {
+        return;
+    }
+
+    // Configure USB PHY for host mode.
+    static const usb_phy_config_t phy_conf = {
+        .controller = USB_PHY_CTRL_OTG,
+        .otg_mode = USB_OTG_MODE_HOST,
+        .target = USB_PHY_TARGET_INT,
+    };
+
+    // Init ESP USB Phy for host mode.
+    usb_new_phy(&phy_conf, &phy_hdl_host);
+}
+
+void usb_phy_deinit_host(void) {
+    if (phy_hdl_host) {
+        usb_del_phy(phy_hdl_host);
+        phy_hdl_host = NULL;
+    }
+}
+
+// Provide tusb_time_millis_api for TinyUSB host timing.
+uint32_t tusb_time_millis_api(void) {
+    return mp_hal_ticks_ms();
+}
+
+// Initialize USB hardware for host mode (called from mp_usbh.c).
+void mp_usbh_ll_init_vbus_fs(void) {
+    usb_phy_init_host();
+}
+
+// USB host interrupt enable/disable.
+// On ESP32, hcd_int_disable() calls esp_intr_free() which deallocates the
+// interrupt entirely rather than just masking it. Since there's no public API
+// to access TinyUSB's internal interrupt handle for esp_intr_disable/enable,
+// these are no-ops. The interrupt remains allocated from tuh_init() and
+// mp_usbh_task() checks the active flag before processing events.
+void mp_usbh_int_enable(void) {
+    // No-op: interrupt stays allocated from tuh_init().
+}
+
+void mp_usbh_int_disable(void) {
+    // No-op: cannot disable without deallocating. See comment above.
+}
+
+#endif // MICROPY_HW_USB_HOST
