@@ -1,0 +1,14 @@
+--- instance0 ---
+devices before active: 0
+cdc before active: 0
+msc before active: 0
+hid before active: 0
+Host active
+CDC device found
+read no data: b''
+any no data: 0
+write ok: True
+Host finished
+--- instance1 ---
+CDC device configured
+Device finished

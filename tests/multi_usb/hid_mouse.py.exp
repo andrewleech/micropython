@@ -1,0 +1,13 @@
+--- instance0 ---
+Host active
+HID device found
+IRQ handler registered
+IRQ: HID report (3 bytes): b'\x00\x05\x03'
+HID IRQ triggered
+Mouse movement detected
+Host finished
+--- instance1 ---
+Mouse device configured
+HID device enumerated
+Mouse report sent
+Device finished
