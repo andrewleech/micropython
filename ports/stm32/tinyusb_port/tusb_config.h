@@ -28,6 +28,14 @@
 
 #include "py/mpconfig.h"
 
+// USB Host mode: the OTG_FS peripheral on RHPORT0 runs as a full-speed host.
+// This is used by boards such as NUCLEO_F429ZI_USBHOST that drive USB host on
+// the FS controller. Device-mode boards (including the USB_HS device matrix
+// below) are unaffected as they do not define MICROPY_HW_USB_HOST.
+#if defined(MICROPY_HW_USB_HOST) && MICROPY_HW_USB_HOST
+#define CFG_TUSB_RHPORT0_MODE (OPT_MODE_HOST | OPT_MODE_FULL_SPEED)
+#endif
+
 // STM32F4/F7/H7 boards with USB_HS use OTG_HS on RHPORT1, not RHPORT0.
 // Disable RHPORT0 and put RHPORT1 in device mode (HS, or FS when the
 // HS controller uses the internal FS PHY via MICROPY_HW_USB_HS_IN_FS).
@@ -60,6 +68,11 @@
 #define USB_HS_PHYC_PLL1_PLLSEL_16MHZ             (USB_HS_PHYC_PLL1_PLLSEL_1 | USB_HS_PHYC_PLL1_PLLSEL_2)
 #define USB_HS_PHYC_PLL1_PLLSEL_24MHZ             (USB_HS_PHYC_PLL1_PLLSEL_3)
 #define USB_HS_PHYC_PLL1_PLLSEL_25MHZ             (USB_HS_PHYC_PLL1_PLLSEL_2 | USB_HS_PHYC_PLL1_PLLSEL_3)
+#endif
+
+// Include host configuration when USB host is enabled.
+#if defined(MICROPY_HW_USB_HOST) && MICROPY_HW_USB_HOST
+#include "tusb_config_host.h"
 #endif
 
 #include "shared/tinyusb/tusb_config.h"
