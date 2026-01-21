@@ -95,16 +95,40 @@ if(MICROPY_PY_TINYUSB)
     )
 
     list(APPEND MICROPY_INC_TINYUSB
+        ${MICROPY_PORT_DIR}/tinyusb_port/
         ${MICROPY_DIR}/shared/tinyusb/
     )
 
-    # Build the Espressif tinyusb component with MicroPython shared/tinyusb/tusb_config.h
+    # Build the Espressif tinyusb component with port's tusb_config.h (must be first for host mode)
     idf_component_get_property(tusb_lib espressif__tinyusb COMPONENT_LIB)
     target_include_directories(${tusb_lib} PRIVATE
+        ${MICROPY_PORT_DIR}/tinyusb_port
         ${MICROPY_DIR}/shared/tinyusb
         ${MICROPY_DIR}
         ${MICROPY_PORT_DIR}
         ${MICROPY_BOARD_DIR})
+endif()
+
+# USB Host support
+if(MICROPY_HW_USB_HOST)
+    list(APPEND MICROPY_SOURCE_TINYUSB
+        ${MICROPY_DIR}/shared/tinyusb/mp_usbh.c
+        # TinyUSB host core and class drivers (not in ESP-IDF component)
+        ${MICROPY_DIR}/lib/tinyusb/src/host/usbh.c
+        ${MICROPY_DIR}/lib/tinyusb/src/host/hub.c
+        ${MICROPY_DIR}/lib/tinyusb/src/class/cdc/cdc_host.c
+        ${MICROPY_DIR}/lib/tinyusb/src/class/msc/msc_host.c
+        ${MICROPY_DIR}/lib/tinyusb/src/class/hid/hid_host.c
+        # TinyUSB DWC2 host controller driver (ESP32-S3 uses DWC2)
+        ${MICROPY_DIR}/lib/tinyusb/src/portable/synopsys/dwc2/hcd_dwc2.c
+        ${MICROPY_DIR}/lib/tinyusb/src/portable/synopsys/dwc2/dwc2_common.c
+    )
+    list(APPEND MICROPY_INC_TINYUSB
+        ${MICROPY_DIR}/lib/tinyusb/src
+    )
+    list(APPEND MICROPY_DEF_TINYUSB
+        MICROPY_HW_USB_HOST=1
+    )
 endif()
 
 list(APPEND MICROPY_SOURCE_PORT
@@ -306,6 +330,13 @@ target_link_options(${MICROPY_TARGET} PUBLIC
   -Wl,--undefined=esp_panic_handler
   -Wl,--wrap=esp_panic_handler
 )
+
+# USB Host linker wrap to schedule task from ISR
+if(MICROPY_HW_USB_HOST)
+    target_link_options(${MICROPY_TARGET} PUBLIC
+        -Wl,--wrap=hcd_event_handler
+    )
+endif()
 
 # Collect all of the include directories and compile definitions for the IDF components,
 # including those added by the IDF Component Manager via idf_components.yaml.
