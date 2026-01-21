@@ -28,6 +28,14 @@
 
 #include "py/mpconfig.h"
 
+#if defined(MICROPY_HW_USB_HOST) && MICROPY_HW_USB_HOST
+
+// USB Host: full-speed host on RHPORT0.
+#define CFG_TUSB_RHPORT0_MODE (OPT_MODE_HOST | OPT_MODE_FULL_SPEED)
+#include "shared/tinyusb/tusb_config_host.h"
+
+#else
+
 // STM32F4/F7/H7 boards with USB_HS use OTG_HS on RHPORT1, not RHPORT0.
 // Disable RHPORT0 and put RHPORT1 in device mode (HS, or FS when the
 // HS controller uses the internal FS PHY via MICROPY_HW_USB_HS_IN_FS).
@@ -45,6 +53,8 @@
 #define CFG_TUSB_RHPORT1_MODE (OPT_MODE_DEVICE | OPT_MODE_HIGH_SPEED)
 #endif
 #endif
+
+#endif // MICROPY_HW_USB_HOST
 
 #if defined(USB_HS_PHYC) && !defined(USB_HS_PHYC_PLL1_PLLSEL_Pos)
 // Providing missing definitions of USB_HS_PHYC_PLL1_PLLSEL constants, required by TinyUSB.
