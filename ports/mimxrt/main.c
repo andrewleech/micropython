@@ -34,6 +34,7 @@
 #include "shared/runtime/pyexec.h"
 #include "shared/runtime/softtimer.h"
 #include "shared/tinyusb/mp_usbd.h"
+#include "shared/tinyusb/mp_usbh.h"
 #include "ticks.h"
 #include "led.h"
 #include "pendsv.h"
@@ -205,6 +206,9 @@ int main(void) {
         soft_timer_deinit();
         #if MICROPY_PY_MACHINE_QECNT
         machine_encoder_deinit_all();
+        #endif
+        #if MICROPY_HW_USB_HOST
+        mp_usbh_deinit();
         #endif
         gc_sweep_all();
         mp_deinit();
