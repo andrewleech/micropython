@@ -1,0 +1,1 @@
+../MIMXRT1170_EVK/manifest.py
