@@ -9,9 +9,7 @@
 #include <stdbool.h>
 #include <string.h>
 
-// Platform detection
-#if defined(__ARM_ARCH_6M__)
-// RP2040/RP2350: TinyCrypt available via NimBLE
+// TinyCrypt for BLE Secure Connections crypto (all ARM Cortex-M platforms)
 #include <tinycrypt/cmac_mode.h>
 #include <tinycrypt/aes.h>
 #include <tinycrypt/ecc.h>
@@ -488,8 +486,3 @@ cleanup:
     memset(tmp, 0, sizeof(tmp));
     return ret;
 }
-
-#else
-// Other platforms: TinyCrypt not available
-#error "TinyCrypt SC crypto implementation requires RP2 platform (__ARM_ARCH_6M__)"
-#endif

@@ -37,6 +37,9 @@ CFLAGS_EXTMOD += -DMICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING=1
 
 ZEPHYR_LIB_DIR = lib/zephyr
 
+# NimBLE submodule provides TinyCrypt library
+NIMBLE_LIB_DIR = lib/mynewt-nimble
+
 # HAL abstraction layer sources
 SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_BLE_EXTMOD_DIR)/hal/, \
 	zephyr_ble_timer.c \
@@ -52,9 +55,19 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_BLE_EXTMOD_DIR)/hal/, \
 	zephyr_ble_util.c \
 	zephyr_ble_arch.c \
 	zephyr_ble_crypto_stubs.c \
+	zephyr_ble_crypto.c \
 	zephyr_ble_monitor_stubs.c \
 	zephyr_ble_feature_stubs.c \
 	zephyr_ble_array_size_stub.c \
+	)
+
+# TinyCrypt crypto library for BLE pairing (Legacy + SC)
+SRC_THIRDPARTY_C += $(addprefix $(NIMBLE_LIB_DIR)/ext/tinycrypt/src/, \
+	aes_encrypt.c \
+	cmac_mode.c \
+	ecc.c \
+	ecc_dh.c \
+	utils.c \
 	)
 
 # Zephyr net_buf library (required by BLE stack)
@@ -139,6 +152,10 @@ INC += -I$(TOP)/$(ZEPHYR_BLE_EXTMOD_DIR)/hal
 INC += -I$(TOP)/$(ZEPHYR_BLE_EXTMOD_DIR)/zephyr_headers_stub
 INC += -I$(TOP)/$(ZEPHYR_LIB_DIR)/include
 INC += -I$(TOP)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth
+INC += -I$(TOP)/$(NIMBLE_LIB_DIR)/ext/tinycrypt/include
+
+# Suppress warnings in TinyCrypt (third-party code)
+$(BUILD)/$(NIMBLE_LIB_DIR)/ext/tinycrypt/%.o: CFLAGS += -Wno-error
 
 endif
 
