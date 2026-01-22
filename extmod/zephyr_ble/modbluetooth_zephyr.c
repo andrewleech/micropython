@@ -1333,19 +1333,38 @@ static void mp_bt_zephyr_gatt_indicate_done(struct bt_conn *conn, struct bt_gatt
 }
 
 static ssize_t mp_bt_zephyr_gatts_attr_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset) {
-    // we receive the value handle, but to look up in the gatts db we need the characteristic handle, and that is is the value handle minus 1
+    struct bt_conn_info info;
+    if (bt_conn_get_info(conn, &info) != 0) {
+        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+    }
+    uint16_t conn_handle = info.id;
+
+    // We receive the value handle, but to look up in the gatts db we need the
+    // characteristic handle, which is the value handle minus 1.
     uint16_t _handle = attr->handle - 1;
 
     DEBUG_printf("BLE attr read for handle %d\n", attr->handle);
 
     mp_bluetooth_gatts_db_entry_t *entry = mp_bluetooth_gatts_db_lookup(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->gatts_db, _handle);
     if (!entry) {
-        // it could be a descriptor instead
+        // It could be a descriptor instead.
         _handle = attr->handle;
         entry = mp_bluetooth_gatts_db_lookup(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->gatts_db, _handle);
         if (!entry) {
             return BT_GATT_ERR(BT_ATT_ERR_INVALID_HANDLE);
         }
+    }
+
+    // Notify Python - allows dynamic value update or rejection.
+    mp_int_t result = mp_bluetooth_gatts_on_read_request(conn_handle, _handle);
+    if (result != 0) {
+        return BT_GATT_ERR(result);
+    }
+
+    // Re-lookup in case Python modified the value via gatts_write.
+    entry = mp_bluetooth_gatts_db_lookup(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->gatts_db, _handle);
+    if (!entry) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_HANDLE);
     }
 
     return bt_gatt_attr_read(conn, attr, buf, len, offset, entry->data, entry->data_len);
