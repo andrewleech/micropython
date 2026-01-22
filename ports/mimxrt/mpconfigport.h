@@ -173,7 +173,9 @@ uint32_t trng_random_u32(void);
 #define MICROPY_PY_NETWORK_HOSTNAME_DEFAULT "mpy-mimxrt"
 #endif
 
+#ifndef MICROPY_HW_ENABLE_USBDEV
 #define MICROPY_HW_ENABLE_USBDEV            (1)
+#endif
 // Enable USB-CDC serial port
 #ifndef MICROPY_HW_USB_CDC
 #define MICROPY_HW_USB_CDC                  (1)
@@ -182,6 +184,11 @@ uint32_t trng_random_u32(void);
 // Enable USB Mass Storage with FatFS filesystem.
 #ifndef MICROPY_HW_USB_MSC
 #define MICROPY_HW_USB_MSC                  (0)
+#endif
+
+// Enable USB Host support.
+#ifndef MICROPY_HW_USB_HOST
+#define MICROPY_HW_USB_HOST                 (0)
 #endif
 
 // Hooks to add builtins

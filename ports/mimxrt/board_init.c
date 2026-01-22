@@ -131,13 +131,21 @@ void usb_phy0_init(uint8_t d_cal, uint8_t txcal45dp, uint8_t txcal45dn) {
 }
 
 void USB_OTG1_IRQHandler(void) {
+    #if MICROPY_HW_USB_HOST
+    tuh_int_handler(0);
+    #else
     tud_int_handler(0);
     tud_task();
+    #endif
     __SEV();
 }
 
 void USB_OTG2_IRQHandler(void) {
+    #if MICROPY_HW_USB_HOST
+    tuh_int_handler(1);
+    #else
     tud_int_handler(1);
     tud_task();
+    #endif
     __SEV();
 }
