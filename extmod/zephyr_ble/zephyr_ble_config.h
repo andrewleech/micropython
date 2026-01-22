@@ -414,7 +414,9 @@ extern const struct device __device_dts_ord_0;
 // When defined, Zephyr uses #if !defined() to check, so any definition disables the feature
 // #define CONFIG_BT_SMP_SC_PAIR_ONLY 0
 // #define CONFIG_BT_SMP_SC_ONLY 0  // Duplicate - defined in SMP section below
-#define CONFIG_BT_SMP_OOB_LEGACY_PAIR_ONLY 0
+// CONFIG_BT_SMP_OOB_LEGACY_PAIR_ONLY must NOT be defined to enable SC pairing
+// When defined (even as 0), Zephyr uses #if !defined() which disables SC code paths
+// #define CONFIG_BT_SMP_OOB_LEGACY_PAIR_ONLY 0
 #define CONFIG_BT_SMP_ENFORCE_MITM 0
 #define CONFIG_BT_SMP_USB_HCI_CTLR_WORKAROUND 0
 #define CONFIG_BT_SMP_ALLOW_UNAUTH_OVERWRITE 1

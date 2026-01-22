@@ -430,7 +430,33 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
 }
 
 static void mp_bt_zephyr_security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err) {
-    DEBUG_printf("mp_bt_zephyr_security_changed: level=%d err=%d\n", level, err);
+    // Decode security level and error for debugging
+    const char *level_str;
+    switch (level) {
+        case BT_SECURITY_L0: level_str = "L0 (no sec)"; break;
+        case BT_SECURITY_L1: level_str = "L1 (no auth no enc)"; break;
+        case BT_SECURITY_L2: level_str = "L2 (enc, no auth)"; break;
+        case BT_SECURITY_L3: level_str = "L3 (enc + auth)"; break;
+        case BT_SECURITY_L4: level_str = "L4 (SC + auth)"; break;
+        default:             level_str = "UNKNOWN"; break;
+    }
+
+    const char *err_str;
+    switch (err) {
+        case BT_SECURITY_ERR_SUCCESS:         err_str = "SUCCESS"; break;
+        case BT_SECURITY_ERR_AUTH_FAIL:       err_str = "AUTH_FAIL"; break;
+        case BT_SECURITY_ERR_PIN_OR_KEY_MISSING: err_str = "PIN_OR_KEY_MISSING"; break;
+        case BT_SECURITY_ERR_OOB_NOT_AVAILABLE: err_str = "OOB_NOT_AVAILABLE"; break;
+        case BT_SECURITY_ERR_AUTH_REQUIREMENT: err_str = "AUTH_REQUIREMENT"; break;
+        case BT_SECURITY_ERR_PAIR_NOT_SUPPORTED: err_str = "PAIR_NOT_SUPPORTED"; break;
+        case BT_SECURITY_ERR_PAIR_NOT_ALLOWED: err_str = "PAIR_NOT_ALLOWED"; break;
+        case BT_SECURITY_ERR_INVALID_PARAM:   err_str = "INVALID_PARAM"; break;
+        case BT_SECURITY_ERR_UNSPECIFIED:     err_str = "UNSPECIFIED"; break;
+        default:                               err_str = "UNKNOWN"; break;
+    }
+
+    DEBUG_printf(">>> mp_bt_zephyr_security_changed: level=%d (%s) err=%d (%s)\n",
+                 level, level_str, err, err_str);
 
     // Safety check: only process if BLE is fully active
     if (mp_bluetooth_zephyr_ble_state != MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE
@@ -2431,10 +2457,11 @@ static void zephyr_passkey_confirm_cb(struct bt_conn *conn, unsigned int passkey
 }
 
 static void zephyr_pairing_confirm_cb(struct bt_conn *conn) {
-    DEBUG_printf("zephyr_pairing_confirm_cb (Just Works)\n");
+    DEBUG_printf("zephyr_pairing_confirm_cb\n");
 
     uint16_t conn_handle = mp_bt_zephyr_auth_get_conn_handle(conn);
     if (conn_handle == 0xFF) {
+        DEBUG_printf("  ERROR: Connection not found!\n");
         return;
     }
 
@@ -2443,7 +2470,7 @@ static void zephyr_pairing_confirm_cb(struct bt_conn *conn) {
     // and applications don't need to handle the passkey action event.
     // Applications that need to reject Just Works pairing can set a different IO capability.
     int err = bt_conn_auth_pairing_confirm(conn);
-    DEBUG_printf("  bt_conn_auth_pairing_confirm returned %d\n", err);
+    DEBUG_printf("  bt_conn_auth_pairing_confirm: %d\n", err);
 }
 
 static void zephyr_auth_cancel_cb(struct bt_conn *conn) {
@@ -2479,8 +2506,6 @@ static void zephyr_pairing_complete_cb(struct bt_conn *conn, bool bonded) {
         rp->auth_action = 0;
         rp->auth_passkey = 0;
     }
-
-    DEBUG_printf("  Auth state cleared, waiting for security_changed callback\n");
 }
 
 static void zephyr_pairing_failed_cb(struct bt_conn *conn, enum bt_security_err reason) {
@@ -2488,6 +2513,7 @@ static void zephyr_pairing_failed_cb(struct bt_conn *conn, enum bt_security_err 
 
     uint16_t conn_handle = mp_bt_zephyr_auth_get_conn_handle(conn);
     if (conn_handle == 0xFF) {
+        DEBUG_printf("  ERROR: Connection not found!\n");
         return;
     }
 
