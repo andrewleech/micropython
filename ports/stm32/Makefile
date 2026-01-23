@@ -563,6 +563,13 @@ ifeq ($(MICROPY_PY_THREAD),1)
 OBJ += $(addprefix $(BUILD)/, $(SRC_FREERTOS_C:.c=.o))
 endif
 
+# Zephyr BLE third-party sources are added to SRC_THIRDPARTY_C by zephyr_ble.mk
+# after extmod.mk has already processed SRC_THIRDPARTY_C into PY_O.
+# Add them explicitly here since they won't be in PY_O.
+ifeq ($(MICROPY_BLUETOOTH_ZEPHYR),1)
+OBJ += $(addprefix $(BUILD)/, $(SRC_THIRDPARTY_C:.c=.o))
+endif
+
 # This file contains performance critical functions so turn up the optimisation
 # level.  It doesn't add much to the code size and improves performance a bit.
 # Don't use -O3 with this file because gcc tries to optimise memset in terms of itself.

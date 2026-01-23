@@ -16,6 +16,12 @@
 // MicroPython headers for debug output
 #include "py/runtime.h"
 
+// Include STM32 HAL header to get platform defines (STM32WB, etc.)
+// This is needed for platform-specific RNG selection in bt_rand()
+#ifdef STM32_HAL_H
+#include STM32_HAL_H
+#endif
+
 // =============================================================================
 // Platform-Specific Hardware RNG (used by all crypto functions)
 // =============================================================================

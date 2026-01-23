@@ -199,6 +199,14 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
     uint16_t auth_conn_handle;    // Connection undergoing authentication
     uint8_t auth_action;          // Pending passkey action type
     uint32_t auth_passkey;        // Passkey for display/comparison
+
+    // Pairing state tracking (for deferred encryption callback)
+    bool pairing_in_progress;      // True from pairing_confirm until pairing_complete
+    bool pending_security_update;  // True if security_changed happened during pairing
+    uint16_t pending_sec_conn;     // Connection handle for pending update
+    bool pending_sec_encrypted;    // Encryption state
+    bool pending_sec_authenticated; // Authentication state
+    uint8_t pending_sec_key_size;  // Key size
 } mp_bluetooth_zephyr_root_pointers_t;
 
 static int mp_bluetooth_zephyr_ble_state;
@@ -493,10 +501,23 @@ static void mp_bt_zephyr_security_changed(struct bt_conn *conn, bt_security_t le
     bool authenticated = (info.security.level >= BT_SECURITY_L3);
     uint8_t key_size = info.security.enc_key_size;
 
-    // For Phase 1, we don't support bonding (bond=False), so always report bonded=false
-    // Phase 3 will add bond storage and check if keys are stored
-    bool bonded = false;
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
 
+    // If pairing is in progress, defer the encryption callback until pairing_complete
+    // This allows us to get the correct bonded flag from the pairing result
+    if (rp && rp->pairing_in_progress) {
+        DEBUG_printf("Security changed: pairing in progress, deferring callback\n");
+        rp->pending_security_update = true;
+        rp->pending_sec_conn = conn_handle;
+        rp->pending_sec_encrypted = encrypted;
+        rp->pending_sec_authenticated = authenticated;
+        rp->pending_sec_key_size = key_size;
+        return;
+    }
+
+    // No pairing in progress - this is re-encryption with existing keys
+    // Fire callback immediately with bonded=false (no new bond created)
+    bool bonded = false;
     DEBUG_printf("Firing _IRQ_ENCRYPTION_UPDATE: encrypted=%d authenticated=%d bonded=%d key_size=%d\n",
                  encrypted, authenticated, bonded, key_size);
     mp_bluetooth_gatts_on_encryption_update(conn_handle, encrypted, authenticated, bonded, key_size);
@@ -2594,6 +2615,12 @@ static void zephyr_pairing_confirm_cb(struct bt_conn *conn) {
         return;
     }
 
+    // Mark pairing in progress - security_changed will defer encryption callback
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (rp) {
+        rp->pairing_in_progress = true;
+    }
+
     // For Just Works pairing, auto-confirm without firing _IRQ_PASSKEY_ACTION.
     // This matches NimBLE behavior where Just Works is auto-accepted internally
     // and applications don't need to handle the passkey action event.
@@ -2624,16 +2651,28 @@ static void zephyr_auth_cancel_cb(struct bt_conn *conn) {
 static void zephyr_pairing_complete_cb(struct bt_conn *conn, bool bonded) {
     DEBUG_printf("zephyr_pairing_complete_cb: bonded=%d\n", bonded);
 
-    // Pairing complete callback fires when SMP key exchange completes
-    // Encryption status change is handled by security_changed callback
-    // This callback only clears the auth state
-
-    // Clear auth state
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
-    if (rp) {
-        rp->auth_conn_handle = 0;
-        rp->auth_action = 0;
-        rp->auth_passkey = 0;
+    if (!rp) {
+        return;
+    }
+
+    // Clear pairing state
+    rp->pairing_in_progress = false;
+    rp->auth_conn_handle = 0;
+    rp->auth_action = 0;
+    rp->auth_passkey = 0;
+
+    // Fire deferred encryption callback if security_changed was called during pairing
+    if (rp->pending_security_update) {
+        DEBUG_printf("Firing deferred _IRQ_ENCRYPTION_UPDATE: encrypted=%d authenticated=%d bonded=%d key_size=%d\n",
+                     rp->pending_sec_encrypted, rp->pending_sec_authenticated, bonded, rp->pending_sec_key_size);
+        rp->pending_security_update = false;
+        mp_bluetooth_gatts_on_encryption_update(
+            rp->pending_sec_conn,
+            rp->pending_sec_encrypted,
+            rp->pending_sec_authenticated,
+            bonded,
+            rp->pending_sec_key_size);
     }
 }
 
@@ -2646,9 +2685,11 @@ static void zephyr_pairing_failed_cb(struct bt_conn *conn, enum bt_security_err 
         return;
     }
 
-    // Clear auth state
+    // Clear pairing state
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
     if (rp) {
+        rp->pairing_in_progress = false;
+        rp->pending_security_update = false;
         rp->auth_conn_handle = 0;
         rp->auth_action = 0;
         rp->auth_passkey = 0;
