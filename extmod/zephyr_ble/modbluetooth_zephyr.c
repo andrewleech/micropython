@@ -1965,32 +1965,23 @@ static uint8_t gattc_characteristic_discover_cb(struct bt_conn *conn,
 static void gattc_subscribe_cb(struct bt_conn *conn, uint8_t err,
     struct bt_gatt_subscribe_params *params) {
 
-    mp_printf(&mp_plat_print, "*** gattc_subscribe_cb CALLED: err=%d ccc=0x%04x value=0x%04x\n",
-                 err, params->ccc_handle, params->value);
-    DEBUG_printf("gattc_subscribe_cb ENTRY: err=%d ccc_handle=0x%04x value=0x%04x\n",
+    DEBUG_printf("gattc_subscribe_cb: err=%d ccc_handle=0x%04x value=0x%04x\n",
                  err, params->ccc_handle, params->value);
 
     if (!mp_bluetooth_is_active()) {
-        DEBUG_printf("  BLE not active, returning\n");
         return;
     }
 
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
 
-    // Mark subscription as active if successful
-    if (err == 0) {
-        DEBUG_printf("  Subscription SUCCESS - marking active\n");
-        rp->gattc_subscribe_active = true;
-    } else {
-        DEBUG_printf("  Subscription FAILED - err=%d\n", err);
-    }
+    // Mark subscription as active/inactive based on result
+    rp->gattc_subscribe_active = (err == 0);
 
     // Fire WRITE_DONE callback for the CCCD write
     mp_bluetooth_gattc_on_read_write_status(MP_BLUETOOTH_IRQ_GATTC_WRITE_DONE,
                                              rp->gattc_subscribe_conn_handle,
                                              rp->gattc_subscribe_ccc_handle,
                                              err);
-    DEBUG_printf("gattc_subscribe_cb EXIT\n");
 }
 
 // Notification/Indication callback
@@ -1998,44 +1989,47 @@ static uint8_t gattc_notify_cb(struct bt_conn *conn,
     struct bt_gatt_subscribe_params *params,
     const void *data, uint16_t length) {
 
-    DEBUG_printf("gattc_notify_cb ENTRY: data=%p length=%d\n", data, length);
+    DEBUG_printf("gattc_notify_cb: data=%p length=%d value=0x%04x\n", data, length, params->value);
 
     if (!mp_bluetooth_is_active()) {
-        DEBUG_printf("  BLE not active, returning STOP\n");
         return BT_GATT_ITER_STOP;
     }
 
-    // Get handles from the params structure and connection object (not from root pointers which may have been overwritten)
-    uint16_t value_handle = params->value_handle;
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
 
+    // Get connection handle from connection object
     struct bt_conn_info info;
     if (bt_conn_get_info(conn, &info) != 0) {
-        DEBUG_printf("  Failed to get connection info, returning STOP\n");
         return BT_GATT_ITER_STOP;
     }
     uint16_t conn_handle = info.id;
 
     if (data == NULL) {
-        // Unsubscribed (remote end stopped notifications or we unsubscribed)
-        DEBUG_printf("  data==NULL (unsubscribe signal) conn_handle=%d value_handle=0x%04x, returning STOP\n",
-                     conn_handle, value_handle);
+        // Unsubscribe complete (remote end stopped or we called bt_gatt_unsubscribe)
+        DEBUG_printf("gattc_notify_cb: unsubscribe complete conn_handle=%d\n", conn_handle);
+        if (rp->gattc_subscribe_active) {
+            rp->gattc_subscribe_active = false;
+            // Fire WRITE_DONE for the CCCD write that triggered unsubscribe
+            mp_bluetooth_gattc_on_read_write_status(MP_BLUETOOTH_IRQ_GATTC_WRITE_DONE,
+                conn_handle, rp->gattc_subscribe_ccc_handle, 0);
+        }
         return BT_GATT_ITER_STOP;
     }
 
-    // Determine if this is a notification or indication based on the subscription type
-    // Zephyr doesn't distinguish in the callback, so we use NOTIFY for both
-    // (The application layer typically doesn't care about the distinction)
-    uint8_t event = MP_BLUETOOTH_IRQ_GATTC_NOTIFY;
+    // Determine if this is a notification or indication based on subscription type
+    uint8_t event = (params->value & BT_GATT_CCC_INDICATE)
+        ? MP_BLUETOOTH_IRQ_GATTC_INDICATE
+        : MP_BLUETOOTH_IRQ_GATTC_NOTIFY;
 
-    DEBUG_printf("  Notification received: conn_handle=%d value_handle=0x%04x length=%d\n",
-                 conn_handle, value_handle, length);
+    DEBUG_printf("gattc_notify_cb: %s received conn_handle=%d value_handle=0x%04x length=%d\n",
+                 (event == MP_BLUETOOTH_IRQ_GATTC_INDICATE) ? "indication" : "notification",
+                 conn_handle, params->value_handle, length);
 
-    // Fire MicroPython callback with notification data
+    // Fire MicroPython callback with notification/indication data
     const uint8_t *data_ptr = (const uint8_t *)data;
-    mp_bluetooth_gattc_on_data_available(event, conn_handle, value_handle,
+    mp_bluetooth_gattc_on_data_available(event, conn_handle, params->value_handle,
                                          &data_ptr, &length, 1);
 
-    DEBUG_printf("  Callback fired, returning CONTINUE\n");
     return BT_GATT_ITER_CONTINUE;
 }
 
@@ -2057,39 +2051,14 @@ static uint8_t gattc_descriptor_discover_cb(struct bt_conn *conn,
 
     // Check if this is a CCCD (Client Characteristic Configuration Descriptor, UUID 0x2902)
     if (attr->uuid->type == BT_UUID_TYPE_16 && BT_UUID_16(attr->uuid)->val == 0x2902) {
-        // Store CCCD info and immediately subscribe to match NimBLE behavior
-        // NimBLE receives ALL notifications automatically; Zephyr requires explicit subscription
-        // We subscribe eagerly to ensure notifications sent before Python writes CCCD are received
+        // Store CCCD info for later use when Python writes to enable notifications
+        // Actual subscription happens in mp_bluetooth_gattc_write() when CCCD is written
         DEBUG_printf("Found CCCD: handle=0x%04x, char_value_handle=0x%04x\n",
                      attr->handle, rp->gattc_discover_char_value_handle);
         rp->gattc_subscribe_ccc_handle = attr->handle;
         rp->gattc_subscribe_value_handle = rp->gattc_discover_char_value_handle;
         rp->gattc_subscribe_conn_handle = conn_handle;
-
-        // Register notification callback WITHOUT writing CCCD using bt_gatt_resubscribe()
-        // This ensures we receive ALL notifications (matching NimBLE behavior) while keeping
-        // CCCD value synchronized with Python's requests
-        memset(&rp->gattc_subscribe_params, 0, sizeof(rp->gattc_subscribe_params));
-        rp->gattc_subscribe_params.notify = gattc_notify_cb;
-        rp->gattc_subscribe_params.subscribe = NULL;
-        rp->gattc_subscribe_params.value_handle = rp->gattc_discover_char_value_handle;
-        rp->gattc_subscribe_params.ccc_handle = attr->handle;
-        rp->gattc_subscribe_params.value = 0x0001; // Value required by bt_gatt_resubscribe()
-
-        struct bt_conn_info conn_info;
-        if (bt_conn_get_info(conn, &conn_info) == 0) {
-            int err = bt_gatt_resubscribe(conn_info.id, conn_info.le.dst, &rp->gattc_subscribe_params);
-            if (err == 0) {
-                rp->gattc_subscribe_active = true;
-                DEBUG_printf("  Silent subscription SUCCESS (callback registered, CCCD not written)\n");
-            } else if (err == -EALREADY) {
-                rp->gattc_subscribe_active = true;
-                DEBUG_printf("  Silent subscription already active\n");
-            } else {
-                DEBUG_printf("  Silent subscription FAILED: err=%d\n", err);
-                rp->gattc_subscribe_active = false;
-            }
-        }
+        rp->gattc_subscribe_active = false;
     }
 
     // Report descriptor
@@ -2345,14 +2314,53 @@ int mp_bluetooth_gattc_write(uint16_t conn_handle, uint16_t value_handle, const 
         DEBUG_printf("CCCD write: handle=0x%04x value=0x%04x active=%d\n",
                      value_handle, cccd_value, rp->gattc_subscribe_active);
 
-        // Eager Subscription Strategy:
-        // We already subscribed during descriptor discovery (eager subscription)
-        // ALL CCCD writes just update the descriptor value using normal writes
-        // The subscription remains active for the connection lifetime, allowing us
-        // to receive all notifications regardless of CCCD value (matching NimBLE behavior)
-        DEBUG_printf("CCCD write: normal write (subscription active=%d, value=0x%04x)\n",
-                     rp->gattc_subscribe_active, cccd_value);
-        // Fall through to normal write handling below
+        if (cccd_value == 0x0000) {
+            // Unsubscribe - disable notifications/indications
+            if (rp->gattc_subscribe_active) {
+                DEBUG_printf("CCCD write: unsubscribing\n");
+                err = bt_gatt_unsubscribe(conn, &rp->gattc_subscribe_params);
+                // gattc_notify_cb fires with data=NULL when complete
+                if (err == 0) {
+                    return 0;
+                }
+                DEBUG_printf("CCCD write: unsubscribe failed err=%d, falling through to normal write\n", err);
+            }
+            // Fall through to normal write if not active or unsubscribe failed
+        } else {
+            // Subscribe - enable notifications (0x0001) or indications (0x0002)
+            DEBUG_printf("CCCD write: subscribing with value=0x%04x\n", cccd_value);
+
+            // Unsubscribe first if already active (to change subscription type)
+            if (rp->gattc_subscribe_active) {
+                bt_gatt_unsubscribe(conn, &rp->gattc_subscribe_params);
+                rp->gattc_subscribe_active = false;
+            }
+
+            // Set up subscription parameters
+            memset(&rp->gattc_subscribe_params, 0, sizeof(rp->gattc_subscribe_params));
+            rp->gattc_subscribe_params.notify = gattc_notify_cb;
+            rp->gattc_subscribe_params.subscribe = gattc_subscribe_cb;
+            rp->gattc_subscribe_params.value_handle = rp->gattc_subscribe_value_handle;
+            rp->gattc_subscribe_params.ccc_handle = value_handle;
+            rp->gattc_subscribe_params.value = cccd_value;
+            atomic_set_bit(rp->gattc_subscribe_params.flags, BT_GATT_SUBSCRIBE_FLAG_VOLATILE);
+
+            rp->gattc_subscribe_conn_handle = conn_handle;
+
+            err = bt_gatt_subscribe(conn, &rp->gattc_subscribe_params);
+            if (err == 0) {
+                // gattc_subscribe_cb will fire and set active flag + WRITE_DONE
+                return 0;
+            } else if (err == -EALREADY) {
+                // Already subscribed, treat as success
+                rp->gattc_subscribe_active = true;
+                mp_bluetooth_gattc_on_read_write_status(MP_BLUETOOTH_IRQ_GATTC_WRITE_DONE,
+                    conn_handle, value_handle, 0);
+                return 0;
+            }
+            DEBUG_printf("CCCD write: subscribe failed err=%d\n", err);
+            return bt_err_to_errno(err);
+        }
     }
 
     // Normal write (not a CCCD)

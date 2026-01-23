@@ -11,6 +11,7 @@ set(MICROPY_BLUETOOTH_BTSTACK OFF)
 set(MICROPY_BLUETOOTH_ZEPHYR ON)
 
 # Debug output disabled - causes NLR crashes in work thread
+# Pairing-specific debug added directly to modbluetooth_zephyr.c
 # set(ZEPHYR_BLE_DEBUG 1)
 
 # Force fetch picotool from git (version mismatch workaround)
