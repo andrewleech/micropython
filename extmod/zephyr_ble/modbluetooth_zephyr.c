@@ -924,10 +924,11 @@ int mp_bluetooth_deinit(void) {
         mp_bt_zephyr_indicate_pool[i].in_use = false;
     }
 
-    // Reset callback registration flag so callbacks will be re-registered on next init.
-    // This is necessary because Zephyr's internal callback list may have been corrupted
-    // by the soft reset, and we want a clean slate.
-    mp_bt_zephyr_callbacks_registered = false;
+    // Note: We intentionally do NOT reset mp_bt_zephyr_callbacks_registered here.
+    // Zephyr callbacks persist across bt_disable()/bt_enable() cycles, and the
+    // callback registration functions (bt_conn_cb_register, bt_gatt_cb_register, etc.)
+    // append to linked lists without checking for duplicates. Re-registering the
+    // same static structures would corrupt Zephyr's internal lists.
 
     // Set state to OFF so next init does full re-initialization
     // (including controller init and callback registration)
@@ -1483,6 +1484,10 @@ int mp_bluetooth_gatts_notify_indicate(uint16_t conn_handle, uint16_t value_hand
             switch (gatts_op) {
                 case MP_BLUETOOTH_GATTS_OP_NOTIFY: {
                     err = bt_gatt_notify(connection->conn, attr_val, value, value_len);
+                    // Process work queue to ensure notification is sent immediately.
+                    // This is critical on platforms without FreeRTOS (e.g., STM32WB55)
+                    // where the work queue isn't processed asynchronously.
+                    mp_bluetooth_zephyr_work_process();
                     break;
                 }
                 case MP_BLUETOOTH_GATTS_OP_INDICATE: {
@@ -1704,8 +1709,6 @@ static struct bt_uuid *create_zephyr_uuid(const mp_obj_bluetooth_uuid_t *uuid) {
 
 // GATT callback for MTU updates (handles both local and remote-initiated MTU exchange)
 // This callback is registered via bt_gatt_cb_register() and fires whenever the ATT MTU changes.
-// Note: On some platforms (e.g., STM32WB55), the MTU exchange may fail with error 14
-// (BT_ATT_ERR_UNLIKELY) and this callback won't fire after the exchange.
 static void mp_bt_zephyr_gatt_mtu_updated(struct bt_conn *conn, uint16_t tx, uint16_t rx) {
     DEBUG_printf("gatt_mtu_updated: tx=%d rx=%d\n", tx, rx);
 
@@ -1713,10 +1716,13 @@ static void mp_bt_zephyr_gatt_mtu_updated(struct bt_conn *conn, uint16_t tx, uin
         return;
     }
 
-    uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
+    // Only notify Python if the connection is already tracked.
+    // This ensures _IRQ_MTU_EXCHANGED fires after _IRQ_CENTRAL_CONNECT/_IRQ_PERIPHERAL_CONNECT.
+    // Zephyr may fire this callback before our connection callback runs, so we silently
+    // ignore early MTU updates - Python can query the MTU later if needed.
+    uint8_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
     if (conn_handle == 0xFF) {
-        // Connection not yet tracked - can happen at connection time
-        DEBUG_printf("gatt_mtu_updated: connection not found\n");
+        DEBUG_printf("gatt_mtu_updated: ignoring (connection not yet tracked)\n");
         return;
     }
 
