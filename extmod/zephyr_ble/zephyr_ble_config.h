@@ -27,9 +27,10 @@
 #ifndef MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_ZEPHYR_BLE_CONFIG_H
 #define MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_ZEPHYR_BLE_CONFIG_H
 
-// Enable debug output for Zephyr BLE implementation (Phase 1 development)
+// Enable debug output for Zephyr BLE implementation
+// Set via makefile: make ZEPHYR_BLE_DEBUG=1
 #ifndef ZEPHYR_BLE_DEBUG
-#define ZEPHYR_BLE_DEBUG 1
+#define ZEPHYR_BLE_DEBUG 0
 #endif
 
 #include <stddef.h>

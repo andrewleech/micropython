@@ -192,6 +192,7 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
     uint16_t gattc_subscribe_value_handle;
     uint16_t gattc_subscribe_ccc_handle;
     bool gattc_subscribe_active; // Track if subscription callback is registered
+    bool gattc_subscribe_changing; // Track if we're intentionally switching subscription types
     #endif // MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
 
     // Pairing/bonding state (Phase 1: Basic pairing without persistent storage)
@@ -420,6 +421,7 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
     if (rp && rp->gattc_subscribe_conn_handle == info.id) {
         rp->gattc_subscribe_active = false;
+        rp->gattc_subscribe_changing = false;
         rp->gattc_subscribe_conn_handle = 0;
         rp->gattc_subscribe_ccc_handle = 0;
         rp->gattc_subscribe_value_handle = 0;
@@ -1974,6 +1976,9 @@ static void gattc_subscribe_cb(struct bt_conn *conn, uint8_t err,
 
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
 
+    // Clear subscription-changing flag (new subscription is now set up)
+    rp->gattc_subscribe_changing = false;
+
     // Mark subscription as active/inactive based on result
     rp->gattc_subscribe_active = (err == 0);
 
@@ -2006,8 +2011,12 @@ static uint8_t gattc_notify_cb(struct bt_conn *conn,
 
     if (data == NULL) {
         // Unsubscribe complete (remote end stopped or we called bt_gatt_unsubscribe)
-        DEBUG_printf("gattc_notify_cb: unsubscribe complete conn_handle=%d\n", conn_handle);
-        if (rp->gattc_subscribe_active) {
+        DEBUG_printf("gattc_notify_cb: unsubscribe complete conn_handle=%d changing=%d\n",
+                     conn_handle, rp->gattc_subscribe_changing);
+        // If we're changing subscription types, this callback is from the old subscription
+        // being unsubscribed. Don't fire WRITE_DONE or change state - the new subscription's
+        // gattc_subscribe_cb will handle that.
+        if (!rp->gattc_subscribe_changing && rp->gattc_subscribe_active) {
             rp->gattc_subscribe_active = false;
             // Fire WRITE_DONE for the CCCD write that triggered unsubscribe
             mp_bluetooth_gattc_on_read_write_status(MP_BLUETOOTH_IRQ_GATTC_WRITE_DONE,
@@ -2059,6 +2068,7 @@ static uint8_t gattc_descriptor_discover_cb(struct bt_conn *conn,
         rp->gattc_subscribe_value_handle = rp->gattc_discover_char_value_handle;
         rp->gattc_subscribe_conn_handle = conn_handle;
         rp->gattc_subscribe_active = false;
+        rp->gattc_subscribe_changing = false;
     }
 
     // Report descriptor
@@ -2167,6 +2177,12 @@ int mp_bluetooth_gattc_discover_primary_services(uint16_t conn_handle, const mp_
     rp->gattc_discover_conn_handle = conn_handle;
 
     int err = bt_gatt_discover(conn, &rp->gattc_discover_params);
+
+    // Process work queue to send ATT request (Issue #14 fix)
+    if (err == 0) {
+        mp_bluetooth_zephyr_work_process();
+    }
+
     return bt_err_to_errno(err);
     #else
     (void)conn_handle;
@@ -2208,6 +2224,12 @@ int mp_bluetooth_gattc_discover_characteristics(uint16_t conn_handle, uint16_t s
     rp->gattc_discover_end_handle = end_handle;
 
     int err = bt_gatt_discover(conn, &rp->gattc_discover_params);
+
+    // Process work queue to send ATT request (Issue #14 fix)
+    if (err == 0) {
+        mp_bluetooth_zephyr_work_process();
+    }
+
     return bt_err_to_errno(err);
     #else
     (void)conn_handle;
@@ -2245,6 +2267,15 @@ int mp_bluetooth_gattc_discover_descriptors(uint16_t conn_handle, uint16_t start
     rp->gattc_discover_char_value_handle = start_handle;
 
     int err = bt_gatt_discover(conn, &rp->gattc_discover_params);
+
+    // FIX Issue #14: Process work queue immediately to send ATT request.
+    // On WB55 without FreeRTOS, work items aren't processed until next poll cycle,
+    // which can cause 4-5 second delays waiting for ATT timeout.
+    // Processing the work queue here ensures the request is sent immediately.
+    if (err == 0) {
+        mp_bluetooth_zephyr_work_process();
+    }
+
     return bt_err_to_errno(err);
     #else
     (void)conn_handle;
@@ -2277,14 +2308,25 @@ int mp_bluetooth_gattc_read(uint16_t conn_handle, uint16_t value_handle) {
     rp->gattc_read_conn_handle = conn_handle;
     rp->gattc_read_value_handle = value_handle;
 
+    #if ZEPHYR_BLE_DEBUG
     struct bt_conn_info conn_info;
     bt_conn_get_info(conn, &conn_info);
     DEBUG_printf("gattc_read: conn_handle=%d value_handle=0x%04x conn_state=%d\n",
         conn_handle, value_handle, conn_info.state);
+    #endif
 
     int err = bt_gatt_read(conn, &rp->gattc_read_params);
+
+    #if ZEPHYR_BLE_DEBUG
     bt_conn_get_info(conn, &conn_info);
     DEBUG_printf("gattc_read: bt_gatt_read returned %d (conn_state=%d)\n", err, conn_info.state);
+    #endif
+
+    // Process work queue immediately to send ATT request (same fix as Issue #14)
+    if (err == 0) {
+        mp_bluetooth_zephyr_work_process();
+    }
+
     return bt_err_to_errno(err);
     #else
     (void)conn_handle;
@@ -2321,17 +2363,27 @@ int mp_bluetooth_gattc_write(uint16_t conn_handle, uint16_t value_handle, const 
                 err = bt_gatt_unsubscribe(conn, &rp->gattc_subscribe_params);
                 // gattc_notify_cb fires with data=NULL when complete
                 if (err == 0) {
+                    // Process work queue to send ATT request
+                    mp_bluetooth_zephyr_work_process();
                     return 0;
                 }
-                DEBUG_printf("CCCD write: unsubscribe failed err=%d, falling through to normal write\n", err);
+                DEBUG_printf("CCCD write: unsubscribe failed err=%d\n", err);
+                return bt_err_to_errno(err);
             }
-            // Fall through to normal write if not active or unsubscribe failed
+            // Not currently subscribed, nothing to do - return success
+            // (Python expects WRITE_DONE callback, fire it manually)
+            mp_bluetooth_gattc_on_read_write_status(MP_BLUETOOTH_IRQ_GATTC_WRITE_DONE,
+                conn_handle, value_handle, 0);
+            return 0;
         } else {
             // Subscribe - enable notifications (0x0001) or indications (0x0002)
             DEBUG_printf("CCCD write: subscribing with value=0x%04x\n", cccd_value);
 
             // Unsubscribe first if already active (to change subscription type)
             if (rp->gattc_subscribe_active) {
+                // Set flag to indicate we're intentionally changing subscriptions
+                // This prevents the old unsubscribe callback from interfering
+                rp->gattc_subscribe_changing = true;
                 bt_gatt_unsubscribe(conn, &rp->gattc_subscribe_params);
                 rp->gattc_subscribe_active = false;
             }
@@ -2349,6 +2401,8 @@ int mp_bluetooth_gattc_write(uint16_t conn_handle, uint16_t value_handle, const 
 
             err = bt_gatt_subscribe(conn, &rp->gattc_subscribe_params);
             if (err == 0) {
+                // Process work queue to send ATT request
+                mp_bluetooth_zephyr_work_process();
                 // gattc_subscribe_cb will fire and set active flag + WRITE_DONE
                 return 0;
             } else if (err == -EALREADY) {
@@ -2381,6 +2435,11 @@ int mp_bluetooth_gattc_write(uint16_t conn_handle, uint16_t value_handle, const 
         err = bt_gatt_write(conn, &rp->gattc_write_params);
     }
 
+    // Process work queue to send ATT request
+    if (err == 0) {
+        mp_bluetooth_zephyr_work_process();
+    }
+
     return bt_err_to_errno(err);
     #else
     (void)conn_handle;
@@ -2410,6 +2469,12 @@ int mp_bluetooth_gattc_exchange_mtu(uint16_t conn_handle) {
     rp->gattc_mtu_conn_handle = conn_handle;
 
     int err = bt_gatt_exchange_mtu(conn, &rp->gattc_mtu_params);
+
+    // Process work queue immediately to send ATT request
+    if (err == 0) {
+        mp_bluetooth_zephyr_work_process();
+    }
+
     return bt_err_to_errno(err);
     #else
     (void)conn_handle;
