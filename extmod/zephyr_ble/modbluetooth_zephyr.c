@@ -568,6 +568,9 @@ void gap_scan_cb_timeout(struct k_timer *timer_id) {
 extern struct bt_conn_auth_cb mp_bt_zephyr_auth_callbacks;
 extern struct bt_conn_auth_info_cb mp_bt_zephyr_auth_info_callbacks;
 
+// Forward declaration for GATT callbacks (handles remote-initiated MTU exchange)
+extern struct bt_gatt_cb mp_bt_zephyr_gatt_callbacks;
+
 // Helper to get conn_handle from bt_conn for auth callbacks
 // Returns 0xFF if BLE not active or connection not found
 static inline uint8_t mp_bt_zephyr_auth_get_conn_handle(struct bt_conn *conn) {
@@ -641,6 +644,9 @@ int mp_bluetooth_init(void) {
                 // Register authentication callbacks for pairing/bonding
                 bt_conn_auth_cb_register(&mp_bt_zephyr_auth_callbacks);
                 bt_conn_auth_info_cb_register(&mp_bt_zephyr_auth_info_callbacks);
+
+                // Register GATT callbacks for MTU updates (handles remote-initiated MTU exchange)
+                bt_gatt_cb_register(&mp_bt_zephyr_gatt_callbacks);
 
                 mp_bt_zephyr_callbacks_registered = true;
                 DEBUG_printf("Zephyr callbacks registered\n");
@@ -1675,6 +1681,35 @@ static struct bt_uuid *create_zephyr_uuid(const mp_obj_bluetooth_uuid_t *uuid) {
     return result;
 }
 
+// GATT callback for MTU updates (handles both local and remote-initiated MTU exchange)
+// This callback is registered via bt_gatt_cb_register() and fires whenever the ATT MTU changes.
+// Note: On some platforms (e.g., STM32WB55), the MTU exchange may fail with error 14
+// (BT_ATT_ERR_UNLIKELY) and this callback won't fire after the exchange.
+static void mp_bt_zephyr_gatt_mtu_updated(struct bt_conn *conn, uint16_t tx, uint16_t rx) {
+    DEBUG_printf("gatt_mtu_updated: tx=%d rx=%d\n", tx, rx);
+
+    if (!mp_bluetooth_is_active()) {
+        return;
+    }
+
+    uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
+    if (conn_handle == 0xFF) {
+        // Connection not yet tracked - can happen at connection time
+        DEBUG_printf("gatt_mtu_updated: connection not found\n");
+        return;
+    }
+
+    // Effective MTU is the minimum of TX and RX MTU values
+    uint16_t mtu = MIN(tx, rx);
+
+    mp_bluetooth_gatts_on_mtu_exchanged(conn_handle, mtu);
+}
+
+// GATT callback structure for MTU updates
+struct bt_gatt_cb mp_bt_zephyr_gatt_callbacks = {
+    .att_mtu_updated = mp_bt_zephyr_gatt_mtu_updated,
+};
+
 #if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
 // Convert Zephyr UUID to MicroPython UUID format.
 // Note: modbluetooth UUIDs store their data in LE.
@@ -2131,19 +2166,21 @@ static void gattc_write_cb(struct bt_conn *conn, uint8_t err,
         rp->gattc_write_conn_handle, rp->gattc_write_value_handle, err);
 }
 
-// MTU exchange callback
+// MTU exchange callback (for bt_gatt_exchange_mtu completion)
+// This callback is called when bt_gatt_exchange_mtu() completes.
+// The actual MTU notification is handled by bt_gatt_cb.att_mtu_updated which fires
+// when the MTU changes, so we only log here.
 static void gattc_mtu_exchange_cb(struct bt_conn *conn, uint8_t err,
     struct bt_gatt_exchange_params *params) {
+    (void)params;
+    (void)conn;
 
-    if (!mp_bluetooth_is_active()) {
-        return;
-    }
+    // Log the completion status
+    DEBUG_printf("GATTC MTU exchange complete: err=%d\n", err);
 
-    if (err == 0) {
-        uint16_t mtu = bt_gatt_get_mtu(conn);
-        mp_bluetooth_gatts_on_mtu_exchanged(
-            MP_STATE_PORT(bluetooth_zephyr_root_pointers)->gattc_mtu_conn_handle, mtu);
-    }
+    // Note: We don't notify Python here because bt_gatt_cb.att_mtu_updated
+    // handles MTU notifications. This callback just indicates the exchange
+    // operation completed (successfully or not).
 }
 
 #endif // MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
