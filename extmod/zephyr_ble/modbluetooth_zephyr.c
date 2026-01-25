@@ -39,10 +39,16 @@
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/l2cap.h>
 #include <zephyr/device.h>
 #include "extmod/modbluetooth.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_work.h"
 #include "extmod/zephyr_ble/net_buf_pool_registry.h"
+
+#if MICROPY_PY_BLUETOOTH_USE_ZEPHYR_FREERTOS
+#include "FreeRTOS.h"
+#include "task.h"
+#endif
 
 // Access Zephyr's internal bt_dev for force-reset on deinit failure
 // Include path has lib/zephyr/subsys/bluetooth, so use host/ prefix
@@ -141,6 +147,32 @@ typedef struct _mp_bt_zephyr_conn_t {
     struct _mp_bt_zephyr_conn_t *next;
 } mp_bt_zephyr_conn_t;
 
+#if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
+
+// L2CAP RX accumulation buffer size (must hold total expected data per direction)
+// The ble_l2cap.py test sends 3640 bytes total, so 4096 gives margin
+#define L2CAP_RX_BUF_SIZE 4096
+
+// L2CAP Connection-Oriented Channel structure
+typedef struct _mp_bluetooth_zephyr_l2cap_channel_t {
+    struct bt_l2cap_le_chan le_chan;   // Zephyr L2CAP LE channel (embedded)
+    uint16_t mtu;                      // Our configured MTU
+    uint8_t *rx_buf;                   // RX accumulation buffer
+    size_t rx_len;                     // Current data length in rx_buf
+    // TX stall handling
+    struct net_buf *tx_pending;        // Pending TX buffer waiting for credits
+    bool credit_stalled;               // Credit exhaustion stall (no TX credits)
+    bool mem_stalled;                  // Memory stall (buffer pool low)
+} mp_bluetooth_zephyr_l2cap_channel_t;
+
+// L2CAP Server structure (for listening)
+typedef struct _mp_bluetooth_zephyr_l2cap_server_t {
+    struct bt_l2cap_server server;     // Zephyr server structure
+    uint16_t mtu;                      // MTU for accepted connections
+} mp_bluetooth_zephyr_l2cap_server_t;
+
+#endif // MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
+
 typedef struct _mp_bluetooth_zephyr_root_pointers_t {
     // list of objects to be tracked by the gc
     mp_obj_t objs_list;
@@ -207,6 +239,13 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
     bool pending_sec_encrypted;    // Encryption state
     bool pending_sec_authenticated; // Authentication state
     uint8_t pending_sec_key_size;  // Key size
+
+    #if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
+    // L2CAP Connection-Oriented Channels state
+    mp_bluetooth_zephyr_l2cap_channel_t *l2cap_chan;   // Current channel
+    mp_bluetooth_zephyr_l2cap_server_t *l2cap_server;  // Server (for listening)
+    bool l2cap_listening;                               // Whether server is registered
+    #endif // MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 } mp_bluetooth_zephyr_root_pointers_t;
 
 static int mp_bluetooth_zephyr_ble_state;
@@ -239,6 +278,36 @@ typedef struct _mp_bt_zephyr_indicate_params_t {
 } mp_bt_zephyr_indicate_params_t;
 
 static mp_bt_zephyr_indicate_params_t mp_bt_zephyr_indicate_pool[CONFIG_BT_MAX_CONN];
+
+#if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
+// L2CAP SDU pool for TX. Buffer size includes headroom for L2CAP header.
+// Keep buffer count low to minimize RAM usage - credit flow control handles pacing.
+#define L2CAP_SDU_BUF_SIZE (CONFIG_BT_L2CAP_TX_MTU + BT_L2CAP_SDU_HDR_SIZE)
+#define L2CAP_SDU_BUF_COUNT 5
+NET_BUF_POOL_FIXED_DEFINE(l2cap_sdu_pool, L2CAP_SDU_BUF_COUNT, L2CAP_SDU_BUF_SIZE,
+    CONFIG_BT_CONN_TX_USER_DATA_SIZE, NULL);
+
+// Forward declarations for L2CAP callbacks and helpers
+static void l2cap_connected_cb(struct bt_l2cap_chan *chan);
+static void l2cap_disconnected_cb(struct bt_l2cap_chan *chan);
+static int l2cap_recv_cb(struct bt_l2cap_chan *chan, struct net_buf *buf);
+static void l2cap_sent_cb(struct bt_l2cap_chan *chan);
+static void l2cap_status_cb(struct bt_l2cap_chan *chan, atomic_t *status);
+static struct net_buf *l2cap_alloc_buf_cb(struct bt_l2cap_chan *chan);
+static int l2cap_server_accept_cb(struct bt_conn *conn, struct bt_l2cap_server *server,
+                                  struct bt_l2cap_chan **chan);
+static void l2cap_destroy_channel(void);
+
+// L2CAP channel operations
+static const struct bt_l2cap_chan_ops l2cap_chan_ops = {
+    .connected = l2cap_connected_cb,
+    .disconnected = l2cap_disconnected_cb,
+    .recv = l2cap_recv_cb,
+    .sent = l2cap_sent_cb,
+    .status = l2cap_status_cb,
+    .alloc_buf = l2cap_alloc_buf_cb,
+};
+#endif // MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 
 static mp_bt_zephyr_conn_t *mp_bt_zephyr_next_conn;
 
@@ -851,6 +920,35 @@ int mp_bluetooth_deinit(void) {
     ret = bt_le_scan_stop();
     if (ret != 0 && ret != -EALREADY) {
         DEBUG_printf("mp_bluetooth_deinit: bt_le_scan_stop returned %d (ignored)\n", ret);
+    }
+    #endif
+
+    #if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
+    // Disconnect active L2CAP channels and clean up.
+    // Clear root pointer FIRST to prevent callbacks from double-freeing.
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (rp && rp->l2cap_chan) {
+        DEBUG_printf("mp_bluetooth_deinit: disconnecting L2CAP channel\n");
+        mp_bluetooth_zephyr_l2cap_channel_t *chan = rp->l2cap_chan;
+        rp->l2cap_chan = NULL;  // Prevent callback from double-freeing
+        if (chan->le_chan.chan.conn) {
+            bt_l2cap_chan_disconnect(&chan->le_chan.chan);
+        }
+        // Cleanup inline (l2cap_destroy_channel checks rp->l2cap_chan which is now NULL)
+        if (chan->tx_pending) {
+            net_buf_unref(chan->tx_pending);
+        }
+        if (chan->rx_buf) {
+            m_del(uint8_t, chan->rx_buf, L2CAP_RX_BUF_SIZE);
+        }
+        m_del(mp_bluetooth_zephyr_l2cap_channel_t, chan, 1);
+    }
+    if (rp && rp->l2cap_server) {
+        // Note: Zephyr has no bt_l2cap_server_unregister(), server cleanup
+        // happens during bt_disable(). Free our wrapper struct.
+        m_del(mp_bluetooth_zephyr_l2cap_server_t, rp->l2cap_server, 1);
+        rp->l2cap_server = NULL;
+        rp->l2cap_listening = false;
     }
     #endif
 
@@ -2921,6 +3019,574 @@ void mp_bluetooth_set_io_capability(uint8_t capability) {
         DEBUG_printf("Auth callbacks re-registered for IO capability %d\n", capability);
     }
 }
+
+// ============================================================================
+// L2CAP Connection-Oriented Channels (COC) Implementation
+// ============================================================================
+
+#if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
+
+// Helper to get connection handle from bt_l2cap_chan
+static uint16_t l2cap_chan_get_conn_handle(struct bt_l2cap_chan *chan) {
+    if (!chan || !chan->conn) {
+        return 0xFFFF;
+    }
+    // Use mp_bt_zephyr_conn_to_handle to get the MicroPython connection index
+    // (info.id returns the local identity address, not the connection handle)
+    return mp_bt_zephyr_conn_to_handle(chan->conn);
+}
+
+// Helper to get L2CAP channel for a given conn_handle and cid
+static mp_bluetooth_zephyr_l2cap_channel_t *l2cap_get_channel_for_conn_cid(
+    uint16_t conn_handle, uint16_t cid) {
+
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (!rp || !rp->l2cap_chan) {
+        DEBUG_printf("l2cap_get_channel: no channel\n");
+        return NULL;
+    }
+
+    struct bt_l2cap_le_chan *le_chan = &rp->l2cap_chan->le_chan;
+
+    // Verify conn_handle and cid match
+    uint16_t chan_conn = l2cap_chan_get_conn_handle(&le_chan->chan);
+    if (chan_conn != conn_handle) {
+        DEBUG_printf("l2cap_get_channel: conn mismatch %d != %d\n", chan_conn, conn_handle);
+        return NULL;
+    }
+    if (le_chan->rx.cid != cid) {
+        DEBUG_printf("l2cap_get_channel: cid mismatch %d != %d\n", le_chan->rx.cid, cid);
+        return NULL;
+    }
+
+    return rp->l2cap_chan;
+}
+
+// Allocate and initialize a new L2CAP channel structure
+static int l2cap_create_channel(uint16_t mtu, mp_bluetooth_zephyr_l2cap_channel_t **out) {
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+
+    if (rp->l2cap_chan != NULL) {
+        // Only one L2CAP channel allowed at a time (matches NimBLE)
+        DEBUG_printf("l2cap_create_channel: channel already in use\n");
+        return MP_EALREADY;
+    }
+
+    // Allocate channel structure
+    mp_bluetooth_zephyr_l2cap_channel_t *chan = m_new0(mp_bluetooth_zephyr_l2cap_channel_t, 1);
+    if (!chan) {
+        return MP_ENOMEM;
+    }
+
+    // Allocate RX accumulation buffer
+    chan->rx_buf = m_new(uint8_t, L2CAP_RX_BUF_SIZE);
+    if (!chan->rx_buf) {
+        m_del(mp_bluetooth_zephyr_l2cap_channel_t, chan, 1);
+        return MP_ENOMEM;
+    }
+
+    // Initialize channel state
+    chan->mtu = mtu;
+    chan->rx_len = 0;
+    chan->tx_pending = NULL;
+    chan->credit_stalled = false;
+    chan->mem_stalled = false;
+
+    // Set up the Zephyr channel with our callbacks (matching Zephyr example pattern)
+    chan->le_chan.chan.ops = &l2cap_chan_ops;
+
+    // Set RX MTU - this is what we advertise to the peer
+    // Note: Don't set MPS explicitly - Zephyr will derive it from config
+    chan->le_chan.rx.mtu = mtu;
+
+    rp->l2cap_chan = chan;
+    *out = chan;
+    return 0;
+}
+
+// Free L2CAP channel (always clean up channel, keep server if listening)
+static void l2cap_destroy_channel(void) {
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (!rp || !rp->l2cap_chan) {
+        return;
+    }
+
+    // Save pointer and clear root pointer first to prevent concurrent access
+    mp_bluetooth_zephyr_l2cap_channel_t *chan = rp->l2cap_chan;
+    rp->l2cap_chan = NULL;
+
+    // Free any pending TX buffer
+    if (chan->tx_pending) {
+        net_buf_unref(chan->tx_pending);
+    }
+
+    // Free RX accumulation buffer
+    if (chan->rx_buf) {
+        m_del(uint8_t, chan->rx_buf, L2CAP_RX_BUF_SIZE);
+    }
+
+    // Free channel structure
+    m_del(mp_bluetooth_zephyr_l2cap_channel_t, chan, 1);
+}
+
+// --- L2CAP Callbacks ---
+
+static void l2cap_connected_cb(struct bt_l2cap_chan *chan) {
+    DEBUG_printf("l2cap_connected_cb: chan=%p\n", chan);
+
+    if (!mp_bluetooth_is_active()) {
+        return;
+    }
+
+    struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
+    uint16_t conn_handle = l2cap_chan_get_conn_handle(chan);
+
+    DEBUG_printf("l2cap_connected_cb: conn=%d rx_cid=%d tx_cid=%d rx_mtu=%d tx_mtu=%d credits=%ld\n",
+                 conn_handle, le_chan->rx.cid, le_chan->tx.cid,
+                 le_chan->rx.mtu, le_chan->tx.mtu, atomic_get(&le_chan->tx.credits));
+
+    // Notify MicroPython about the connection
+    // our_mtu is rx.mtu, peer_mtu is tx.mtu
+    mp_bluetooth_on_l2cap_connect(conn_handle,
+                                   le_chan->rx.cid,
+                                   le_chan->psm,
+                                   le_chan->rx.mtu,  // our_mtu
+                                   le_chan->tx.mtu); // peer_mtu
+}
+
+static void l2cap_disconnected_cb(struct bt_l2cap_chan *chan) {
+    DEBUG_printf("l2cap_disconnected_cb\n");
+
+    struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
+    uint16_t conn_handle = l2cap_chan_get_conn_handle(chan);
+
+    DEBUG_printf("l2cap_disconnected_cb: conn=%d cid=%d active=%d\n",
+                 conn_handle, le_chan->rx.cid, mp_bluetooth_is_active());
+
+    // Only notify Python if BLE is still active (not during deinit)
+    if (mp_bluetooth_is_active()) {
+        mp_bluetooth_on_l2cap_disconnect(conn_handle,
+                                          le_chan->rx.cid,
+                                          le_chan->psm,
+                                          0); // status=0 for normal disconnect
+    }
+
+    // Always clean up channel resources, even during deinit.
+    // This ensures Zephyr's internal state is properly cleaned up.
+    l2cap_destroy_channel();
+}
+
+static int l2cap_recv_cb(struct bt_l2cap_chan *chan, struct net_buf *buf) {
+    DEBUG_printf("l2cap_recv_cb: len=%d active=%d\n", (int)buf->len, mp_bluetooth_is_active());
+
+    // During deinit, just return 0 to let Zephyr reclaim the buffer.
+    // Don't return errors that might confuse Zephyr's state machine.
+    if (!mp_bluetooth_is_active()) {
+        return 0;
+    }
+
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (!rp || !rp->l2cap_chan) {
+        return 0;  // Return 0 instead of error to allow cleanup
+    }
+
+    mp_bluetooth_zephyr_l2cap_channel_t *l2cap_chan = rp->l2cap_chan;
+    struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
+    uint16_t conn_handle = l2cap_chan_get_conn_handle(chan);
+
+    // Copy data to our accumulation buffer
+    size_t add_len = buf->len;
+    size_t avail = L2CAP_RX_BUF_SIZE - l2cap_chan->rx_len;
+    if (avail >= add_len) {
+        memcpy(l2cap_chan->rx_buf + l2cap_chan->rx_len, buf->data, add_len);
+        l2cap_chan->rx_len += add_len;
+        DEBUG_printf("l2cap_recv_cb: added %d, total=%d\n", (int)add_len, (int)l2cap_chan->rx_len);
+    } else {
+        DEBUG_printf("l2cap_recv_cb: buffer full, dropping %d bytes\n", (int)add_len);
+    }
+
+    // Notify MicroPython that data is available
+    mp_bluetooth_on_l2cap_recv(conn_handle, le_chan->rx.cid);
+
+    // Return 0 to grant credits immediately
+    // We've copied data to our own buffer, so Zephyr can reuse this buffer
+    return 0;
+}
+
+// Helper to try sending pending TX buffer or notify ready after stall.
+// Returns true if there was a pending buffer (regardless of send success).
+static bool l2cap_try_send_pending(struct bt_l2cap_chan *chan) {
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (!rp || !rp->l2cap_chan) {
+        return false;
+    }
+
+    mp_bluetooth_zephyr_l2cap_channel_t *l2cap_chan = rp->l2cap_chan;
+    struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
+    uint16_t conn_handle = l2cap_chan_get_conn_handle(chan);
+    long credits = atomic_get(&le_chan->tx.credits);
+
+    // If we have a pending TX buffer, try to send it now
+    if (l2cap_chan->tx_pending) {
+        // Calculate PDUs needed for the pending buffer
+        uint16_t len = l2cap_chan->tx_pending->len;
+        uint16_t mps = le_chan->tx.mps;
+        uint16_t sdu_with_header = len + 2;
+        uint16_t pdus_needed = (sdu_with_header + mps - 1) / mps;
+
+        if (credits >= pdus_needed) {
+            // Have enough credits - send it
+            int ret = bt_l2cap_chan_send(&le_chan->chan, l2cap_chan->tx_pending);
+            if (ret == 0) {
+                l2cap_chan->tx_pending = NULL;
+                l2cap_chan->credit_stalled = false;
+                l2cap_chan->mem_stalled = false;
+                mp_bluetooth_on_l2cap_send_ready(conn_handle, le_chan->rx.cid, 0);
+            } else {
+                // Error - discard the buffer
+                net_buf_unref(l2cap_chan->tx_pending);
+                l2cap_chan->tx_pending = NULL;
+                l2cap_chan->credit_stalled = false;
+                mp_bluetooth_on_l2cap_send_ready(conn_handle, le_chan->rx.cid, ret);
+            }
+        }
+        // If not enough credits, just wait for status_cb or next sent_cb
+        return true;
+    }
+
+    // No pending buffer - if stalled, notify ready
+    if (l2cap_chan->credit_stalled || l2cap_chan->mem_stalled) {
+        l2cap_chan->credit_stalled = false;
+        l2cap_chan->mem_stalled = false;
+        mp_bluetooth_on_l2cap_send_ready(conn_handle, le_chan->rx.cid, 0);
+    }
+    return false;
+}
+
+static void l2cap_sent_cb(struct bt_l2cap_chan *chan) {
+    DEBUG_printf("l2cap_sent_cb\n");
+
+    if (!mp_bluetooth_is_active()) {
+        return;
+    }
+
+    l2cap_try_send_pending(chan);
+}
+
+// Status callback - called when channel status changes (e.g., credits become available)
+static void l2cap_status_cb(struct bt_l2cap_chan *chan, atomic_t *status) {
+    bool can_send = atomic_test_bit(status, BT_L2CAP_STATUS_OUT);
+    DEBUG_printf("l2cap_status_cb: can_send=%d\n", can_send);
+
+    if (!mp_bluetooth_is_active()) {
+        return;
+    }
+
+    if (can_send) {
+        l2cap_try_send_pending(chan);
+    }
+}
+
+static struct net_buf *l2cap_alloc_buf_cb(struct bt_l2cap_chan *chan) {
+    // Allocate from our SDU pool
+    struct net_buf *buf = net_buf_alloc(&l2cap_sdu_pool, K_NO_WAIT);
+    DEBUG_printf("l2cap_alloc_buf_cb: %s\n", buf ? "OK" : "FAIL");
+    return buf;
+}
+
+static int l2cap_server_accept_cb(struct bt_conn *conn, struct bt_l2cap_server *server,
+                                  struct bt_l2cap_chan **chan) {
+    DEBUG_printf("l2cap_server_accept_cb\n");
+
+    if (!mp_bluetooth_is_active()) {
+        return -ESHUTDOWN;
+    }
+
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (!rp || !rp->l2cap_server) {
+        return -EINVAL;
+    }
+
+    // Get connection handle (MicroPython connection index, not HCI handle)
+    uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
+    if (conn_handle == 0xFFFF) {
+        return -EINVAL;
+    }
+
+    // Create a channel for this incoming connection
+    mp_bluetooth_zephyr_l2cap_channel_t *l2cap_chan;
+    int ret = l2cap_create_channel(rp->l2cap_server->mtu, &l2cap_chan);
+    if (ret != 0) {
+        return ret;
+    }
+
+    // Set the PSM on the channel
+    l2cap_chan->le_chan.psm = rp->l2cap_server->server.psm;
+
+    // Let MicroPython decide whether to accept
+    // Note: Zephyr doesn't give us peer MTU at accept time, so we use our MTU for both
+    // Note: CID may not be assigned yet - we'll get the real CID in connected callback
+    DEBUG_printf("l2cap_server_accept_cb: cid=%d (may be 0 at accept time)\n",
+                 l2cap_chan->le_chan.rx.cid);
+    ret = mp_bluetooth_on_l2cap_accept(conn_handle,
+                                        l2cap_chan->le_chan.rx.cid,
+                                        rp->l2cap_server->server.psm,
+                                        l2cap_chan->mtu,  // our_mtu
+                                        0);               // peer_mtu (not known yet)
+    if (ret != 0) {
+        // Application rejected the connection
+        l2cap_destroy_channel();
+        return ret;
+    }
+
+    // Return our channel to Zephyr
+    *chan = &l2cap_chan->le_chan.chan;
+    return 0;
+}
+
+// --- L2CAP API Functions ---
+
+int mp_bluetooth_l2cap_listen(uint16_t psm, uint16_t mtu) {
+    DEBUG_printf("mp_bluetooth_l2cap_listen: psm=%d mtu=%d\n", psm, mtu);
+
+    if (!mp_bluetooth_is_active()) {
+        return ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+
+    // Check if already listening
+    if (rp->l2cap_listening) {
+        return MP_EALREADY;
+    }
+
+    // Allocate server structure (channel is created in accept callback)
+    rp->l2cap_server = m_new0(mp_bluetooth_zephyr_l2cap_server_t, 1);
+    if (!rp->l2cap_server) {
+        return MP_ENOMEM;
+    }
+
+    // Set up server
+    rp->l2cap_server->server.psm = psm;
+    rp->l2cap_server->server.accept = l2cap_server_accept_cb;
+    rp->l2cap_server->server.sec_level = BT_SECURITY_L1;  // No encryption required
+    rp->l2cap_server->mtu = mtu;
+
+    // Register the server
+    int ret = bt_l2cap_server_register(&rp->l2cap_server->server);
+    if (ret != 0) {
+        DEBUG_printf("mp_bluetooth_l2cap_listen: bt_l2cap_server_register failed %d\n", ret);
+        m_del(mp_bluetooth_zephyr_l2cap_server_t, rp->l2cap_server, 1);
+        rp->l2cap_server = NULL;
+        return bt_err_to_errno(ret);
+    }
+
+    rp->l2cap_listening = true;
+    DEBUG_printf("mp_bluetooth_l2cap_listen: listening on PSM %d\n", rp->l2cap_server->server.psm);
+    return 0;
+}
+
+int mp_bluetooth_l2cap_connect(uint16_t conn_handle, uint16_t psm, uint16_t mtu) {
+    DEBUG_printf("mp_bluetooth_l2cap_connect: conn_handle=%d psm=%d mtu=%d\n",
+                 conn_handle, psm, mtu);
+
+    if (!mp_bluetooth_is_active()) {
+        return ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    struct bt_conn *conn = mp_bt_zephyr_get_conn(conn_handle);
+    if (conn == NULL) {
+        return MP_ENOTCONN;
+    }
+
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+
+    // Create channel structure
+    mp_bluetooth_zephyr_l2cap_channel_t *chan;
+    int ret = l2cap_create_channel(mtu, &chan);
+    if (ret != 0) {
+        return ret;
+    }
+
+    // Initiate connection
+    ret = bt_l2cap_chan_connect(conn, &chan->le_chan.chan, psm);
+    if (ret != 0) {
+        DEBUG_printf("mp_bluetooth_l2cap_connect: bt_l2cap_chan_connect failed %d\n", ret);
+        l2cap_destroy_channel();  // Clean up the channel we just created
+        return bt_err_to_errno(ret);
+    }
+
+    // Process work queue to send the connection request
+    mp_bluetooth_zephyr_work_process();
+
+    return 0;
+}
+
+int mp_bluetooth_l2cap_disconnect(uint16_t conn_handle, uint16_t cid) {
+    DEBUG_printf("mp_bluetooth_l2cap_disconnect: conn_handle=%d cid=%d\n", conn_handle, cid);
+
+    if (!mp_bluetooth_is_active()) {
+        return ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    mp_bluetooth_zephyr_l2cap_channel_t *chan = l2cap_get_channel_for_conn_cid(conn_handle, cid);
+    if (!chan) {
+        return MP_EINVAL;
+    }
+
+    int ret = bt_l2cap_chan_disconnect(&chan->le_chan.chan);
+    if (ret != 0) {
+        DEBUG_printf("mp_bluetooth_l2cap_disconnect: bt_l2cap_chan_disconnect failed %d\n", ret);
+        return bt_err_to_errno(ret);
+    }
+
+    // Process work queue
+    mp_bluetooth_zephyr_work_process();
+
+    return 0;
+}
+
+int mp_bluetooth_l2cap_send(uint16_t conn_handle, uint16_t cid,
+                            const uint8_t *buf, size_t len, bool *stalled) {
+    DEBUG_printf("mp_bluetooth_l2cap_send: conn=%d cid=%d len=%d\n", conn_handle, cid, (int)len);
+
+    if (!mp_bluetooth_is_active()) {
+        return ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    mp_bluetooth_zephyr_l2cap_channel_t *chan = l2cap_get_channel_for_conn_cid(conn_handle, cid);
+    if (!chan) {
+        return MP_EINVAL;
+    }
+
+    struct bt_l2cap_le_chan *le_chan = &chan->le_chan;
+
+    // Check that the data fits in the peer's MTU
+    if (len > le_chan->tx.mtu) {
+        return MP_EINVAL;
+    }
+
+    // Check if we already have a pending TX buffer (shouldn't happen if Python waits properly)
+    if (chan->tx_pending) {
+        return MP_EBUSY;
+    }
+
+    // Allocate buffer from our pool
+    struct net_buf *sdu_buf = net_buf_alloc(&l2cap_sdu_pool, K_NO_WAIT);
+    if (!sdu_buf) {
+        // Pool exhausted - stall and let the caller retry later
+        DEBUG_printf("mp_bluetooth_l2cap_send: pool exhausted\n");
+        chan->mem_stalled = true;
+        *stalled = true;
+        return 0;  // Success but stalled - Python will wait for SEND_READY
+    }
+
+    // Reserve headroom for L2CAP SDU header
+    net_buf_reserve(sdu_buf, BT_L2CAP_SDU_CHAN_SEND_RESERVE);
+
+    // Copy data into buffer
+    net_buf_add_mem(sdu_buf, buf, len);
+
+    // Calculate how many PDUs (credits) this SDU will need
+    // SDU = SDU length header (2 bytes) + payload
+    // Each PDU can carry up to MPS bytes
+    uint16_t mps = le_chan->tx.mps;
+    if (mps == 0) {
+        // Channel not fully established yet
+        net_buf_unref(sdu_buf);
+        return MP_EINVAL;
+    }
+    uint16_t sdu_with_header = len + 2;  // 2 bytes for SDU length field
+    uint16_t pdus_needed = (sdu_with_header + mps - 1) / mps;
+
+    long credits = atomic_get(&le_chan->tx.credits);
+
+    // Check if we have enough credits to send this SDU
+    // Zephyr's bt_l2cap_chan_send just queues without checking - we must check ourselves
+    if (credits < pdus_needed) {
+        // Not enough credits - save buffer and stall
+        DEBUG_printf("mp_bluetooth_l2cap_send: stalled (need %d credits, have %ld)\n",
+                     pdus_needed, credits);
+        chan->tx_pending = sdu_buf;
+        chan->credit_stalled = true;
+        *stalled = true;
+        return 0;  // Success but stalled - Python will wait for SEND_READY
+    }
+
+    // Have enough credits - send the data
+    int ret = bt_l2cap_chan_send(&le_chan->chan, sdu_buf);
+    if (ret < 0) {
+        // Error - free the buffer
+        DEBUG_printf("mp_bluetooth_l2cap_send: error %d\n", ret);
+        net_buf_unref(sdu_buf);
+        return bt_err_to_errno(ret);
+    }
+
+    // Process work queue to actually transmit the data
+    mp_bluetooth_zephyr_work_process();
+
+    // After processing, check credits remaining
+    credits = atomic_get(&le_chan->tx.credits);
+
+    // If credits are now exhausted, tell caller we're stalled
+    // This allows Python to wait for SEND_READY before sending more
+    if (credits == 0) {
+        DEBUG_printf("mp_bluetooth_l2cap_send: stalled (credits exhausted)\n");
+        chan->credit_stalled = true;
+        *stalled = true;
+    }
+
+    return 0;
+}
+
+int mp_bluetooth_l2cap_recvinto(uint16_t conn_handle, uint16_t cid,
+                                 uint8_t *buf, size_t *len) {
+    DEBUG_printf("mp_bluetooth_l2cap_recvinto: conn_handle=%d cid=%d buf=%p len=%zu\n",
+                 conn_handle, cid, buf, buf ? *len : 0);
+
+    if (!mp_bluetooth_is_active()) {
+        return ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    mp_bluetooth_zephyr_l2cap_channel_t *chan = l2cap_get_channel_for_conn_cid(conn_handle, cid);
+    if (!chan) {
+        return MP_EINVAL;
+    }
+
+    MICROPY_PY_BLUETOOTH_ENTER
+
+    if (chan->rx_len > 0) {
+        size_t avail = chan->rx_len;
+
+        if (buf == NULL) {
+            // Just return the amount of data available
+            *len = avail;
+        } else {
+            // Copy data into buffer
+            size_t to_copy = MIN(*len, avail);
+            memcpy(buf, chan->rx_buf, to_copy);
+            *len = to_copy;
+
+            if (to_copy == avail) {
+                // All data consumed - reset buffer
+                chan->rx_len = 0;
+            } else {
+                // Partial consumption - shift remaining data to front
+                memmove(chan->rx_buf, chan->rx_buf + to_copy, avail - to_copy);
+                chan->rx_len = avail - to_copy;
+            }
+        }
+    } else {
+        // No pending data
+        *len = 0;
+    }
+
+    MICROPY_PY_BLUETOOTH_EXIT
+
+    return 0;
+}
+
+#endif // MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 
 MP_REGISTER_ROOT_POINTER(struct _mp_bluetooth_zephyr_root_pointers_t *bluetooth_zephyr_root_pointers);
 

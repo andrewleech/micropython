@@ -432,8 +432,11 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_SCAN_WITH_IDENTITY 1  // Use identity address for scanning instead of random address
 
 // --- L2CAP ---
-#define CONFIG_BT_L2CAP_TX_BUF_COUNT 4
-#define CONFIG_BT_L2CAP_TX_MTU 256  // L2CAP TX MTU (matches NimBLE default)
+#define CONFIG_BT_L2CAP_TX_BUF_COUNT 4  // L2CAP TX buffers
+#define CONFIG_BT_L2CAP_TX_MTU 450  // L2CAP TX MTU (for L2CAP COC test)
+
+// --- L2CAP Dynamic Channels (COC - Connection-Oriented Channels) ---
+#define CONFIG_BT_L2CAP_DYNAMIC_CHANNEL 1  // Enable COC (requires SMP - already enabled)
 
 // --- Security Manager Protocol (SMP) - Pairing/Bonding ---
 #define CONFIG_BT_SMP 1                        // Enable Security Manager Protocol
