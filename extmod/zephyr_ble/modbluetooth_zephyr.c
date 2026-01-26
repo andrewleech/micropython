@@ -1007,6 +1007,11 @@ int mp_bluetooth_deinit(void) {
     extern void mp_bluetooth_zephyr_work_reset(void);
     mp_bluetooth_zephyr_work_reset();
 
+    // Reset net_buf pool state to prevent corruption across soft resets.
+    // Pools retain runtime state (free list, uninit_count, lock) from the
+    // previous session which can cause crashes on next init.
+    mp_net_buf_pool_state_reset();
+
     // Deinit port-specific resources (CYW43 cleanup, soft timers, GATT pool, etc.)
     // This must be done after bt_disable() completes.
     #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI || defined(STM32WB)
@@ -1018,9 +1023,7 @@ int mp_bluetooth_deinit(void) {
     mp_bt_zephyr_next_conn = NULL;
 
     // Reset indication pool - all indications should be done by now
-    for (int i = 0; i < CONFIG_BT_MAX_CONN; i++) {
-        mp_bt_zephyr_indicate_pool[i].in_use = false;
-    }
+    memset(mp_bt_zephyr_indicate_pool, 0, sizeof(mp_bt_zephyr_indicate_pool));
 
     // Note: We intentionally do NOT reset mp_bt_zephyr_callbacks_registered here.
     // Zephyr callbacks persist across bt_disable()/bt_enable() cycles, and the
