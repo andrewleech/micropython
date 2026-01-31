@@ -122,3 +122,16 @@ void bt_iso_disconnected(struct bt_conn *conn) {
     (void)conn;
     // No-op: ISO not implemented
 }
+
+// ISO cleanup stub - called from conn.c deferred_work()
+void bt_iso_cleanup_acl(struct bt_conn *conn) {
+    (void)conn;
+    // No-op: ISO not implemented
+}
+
+// ISO channel state change stub
+void bt_iso_chan_set_state(void *chan, int state) {
+    (void)chan;
+    (void)state;
+    // No-op: ISO not implemented
+}
