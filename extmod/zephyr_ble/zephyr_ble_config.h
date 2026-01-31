@@ -433,10 +433,12 @@ extern const struct device __device_dts_ord_0;
 
 // --- L2CAP ---
 #define CONFIG_BT_L2CAP_TX_BUF_COUNT 4  // L2CAP TX buffers
-#define CONFIG_BT_L2CAP_TX_MTU 450  // L2CAP TX MTU (for L2CAP COC test)
+#define CONFIG_BT_L2CAP_TX_MTU 256  // L2CAP TX MTU (reduced from 450 to save RAM - Issue #15)
 
 // --- L2CAP Dynamic Channels (COC - Connection-Oriented Channels) ---
+#if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 #define CONFIG_BT_L2CAP_DYNAMIC_CHANNEL 1  // Enable COC (requires SMP - already enabled)
+#endif
 
 // --- Security Manager Protocol (SMP) - Pairing/Bonding ---
 #define CONFIG_BT_SMP 1                        // Enable Security Manager Protocol
