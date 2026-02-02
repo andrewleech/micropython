@@ -240,8 +240,14 @@ extern const struct device __device_dts_ord_0;
 #endif
 
 #ifndef __noinit
-// Uninitialized data section (not used in MicroPython)
-#define __noinit __attribute__((section(".noinit")))
+// Zephyr uses __noinit on net_buf data arrays to avoid startup zeroing.
+// However, this places data in .noinit section which is NEVER zeroed - not on
+// cold boot, not on soft reset. This causes stale buffer data across soft resets,
+// leading to HardFault when Zephyr reinitializes pools.
+//
+// Fix: Define __noinit as empty so data goes in regular BSS (zeroed on startup).
+// The ~14KB startup zeroing overhead is negligible (<1ms on RP2040).
+#define __noinit /* place in BSS, not .noinit */
 #endif
 
 // Note: FLEXIBLE_ARRAY_DECLARE is defined by Zephyr's sys/util.h - don't define here
@@ -433,7 +439,7 @@ extern const struct device __device_dts_ord_0;
 
 // --- L2CAP ---
 #define CONFIG_BT_L2CAP_TX_BUF_COUNT 4  // L2CAP TX buffers
-#define CONFIG_BT_L2CAP_TX_MTU 256  // L2CAP TX MTU (reduced from 450 to save RAM - Issue #15)
+#define CONFIG_BT_L2CAP_TX_MTU 256  // L2CAP TX MTU (256 sufficient for most use cases, saves ~2KB RAM vs 450)
 
 // --- L2CAP Dynamic Channels (COC - Connection-Oriented Channels) ---
 #if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS

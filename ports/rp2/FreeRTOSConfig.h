@@ -107,8 +107,7 @@
 // Memory configuration
 // ============================================================================
 
-// RP2040 has 264KB RAM total - use conservative heap size
-// Most memory for Python threads comes from MicroPython GC heap
+// RP2040 has 264KB RAM total - keep FreeRTOS heap small to maximize Python GC heap
 #define configSUPPORT_DYNAMIC_ALLOCATION (1)
 #define configTOTAL_HEAP_SIZE (8192)
 

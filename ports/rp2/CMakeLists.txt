@@ -514,6 +514,7 @@ if(MICROPY_BLUETOOTH_ZEPHYR)
 
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
         MICROPY_BLUETOOTH_ZEPHYR=1
+        MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS=1
     )
 
     # MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI calls mp_bluetooth_hci_controller_init()
