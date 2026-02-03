@@ -171,6 +171,12 @@ typedef struct _mp_bluetooth_zephyr_l2cap_server_t {
     uint16_t mtu;                      // MTU for accepted connections
 } mp_bluetooth_zephyr_l2cap_server_t;
 
+// Static L2CAP server structure - persists across soft resets because Zephyr
+// has no bt_l2cap_server_unregister() API for LE L2CAP.
+// Once registered, the server stays in Zephyr's internal list until hard reset.
+static mp_bluetooth_zephyr_l2cap_server_t mp_bluetooth_zephyr_l2cap_static_server;
+static bool mp_bluetooth_zephyr_l2cap_server_registered = false;
+
 #endif // MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 
 typedef struct _mp_bluetooth_zephyr_root_pointers_t {
@@ -242,9 +248,10 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
 
     #if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
     // L2CAP Connection-Oriented Channels state
-    mp_bluetooth_zephyr_l2cap_channel_t *l2cap_chan;   // Current channel
-    mp_bluetooth_zephyr_l2cap_server_t *l2cap_server;  // Server (for listening)
-    bool l2cap_listening;                               // Whether server is registered
+    mp_bluetooth_zephyr_l2cap_channel_t *l2cap_chan;   // Current channel (dynamic per-connection)
+    // Note: L2CAP server is static (mp_bluetooth_zephyr_l2cap_static_server) because
+    // Zephyr has no bt_l2cap_server_unregister() API for LE L2CAP.
+    bool l2cap_listening;                               // Whether listening this session
     #endif // MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 } mp_bluetooth_zephyr_root_pointers_t;
 
@@ -943,11 +950,11 @@ int mp_bluetooth_deinit(void) {
         }
         m_del(mp_bluetooth_zephyr_l2cap_channel_t, chan, 1);
     }
-    if (rp && rp->l2cap_server) {
-        // Note: Zephyr has no bt_l2cap_server_unregister(), server cleanup
-        // happens during bt_disable(). Free our wrapper struct.
-        m_del(mp_bluetooth_zephyr_l2cap_server_t, rp->l2cap_server, 1);
-        rp->l2cap_server = NULL;
+    if (rp) {
+        // Note: Zephyr has no bt_l2cap_server_unregister() for LE L2CAP.
+        // The static server structure persists across soft resets and we
+        // track registration with mp_bluetooth_zephyr_l2cap_server_registered.
+        // Just clear the session-level listening flag.
         rp->l2cap_listening = false;
     }
     #endif
@@ -3305,9 +3312,19 @@ static int l2cap_server_accept_cb(struct bt_conn *conn, struct bt_l2cap_server *
         return -ESHUTDOWN;
     }
 
-    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
-    if (!rp || !rp->l2cap_server) {
+    // Use static server structure (persists across soft resets)
+    if (!mp_bluetooth_zephyr_l2cap_server_registered) {
+        DEBUG_printf("l2cap_server_accept_cb: server not registered\n");
         return -EINVAL;
+    }
+
+    // Check that Python has called l2cap_listen() this session.
+    // If not, reject the connection - the Zephyr server persists but Python
+    // hasn't set up handlers yet.
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (!rp || !rp->l2cap_listening) {
+        DEBUG_printf("l2cap_server_accept_cb: not listening this session\n");
+        return -EINVAL;  // Use EINVAL instead of ENOENT for consistency
     }
 
     // Get connection handle (MicroPython connection index, not HCI handle)
@@ -3318,13 +3335,13 @@ static int l2cap_server_accept_cb(struct bt_conn *conn, struct bt_l2cap_server *
 
     // Create a channel for this incoming connection
     mp_bluetooth_zephyr_l2cap_channel_t *l2cap_chan;
-    int ret = l2cap_create_channel(rp->l2cap_server->mtu, &l2cap_chan);
+    int ret = l2cap_create_channel(mp_bluetooth_zephyr_l2cap_static_server.mtu, &l2cap_chan);
     if (ret != 0) {
         return ret;
     }
 
     // Set the PSM on the channel
-    l2cap_chan->le_chan.psm = rp->l2cap_server->server.psm;
+    l2cap_chan->le_chan.psm = mp_bluetooth_zephyr_l2cap_static_server.server.psm;
 
     // Let MicroPython decide whether to accept
     // Note: Zephyr doesn't give us peer MTU at accept time, so we use our MTU for both
@@ -3333,7 +3350,7 @@ static int l2cap_server_accept_cb(struct bt_conn *conn, struct bt_l2cap_server *
                  l2cap_chan->le_chan.rx.cid);
     ret = mp_bluetooth_on_l2cap_accept(conn_handle,
                                         l2cap_chan->le_chan.rx.cid,
-                                        rp->l2cap_server->server.psm,
+                                        mp_bluetooth_zephyr_l2cap_static_server.server.psm,
                                         l2cap_chan->mtu,  // our_mtu
                                         0);               // peer_mtu (not known yet)
     if (ret != 0) {
@@ -3358,34 +3375,45 @@ int mp_bluetooth_l2cap_listen(uint16_t psm, uint16_t mtu) {
 
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
 
-    // Check if already listening
+    // Check if already listening (this session)
     if (rp->l2cap_listening) {
         return MP_EALREADY;
     }
 
-    // Allocate server structure (channel is created in accept callback)
-    rp->l2cap_server = m_new0(mp_bluetooth_zephyr_l2cap_server_t, 1);
-    if (!rp->l2cap_server) {
-        return MP_ENOMEM;
+    // Check if server was already registered (persists across soft reset)
+    // Zephyr has no bt_l2cap_server_unregister() for LE L2CAP, so once registered
+    // the PSM stays registered until hard reset.
+    if (mp_bluetooth_zephyr_l2cap_server_registered) {
+        if (mp_bluetooth_zephyr_l2cap_static_server.server.psm == psm) {
+            // Same PSM - just update MTU and mark as listening
+            DEBUG_printf("mp_bluetooth_l2cap_listen: reusing existing server for PSM %d\n", psm);
+            mp_bluetooth_zephyr_l2cap_static_server.mtu = mtu;
+            rp->l2cap_listening = true;
+            return 0;
+        } else {
+            // Different PSM requested but another is already registered
+            DEBUG_printf("mp_bluetooth_l2cap_listen: server already registered for PSM %d\n",
+                        mp_bluetooth_zephyr_l2cap_static_server.server.psm);
+            return MP_EADDRINUSE;
+        }
     }
 
-    // Set up server
-    rp->l2cap_server->server.psm = psm;
-    rp->l2cap_server->server.accept = l2cap_server_accept_cb;
-    rp->l2cap_server->server.sec_level = BT_SECURITY_L1;  // No encryption required
-    rp->l2cap_server->mtu = mtu;
+    // Set up static server structure
+    mp_bluetooth_zephyr_l2cap_static_server.server.psm = psm;
+    mp_bluetooth_zephyr_l2cap_static_server.server.accept = l2cap_server_accept_cb;
+    mp_bluetooth_zephyr_l2cap_static_server.server.sec_level = BT_SECURITY_L1;  // No encryption required
+    mp_bluetooth_zephyr_l2cap_static_server.mtu = mtu;
 
     // Register the server
-    int ret = bt_l2cap_server_register(&rp->l2cap_server->server);
+    int ret = bt_l2cap_server_register(&mp_bluetooth_zephyr_l2cap_static_server.server);
     if (ret != 0) {
         DEBUG_printf("mp_bluetooth_l2cap_listen: bt_l2cap_server_register failed %d\n", ret);
-        m_del(mp_bluetooth_zephyr_l2cap_server_t, rp->l2cap_server, 1);
-        rp->l2cap_server = NULL;
         return bt_err_to_errno(ret);
     }
 
+    mp_bluetooth_zephyr_l2cap_server_registered = true;
     rp->l2cap_listening = true;
-    DEBUG_printf("mp_bluetooth_l2cap_listen: listening on PSM %d\n", rp->l2cap_server->server.psm);
+    DEBUG_printf("mp_bluetooth_l2cap_listen: listening on PSM %d\n", psm);
     return 0;
 }
 
@@ -3401,8 +3429,6 @@ int mp_bluetooth_l2cap_connect(uint16_t conn_handle, uint16_t psm, uint16_t mtu)
     if (conn == NULL) {
         return MP_ENOTCONN;
     }
-
-    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
 
     // Create channel structure
     mp_bluetooth_zephyr_l2cap_channel_t *chan;
