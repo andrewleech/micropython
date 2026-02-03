@@ -529,6 +529,8 @@ ifeq ($(MICROPY_BLUETOOTH_ZEPHYR),1)
 SRC_C += mpzephyrport.c
 # Define STM32 port flag for Zephyr BLE CMSIS header selection
 CFLAGS += -D__ZEPHYR_BLE_STM32_PORT__
+# Enable L2CAP channels (must be passed as CFLAGS for Zephyr sources)
+CFLAGS += -DMICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS=1
 include $(TOP)/extmod/zephyr_ble/zephyr_ble.mk
 endif
 

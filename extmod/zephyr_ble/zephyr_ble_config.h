@@ -439,7 +439,7 @@ extern const struct device __device_dts_ord_0;
 
 // --- L2CAP ---
 #define CONFIG_BT_L2CAP_TX_BUF_COUNT 4  // L2CAP TX buffers
-#define CONFIG_BT_L2CAP_TX_MTU 256  // L2CAP TX MTU (256 sufficient for most use cases, saves ~2KB RAM vs 450)
+#define CONFIG_BT_L2CAP_TX_MTU 450  // L2CAP TX MTU (450 needed for ble_l2cap.py test)
 
 // --- L2CAP Dynamic Channels (COC - Connection-Oriented Channels) ---
 #if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
