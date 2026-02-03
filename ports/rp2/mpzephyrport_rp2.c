@@ -147,6 +147,9 @@ static volatile uint32_t hci_rx_evt_cmd_complete = 0;  // 0x0E
 static volatile uint32_t hci_rx_evt_cmd_status = 0;    // 0x0F
 static volatile uint32_t hci_rx_evt_le_meta = 0;       // 0x3E (LE events including ADV_REPORT)
 static volatile uint32_t hci_rx_evt_le_adv_report = 0; // 0x3E subevent 0x02 (advertising reports)
+static volatile uint32_t hci_rx_evt_le_conn_complete = 0; // 0x3E subevent 0x01 (LE Connection Complete)
+static volatile uint32_t hci_rx_evt_le_enh_conn_complete = 0; // 0x3E subevent 0x0A (LE Enhanced Connection Complete)
+static volatile uint32_t hci_rx_evt_disconnect_complete = 0;  // 0x05 (Disconnection Complete)
 static volatile uint32_t hci_rx_evt_other = 0;         // Other event codes
 static volatile uint32_t hci_rx_acl = 0;               // ACL data packets
 
@@ -230,10 +233,24 @@ static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len) {
                     hci_rx_evt_le_meta++;
                     valid_event = true;
                     // Check LE subevent code (at pkt_data[2] after evt_code and length)
-                    if (pkt_len >= 3 && pkt_data[2] == 0x02) {
-                        hci_rx_evt_le_adv_report++;
+                    if (pkt_len >= 3) {
+                        uint8_t subevent = pkt_data[2];
+                        if (subevent == 0x02) {
+                            hci_rx_evt_le_adv_report++;
+                        } else if (subevent == 0x01) {
+                            // LE Connection Complete
+                            hci_rx_evt_le_conn_complete++;
+                        } else if (subevent == 0x0A) {
+                            // LE Enhanced Connection Complete
+                            hci_rx_evt_le_enh_conn_complete++;
+                        }
                     }
-                } else if (evt_code == 0x05 || evt_code == 0x08 ||
+                } else if (evt_code == 0x05) {
+                    // Disconnection Complete
+                    hci_rx_evt_disconnect_complete++;
+                    hci_rx_evt_other++;
+                    valid_event = true;
+                } else if (evt_code == 0x08 ||
                            evt_code == 0x13 || evt_code == 0x1A ||
                            evt_code == 0x04 || evt_code == 0x03) {
                     // Other valid events
@@ -447,6 +464,9 @@ void mp_bluetooth_zephyr_hci_rx_task_start(void) {
     hci_rx_evt_cmd_status = 0;
     hci_rx_evt_le_meta = 0;
     hci_rx_evt_le_adv_report = 0;
+    hci_rx_evt_le_conn_complete = 0;
+    hci_rx_evt_le_enh_conn_complete = 0;
+    hci_rx_evt_disconnect_complete = 0;
     hci_rx_evt_other = 0;
     hci_rx_acl = 0;
     hci_rx_queue_head = 0;
@@ -499,6 +519,10 @@ void mp_bluetooth_zephyr_hci_rx_task_stop(void) {
         (unsigned long)hci_rx_evt_cmd_complete, (unsigned long)hci_rx_evt_cmd_status,
         (unsigned long)hci_rx_evt_le_meta, (unsigned long)hci_rx_evt_le_adv_report,
         (unsigned long)hci_rx_evt_other, (unsigned long)hci_rx_acl);
+    // Issue #16 debug: connection-related events
+    debug_printf("  Connection events: conn_complete=%lu enh_conn=%lu disconnect=%lu\n",
+        (unsigned long)hci_rx_evt_le_conn_complete, (unsigned long)hci_rx_evt_le_enh_conn_complete,
+        (unsigned long)hci_rx_evt_disconnect_complete);
 
     // Phase 1: Signal shutdown intent (but keep recv_cb set for polling fallback)
     // After task stops, bt_disable() and other HCI operations will use polling mode
