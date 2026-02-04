@@ -5,6 +5,14 @@ Add Zephyr BLE stack as an alternative to NimBLE/BTstack for all MicroPython por
 
 ---
 
+## Milestones
+
+| Tag | Date | Description |
+|-----|------|-------------|
+| `zephyr-ble-2026-02-05` | 2026-02-05 | Peripheral and central roles working on Pico W and WB55. All fixable issues resolved. Remaining limitations are Zephyr architectural (indication type detection, forced notifications). |
+
+---
+
 ## Quick Reference
 
 ### RP2 Pico W (RP2040/RP2350)
