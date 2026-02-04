@@ -221,6 +221,7 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
     struct bt_gatt_read_params gattc_read_params;
     uint16_t gattc_read_conn_handle;
     uint16_t gattc_read_value_handle;
+    bool gattc_read_data_received; // Track if data callback was called for current read
 
     // GATT client write state
     struct bt_gatt_write_params gattc_write_params;
@@ -238,6 +239,7 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
     uint16_t gattc_subscribe_ccc_handle;
     bool gattc_subscribe_active; // Track if subscription callback is registered
     bool gattc_subscribe_changing; // Track if we're intentionally switching subscription types
+    bool gattc_unsubscribing; // Track if we're explicitly unsubscribing via CCCD write
 
     // Auto-subscriptions for notification delivery without explicit CCCD write.
     // Zephyr's architecture requires subscriptions to be registered for notification
@@ -550,6 +552,7 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
     if (rp && rp->gattc_subscribe_conn_handle == conn_handle) {
         rp->gattc_subscribe_active = false;
         rp->gattc_subscribe_changing = false;
+        rp->gattc_unsubscribing = false;
         rp->gattc_subscribe_conn_handle = 0;
         rp->gattc_subscribe_ccc_handle = 0;
         rp->gattc_subscribe_value_handle = 0;
@@ -1514,18 +1517,16 @@ static void mp_bt_zephyr_gatt_indicate_destroy(struct bt_gatt_indicate_params *p
 }
 
 static void mp_bt_zephyr_gatt_indicate_done(struct bt_conn *conn, struct bt_gatt_indicate_params *params, uint8_t err) {
-    struct bt_conn_info info;
-    bt_conn_get_info(conn, &info);
+    uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
     uint16_t chr_handle = params->attr->handle - 1;
-    mp_bluetooth_gatts_on_indicate_complete(info.id, chr_handle, err);
+    mp_bluetooth_gatts_on_indicate_complete(conn_handle, chr_handle, err);
 }
 
 static ssize_t mp_bt_zephyr_gatts_attr_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset) {
-    struct bt_conn_info info;
-    if (bt_conn_get_info(conn, &info) != 0) {
+    uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
+    if (conn_handle == 0xFFFF) {
         return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
     }
-    uint16_t conn_handle = info.id;
 
     // We receive the value handle, but to look up in the gatts db we need the
     // characteristic handle, which is the value handle minus 1.
@@ -1559,8 +1560,7 @@ static ssize_t mp_bt_zephyr_gatts_attr_read(struct bt_conn *conn, const struct b
 }
 
 static ssize_t mp_bt_zephyr_gatts_attr_write(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags) {
-    struct bt_conn_info info;
-    bt_conn_get_info(conn, &info);
+    uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
 
     DEBUG_printf("BLE attr write for handle %d\n", attr->handle);
 
@@ -1598,7 +1598,7 @@ static ssize_t mp_bt_zephyr_gatts_attr_write(struct bt_conn *conn, const struct 
     memcpy(&entry->data[offset], buf, len);
     entry->data_len = offset + len;
 
-    mp_bluetooth_gatts_on_write(info.id, _handle);
+    mp_bluetooth_gatts_on_write(conn_handle, _handle);
 
     return len;
 }
@@ -2279,22 +2279,22 @@ static uint8_t gattc_notify_cb(struct bt_conn *conn,
 
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
 
-    // Get connection handle from connection object
-    struct bt_conn_info info;
-    if (bt_conn_get_info(conn, &info) != 0) {
+    // Get connection handle from connection tracking list (not info.id which is identity ID)
+    uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
+    if (conn_handle == 0xFFFF) {
         return BT_GATT_ITER_STOP;
     }
-    uint16_t conn_handle = info.id;
 
     if (data == NULL) {
-        // Unsubscribe complete (remote end stopped or we called bt_gatt_unsubscribe)
-        DEBUG_printf("gattc_notify_cb: unsubscribe complete conn_handle=%d changing=%d\n",
-                     conn_handle, rp->gattc_subscribe_changing);
-        // If we're changing subscription types, this callback is from the old subscription
-        // being unsubscribed. Don't fire WRITE_DONE or change state - the new subscription's
-        // gattc_subscribe_cb will handle that.
-        if (!rp->gattc_subscribe_changing && rp->gattc_subscribe_active) {
+        // Unsubscribe complete (remote end stopped, disconnect, or explicit unsubscribe)
+        DEBUG_printf("gattc_notify_cb: unsubscribe complete conn_handle=%d changing=%d unsubscribing=%d\n",
+                     conn_handle, rp->gattc_subscribe_changing, rp->gattc_unsubscribing);
+        // Only fire WRITE_DONE if we explicitly requested unsubscribe via CCCD write.
+        // Don't fire for disconnect-triggered cleanup (gattc_unsubscribing is false).
+        // Don't fire if changing subscription types (gattc_subscribe_cb handles that).
+        if (rp->gattc_unsubscribing && !rp->gattc_subscribe_changing) {
             rp->gattc_subscribe_active = false;
+            rp->gattc_unsubscribing = false;
             // Fire WRITE_DONE for the CCCD write that triggered unsubscribe
             mp_bluetooth_gattc_on_read_write_status(MP_BLUETOOTH_IRQ_GATTC_WRITE_DONE,
                 conn_handle, rp->gattc_subscribe_ccc_handle, 0);
@@ -2335,12 +2335,11 @@ static uint8_t gattc_auto_notify_cb(struct bt_conn *conn,
         return BT_GATT_ITER_STOP;
     }
 
-    // Get connection handle from connection object
-    struct bt_conn_info info;
-    if (bt_conn_get_info(conn, &info) != 0) {
+    // Get connection handle from connection tracking list (not info.id which is identity ID)
+    uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
+    if (conn_handle == 0xFFFF) {
         return BT_GATT_ITER_STOP;
     }
-    uint16_t conn_handle = info.id;
 
     // Determine event type based on what we subscribed to.
     // Since we subscribe to only one type (prefer INDICATE if supported),
@@ -2519,6 +2518,7 @@ static uint8_t gattc_descriptor_discover_cb(struct bt_conn *conn,
         rp->gattc_subscribe_conn_handle = conn_handle;
         rp->gattc_subscribe_active = false;
         rp->gattc_subscribe_changing = false;
+        rp->gattc_unsubscribing = false;
     }
 
     // Report descriptor
@@ -2548,24 +2548,32 @@ static uint8_t gattc_read_cb(struct bt_conn *conn, uint8_t err,
     uint16_t conn_handle = rp->gattc_read_conn_handle;
     uint16_t value_handle = rp->gattc_read_value_handle;
 
-    DEBUG_printf("gattc_read_cb: conn_handle=%d value_handle=0x%04x\n", conn_handle, value_handle);
+    DEBUG_printf("gattc_read_cb: conn_handle=%d value_handle=0x%04x data=%p len=%d err=%d\n",
+        conn_handle, value_handle, data, length, err);
 
-    if (data != NULL && length > 0) {
-        // Data available
+    if (data != NULL) {
+        // Data available (may be empty, length=0 for empty characteristics)
+        rp->gattc_read_data_received = true;
         const uint8_t *data_ptr = (const uint8_t *)data;
         mp_bluetooth_gattc_on_data_available(MP_BLUETOOTH_IRQ_GATTC_READ_RESULT,
             conn_handle, value_handle, &data_ptr, &length, 1);
+        return BT_GATT_ITER_CONTINUE;
     }
 
-    if (data == NULL) {
-        // Read complete
-        DEBUG_printf("gattc_read_cb: read complete, err=%d\n", err);
-        mp_bluetooth_gattc_on_read_write_status(MP_BLUETOOTH_IRQ_GATTC_READ_DONE,
-            conn_handle, value_handle, err);
-        return BT_GATT_ITER_STOP;
+    // Read complete (data == NULL).
+    // Zephyr skips the data callback for empty characteristics and calls with data=NULL directly.
+    // Only fire empty READ_RESULT if no data was received and the read was successful.
+    if (err == 0 && !rp->gattc_read_data_received) {
+        const uint8_t *empty_ptr = (const uint8_t *)"";
+        uint16_t empty_len = 0;
+        mp_bluetooth_gattc_on_data_available(MP_BLUETOOTH_IRQ_GATTC_READ_RESULT,
+            conn_handle, value_handle, &empty_ptr, &empty_len, 1);
     }
 
-    return BT_GATT_ITER_CONTINUE;
+    // Fire READ_DONE to signal completion (with error status if applicable)
+    mp_bluetooth_gattc_on_read_write_status(MP_BLUETOOTH_IRQ_GATTC_READ_DONE,
+        conn_handle, value_handle, err);
+    return BT_GATT_ITER_STOP;
 }
 
 // Write callback
@@ -2759,6 +2767,7 @@ int mp_bluetooth_gattc_read(uint16_t conn_handle, uint16_t value_handle) {
 
     rp->gattc_read_conn_handle = conn_handle;
     rp->gattc_read_value_handle = value_handle;
+    rp->gattc_read_data_received = false;  // Reset for new read operation
 
     #if ZEPHYR_BLE_DEBUG
     struct bt_conn_info conn_info;
@@ -2812,6 +2821,8 @@ int mp_bluetooth_gattc_write(uint16_t conn_handle, uint16_t value_handle, const 
             // Unsubscribe - disable notifications/indications
             if (rp->gattc_subscribe_active) {
                 DEBUG_printf("CCCD write: unsubscribing\n");
+                // Set flag so gattc_notify_cb knows to fire WRITE_DONE
+                rp->gattc_unsubscribing = true;
                 err = bt_gatt_unsubscribe(conn, &rp->gattc_subscribe_params);
                 // gattc_notify_cb fires with data=NULL when complete
                 if (err == 0) {
@@ -2819,6 +2830,8 @@ int mp_bluetooth_gattc_write(uint16_t conn_handle, uint16_t value_handle, const 
                     mp_bluetooth_zephyr_work_process();
                     return 0;
                 }
+                // Unsubscribe failed, clear flag
+                rp->gattc_unsubscribing = false;
                 DEBUG_printf("CCCD write: unsubscribe failed err=%d\n", err);
                 return bt_err_to_errno(err);
             }
