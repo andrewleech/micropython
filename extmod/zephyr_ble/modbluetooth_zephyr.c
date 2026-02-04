@@ -467,15 +467,23 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
         mp_bluetooth_gap_on_connected_disconnected(disconnect_event, info.id, 0xff, addr);
     } else {
         DEBUG_printf("Connected with id %d role %d\n", info.id, info.role);
-        // Take a reference to the connection for storage
-        // For incoming connections (peripheral role), conn is NULL - take new ref
-        // For outgoing connections (central role), conn already stored - use existing ref
+        // Take a reference to the connection for storage.
+        // The callback's 'conn' parameter is a borrowed reference from Zephyr.
+        //
+        // Cases where mp_bt_zephyr_next_conn->conn is NULL:
+        // 1. Incoming connections (peripheral role) - always NULL
+        // 2. Outgoing connections with synchronous HCI (STM32WB) - callback fires
+        //    DURING bt_conn_le_create before gap_connect can store the ref
+        //
+        // Cases where mp_bt_zephyr_next_conn->conn is set:
+        // 1. Outgoing connections with async HCI (RP2 FreeRTOS) - gap_connect
+        //    stored the ref from bt_conn_le_create before callback fires
         if (mp_bt_zephyr_next_conn->conn == NULL) {
-            // Incoming connection: callback parameter is borrowed, need our own ref
+            // Need our own reference - callback param is borrowed
             mp_bt_zephyr_next_conn->conn = bt_conn_ref(conn);
             DEBUG_printf("  Stored NEW connection ref %p\n", mp_bt_zephyr_next_conn->conn);
         } else {
-            // Outgoing connection: already have ref from bt_conn_le_create()
+            // Already have ref from bt_conn_le_create(), use it
             DEBUG_printf("  Using EXISTING connection ref %p\n", mp_bt_zephyr_next_conn->conn);
         }
         debug_check_uuid("before_connect_cb");
@@ -1733,12 +1741,15 @@ int mp_bluetooth_gap_scan_stop(void) {
 
 int mp_bluetooth_gap_peripheral_connect(uint8_t addr_type, const uint8_t *addr, int32_t duration_ms, int32_t min_conn_interval_us, int32_t max_conn_interval_us) {
     DEBUG_printf("mp_bluetooth_gap_peripheral_connect: addr_type=%u duration_ms=%d\n", addr_type, (int)duration_ms);
+    DEBUG_printf("  addr=%02x:%02x:%02x:%02x:%02x:%02x (BE from MicroPython)\n",
+                 addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
     if (!mp_bluetooth_is_active()) {
         return ERRNO_BLUETOOTH_NOT_ACTIVE;
     }
 
     // Stop scanning if active (can't scan and initiate connection simultaneously)
     if (mp_bluetooth_zephyr_gap_scan_state != MP_BLUETOOTH_ZEPHYR_GAP_SCAN_STATE_INACTIVE) {
+        DEBUG_printf("  stopping active scan before connect\n");
         mp_bluetooth_gap_scan_stop();
     }
 
@@ -1748,6 +1759,10 @@ int mp_bluetooth_gap_peripheral_connect(uint8_t addr_type, const uint8_t *addr, 
     for (int i = 0; i < 6; ++i) {
         peer_addr.a.val[i] = addr[5 - i];  // Reverse byte order: BE -> LE
     }
+    DEBUG_printf("  peer_addr: type=%d addr=%02x:%02x:%02x:%02x:%02x:%02x (LE for Zephyr)\n",
+                 peer_addr.type,
+                 peer_addr.a.val[5], peer_addr.a.val[4], peer_addr.a.val[3],
+                 peer_addr.a.val[2], peer_addr.a.val[1], peer_addr.a.val[0]);
 
     // Create connection parameters for scanning during connection establishment
     struct bt_conn_le_create_param create_param = {
@@ -1774,6 +1789,18 @@ int mp_bluetooth_gap_peripheral_connect(uint8_t addr_type, const uint8_t *addr, 
         .timeout = BT_GAP_MS_TO_CONN_TIMEOUT(4000),  // 4 seconds in 10ms units
     };
 
+    DEBUG_printf("  create_param: interval=%d window=%d timeout=%d\n",
+                 create_param.interval, create_param.window, create_param.timeout);
+    DEBUG_printf("  conn_param: interval_min=%d interval_max=%d latency=%d timeout=%d\n",
+                 conn_param.interval_min, conn_param.interval_max,
+                 conn_param.latency, conn_param.timeout);
+
+    // Process any pending work items before attempting connection.
+    // This ensures Zephyr has finished cleaning up any previous connection to
+    // the same peer address. Zephyr releases its final connection reference
+    // AFTER the disconnected callback returns via a work item.
+    mp_bluetooth_zephyr_work_process();
+
     // Pre-allocate connection tracking structure
     if (mp_bt_zephyr_next_conn != NULL) {
         // This shouldn't happen - indicates previous connection didn't properly clean up
@@ -1784,21 +1811,52 @@ int mp_bluetooth_gap_peripheral_connect(uint8_t addr_type, const uint8_t *addr, 
     mp_obj_list_append(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->objs_list, MP_OBJ_FROM_PTR(mp_bt_zephyr_next_conn));
 
     // Initiate connection
-    struct bt_conn *conn;
+    struct bt_conn *conn = NULL;  // Must be NULL for Zephyr's check
+    DEBUG_printf("  calling bt_conn_le_create...\n");
     int err = bt_conn_le_create(&peer_addr, &create_param, &conn_param, &conn);
 
     if (err != 0) {
         // Connection initiation failed - structure registered with GC, just reset pointer
         DEBUG_printf("  bt_conn_le_create failed: err=%d\n", err);
+        // Log specific Zephyr error meanings
+        if (err == -EINVAL) {
+            DEBUG_printf("  EINVAL: invalid params, bad random addr, or conn exists\n");
+        } else if (err == -EAGAIN) {
+            DEBUG_printf("  EAGAIN: BT dev not ready or scanner blocking\n");
+        } else if (err == -EALREADY) {
+            DEBUG_printf("  EALREADY: already initiating a connection\n");
+        } else if (err == -ENOMEM) {
+            DEBUG_printf("  ENOMEM: no memory for connection\n");
+        }
         mp_bt_zephyr_next_conn = NULL;
         return bt_err_to_errno(err);
     }
 
-    // Store conn handle for cancellation support
-    // bt_conn_le_create() returns with a reference - we keep it for cancellation
-    // In mp_bt_zephyr_connected callback, we take ANOTHER reference for storage
+    // Handle reference management for the connection.
+    // bt_conn_le_create() returns with a reference to the connection object.
+    //
+    // On platforms with async HCI (RP2 FreeRTOS): bt_conn_le_create returns,
+    // we store conn, then callback fires later and uses our stored ref.
+    //
+    // On platforms with sync HCI (STM32WB without FreeRTOS): callback may fire
+    // DURING bt_conn_le_create before it returns. In this case:
+    // - Callback sees mp_bt_zephyr_next_conn->conn == NULL
+    // - Callback takes its own ref (correct - callback param is borrowed)
+    // - Callback sets mp_bt_zephyr_next_conn = NULL
+    // - bt_conn_le_create returns with conn (another ref)
+    // - We must unref the extra ref since callback already handled it
     DEBUG_printf("  bt_conn_le_create succeeded, conn=%p\n", conn);
-    mp_bt_zephyr_next_conn->conn = conn;
+
+    if (mp_bt_zephyr_next_conn == NULL) {
+        // Callback already fired synchronously and handled the connection.
+        // The callback took its own reference, so we must release the
+        // reference returned by bt_conn_le_create to avoid ref leak.
+        DEBUG_printf("  callback handled synchronously, unref extra ref\n");
+        bt_conn_unref(conn);
+    } else {
+        // Normal async path - store the reference for callback to use.
+        mp_bt_zephyr_next_conn->conn = conn;
+    }
 
     return 0;
 }
