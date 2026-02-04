@@ -131,6 +131,13 @@ union uuid_u {
 // Fixed by using malloc() to keep GATT data outside GC control.
 #define debug_check_uuid(where) ((void)0)
 
+// Forward declarations for GATT client functions used elsewhere
+#if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+static void gattc_register_auto_subscription(struct bt_conn *conn, uint16_t conn_handle, uint16_t value_handle, uint8_t properties);
+static void gattc_clear_auto_subscriptions(uint16_t conn_handle);
+static void gattc_remove_auto_subscription_for_handle(struct bt_conn *conn, uint16_t conn_handle, uint16_t value_handle);
+#endif
+
 struct add_characteristic {
     uint8_t properties;
     uint8_t permissions;
@@ -224,13 +231,27 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
     struct bt_gatt_exchange_params gattc_mtu_params;
     uint16_t gattc_mtu_conn_handle;
 
-    // GATT client subscription state (for NOTIFY/INDICATE)
+    // GATT client subscription state (for NOTIFY/INDICATE via explicit CCCD write)
     struct bt_gatt_subscribe_params gattc_subscribe_params;
     uint16_t gattc_subscribe_conn_handle;
     uint16_t gattc_subscribe_value_handle;
     uint16_t gattc_subscribe_ccc_handle;
     bool gattc_subscribe_active; // Track if subscription callback is registered
     bool gattc_subscribe_changing; // Track if we're intentionally switching subscription types
+
+    // Auto-subscriptions for notification delivery without explicit CCCD write.
+    // Zephyr's architecture requires subscriptions to be registered for notification
+    // callbacks to fire, unlike NimBLE which delivers all notifications unconditionally.
+    // These are registered during characteristic discovery for any characteristics
+    // with notify/indicate properties.
+    #ifndef GATTC_AUTO_SUBSCRIBE_MAX
+    #define GATTC_AUTO_SUBSCRIBE_MAX 16  // Max simultaneous auto-subscribed handles
+    #endif
+    struct {
+        struct bt_gatt_subscribe_params params;
+        uint16_t conn_handle;
+        bool in_use;
+    } gattc_auto_subscriptions[GATTC_AUTO_SUBSCRIBE_MAX];
     #endif // MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
 
     // Pairing/bonding state (Phase 1: Basic pairing without persistent storage)
@@ -502,6 +523,7 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
     }
 
     // Reset subscription state if this was the subscribed connection
+    #if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
     if (rp && rp->gattc_subscribe_conn_handle == info.id) {
         rp->gattc_subscribe_active = false;
@@ -510,6 +532,10 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
         rp->gattc_subscribe_ccc_handle = 0;
         rp->gattc_subscribe_value_handle = 0;
     }
+
+    // Clear auto-subscriptions for this connection
+    gattc_clear_auto_subscriptions(info.id);
+    #endif // MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
 
     mp_bt_zephyr_remove_connection(info.id);
     mp_bluetooth_gap_on_connected_disconnected(disconnect_event, info.id, info.le.dst->type, info.le.dst->a.val);
@@ -2111,6 +2137,13 @@ static uint8_t gattc_characteristic_discover_cb(struct bt_conn *conn,
             end_handle,
             rp->gattc_pending_char.properties,
             &rp->gattc_pending_char.uuid);
+
+        // Auto-register subscription for characteristics with NOTIFY/INDICATE properties.
+        // This allows notifications to be delivered without explicit CCCD write,
+        // matching NimBLE's behavior where notifications are always delivered.
+        gattc_register_auto_subscription(conn, conn_handle,
+            rp->gattc_pending_char.value_handle,
+            rp->gattc_pending_char.properties);
     }
 
     if (attr == NULL) {
@@ -2210,6 +2243,179 @@ static uint8_t gattc_notify_cb(struct bt_conn *conn,
                                          &data_ptr, &length, 1);
 
     return BT_GATT_ITER_CONTINUE;
+}
+
+// Auto-subscription notification callback - simpler than gattc_notify_cb
+// Only delivers notifications to Python, no state management
+static uint8_t gattc_auto_notify_cb(struct bt_conn *conn,
+    struct bt_gatt_subscribe_params *params,
+    const void *data, uint16_t length) {
+
+    if (!mp_bluetooth_is_active()) {
+        return BT_GATT_ITER_STOP;
+    }
+
+    if (data == NULL) {
+        // Unsubscribe complete - just stop iteration, no state to update
+        DEBUG_printf("gattc_auto_notify_cb: unsubscribe complete\n");
+        return BT_GATT_ITER_STOP;
+    }
+
+    // Get connection handle from connection object
+    struct bt_conn_info info;
+    if (bt_conn_get_info(conn, &info) != 0) {
+        return BT_GATT_ITER_STOP;
+    }
+    uint16_t conn_handle = info.id;
+
+    // Determine event type based on what we subscribed to.
+    // Since we subscribe to only one type (prefer INDICATE if supported),
+    // params->value correctly indicates the subscription type.
+    uint8_t event = (params->value & BT_GATT_CCC_INDICATE)
+        ? MP_BLUETOOTH_IRQ_GATTC_INDICATE
+        : MP_BLUETOOTH_IRQ_GATTC_NOTIFY;
+
+    DEBUG_printf("gattc_auto_notify_cb: notification received conn_handle=%d value_handle=0x%04x length=%d\n",
+                 conn_handle, params->value_handle, length);
+
+    // Fire MicroPython callback with notification/indication data
+    const uint8_t *data_ptr = (const uint8_t *)data;
+    mp_bluetooth_gattc_on_data_available(event, conn_handle, params->value_handle,
+                                         &data_ptr, &length, 1);
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
+// Helper to register a single auto-subscription for a specific subscription type
+static bool gattc_register_auto_subscription_type(struct bt_conn *conn, uint16_t conn_handle,
+    uint16_t value_handle, uint16_t sub_value, struct bt_conn_info *info) {
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+
+    // Check if already registered for this handle+type on this connection
+    for (int i = 0; i < GATTC_AUTO_SUBSCRIBE_MAX; i++) {
+        if (rp->gattc_auto_subscriptions[i].in_use &&
+            rp->gattc_auto_subscriptions[i].conn_handle == conn_handle &&
+            rp->gattc_auto_subscriptions[i].params.value_handle == value_handle &&
+            rp->gattc_auto_subscriptions[i].params.value == sub_value) {
+            DEBUG_printf("gattc_register_auto_subscription: already registered handle=0x%04x type=0x%x\n",
+                        value_handle, sub_value);
+            return true;  // Already registered
+        }
+    }
+
+    // Find a free slot
+    int slot = -1;
+    for (int i = 0; i < GATTC_AUTO_SUBSCRIBE_MAX; i++) {
+        if (!rp->gattc_auto_subscriptions[i].in_use) {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot < 0) {
+        DEBUG_printf("gattc_register_auto_subscription: no free slots\n");
+        return false;
+    }
+
+    // Set up subscription params
+    struct bt_gatt_subscribe_params *params = &rp->gattc_auto_subscriptions[slot].params;
+    memset(params, 0, sizeof(*params));
+    params->notify = gattc_auto_notify_cb;
+    params->value_handle = value_handle;
+    // ccc_handle is required by bt_gatt_resubscribe assert but not actually used
+    // Set to value_handle + 1 which is typically where CCCD is
+    params->ccc_handle = value_handle + 1;
+    params->value = sub_value;
+
+    // Register with Zephyr - this adds to internal subscription list without CCCD write
+    int err = bt_gatt_resubscribe(info->id, info->le.dst, params);
+    if (err && err != -EALREADY) {
+        DEBUG_printf("gattc_register_auto_subscription: bt_gatt_resubscribe failed err=%d\n", err);
+        return false;
+    }
+
+    // Mark slot as in use
+    rp->gattc_auto_subscriptions[slot].conn_handle = conn_handle;
+    rp->gattc_auto_subscriptions[slot].in_use = true;
+
+    DEBUG_printf("gattc_register_auto_subscription: registered slot=%d handle=0x%04x type=0x%x\n",
+                slot, value_handle, sub_value);
+    return true;
+}
+
+// Register auto-subscription for a characteristic handle.
+// This allows notifications to be delivered without explicit CCCD write,
+// matching NimBLE's behavior. Called during characteristic discovery for
+// characteristics with NOTIFY or INDICATE properties.
+//
+// NOTE: Zephyr's bt_gatt_notification() doesn't pass the ATT opcode type
+// (notify vs indicate) to the callback - both go through the same path.
+// We can only infer the type from params->value (what we subscribed to).
+// Therefore we subscribe to only ONE type (prefer INDICATE if supported)
+// so params->value unambiguously indicates the event type.
+static void gattc_register_auto_subscription(struct bt_conn *conn, uint16_t conn_handle, uint16_t value_handle, uint8_t properties) {
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (!rp) {
+        return;
+    }
+
+    // Check if notify or indicate is supported
+    if (!(properties & (BT_GATT_CHRC_NOTIFY | BT_GATT_CHRC_INDICATE))) {
+        return;
+    }
+
+    // Get peer address for bt_gatt_resubscribe
+    struct bt_conn_info info;
+    if (bt_conn_get_info(conn, &info) != 0) {
+        DEBUG_printf("gattc_register_auto_subscription: failed to get conn info\n");
+        return;
+    }
+
+    // Subscribe to only ONE type so params->value correctly identifies the event.
+    // Prefer NOTIFY if supported (more common, lighter weight), else INDICATE.
+    uint16_t sub_value;
+    if (properties & BT_GATT_CHRC_NOTIFY) {
+        sub_value = BT_GATT_CCC_NOTIFY;
+    } else {
+        sub_value = BT_GATT_CCC_INDICATE;
+    }
+    gattc_register_auto_subscription_type(conn, conn_handle, value_handle, sub_value, &info);
+}
+
+// Clear auto-subscriptions for a disconnected connection
+static void gattc_clear_auto_subscriptions(uint16_t conn_handle) {
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (!rp) {
+        return;
+    }
+
+    for (int i = 0; i < GATTC_AUTO_SUBSCRIBE_MAX; i++) {
+        if (rp->gattc_auto_subscriptions[i].in_use &&
+            rp->gattc_auto_subscriptions[i].conn_handle == conn_handle) {
+            rp->gattc_auto_subscriptions[i].in_use = false;
+            DEBUG_printf("gattc_clear_auto_subscriptions: cleared slot=%d\n", i);
+        }
+    }
+}
+
+// Remove auto-subscription for a specific value handle when explicit subscription is made.
+// This prevents duplicate callbacks when both auto and explicit subscriptions exist.
+static void gattc_remove_auto_subscription_for_handle(struct bt_conn *conn, uint16_t conn_handle, uint16_t value_handle) {
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (!rp) {
+        return;
+    }
+
+    for (int i = 0; i < GATTC_AUTO_SUBSCRIBE_MAX; i++) {
+        if (rp->gattc_auto_subscriptions[i].in_use &&
+            rp->gattc_auto_subscriptions[i].conn_handle == conn_handle &&
+            rp->gattc_auto_subscriptions[i].params.value_handle == value_handle) {
+            // Unsubscribe from Zephyr's internal list
+            bt_gatt_unsubscribe(conn, &rp->gattc_auto_subscriptions[i].params);
+            rp->gattc_auto_subscriptions[i].in_use = false;
+            DEBUG_printf("gattc_remove_auto_subscription_for_handle: removed slot=%d handle=0x%04x\n", i, value_handle);
+        }
+    }
 }
 
 static uint8_t gattc_descriptor_discover_cb(struct bt_conn *conn,
@@ -2559,6 +2765,9 @@ int mp_bluetooth_gattc_write(uint16_t conn_handle, uint16_t value_handle, const 
                 bt_gatt_unsubscribe(conn, &rp->gattc_subscribe_params);
                 rp->gattc_subscribe_active = false;
             }
+
+            // Remove any auto-subscription for this handle to prevent duplicate callbacks
+            gattc_remove_auto_subscription_for_handle(conn, conn_handle, rp->gattc_subscribe_value_handle);
 
             // Set up subscription parameters
             memset(&rp->gattc_subscribe_params, 0, sizeof(rp->gattc_subscribe_params));
