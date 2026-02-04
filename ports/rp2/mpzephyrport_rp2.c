@@ -112,7 +112,7 @@ static uint8_t __attribute__((aligned(4))) hci_rx_buffer[CYW43_HCI_HEADER_SIZE +
 #include "FreeRTOS.h"
 #include "task.h"
 
-#define HCI_RX_TASK_STACK_SIZE 1024  // 4KB (in words)
+#define HCI_RX_TASK_STACK_SIZE 2048  // 8KB (in words) - adequate for Zephyr BLE callbacks
 // Lower priority than main thread - HCI RX can wait for main to process
 #define HCI_RX_TASK_PRIORITY (tskIDLE_PRIORITY + 1)
 
