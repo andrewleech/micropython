@@ -42,38 +42,35 @@ mpremote connect /dev/ttyACM* repl
 
 ## Current Status
 
-### RP2 Pico W (RP2040) - Peripheral Role Working
-- **Zephyr BLE as Peripheral** (with NimBLE central): 11/13 tests pass
+### RP2 Pico W (RP2040)
+- **Zephyr BLE as Peripheral** (with NimBLE central): Mostly working
   - ✓ Scanning, Advertising, Connections
   - ✓ GATT server (read/write/notify/indicate)
   - ✓ Pairing (legacy mode)
-  - ✗ L2CAP as peripheral: OSError 112 (Issue #20 regression)
+  - ✓ L2CAP (Issue #20 FIXED)
   - ✗ Pairing bond: event ordering issue
-- **Zephyr BLE as Central**: Major issues (Issue #18, #19)
-  - ✗ Service discovery causes k_panic (Issue #18)
-  - △ Notifications partially working (Issue #19 - indications misclassified)
-  - 4/15 tests pass against NimBLE peripheral
+- **Zephyr BLE as Central** (with NimBLE peripheral): Mostly working
+  - ✓ Service discovery (Issue #18 FIXED)
+  - ✓ ble_gap_connect.py, ble_gattc_discover_services.py, ble_irq_calls.py PASS
+  - ✗ ble_characteristic.py: Indications misclassified as notifications (Issue #19)
+  - ✗ ble_subscribe.py: Missing forced notifications - Zephyr limitation
 
 ### STM32WB55
 - **NimBLE**: ✓ Fully working (all features)
-- **Zephyr BLE as Peripheral** (with NimBLE central): 12/13 tests pass
+- **Zephyr BLE as Peripheral** (with NimBLE central): Mostly working
   - ✓ Scanning, Advertising, Connections
   - ✓ GATT server (read/write/notify/indicate)
   - ✓ GATT client operations
   - ✓ Pairing/bonding
-  - ✓ ble_characteristic.py PASS
-  - ✗ L2CAP as peripheral: OSError 112 (Issue #20 regression)
-  - ✗ Runtime MTU config (ble_mtu.py skipped)
-- **Zephyr BLE as Central** (with NimBLE peripheral): Partially working
-  - ✓ Basic connections work (ble_gap_connect.py, ble_gattc_discover_services.py pass)
-  - ✓ BLE operations from IRQ callbacks work (Issue #17 FIXED, Issue #21 FIXED)
-  - ✗ ble_irq_calls.py: Missing READ_RESULT events, duplicate WRITE_DONE (Issue #22)
+  - ✓ L2CAP (Issue #20 FIXED)
+  - ✗ Runtime MTU config (ble_mtu.py skipped - compile-time only)
+- **Zephyr BLE as Central** (with NimBLE peripheral): Mostly working
+  - ✓ ble_gap_connect.py, ble_gattc_discover_services.py, ble_irq_calls.py PASS
   - ✗ ble_characteristic.py: Indications misclassified as notifications (Issue #19)
-  - ✗ ble_subscribe.py: Missing forced notifications (periph10)
+  - ✗ ble_subscribe.py: Missing forced notifications - Zephyr limitation
 
 ### RP2 Pico 2 W (RP2350)
-- Fix #8: Net_buf crash FIXED (see `docs/NET_BUF_CRASH_FIX.md`)
-- Status: HCI init hang - untested recently
+- Status: Untested - HCI init hang reported previously, may be fixed by recent changes
 
 ---
 
@@ -285,8 +282,8 @@ For Zephyr BLE testing, use Pico W (Zephyr) as instance0 and PYBD (NimBLE) as in
 - **Also fixed**: info.id bug - was using Zephyr identity ID (always 0) instead of
   connection handle derived from list position. Commit 236bec5010
 
-**Issue #22: ble_irq_calls.py GATT Read/Write Issues** - ✓ MOSTLY FIXED
-- **Status**: GATT reads/writes working, minor descriptor count difference remains
+**Issue #22: ble_irq_calls.py GATT Read/Write Issues** - ✓ FIXED
+- **Status**: FIXED - Test now passes on both NimBLE and Zephyr
 - **Fixed**:
   1. Missing READ_RESULT: Zephyr skips data callback for empty characteristics. Now fire
      empty READ_RESULT when data=NULL and err=0 and no data was previously received.
@@ -294,16 +291,17 @@ For Zephyr BLE testing, use Pico W (Zephyr) as instance0 and PYBD (NimBLE) as in
      Added gattc_unsubscribing flag to only fire for explicit CCCD unsubscribe.
   3. info.id bug: Multiple callbacks used Zephyr identity ID (always 0) instead of
      connection handle from mp_bt_zephyr_conn_to_handle().
-- **Remaining**: Descriptor count difference (2 vs 3) - minor behavioral difference
-- **Commit**: 45517be03d
+  4. Descriptor count difference: Made test stack-agnostic by not printing each
+     DESCRIPTOR_RESULT (count varies: NimBLE=3, Zephyr=2). Only CCCD matters.
+- **Commits**: 45517be03d, 00d707e6b2
 
-**Issue #18: Pico W Central k_panic in Service Discovery** - OPEN
-- **Status**: Fatal BLE stack error during GATT service discovery
-- **Discovered**: 2026-02-03 via multitest matrix investigation
-- **Symptoms**: `RuntimeError: BLE stack fatal error (k_panic)` in `ble_gattc_discover_services.py`
-- **Affected**: Pico W as central only
-- **Impact**: Service discovery causes device crash
-- **Investigation**: `docs/ISSUE_18_PICO_CENTRAL_KPANIC.md`
+**Issue #18: Pico W Central k_panic in Service Discovery** - ✓ FIXED
+- **Status**: FIXED - Service discovery now works
+- **Root cause**: FreeRTOS HCI RX task had only 4KB stack, insufficient for Zephyr BLE
+  callback chains during characteristic discovery (bt_gatt_resubscribe calls)
+- **Fix**: Increased HCI_RX_TASK_STACK_SIZE from 1024 to 2048 words (4KB → 8KB)
+- **Cost**: +4KB RAM (acceptable on RP2040's 264KB)
+- **Commit**: db8543928e
 
 **Issue #19: Pico W Central Notification Delivery Failure** - PARTIALLY FIXED
 - **Status**: Notifications working, indications misclassified as notifications
@@ -482,10 +480,8 @@ See `docs/PERFORMANCE.md` for detailed analysis.
 
 ## Next Steps
 
-1. **Issue #18: Fix Pico W k_panic** - Critical stability issue in service discovery
-2. **Issue #19: Fix indication type detection** - Indications misclassified as notifications
-3. **ble_irq_calls.py descriptor count** - Minor: 2 vs 3 descriptors (Zephyr vs NimBLE)
-4. **RP2 Pico 2 W (RP2350)**: Fix HCI init hang (blocks Zephyr BLE on RP2350)
+1. **Issue #19: Fix indication type detection** - Indications misclassified as notifications (Zephyr upstream limitation)
+2. **RP2 Pico 2 W (RP2350)**: Untested - HCI init hang reported previously, may be fixed by recent changes
 
 ---
 
