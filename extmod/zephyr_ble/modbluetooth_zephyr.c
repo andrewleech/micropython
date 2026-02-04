@@ -455,8 +455,10 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
     if (err) {
         uint8_t addr[6] = {0};
         DEBUG_printf("Connection failed (err %u role %d)\n", err, info.role);
-        // For outgoing connections, clean up stored conn reference
-        if (mp_bt_zephyr_next_conn->conn != NULL) {
+        // For outgoing connections, clean up stored conn reference.
+        // Defensive NULL check: mp_bt_zephyr_next_conn could be NULL if
+        // advertising was stopped or another callback path cleared it.
+        if (mp_bt_zephyr_next_conn != NULL && mp_bt_zephyr_next_conn->conn != NULL) {
             DEBUG_printf("  Unref'ing failed outgoing connection %p\n", mp_bt_zephyr_next_conn->conn);
             bt_conn_unref(mp_bt_zephyr_next_conn->conn);
             mp_bt_zephyr_next_conn->conn = NULL;
