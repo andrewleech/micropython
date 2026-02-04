@@ -466,7 +466,8 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
         // Don't free mp_bt_zephyr_next_conn here - it's registered with GC list
         // Reset pointer so next connection allocates fresh structure
         mp_bt_zephyr_next_conn = NULL;
-        mp_bluetooth_gap_on_connected_disconnected(disconnect_event, info.id, 0xff, addr);
+        // Use 0xFF for failed connections - no valid handle exists
+        mp_bluetooth_gap_on_connected_disconnected(disconnect_event, 0xFF, 0xff, addr);
     } else {
         DEBUG_printf("Connected with id %d role %d\n", info.id, info.role);
         // Take a reference to the connection for storage.
@@ -493,10 +494,13 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
         // from within the IRQ handler - they need mp_bt_zephyr_find_connection()
         // to succeed.
         mp_bt_zephyr_insert_connection(mp_bt_zephyr_next_conn);
+        // Get the actual connection handle from list position (not info.id which
+        // is the Zephyr identity ID, always 0 with CONFIG_BT_ID_MAX=1).
+        uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(mp_bt_zephyr_next_conn->conn);
         // Reset pointer so next connection allocates fresh structure
         mp_bt_zephyr_next_conn = NULL;
         debug_check_uuid("before_connect_cb");
-        mp_bluetooth_gap_on_connected_disconnected(connect_event, info.id, info.le.dst->type, info.le.dst->a.val);
+        mp_bluetooth_gap_on_connected_disconnected(connect_event, conn_handle, info.le.dst->type, info.le.dst->a.val);
         debug_check_uuid("after_connect_cb");
     }
 }
@@ -517,6 +521,10 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
     struct bt_conn_info info;
     bt_conn_get_info(conn, &info);
 
+    // Get actual connection handle from list position (not info.id which is
+    // Zephyr identity ID). Must do this BEFORE removing from list.
+    uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
+
     // Determine correct IRQ event based on connection role:
     // - BT_HCI_ROLE_CENTRAL (0x00): Local initiated connection → PERIPHERAL_DISCONNECT
     // - BT_HCI_ROLE_PERIPHERAL (0x01): Remote initiated connection → CENTRAL_DISCONNECT
@@ -524,12 +532,12 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
         ? MP_BLUETOOTH_IRQ_PERIPHERAL_DISCONNECT
         : MP_BLUETOOTH_IRQ_CENTRAL_DISCONNECT;
 
-    DEBUG_printf("Disconnected (id %d reason %u role %d)\n", info.id, reason, info.role);
+    DEBUG_printf("Disconnected (handle %d reason %u role %d)\n", conn_handle, reason, info.role);
 
     // Find our stored connection and unref it
     // Note: 'conn' parameter is a borrowed reference from Zephyr callback - don't unref it
     // We only unref the reference we explicitly took in mp_bt_zephyr_connected()
-    mp_bt_zephyr_conn_t *stored = mp_bt_zephyr_find_connection(info.id);
+    mp_bt_zephyr_conn_t *stored = mp_bt_zephyr_find_connection(conn_handle);
     if (stored && stored->conn) {
         DEBUG_printf("  Unref'ing stored connection %p\n", stored->conn);
         bt_conn_unref(stored->conn);
@@ -539,7 +547,7 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
     // Reset subscription state if this was the subscribed connection
     #if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
-    if (rp && rp->gattc_subscribe_conn_handle == info.id) {
+    if (rp && rp->gattc_subscribe_conn_handle == conn_handle) {
         rp->gattc_subscribe_active = false;
         rp->gattc_subscribe_changing = false;
         rp->gattc_subscribe_conn_handle = 0;
@@ -548,11 +556,13 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
     }
 
     // Clear auto-subscriptions for this connection
-    gattc_clear_auto_subscriptions(info.id);
+    gattc_clear_auto_subscriptions(conn_handle);
     #endif // MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
 
-    mp_bt_zephyr_remove_connection(info.id);
-    mp_bluetooth_gap_on_connected_disconnected(disconnect_event, info.id, info.le.dst->type, info.le.dst->a.val);
+    // Fire Python callback BEFORE removing from list, so cleanup operations
+    // in the callback can still access the connection if needed.
+    mp_bluetooth_gap_on_connected_disconnected(disconnect_event, conn_handle, info.le.dst->type, info.le.dst->a.val);
+    mp_bt_zephyr_remove_connection(conn_handle);
 }
 
 static void mp_bt_zephyr_security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err) {
