@@ -488,12 +488,16 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
             // Already have ref from bt_conn_le_create(), use it
             DEBUG_printf("  Using EXISTING connection ref %p\n", mp_bt_zephyr_next_conn->conn);
         }
-        debug_check_uuid("before_connect_cb");
-        mp_bluetooth_gap_on_connected_disconnected(connect_event, info.id, info.le.dst->type, info.le.dst->a.val);
-        debug_check_uuid("after_connect_cb");
+        // Insert connection into tracking list BEFORE firing Python callback.
+        // This ensures BLE operations (e.g., GATT discovery) can be performed
+        // from within the IRQ handler - they need mp_bt_zephyr_find_connection()
+        // to succeed.
         mp_bt_zephyr_insert_connection(mp_bt_zephyr_next_conn);
         // Reset pointer so next connection allocates fresh structure
         mp_bt_zephyr_next_conn = NULL;
+        debug_check_uuid("before_connect_cb");
+        mp_bluetooth_gap_on_connected_disconnected(connect_event, info.id, info.le.dst->type, info.le.dst->a.val);
+        debug_check_uuid("after_connect_cb");
     }
 }
 
