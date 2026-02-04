@@ -70,7 +70,9 @@ mpremote connect /dev/ttyACM* repl
   - ✗ ble_subscribe.py: Missing forced notifications - Zephyr limitation
 
 ### RP2 Pico 2 W (RP2350)
-- Status: Untested - HCI init hang reported previously, may be fixed by recent changes
+- Status: Cannot test - no hardware available
+- Build: ✓ Compiles successfully
+- Previous issue: HCI init hang reported - may be fixed by Issue #18 stack size increase
 
 ---
 
