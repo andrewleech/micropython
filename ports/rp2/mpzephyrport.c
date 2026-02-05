@@ -43,8 +43,15 @@ void mp_bluetooth_hci_poll(void) {
     if (mp_bluetooth_is_active()) {
         DEBUG_printf("mp_bluetooth_hci_poll\n");
 
+        // Read HCI packets from CYW43 transport
+        // This is critical for receiving connection events, scan results, etc.
+        // Without this, HCI events would only be read during semaphore waits.
+        extern void mp_bluetooth_zephyr_poll_uart(void);
+        mp_bluetooth_zephyr_poll_uart();
+
         // Process Zephyr BLE work queues and semaphores
         // This handles all pending work items, timers, and events
+        // Must be called AFTER reading HCI to process newly queued rx_work
         extern void mp_bluetooth_zephyr_poll(void);
         mp_bluetooth_zephyr_poll();
 
