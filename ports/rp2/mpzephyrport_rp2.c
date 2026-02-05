@@ -627,12 +627,12 @@ static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len) {
 }
 
 // Forward declarations
-static void mp_zephyr_hci_poll_now(void);
+void mp_bluetooth_zephyr_hci_poll_now(void);
 void mp_bluetooth_zephyr_port_poll_in_ms(uint32_t ms);
 
 // This is called by soft_timer and executes at PendSV level
 static void mp_zephyr_hci_soft_timer_callback(soft_timer_entry_t *self) {
-    mp_zephyr_hci_poll_now();
+    mp_bluetooth_zephyr_hci_poll_now();
 }
 
 // HCI packet reception handler - called when data arrives from CYW43 SPI
@@ -691,8 +691,11 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
     mp_bluetooth_zephyr_port_poll_in_ms(10);
 }
 
-static void mp_zephyr_hci_poll_now(void) {
-    // Note: mp_printf can crash during BLE init - avoid debug output here
+// Schedule immediate BLE work queue processing in main thread context.
+// Safe to call from PendSV/interrupt context (uses MICROPY_BEGIN_ATOMIC_SECTION).
+// Called by cyw43_bluetooth_hci_process() after HCI data arrives to close the
+// gap between HCI packet reception and work queue processing.
+void mp_bluetooth_zephyr_hci_poll_now(void) {
     mp_sched_schedule_node(&mp_zephyr_hci_sched_node, run_zephyr_hci_task);
 }
 

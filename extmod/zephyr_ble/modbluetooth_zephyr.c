@@ -922,7 +922,7 @@ int mp_bluetooth_init(void) {
 
         // Start HCI RX task for continuous HCI polling in background
         // The task is stopped first in mp_bluetooth_deinit() to prevent race conditions
-        #if MICROPY_PY_THREAD
+        #if MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
         extern void mp_bluetooth_zephyr_hci_rx_task_start(void);
         mp_bluetooth_zephyr_hci_rx_task_start();
         DEBUG_printf("HCI RX task started\n");

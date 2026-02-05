@@ -381,11 +381,17 @@ void cyw43_hal_generate_laa_mac(int idx, uint8_t buf[6]) {
 // Bluetooth HCI process callback - called by CYW43 driver when BT data is available.
 // This is the entry point for HCI RX processing in the Zephyr BLE stack.
 // BTstack provides its own implementation in btstack_hci_transport_cyw43.c.
+// Called from service task context via cyw43_poll() when WL_HOST_WAKE GPIO fires.
+// IMPORTANT: Do NOT call poll_uart() here - this runs on the FreeRTOS service task,
+// not the main task. Calling bt_hci_recv() from the service task causes concurrent
+// access to Zephyr BT host state (priority event handlers like hci_cmd_complete,
+// le_conn_complete_prio run immediately inside bt_hci_recv). Instead, just schedule
+// HCI processing on the main task where all BLE state access is serialized.
 volatile uint32_t cyw43_bt_hci_process_count = 0;
-extern void mp_bluetooth_zephyr_poll_uart(void);
+extern void mp_bluetooth_zephyr_hci_poll_now(void);
 void cyw43_bluetooth_hci_process(void) {
     cyw43_bt_hci_process_count++;
-    mp_bluetooth_zephyr_poll_uart();
+    mp_bluetooth_zephyr_hci_poll_now();
 }
 
 #endif // MICROPY_BLUETOOTH_ZEPHYR
