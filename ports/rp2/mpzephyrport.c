@@ -48,9 +48,9 @@ void mp_bluetooth_hci_poll(void) {
         extern void mp_bluetooth_zephyr_poll(void);
         mp_bluetooth_zephyr_poll();
 
-        // Call this function again in 128ms to check for new events
-        // TODO: improve this by only calling back when needed
-        mp_bluetooth_hci_poll_in_ms(128);
+        // Call this function again in 10ms to check for new events
+        // Use same interval as FreeRTOS HCI RX task for responsive BLE
+        mp_bluetooth_hci_poll_in_ms(10);
     }
 }
 
@@ -61,6 +61,14 @@ void mp_bluetooth_zephyr_hci_uart_wfi(void) {
     // This reads from HCI transport and passes to Zephyr BLE stack
     extern void mp_bluetooth_zephyr_poll_uart(void);
     mp_bluetooth_zephyr_poll_uart();
+
+    // Process timers, work queues, and additional HCI (critical for callback delivery)
+    // Without this, callbacks are delayed until the next mp_bluetooth_hci_poll()
+    // which can cause timeouts in complex GATT operations.
+    // mp_bluetooth_zephyr_poll() has internal re-entrancy protection via
+    // mp_bluetooth_zephyr_hci_processing_depth check.
+    extern void mp_bluetooth_zephyr_poll(void);
+    mp_bluetooth_zephyr_poll();
 }
 
 // Called by mp_bluetooth_zephyr_poll() to process HCI packets from the queue
