@@ -438,7 +438,9 @@ extern const struct device __device_dts_ord_0;
 // "Security Manager Protocol (SMP) - Pairing/Bonding" section below. This section
 // contains additional SMP options.
 // #define CONFIG_BT_SMP 0  // OLD - now enabled in SMP section below for pairing/bonding
-#define CONFIG_BT_SIGNING 0
+// CONFIG_BT_SIGNING: Not defined = disabled. Must not be defined to 0
+// because Zephyr uses #if defined() which treats 0 as enabled.
+// #define CONFIG_BT_SIGNING 1
 // CONFIG_BT_SMP_SC_PAIR_ONLY must NOT be defined (not even to 0) to enable legacy+SC pairing
 // When defined, Zephyr uses #if !defined() to check, so any definition disables the feature
 // #define CONFIG_BT_SMP_SC_PAIR_ONLY 0
@@ -454,8 +456,13 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_PASSKEY_MAX 999999
 #define CONFIG_BT_SMP_MIN_ENC_KEY_SIZE 7  // Minimum encryption key size (7-16 bytes)
 #define BT_SMP_MIN_ENC_KEY_SIZE CONFIG_BT_SMP_MIN_ENC_KEY_SIZE
-#define CONFIG_BT_PRIVACY 0  // Disabled to fix scanning EPERM error
-#define CONFIG_BT_RPA 0  // Disabled to fix scanning EPERM error
+// CONFIG_BT_PRIVACY: Not defined = disabled. Must not be defined to 0
+// because Zephyr uses #if defined() which treats 0 as enabled.
+// Previously defined as 0 to fix scanning EPERM — the EPERM was actually
+// caused by privacy code being compiled in (defined() = true) but not
+// properly initialized. Leaving undefined fixes both issues.
+// #define CONFIG_BT_PRIVACY 1
+// #define CONFIG_BT_RPA 1
 #define CONFIG_BT_CTLR_PRIVACY 0  // No controller privacy (host-only)
 #define CONFIG_BT_SCAN_WITH_IDENTITY 1  // Use identity address for scanning instead of random address
 
