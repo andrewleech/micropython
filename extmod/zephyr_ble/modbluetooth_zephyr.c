@@ -41,6 +41,7 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/l2cap.h>
 #include <zephyr/device.h>
+#include "host/att_internal.h"
 #include "extmod/modbluetooth.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_work.h"
 #include "extmod/zephyr_ble/net_buf_pool_registry.h"
@@ -310,9 +311,10 @@ typedef struct _mp_bt_zephyr_indicate_params_t {
 static mp_bt_zephyr_indicate_params_t mp_bt_zephyr_indicate_pool[CONFIG_BT_MAX_CONN];
 
 #if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
-// L2CAP SDU pool for TX. Buffer size includes headroom for L2CAP header.
+// L2CAP SDU pool for TX. Buffer size includes headroom for L2CAP/HCI headers.
+// Uses Zephyr's BT_L2CAP_SDU_BUF_SIZE to account for all required headroom.
 // Keep buffer count low to minimize RAM usage - credit flow control handles pacing.
-#define L2CAP_SDU_BUF_SIZE (CONFIG_BT_L2CAP_TX_MTU + BT_L2CAP_SDU_HDR_SIZE)
+#define L2CAP_SDU_BUF_SIZE BT_L2CAP_SDU_BUF_SIZE(CONFIG_BT_L2CAP_TX_MTU)
 #define L2CAP_SDU_BUF_COUNT 5
 NET_BUF_POOL_FIXED_DEFINE(l2cap_sdu_pool, L2CAP_SDU_BUF_COUNT, L2CAP_SDU_BUF_SIZE,
     CONFIG_BT_CONN_TX_USER_DATA_SIZE, NULL);
@@ -1675,6 +1677,23 @@ int mp_bluetooth_gatts_notify_indicate(uint16_t conn_handle, uint16_t value_hand
                     break;
                 }
             }
+        } else if (gatts_op == MP_BLUETOOTH_GATTS_OP_NOTIFY) {
+            // Handle not in local GATT DB — send raw ATT notification PDU.
+            // This supports cases where a GATTC-discovered remote handle is
+            // passed to gatts_notify (e.g. perf_gatt_notify.py).
+            struct net_buf *buf = bt_att_create_pdu(connection->conn, BT_ATT_OP_NOTIFY,
+                sizeof(struct bt_att_notify) + value_len);
+            if (buf) {
+                struct bt_att_notify *nfy = net_buf_add(buf,
+                    sizeof(struct bt_att_notify) + value_len);
+                nfy->handle = sys_cpu_to_le16(value_handle);
+                memcpy(nfy->value, value, value_len);
+                bt_att_set_tx_meta_data(buf, NULL, NULL, BT_ATT_CHAN_OPT_NONE);
+                err = bt_att_send(connection->conn, buf);
+            } else {
+                err = -ENOMEM;
+            }
+            mp_bluetooth_zephyr_work_process();
         }
     }
 
@@ -3391,6 +3410,11 @@ static int l2cap_create_channel(uint16_t mtu, mp_bluetooth_zephyr_l2cap_channel_
         return MP_ENOMEM;
     }
 
+    // Clamp MTU to what our compile-time buffer pool can handle.
+    if (mtu > CONFIG_BT_L2CAP_TX_MTU) {
+        mtu = CONFIG_BT_L2CAP_TX_MTU;
+    }
+
     // Initialize channel state
     chan->mtu = mtu;
     chan->rx_len = 0;
@@ -3683,7 +3707,7 @@ int mp_bluetooth_l2cap_listen(uint16_t psm, uint16_t mtu) {
         if (mp_bluetooth_zephyr_l2cap_static_server.server.psm == psm) {
             // Same PSM - just update MTU and mark as listening
             DEBUG_printf("mp_bluetooth_l2cap_listen: reusing existing server for PSM %d\n", psm);
-            mp_bluetooth_zephyr_l2cap_static_server.mtu = mtu;
+            mp_bluetooth_zephyr_l2cap_static_server.mtu = MIN(mtu, CONFIG_BT_L2CAP_TX_MTU);
             rp->l2cap_listening = true;
             return 0;
         } else {
@@ -3698,7 +3722,7 @@ int mp_bluetooth_l2cap_listen(uint16_t psm, uint16_t mtu) {
     mp_bluetooth_zephyr_l2cap_static_server.server.psm = psm;
     mp_bluetooth_zephyr_l2cap_static_server.server.accept = l2cap_server_accept_cb;
     mp_bluetooth_zephyr_l2cap_static_server.server.sec_level = BT_SECURITY_L1;  // No encryption required
-    mp_bluetooth_zephyr_l2cap_static_server.mtu = mtu;
+    mp_bluetooth_zephyr_l2cap_static_server.mtu = MIN(mtu, CONFIG_BT_L2CAP_TX_MTU);
 
     // Register the server
     int ret = bt_l2cap_server_register(&mp_bluetooth_zephyr_l2cap_static_server.server);
@@ -3786,8 +3810,8 @@ int mp_bluetooth_l2cap_send(uint16_t conn_handle, uint16_t cid,
 
     struct bt_l2cap_le_chan *le_chan = &chan->le_chan;
 
-    // Check that the data fits in the peer's MTU
-    if (len > le_chan->tx.mtu) {
+    // Check that the data fits in the peer's MTU and our local buffer pool.
+    if (len > le_chan->tx.mtu || len > CONFIG_BT_L2CAP_TX_MTU) {
         return MP_EINVAL;
     }
 
