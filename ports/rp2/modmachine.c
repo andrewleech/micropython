@@ -134,6 +134,11 @@ static void mp_machine_set_freq(size_t n_args, const mp_obj_t *args) {
 }
 
 static void mp_machine_idle(void) {
+    // Process scheduled callbacks (e.g. BLE polling) before sleeping
+    // This matches the STM32 behavior and ensures timely callback delivery
+    extern void mp_handle_pending(bool);
+    mp_handle_pending(false);
+
     MICROPY_INTERNAL_WFE(1);
 }
 

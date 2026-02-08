@@ -277,3 +277,42 @@ int mp_hal_is_pin_reserved(int n) {
     return false;
     #endif
 }
+
+#if MICROPY_PY_NETWORK_CYW43
+// Check if CYW43 poll is pending.
+bool cyw43_poll_is_pending(void) {
+    return pendsv_is_pending(PENDSV_DISPATCH_CYW43);
+}
+
+// Wait with background processing.
+// Required by pico-SDK's cyw43_driver_picow library.
+void cyw43_await_background_or_timeout_us(uint32_t timeout_us) {
+    if (timeout_us <= 1000) {
+        uint32_t start = mp_hal_ticks_us();
+        while (mp_hal_ticks_us() - start < timeout_us) {
+            mp_event_handle_nowait();
+        }
+        return;
+    }
+    mp_event_wait_ms(timeout_us / 1000);
+}
+
+// Wrapper for m_tracked_calloc with malloc-compatible signature.
+// Used by CYW43 driver (via compile definition cyw43_malloc=m_tracked_calloc_wrapper)
+// because pico-sdk's default cyw43_malloc uses C malloc which has no heap in MicroPython.
+void *m_tracked_calloc_wrapper(size_t size) {
+    return m_tracked_calloc(size, 1);
+}
+
+#if MICROPY_BLUETOOTH_ZEPHYR
+// Bluetooth HCI process callback - called by CYW43 driver when BT data is available.
+// Schedule HCI processing on the main task where all BLE state access is serialized.
+volatile uint32_t cyw43_bt_hci_process_count = 0;
+extern void mp_bluetooth_zephyr_hci_poll_now(void);
+void cyw43_bluetooth_hci_process(void) {
+    cyw43_bt_hci_process_count++;
+    mp_bluetooth_zephyr_hci_poll_now();
+}
+#endif // MICROPY_BLUETOOTH_ZEPHYR
+
+#endif // MICROPY_PY_NETWORK_CYW43

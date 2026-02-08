@@ -261,6 +261,13 @@ elseif(PICO_RISCV)
     )
 endif()
 
+# When a board variant explicitly disables threading, override mpconfigport.h default
+if(DEFINED MICROPY_PY_THREAD AND NOT MICROPY_PY_THREAD)
+    target_compile_definitions(${MICROPY_TARGET} PRIVATE
+        MICROPY_PY_THREAD=0
+    )
+endif()
+
 # Use our custom pico_float_micropython float implementation.  This is needed for two reasons:
 # - to fix inf handling in pico-sdk's __wrap___aeabi_fadd();
 # - so we can use our own libm functions, to fix inaccuracies in the pico-sdk versions.
@@ -327,24 +334,46 @@ if (MICROPY_PY_LWIP)
 endif()
 
 if(MICROPY_PY_BLUETOOTH)
+    # Add shared HCI infrastructure for all BLE stacks (BTstack, NimBLE, Zephyr)
+    # Provides common polling, scheduling, and controller interface (WEAK overrides)
     list(APPEND MICROPY_SOURCE_PORT mpbthciport.c)
+
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
         MICROPY_PY_BLUETOOTH=1
         MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS=1
         MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE=1
     )
+    # Interlock requires threading support for mp_thread_get_state/set_state
+    if(NOT DEFINED MICROPY_PY_THREAD OR MICROPY_PY_THREAD)
+        target_compile_definitions(${MICROPY_TARGET} PRIVATE
+            MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS_WITH_INTERLOCK=1
+            MICROPY_PY_BLUETOOTH_SYNC_EVENT_STACK_SIZE=2048
+        )
+    endif()
 endif()
 
 if (MICROPY_PY_BLUETOOTH_CYW43)
     target_compile_definitions(${MICROPY_TARGET} PRIVATE
         CYW43_ENABLE_BLUETOOTH=1
         MICROPY_PY_BLUETOOTH_CYW43=1
+        CYW43_INCLUDE_LEGACY_F1_OVERFLOW_WORKAROUND_VARIABLES=1
+    )
+
+    # Add CYW43 external pin support (needed for LED and other CYW43 GPIO pins)
+    list(APPEND MICROPY_SOURCE_PORT
+        machine_pin_cyw43.c
     )
 
     if (MICROPY_BLUETOOTH_BTSTACK)
+        # BTstack uses SPI/SDIO BT transport
         target_link_libraries(${MICROPY_TARGET}
             pico_btstack_hci_transport_cyw43
         )
+    endif()
+
+    if (MICROPY_BLUETOOTH_ZEPHYR)
+        # Zephyr BLE uses CYW43 SPI btbus (same as BTstack)
+        # HCI transport files added in MICROPY_BLUETOOTH_ZEPHYR section above
     endif()
 endif()
 
@@ -389,6 +418,59 @@ if(MICROPY_BLUETOOTH_NIMBLE)
     list(APPEND MICROPY_INC_CORE ${NIMBLE_INCLUDE})
 endif()
 
+if(MICROPY_BLUETOOTH_ZEPHYR)
+    list(APPEND GIT_SUBMODULES lib/zephyr)
+    if(NOT UPDATE_SUBMODULES AND NOT EXISTS ${MICROPY_DIR}/lib/zephyr/subsys/bluetooth/host/hci_core.c)
+        message(FATAL_ERROR " zephyr not initialized.\n Run 'make BOARD=${MICROPY_BOARD} submodules'")
+    endif()
+
+    # Add minimal Zephyr port (generic, platform-independent)
+    # Uses same pattern as NimBLE - mpbthciport.c (added above) provides shared infrastructure
+    # CYW43 controller functions provided by pico-sdk via WEAK overrides
+    list(APPEND MICROPY_SOURCE_PORT
+        mpzephyrport.c           # Generic Zephyr polling (platform-independent)
+    )
+
+    if (MICROPY_PY_NETWORK_CYW43)
+        list(APPEND MICROPY_SOURCE_PORT mpzephyrport_rp2.c)  # Full CYW43 HCI transport
+    else()
+        list(APPEND MICROPY_SOURCE_PORT mpzephyrport_rp2_stub.c)  # Minimal HCI stub
+    endif()
+
+    include(${MICROPY_DIR}/extmod/zephyr_ble/zephyr_ble.cmake)
+    target_link_libraries(${MICROPY_TARGET} micropy_extmod_zephyr_ble)
+
+    # Link CMSIS headers to Zephyr BLE (provides __enable_irq, __disable_irq, __ISB, __get_PRIMASK)
+    # These intrinsics are required by Zephyr's arch/arm/asm_inline_gcc.h
+    if(TARGET cmsis_core_headers)
+        target_link_libraries(micropy_extmod_zephyr_ble INTERFACE cmsis_core_headers)
+    endif()
+
+    # Define port-specific macro for cmsis_core.h stub header
+    target_compile_definitions(micropy_extmod_zephyr_ble INTERFACE __ZEPHYR_BLE_RP2_PORT__)
+
+    get_target_property(ZEPHYR_INCLUDE micropy_extmod_zephyr_ble INTERFACE_INCLUDE_DIRECTORIES)
+    list(APPEND MICROPY_INC_CORE ${ZEPHYR_INCLUDE})
+
+    # Add Zephyr BLE sources for QSTR/root pointer scanning
+    get_target_property(ZEPHYR_BLE_SOURCES micropy_extmod_zephyr_ble INTERFACE_SOURCES)
+    list(APPEND MICROPY_SOURCE_QSTR ${ZEPHYR_BLE_SOURCES})
+
+    target_compile_definitions(${MICROPY_TARGET} PRIVATE
+        MICROPY_BLUETOOTH_ZEPHYR=1
+        MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS=1
+    )
+
+    # MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI calls mp_bluetooth_hci_controller_init()
+    # before bt_enable(). For CYW43, HCI transport is initialized via
+    # bt_hci_transport_setup() which is called by bt_enable().
+    if (NOT MICROPY_PY_NETWORK_CYW43)
+        target_compile_definitions(${MICROPY_TARGET} PRIVATE
+            MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI=1
+        )
+    endif()
+endif()
+
 # tinyusb helper
 target_include_directories(${MICROPY_TARGET} PRIVATE
     ${MICROPY_DIR}/shared/tinyusb/
@@ -410,15 +492,33 @@ if (MICROPY_PY_NETWORK_CYW43)
     )
     endif()
 
-    list(APPEND MICROPY_SOURCE_PORT
-        machine_pin_cyw43.c
+    # Override cyw43_malloc/free to use MicroPython's tracked allocator.
+    # This is critical because the pico-sdk's default uses C malloc which
+    # panics with "Out of memory" during BT firmware download.
+    # The compile definitions are set on cyw43_driver which is an INTERFACE
+    # library, so they propagate to all targets that link it.
+    target_compile_definitions(cyw43_driver INTERFACE
+        cyw43_malloc=m_tracked_calloc_wrapper
+        cyw43_free=m_tracked_free
+    )
+    # Force-include header with function declarations for the above.
+    # Use generator expression to only apply to C files, not assembly.
+    target_compile_options(cyw43_driver INTERFACE
+        $<$<COMPILE_LANGUAGE:C>:-include${MICROPY_PORT_DIR}/cyw43_mp_malloc.h>
     )
 
+    # Link CYW43 WiFi driver (for both BTstack and Zephyr BLE)
     target_link_libraries(${MICROPY_TARGET}
         cyw43_driver_picow
     )
+
+    # Port dir must come before pico_cyw43_driver/include so MicroPython's
+    # cyw43_configport.h is found first (the pico-SDK version defines
+    # CYW43_THREAD_ENTER as a function call requiring cyw43_arch linkage).
     target_include_directories(${MICROPY_TARGET} PRIVATE
+        "${MICROPY_PORT_DIR}"
         ${MICROPY_DIR}/lib/cyw43-driver/
+        ${PICO_SDK_PATH}/src/rp2_common/pico_cyw43_driver/include
     )
 
 endif()

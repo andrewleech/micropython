@@ -127,6 +127,8 @@
 #define MICROPY_FLOAT_IMPL                      (MICROPY_FLOAT_IMPL_FLOAT)
 #define MICROPY_SCHEDULER_DEPTH                 (8)
 #define MICROPY_SCHEDULER_STATIC_NODES          (1)
+// Wake the CPU from WFE when a scheduler node is added (e.g. BLE HCI data ready).
+#define MICROPY_SCHED_HOOK_SCHEDULED            __sev()
 #ifndef MICROPY_USE_INTERNAL_ERRNO
 #define MICROPY_USE_INTERNAL_ERRNO              (1)
 #endif
@@ -300,6 +302,10 @@ extern void lwip_lock_release(void);
 // Bluetooth code only runs in the scheduler, no locking/mutex required.
 #define MICROPY_PY_BLUETOOTH_ENTER uint32_t atomic_state = 0;
 #define MICROPY_PY_BLUETOOTH_EXIT (void)atomic_state;
+// Enable central mode and GATT client support
+#ifndef MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
+#define MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE (1)
+#endif
 #endif
 
 #ifndef MICROPY_BOARD_STARTUP
