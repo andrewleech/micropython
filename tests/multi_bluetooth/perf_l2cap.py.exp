@@ -1,4 +1,10 @@
 --- instance0 ---
-
+sent 5/20
+sent 10/20
+sent 15/20
+sent 20/20
 --- instance1 ---
-
+recv 25%
+recv 50%
+recv 75%
+recv 100%
