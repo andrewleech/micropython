@@ -80,3 +80,6 @@
 [submodule "lib/CMSIS_6"]
 	path = lib/CMSIS_6
 	url = https://github.com/ARM-software/CMSIS_6.git
+[submodule "lib/zephyr"]
+	path = lib/zephyr
+	url = https://github.com/zephyrproject-rtos/zephyr.git
