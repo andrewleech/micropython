@@ -44,7 +44,9 @@
 #include "uart.h"
 #include "modmachine.h"
 #include "modrp2.h"
+#if MICROPY_BLUETOOTH_BTSTACK || MICROPY_BLUETOOTH_NIMBLE
 #include "mpbthciport.h"
+#endif
 #include "mpnetworkport.h"
 #include "genhdr/mpversion.h"
 #include "mp_usbd.h"
@@ -160,7 +162,9 @@ int main(int argc, char **argv) {
     {
         cyw43_init(&cyw43_state);
         cyw43_irq_init();
+        #if !MICROPY_BLUETOOTH_ZEPHYR
         cyw43_post_poll_hook(); // enable the irq
+        #endif
         uint8_t buf[8];
         memcpy(&buf[0], "PICO", 4);
 
@@ -199,6 +203,12 @@ int main(int argc, char **argv) {
         #if MICROPY_PY_BLUETOOTH
         mp_bluetooth_hci_init();
         #endif
+
+        #if MICROPY_BLUETOOTH_ZEPHYR && (MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_CYW43)
+        // For Zephyr BLE, enable CYW43 IRQ after BLE subsystem is initialized
+        cyw43_post_poll_hook();
+        #endif
+
         #if MICROPY_PY_NETWORK
         mod_network_init();
         #endif
@@ -248,6 +258,10 @@ int main(int argc, char **argv) {
         // Hook for resetting anything immediately following a soft reset command.
         MICROPY_BOARD_START_SOFT_RESET();
 
+        // BLE must be deinitialized before network to ensure clean shutdown
+        #if MICROPY_PY_BLUETOOTH
+        mp_bluetooth_deinit();
+        #endif
         #if MICROPY_PY_NETWORK
         mod_network_deinit();
         #endif
@@ -256,9 +270,6 @@ int main(int argc, char **argv) {
         #endif
         rp2_dma_deinit();
         rp2_pio_deinit();
-        #if MICROPY_PY_BLUETOOTH
-        mp_bluetooth_deinit();
-        #endif
         #if MICROPY_PY_MACHINE_PWM
         machine_pwm_deinit_all();
         #endif
