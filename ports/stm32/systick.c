@@ -30,7 +30,14 @@
 #include "irq.h"
 #include "pendsv.h"
 #include "systick.h"
+#if MICROPY_PY_THREAD
+#if defined(MICROPY_MPTHREADPORT_H)
+#include "FreeRTOS.h"
+#include "task.h"
+#else
 #include "pybthread.h"
+#endif
+#endif
 
 extern __IO uint32_t uwTick;
 
@@ -59,6 +66,15 @@ void SysTick_Handler(void) {
     }
 
     #if MICROPY_PY_THREAD
+    #if defined(MICROPY_MPTHREADPORT_H)
+    // FreeRTOS: call port tick handler for scheduler tick and context switch
+    // Only after scheduler has started to avoid issues during init
+    extern void xPortSysTickHandler(void);
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
+        xPortSysTickHandler();
+    }
+    #else
+    // pybthread: handle timeslice-based scheduling
     if (pyb_thread_enabled) {
         if (pyb_thread_cur->timeslice == 0) {
             if (pyb_thread_cur->run_next != pyb_thread_cur) {
@@ -68,6 +84,7 @@ void SysTick_Handler(void) {
             --pyb_thread_cur->timeslice;
         }
     }
+    #endif
     #endif
 }
 
@@ -91,6 +108,8 @@ void HAL_Delay(uint32_t Delay) {
 
 // Core delay function that does an efficient sleep and may switch thread context.
 // If IRQs are enabled then we must have the GIL.
+// When using FreeRTOS, this is provided by mp_freertos_hal.c
+#if !defined(MICROPY_MPTHREADPORT_H)
 void mp_hal_delay_ms(mp_uint_t Delay) {
     if (query_irq() == IRQ_STATE_ENABLED) {
         // IRQs enabled, so can use systick counter to do the delay
@@ -112,6 +131,7 @@ void mp_hal_delay_ms(mp_uint_t Delay) {
         }
     }
 }
+#endif
 
 // delay for given number of microseconds
 void mp_hal_delay_us(mp_uint_t usec) {
