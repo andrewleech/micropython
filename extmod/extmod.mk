@@ -541,11 +541,22 @@ ifeq ($(MICROPY_BLUETOOTH_NIMBLE),1)
 ifeq ($(MICROPY_BLUETOOTH_BTSTACK),1)
 $(error Cannot enable both NimBLE and BTstack at the same time)
 endif
+ifeq ($(MICROPY_BLUETOOTH_ZEPHYR),1)
+$(error Cannot enable both NimBLE and Zephyr BLE at the same time)
+endif
+endif
+
+ifeq ($(MICROPY_BLUETOOTH_BTSTACK),1)
+ifeq ($(MICROPY_BLUETOOTH_ZEPHYR),1)
+$(error Cannot enable both BTstack and Zephyr BLE at the same time)
+endif
 endif
 
 ifneq ($(MICROPY_BLUETOOTH_NIMBLE),1)
 ifneq ($(MICROPY_BLUETOOTH_BTSTACK),1)
-$(error Must enable one of MICROPY_BLUETOOTH_NIMBLE or MICROPY_BLUETOOTH_BTSTACK)
+ifneq ($(MICROPY_BLUETOOTH_ZEPHYR),1)
+$(error Must enable one of MICROPY_BLUETOOTH_NIMBLE, MICROPY_BLUETOOTH_BTSTACK, or MICROPY_BLUETOOTH_ZEPHYR)
+endif
 endif
 endif
 
@@ -555,6 +566,10 @@ endif
 
 ifeq ($(MICROPY_BLUETOOTH_BTSTACK),1)
 include $(TOP)/extmod/btstack/btstack.mk
+endif
+
+ifeq ($(MICROPY_BLUETOOTH_ZEPHYR),1)
+include $(TOP)/extmod/zephyr_ble/zephyr_ble.mk
 endif
 
 endif

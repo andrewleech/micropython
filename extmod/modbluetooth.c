@@ -51,6 +51,18 @@
 #error pairing and bonding require synchronous modbluetooth events
 #endif
 
+// Ensure QSTRs for pairing/bonding features are always extracted even when feature is disabled.
+// These are used in config() and method tables when MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING=1.
+// Force QSTR extraction for conditional features - must be outside #ifndef NO_QSTR
+static inline void __attribute__((unused)) _force_qstr_extraction(void) {
+    (void)MP_QSTR_bond;
+    (void)MP_QSTR_mitm;
+    (void)MP_QSTR_io;
+    (void)MP_QSTR_le_secure;
+    (void)MP_QSTR_gap_pair;
+    (void)MP_QSTR_gap_passkey;
+}
+
 // NimBLE can have fragmented data for GATTC events, so requires reassembly.
 #define MICROPY_PY_BLUETOOTH_USE_GATTC_EVENT_DATA_REASSEMBLY MICROPY_BLUETOOTH_NIMBLE
 
@@ -291,7 +303,8 @@ static mp_obj_t bluetooth_ble_active(size_t n_args, const mp_obj_t *args) {
     if (n_args == 2) {
         // Boolean enable/disable argument supplied, set current state.
         int err;
-        if (mp_obj_is_true(args[1])) {
+        bool activate = mp_obj_is_true(args[1]);
+        if (activate) {
             err = mp_bluetooth_init();
         } else {
             err = mp_bluetooth_deinit();
@@ -936,6 +949,16 @@ static const mp_rom_map_elem_t bluetooth_ble_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_active), MP_ROM_PTR(&bluetooth_ble_active_obj) },
     { MP_ROM_QSTR(MP_QSTR_config), MP_ROM_PTR(&bluetooth_ble_config_obj) },
     { MP_ROM_QSTR(MP_QSTR_irq), MP_ROM_PTR(&bluetooth_ble_irq_obj) },
+    // Stack identification
+    #if MICROPY_BLUETOOTH_ZEPHYR
+    { MP_ROM_QSTR(MP_QSTR_stack), MP_ROM_QSTR(MP_QSTR_zephyr) },
+    #elif MICROPY_BLUETOOTH_NIMBLE
+    { MP_ROM_QSTR(MP_QSTR_stack), MP_ROM_QSTR(MP_QSTR_nimble) },
+    #elif MICROPY_BLUETOOTH_BTSTACK
+    { MP_ROM_QSTR(MP_QSTR_stack), MP_ROM_QSTR(MP_QSTR_btstack) },
+    #else
+    { MP_ROM_QSTR(MP_QSTR_stack), MP_ROM_QSTR(MP_QSTR_unknown) },
+    #endif
     // GAP
     { MP_ROM_QSTR(MP_QSTR_gap_advertise), MP_ROM_PTR(&bluetooth_ble_gap_advertise_obj) },
     #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE

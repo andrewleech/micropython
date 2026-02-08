@@ -348,3 +348,6 @@ if(MICROPY_PY_LWIP)
 
     list(APPEND GIT_SUBMODULES lib/lwip)
 endif()
+
+# Note: Bluetooth stack libraries (BTstack, NimBLE, Zephyr BLE) are
+# included directly by each port's CMakeLists.txt, not here in extmod.cmake
