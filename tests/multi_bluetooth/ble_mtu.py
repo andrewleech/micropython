@@ -3,7 +3,11 @@
 #
 # See ble_mtu_peripheral.py which tests peripheral-initiated MTU exchange (not supported on btstack).
 #
-# Four connections are made:
+# This test requires runtime MTU configuration via ble.config(mtu=X).
+# Stacks that don't support this (e.g., Zephyr) will skip this test.
+# Basic MTU exchange is tested by ble_irq_calls.py which doesn't require runtime config.
+#
+# Four connections are made with different MTU configurations:
 #
 # Test | Requested | Preferred | Result | Notes
 #   0  |  300 (C)  |  256 (P)  |  256   |
@@ -15,7 +19,23 @@
 # is written by the client (central) to ensure that the expected size is transmitted.
 
 from micropython import const
+import errno
 import time, machine, bluetooth
+
+# Check if runtime MTU configuration is supported.
+_ble_check = bluetooth.BLE()
+_ble_check.active(1)
+try:
+    _ble_check.config(mtu=256)
+    _mtu_config_supported = True
+except OSError as e:
+    _mtu_config_supported = e.errno != errno.EOPNOTSUPP
+    if not _mtu_config_supported:
+        print("SKIP")
+        raise SystemExit
+finally:
+    _ble_check.active(0)
+    del _ble_check
 
 TIMEOUT_MS = 5000
 

@@ -41,7 +41,8 @@ def irq(event, data):
     elif event == _IRQ_CENTRAL_DISCONNECT:
         print("_IRQ_CENTRAL_DISCONNECT")
     elif event == _IRQ_GATTS_READ_REQUEST:
-        print("_IRQ_GATTS_READ_REQUEST")
+        # Don't print here - print after wait_for_event to ensure consistent ordering
+        pass
     elif event == _IRQ_PERIPHERAL_CONNECT:
         print("_IRQ_PERIPHERAL_CONNECT")
         waiting_events[event] = data[0]
@@ -90,8 +91,9 @@ def instance0():
         # Wait for pairing event.
         wait_for_event(_IRQ_ENCRYPTION_UPDATE, TIMEOUT_MS)
 
-        # Wait for GATTS read request.
+        # Wait for GATTS read request (print here for consistent ordering across stacks).
         wait_for_event(_IRQ_GATTS_READ_REQUEST, TIMEOUT_MS)
+        print("_IRQ_GATTS_READ_REQUEST")
 
         # Wait for central to disconnect.
         wait_for_event(_IRQ_CENTRAL_DISCONNECT, TIMEOUT_MS)
