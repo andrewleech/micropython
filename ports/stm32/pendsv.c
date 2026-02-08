@@ -62,6 +62,38 @@ void pendsv_dispatch_handler(void) {
 }
 #endif
 
+// PendSV handler with support for both pybthread and FreeRTOS backends
+#if MICROPY_PY_THREAD && defined(MICROPY_MPTHREADPORT_H)
+// FreeRTOS backend: handle dispatch then call FreeRTOS context switch handler
+__attribute__((naked)) void PendSV_Handler(void) {
+    __asm volatile (
+        #if defined(PENDSV_DISPATCH_NUM_SLOTS)
+        // Check if there are any pending calls to dispatch to
+        "ldr r1, pendsv_dispatch_active_ptr_freertos\n"
+        "ldr r0, [r1]\n"
+        "cmp r0, #0\n"
+        "beq .no_dispatch_freertos\n"
+        // Dispatch is pending - call handler first, then do context switch
+        "mov r2, #0\n"
+        "str r2, [r1]\n"                // clear pendsv_dispatch_active
+        "push {lr}\n"                   // save EXC_RETURN on MSP
+        "bl pendsv_dispatch_handler\n"  // call C handler (uses MSP)
+        "pop {lr}\n"                    // restore EXC_RETURN
+        ".no_dispatch_freertos:\n"
+        #endif
+        // Jump to FreeRTOS context switch handler (tail call)
+        // xPortPendSVHandler is the FreeRTOS PendSV handler from the port
+        "b xPortPendSVHandler\n"
+        // Data
+        ".align 2\n"
+        #if defined(PENDSV_DISPATCH_NUM_SLOTS)
+        "pendsv_dispatch_active_ptr_freertos: .word pendsv_dispatch_active\n"
+        #endif
+        );
+}
+
+#else
+// pybthread backend or no threading
 __attribute__((naked)) void PendSV_Handler(void) {
     // Handle a PendSV interrupt
     //
@@ -131,3 +163,4 @@ __attribute__((naked)) void PendSV_Handler(void) {
         #endif
         );
 }
+#endif

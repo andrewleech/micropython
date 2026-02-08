@@ -144,7 +144,7 @@ typedef struct {
     uint32_t r0, r1, r2, r3, r12, lr, pc, xpsr;
 } ExceptionRegisters_t;
 
-int pyb_hard_fault_debug = 0;
+int pyb_hard_fault_debug = 1;
 
 void HardFault_C_Handler(ExceptionRegisters_t *regs) {
     if (!pyb_hard_fault_debug) {
@@ -283,8 +283,17 @@ void UsageFault_Handler(void) {
   * @param  None
   * @retval None
   */
+#if MICROPY_PY_THREAD && defined(MICROPY_MPTHREADPORT_H)
+// FreeRTOS uses SVC to start the scheduler - forward to FreeRTOS handler
+__attribute__((naked)) void SVC_Handler(void) {
+    __asm volatile (
+        "b vPortSVCHandler\n"
+        );
+}
+#elif !MICROPY_PY_THREAD
 void SVC_Handler(void) {
 }
+#endif
 
 /**
   * @brief  This function handles Debug Monitor exception.
