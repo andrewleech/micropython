@@ -89,7 +89,10 @@ class Central:
         ble.gap_connect(*BDADDR)
 
     def _ble_event_handler(self, event, data):
-        print(EVENT_NAMES[event])
+        # Don't print DESCRIPTOR_RESULT for each descriptor - count varies by stack.
+        # We only care that CCCD is found (printed below when matched).
+        if event != _IRQ_GATTC_DESCRIPTOR_RESULT:
+            print(EVENT_NAMES[event])
 
         if event == _IRQ_PERIPHERAL_CONNECT:
             conn_handle, _, _ = data
