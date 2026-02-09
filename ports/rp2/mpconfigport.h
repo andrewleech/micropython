@@ -127,6 +127,8 @@
 #define MICROPY_FLOAT_IMPL                      (MICROPY_FLOAT_IMPL_FLOAT)
 #define MICROPY_SCHEDULER_DEPTH                 (8)
 #define MICROPY_SCHEDULER_STATIC_NODES          (1)
+// Wake the CPU from WFE when a scheduler node is added (e.g. BLE HCI data ready).
+#define MICROPY_SCHED_HOOK_SCHEDULED            __sev()
 #ifndef MICROPY_USE_INTERNAL_ERRNO
 #define MICROPY_USE_INTERNAL_ERRNO              (1)
 #endif
