@@ -1765,11 +1765,18 @@ int mp_bluetooth_gap_scan_start(int32_t duration_ms, int32_t interval_us, int32_
         .interval = MAX(BLE_HCI_SCAN_ITVL_MIN, MIN(BLE_HCI_SCAN_ITVL_MAX, interval_us / 625)),
         .window = MAX(BLE_HCI_SCAN_WINDOW_MIN, MIN(BLE_HCI_SCAN_WINDOW_MAX, window_us / 625)),
     };
-    k_timer_start(&mp_bluetooth_zephyr_gap_scan_timer, K_MSEC(duration_ms), K_NO_WAIT);
-    mp_bluetooth_zephyr_gap_scan_state = MP_BLUETOOTH_ZEPHYR_GAP_SCAN_STATE_ACTIVE;
+
+    // Drain pending work items (connection cleanup etc) before starting scan.
+    mp_bluetooth_zephyr_work_process();
+
     int err = bt_le_scan_start(&param, NULL);
     DEBUG_printf("gap_scan_start: err=%d\n", err);
-    return bt_err_to_errno(err);
+    if (err != 0) {
+        return bt_err_to_errno(err);
+    }
+    k_timer_start(&mp_bluetooth_zephyr_gap_scan_timer, K_MSEC(duration_ms), K_NO_WAIT);
+    mp_bluetooth_zephyr_gap_scan_state = MP_BLUETOOTH_ZEPHYR_GAP_SCAN_STATE_ACTIVE;
+    return 0;
 }
 
 int mp_bluetooth_gap_scan_stop(void) {
