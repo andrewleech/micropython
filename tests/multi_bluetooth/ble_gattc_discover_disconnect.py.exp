@@ -1,0 +1,11 @@
+--- instance0 ---
+gap_advertise
+_IRQ_CENTRAL_CONNECT
+gap_disconnect: True
+_IRQ_CENTRAL_DISCONNECT
+--- instance1 ---
+gap_connect
+_IRQ_PERIPHERAL_CONNECT
+gattc_discover_services
+_IRQ_PERIPHERAL_DISCONNECT
+discovery_survived_disconnect
