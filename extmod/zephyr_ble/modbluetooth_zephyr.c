@@ -445,6 +445,9 @@ static void mp_bt_zephyr_remove_connection(uint8_t conn_handle) {
     }
 }
 
+// Forward declaration - defined below in the scan section.
+static void reverse_addr_byte_order(uint8_t *addr_out, const bt_addr_le_t *addr_in);
+
 static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
     DEBUG_printf("mp_bt_zephyr_connected: conn=%p err=%u state=%d\n",
         conn, err, mp_bluetooth_zephyr_ble_state);
@@ -488,7 +491,9 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
         // Reset pointer so next connection allocates fresh structure
         mp_bt_zephyr_next_conn = NULL;
         // Use 0xFF for failed connections - no valid handle exists
-        mp_bluetooth_gap_on_connected_disconnected(disconnect_event, 0xFF, 0xff, addr);
+        uint8_t reversed_addr[6];
+        reverse_addr_byte_order(reversed_addr, info.le.dst);
+        mp_bluetooth_gap_on_connected_disconnected(disconnect_event, 0xFF, 0xff, reversed_addr);
     } else {
         DEBUG_printf("Connected with id %d role %d\n", info.id, info.role);
         // Take a reference to the connection for storage.
@@ -521,7 +526,9 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
         // Reset pointer so next connection allocates fresh structure
         mp_bt_zephyr_next_conn = NULL;
         debug_check_uuid("before_connect_cb");
-        mp_bluetooth_gap_on_connected_disconnected(connect_event, conn_handle, info.le.dst->type, info.le.dst->a.val);
+        uint8_t addr[6];
+        reverse_addr_byte_order(addr, info.le.dst);
+        mp_bluetooth_gap_on_connected_disconnected(connect_event, conn_handle, info.le.dst->type, addr);
         debug_check_uuid("after_connect_cb");
     }
 }
@@ -583,7 +590,9 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
 
     // Fire Python callback BEFORE removing from list, so cleanup operations
     // in the callback can still access the connection if needed.
-    mp_bluetooth_gap_on_connected_disconnected(disconnect_event, conn_handle, info.le.dst->type, info.le.dst->a.val);
+    uint8_t addr[6];
+    reverse_addr_byte_order(addr, info.le.dst);
+    mp_bluetooth_gap_on_connected_disconnected(disconnect_event, conn_handle, info.le.dst->type, addr);
     mp_bt_zephyr_remove_connection(conn_handle);
 }
 
