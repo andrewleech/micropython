@@ -34,6 +34,10 @@
 #include <stddef.h>
 #include <stdio.h>
 
+// Maximum time to poll before returning -EAGAIN. Caps K_FOREVER to prevent
+// infinite hang if HCI transport is broken or during deinit.
+#define ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS 5000
+
 #if ZEPHYR_BLE_DEBUG
 #define DEBUG_SEM_printf(...) mp_printf(&mp_plat_print, "SEM: " __VA_ARGS__)
 #else
@@ -111,12 +115,9 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
     // Fallback: poll with short timeouts for HCI processing
     // This is used before HCI RX task is started (during bt_enable setup)
     uint32_t start_ms = mp_hal_ticks_ms();
-    // Cap K_FOREVER to 5 seconds to prevent infinite hang during deinit.
-    // If HCI transport is broken, we don't want to block forever.
-    #define K_SEM_MAX_TIMEOUT_MS 5000
-    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? K_SEM_MAX_TIMEOUT_MS : timeout.ticks;
-    if (timeout_ms > K_SEM_MAX_TIMEOUT_MS) {
-        timeout_ms = K_SEM_MAX_TIMEOUT_MS;
+    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS : timeout.ticks;
+    if (timeout_ms > ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS) {
+        timeout_ms = ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS;
     }
 
     DEBUG_SEM_printf("  --> polling mode (HCI RX task not active)\n");
@@ -142,6 +143,16 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
         DEBUG_SEM_printf("SEM_POLL: calling hci_uart_wfi\n");
         mp_bluetooth_zephyr_hci_uart_wfi();
 
+        // Check for pending MicroPython exception (e.g. KeyboardInterrupt from Ctrl-C).
+        // Return -EAGAIN so Zephyr callers treat this as a timeout and clean up normally.
+        // The exception remains in mp_pending_exception and is raised once control
+        // returns to the Python VM.
+        if (MP_STATE_THREAD(mp_pending_exception) != MP_OBJ_NULL) {
+            DEBUG_SEM_printf("  --> interrupted by pending exception\n");
+            mp_bluetooth_zephyr_in_wait_loop = false;
+            return -EAGAIN;
+        }
+
         // Process work items that might signal this semaphore
         // This is critical during init - bt_enable() submits work that must execute
         // SKIP if we're already processing HCI events to prevent re-entrancy
@@ -158,7 +169,7 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
 
         // Check for timeout
         uint32_t elapsed = mp_hal_ticks_ms() - start_ms;
-        if (timeout_ms != UINT32_MAX && elapsed >= timeout_ms) {
+        if (elapsed >= timeout_ms) {
             DEBUG_SEM_printf("  --> timeout after %u ms\n", elapsed);
             // Print which semaphore timed out
             mp_printf(&mp_plat_print, "k_sem_take TIMEOUT: sem=%p count=%u polls=%d\n",
@@ -248,10 +259,13 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
         return -EBUSY;
     }
 
-    // K_FOREVER: Block indefinitely
+    // K_FOREVER: Block indefinitely (capped to prevent infinite hang)
     // Regular timeout: Block for specified time
     uint32_t t0 = mp_hal_ticks_ms();
-    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? 0xFFFFFFFF : timeout.ticks;
+    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS : timeout.ticks;
+    if (timeout_ms > ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS) {
+        timeout_ms = ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS;
+    }
 
     DEBUG_SEM_printf("  --> waiting (timeout=%u ms)\n", timeout_ms);
 
@@ -263,20 +277,29 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
         // Process HCI packets
         mp_bluetooth_zephyr_hci_uart_wfi();
 
+        // Check for pending MicroPython exception (e.g. KeyboardInterrupt from Ctrl-C).
+        // Return -EAGAIN so Zephyr callers treat this as a timeout and clean up normally.
+        // The exception remains in mp_pending_exception and is raised once control
+        // returns to the Python VM.
+        if (MP_STATE_THREAD(mp_pending_exception) != MP_OBJ_NULL) {
+            DEBUG_SEM_printf("  --> interrupted by pending exception\n");
+            mp_bluetooth_zephyr_in_wait_loop = false;
+            return -EAGAIN;
+        }
+
         // Check timeout
         uint32_t elapsed = mp_hal_ticks_ms() - t0;
-        if (timeout_ms != 0xFFFFFFFF && elapsed >= timeout_ms) {
+        if (elapsed >= timeout_ms) {
             DEBUG_SEM_printf("  --> timeout after %u ms\n", elapsed);
             mp_bluetooth_zephyr_in_wait_loop = false;
             return -EAGAIN;
         }
 
-        // Yield
-        if (timeout_ms == 0xFFFFFFFF) {
-            mp_event_wait_indefinite();
-        } else {
-            mp_event_wait_ms(0);
-        }
+        // Process MicroPython scheduled callbacks without raising exceptions.
+        // Uses CALLBACKS_ONLY to avoid nlr_raise which would unwind past
+        // Zephyr's C frames without cleanup.
+        mp_handle_pending_internal(MP_HANDLE_PENDING_CALLBACKS_ONLY);
+        MICROPY_INTERNAL_WFE(100);
     }
 
     mp_bluetooth_zephyr_in_wait_loop = false;

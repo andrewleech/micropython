@@ -30,6 +30,10 @@
 #include "zephyr_ble_work.h"
 #include "zephyr_ble_atomic.h"
 
+// Maximum time to poll before returning NULL. Caps K_FOREVER to prevent
+// infinite hang if HCI transport is broken or during deinit.
+#define ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS 5000
+
 // Debug flag (disabled for FreeRTOS - mp_printf not thread-safe in work thread)
 static volatile int debug_enabled = 0;  // Disable debug to prevent NLR crashes
 
@@ -143,7 +147,10 @@ void *k_queue_get(struct k_queue *queue, k_timeout_t timeout) {
     // (similar to k_sem_take implementation)
     DEBUG_FIFO("  -> busy-wait mode (timeout=%u)", (unsigned)timeout.ticks);
     uint32_t t0 = mp_hal_ticks_ms();
-    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? 0xFFFFFFFF : timeout.ticks;
+    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS : timeout.ticks;
+    if (timeout_ms > ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS) {
+        timeout_ms = ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS;
+    }
 
     int loop_count = 0;
     while (true) {
@@ -165,9 +172,18 @@ void *k_queue_get(struct k_queue *queue, k_timeout_t timeout) {
         }
         MICROPY_PY_BLUETOOTH_EXIT
 
+        // Check for pending MicroPython exception (e.g. KeyboardInterrupt from Ctrl-C).
+        // Return NULL so Zephyr callers treat this as a timeout and clean up normally.
+        // The exception remains in mp_pending_exception and is raised once control
+        // returns to the Python VM.
+        if (MP_STATE_THREAD(mp_pending_exception) != MP_OBJ_NULL) {
+            DEBUG_FIFO("  -> interrupted by pending exception");
+            return NULL;
+        }
+
         // Check timeout
         uint32_t elapsed = mp_hal_ticks_ms() - t0;
-        if (timeout_ms != 0xFFFFFFFF && elapsed >= timeout_ms) {
+        if (elapsed >= timeout_ms) {
             DEBUG_FIFO("  -> timeout after %u ms", elapsed);
             return NULL;
         }
@@ -175,18 +191,11 @@ void *k_queue_get(struct k_queue *queue, k_timeout_t timeout) {
         // Process pending work to allow items to be added
         mp_bluetooth_zephyr_work_process();
 
-        // Wait for events with proper background processing
-        // This allows IRQ handlers (UART, timers, etc) to run and add items to queue
-        if (timeout_ms == 0xFFFFFFFF) {
-            // K_FOREVER: wait indefinitely
-            mp_event_wait_indefinite();
-        } else {
-            // Timed wait: wait for remaining time or until interrupt
-            uint32_t remaining = timeout_ms - elapsed;
-            if (remaining > 0) {
-                mp_event_wait_ms(remaining);
-            }
-        }
+        // Process MicroPython scheduled callbacks without raising exceptions.
+        // Uses CALLBACKS_ONLY to avoid nlr_raise which would unwind past
+        // Zephyr's C frames without cleanup.
+        mp_handle_pending_internal(MP_HANDLE_PENDING_CALLBACKS_ONLY);
+        MICROPY_INTERNAL_WFE(100);
 
         loop_count++;
         if (loop_count % 100 == 0) {
@@ -260,7 +269,10 @@ void *k_lifo_get(struct k_lifo *lifo, k_timeout_t timeout) {
     // K_FOREVER or timeout: Busy-wait pattern
     DEBUG_FIFO("  -> busy-wait mode (timeout=%u)", (unsigned)timeout.ticks);
     uint32_t t0 = mp_hal_ticks_ms();
-    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? 0xFFFFFFFF : timeout.ticks;
+    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS : timeout.ticks;
+    if (timeout_ms > ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS) {
+        timeout_ms = ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS;
+    }
 
     int loop_count = 0;
     while (true) {
@@ -284,9 +296,18 @@ void *k_lifo_get(struct k_lifo *lifo, k_timeout_t timeout) {
         }
         MICROPY_PY_BLUETOOTH_EXIT
 
+        // Check for pending MicroPython exception (e.g. KeyboardInterrupt from Ctrl-C).
+        // Return NULL so Zephyr callers treat this as a timeout and clean up normally.
+        // The exception remains in mp_pending_exception and is raised once control
+        // returns to the Python VM.
+        if (MP_STATE_THREAD(mp_pending_exception) != MP_OBJ_NULL) {
+            DEBUG_FIFO("  -> interrupted by pending exception");
+            return NULL;
+        }
+
         // Check timeout
         uint32_t elapsed = mp_hal_ticks_ms() - t0;
-        if (timeout_ms != 0xFFFFFFFF && elapsed >= timeout_ms) {
+        if (elapsed >= timeout_ms) {
             DEBUG_FIFO("  -> timeout after %u ms", elapsed);
             return NULL;
         }
@@ -294,17 +315,11 @@ void *k_lifo_get(struct k_lifo *lifo, k_timeout_t timeout) {
         // Process pending work to allow items to be added
         mp_bluetooth_zephyr_work_process();
 
-        // Wait for events with proper background processing
-        if (timeout_ms == 0xFFFFFFFF) {
-            // K_FOREVER: wait indefinitely
-            mp_event_wait_indefinite();
-        } else {
-            // Timed wait: wait for remaining time or until interrupt
-            uint32_t remaining = timeout_ms - elapsed;
-            if (remaining > 0) {
-                mp_event_wait_ms(remaining);
-            }
-        }
+        // Process MicroPython scheduled callbacks without raising exceptions.
+        // Uses CALLBACKS_ONLY to avoid nlr_raise which would unwind past
+        // Zephyr's C frames without cleanup.
+        mp_handle_pending_internal(MP_HANDLE_PENDING_CALLBACKS_ONLY);
+        MICROPY_INTERNAL_WFE(100);
 
         loop_count++;
         if (loop_count % 100 == 0) {
