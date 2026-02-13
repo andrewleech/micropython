@@ -30,11 +30,16 @@
 // Include MicroPython configuration to get MICROPY_HW_USB_HOST.
 #include "py/mpconfig.h"
 
-// RHPort mode - host or device based on config.
-#if MICROPY_HW_USB_HOST
+// RHPort mode - host, device, or dual-port based on config.
+#if MICROPY_HW_USB_HOST && MICROPY_HW_ENABLE_USBDEV
+// Dual-port mode: RHPORT0 = device, RHPORT1 = host.
+#include "tusb_config_dual.h"
+#elif MICROPY_HW_USB_HOST
+// Host-only mode: RHPORT0 = host.
 #define CFG_TUSB_RHPORT0_MODE   (OPT_MODE_HOST | OPT_MODE_HIGH_SPEED)
 #include "tusb_config_host.h"
 #else
+// Device-only mode: RHPORT0 = device.
 #define CFG_TUSB_RHPORT0_MODE   (OPT_MODE_DEVICE | OPT_MODE_HIGH_SPEED)
 #endif
 
