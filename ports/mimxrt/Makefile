@@ -507,6 +507,7 @@ endif
 
 ifeq ($(MICROPY_HW_USB_HOST),1)
 CFLAGS += -DMICROPY_HW_USB_HOST=1
+LDFLAGS += --wrap=hcd_event_handler
 endif
 
 CFLAGS += $(CFLAGS_EXTRA)
