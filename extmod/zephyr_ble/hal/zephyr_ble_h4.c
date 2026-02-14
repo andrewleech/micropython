@@ -61,8 +61,22 @@ void mp_bluetooth_zephyr_h4_deinit(void) {
     h4_recv_cb = NULL;
 }
 
+// --- Accessors for registered transport ---
+
+const struct device *mp_bluetooth_zephyr_h4_get_dev(void) {
+    return h4_dev;
+}
+
+bt_hci_recv_t mp_bluetooth_zephyr_h4_get_recv_cb(void) {
+    return h4_recv_cb;
+}
+
 // --- H:4 parser state ---
 
+// H:4 parser state — single static instance, not thread/IRQ safe.
+// Callers must ensure process_byte is not called concurrently.
+// On STM32WB, IPCC flag clearing prevents reentrant readpacket calls.
+// On RP2, all calls are from the main MicroPython thread.
 static struct {
     struct net_buf *buf;
     uint16_t remaining;
@@ -155,8 +169,9 @@ struct net_buf *mp_bluetooth_zephyr_h4_process_byte(uint8_t byte) {
         }
 
         if (!h4_rx.buf) {
-            mp_printf(&mp_plat_print, "HCI ERROR: Failed to allocate buffer for type 0x%02x\n", h4_rx.type);
-            mp_bluetooth_zephyr_h4_reset();
+            mp_printf(&mp_plat_print, "HCI ERROR: Failed to allocate buffer for type 0x%02x, will retry\n", h4_rx.type);
+            // State preserved: have_hdr=true, buf=NULL, remaining=payload_length
+            // Next process_byte call will retry allocation
             return NULL;
         }
 
@@ -171,6 +186,41 @@ struct net_buf *mp_bluetooth_zephyr_h4_process_byte(uint8_t byte) {
             return buf;
         }
         return NULL;
+    }
+
+    // Step 2b: Retry allocation if previous attempt failed
+    if (h4_rx.have_hdr && !h4_rx.buf) {
+        // Re-attempt allocation using saved header
+        size_t hdr_size;
+        switch (h4_rx.type) {
+            case BT_HCI_H4_EVT:
+                hdr_size = sizeof(struct bt_hci_evt_hdr);
+                h4_rx.buf = bt_buf_get_evt(h4_rx.hdr.evt.evt, false, K_NO_WAIT);
+                break;
+            case BT_HCI_H4_ACL:
+                hdr_size = sizeof(struct bt_hci_acl_hdr);
+                h4_rx.buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_NO_WAIT);
+                break;
+            case BT_HCI_H4_ISO:
+                hdr_size = sizeof(struct bt_hci_iso_hdr);
+                h4_rx.buf = bt_buf_get_rx(BT_BUF_ISO_IN, K_NO_WAIT);
+                break;
+            default:
+                mp_bluetooth_zephyr_h4_reset();
+                return NULL;
+        }
+        if (!h4_rx.buf) {
+            // Still no buffer — drain this payload byte
+            h4_rx.remaining--;
+            if (h4_rx.remaining == 0) {
+                h4_rx.type = 0;
+                h4_rx.have_hdr = false;
+            }
+            return NULL;
+        }
+        // Allocation succeeded on retry — add saved header to buffer
+        net_buf_add_mem(h4_rx.buf, &h4_rx.hdr, hdr_size);
+        // Fall through to Step 3 to consume current byte as payload
     }
 
     // Step 3: Payload bytes
@@ -201,34 +251,6 @@ void mp_bluetooth_zephyr_h4_deliver(struct net_buf *buf) {
     } else {
         net_buf_unref(buf);
     }
-}
-
-int mp_bluetooth_zephyr_hci_rx_packet(uint8_t pkt_type, const uint8_t *data, size_t len) {
-    struct net_buf *buf = NULL;
-
-    switch (pkt_type) {
-        case BT_HCI_H4_EVT:
-            if (len >= 1) {
-                buf = bt_buf_get_evt(data[0], false, K_NO_WAIT);
-            }
-            break;
-        case BT_HCI_H4_ACL:
-            buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_NO_WAIT);
-            break;
-        case BT_HCI_H4_ISO:
-            buf = bt_buf_get_rx(BT_BUF_ISO_IN, K_NO_WAIT);
-            break;
-        default:
-            return -1;
-    }
-
-    if (!buf) {
-        return -1;
-    }
-
-    net_buf_add_mem(buf, data, len);
-    mp_bluetooth_zephyr_h4_deliver(buf);
-    return 0;
 }
 
 // --- Weak poll_uart default ---

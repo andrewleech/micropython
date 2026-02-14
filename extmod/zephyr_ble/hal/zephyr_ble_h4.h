@@ -54,15 +54,16 @@ void mp_bluetooth_zephyr_h4_reset(void);
 // buffer and is responsible for delivery or unref.
 struct net_buf *mp_bluetooth_zephyr_h4_process_byte(uint8_t byte);
 
+// Return the registered HCI device. NULL if not initialised.
+const struct device *mp_bluetooth_zephyr_h4_get_dev(void);
+
+// Return the registered receive callback. NULL if not initialised.
+bt_hci_recv_t mp_bluetooth_zephyr_h4_get_recv_cb(void);
+
 // Deliver a completed buffer via the registered recv_cb. Weak — ports that
 // need deferred delivery (e.g. IRQ-safe queue) call process_byte directly
 // and handle the buffer themselves.
 void mp_bluetooth_zephyr_h4_deliver(struct net_buf *buf);
-
-// Allocate a net_buf for the given H:4 packet type, copy data, and deliver
-// via h4_deliver(). For transports that produce complete packets in a
-// contiguous buffer. Returns 0 on success, -1 on allocation failure.
-int mp_bluetooth_zephyr_hci_rx_packet(uint8_t pkt_type, const uint8_t *data, size_t len);
 
 // Read bytes from mp_bluetooth_hci_uart_readchar() in a loop, feed each to
 // the H:4 parser, deliver completed packets via h4_deliver(). Weak default

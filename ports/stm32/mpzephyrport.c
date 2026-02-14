@@ -77,10 +77,6 @@ extern void mp_bluetooth_hci_poll_now_default(void);
 #define H4_SCO  0x03
 #define H4_EVT  0x04
 
-// Zephyr HCI driver callback and device
-static const struct device *hci_dev = NULL;
-static bt_hci_recv_t recv_cb = NULL;
-
 // Queue for completed HCI packets (received from interrupt context)
 // These are deferred for processing in scheduler context to avoid stack overflow
 // Increased from 8 to 32 to handle burst of advertising reports during scanning
@@ -292,7 +288,7 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     // Process Zephyr BLE work queues and semaphores
     mp_bluetooth_zephyr_poll();
 
-    if (recv_cb == NULL) {
+    if (mp_bluetooth_zephyr_h4_get_recv_cb() == NULL) {
         return;
     }
 
@@ -317,7 +313,7 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     // Phase 3: Process sorted batch
     for (int i = 0; i < batch_count; i++) {
         buf = batch[i];
-        int ret = recv_cb(hci_dev, buf);
+        int ret = mp_bluetooth_zephyr_h4_get_recv_cb()(mp_bluetooth_zephyr_h4_get_dev(), buf);
         if (ret < 0) {
             error_printf("recv_cb failed: %d\n", ret);
             net_buf_unref(buf);
@@ -368,7 +364,7 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
 // This is critical for preventing deadlocks when waiting for HCI command responses
 // See docs/BLE_TIMING_ARCHITECTURE.md for detailed timing analysis
 void mp_bluetooth_zephyr_hci_uart_wfi(void) {
-    if (recv_cb == NULL) {
+    if (mp_bluetooth_zephyr_h4_get_recv_cb() == NULL) {
         return;
     }
 
@@ -403,7 +399,7 @@ void mp_bluetooth_zephyr_hci_uart_wfi(void) {
 
     // Process events
     for (int i = 0; i < wfi_batch_count; i++) {
-        recv_cb(hci_dev, wfi_batch[i]);
+        mp_bluetooth_zephyr_h4_get_recv_cb()(mp_bluetooth_zephyr_h4_get_dev(), wfi_batch[i]);
     }
 
     // Process work queue after wfi events (same pattern as mp_bluetooth_zephyr_port_run_task)
@@ -432,9 +428,6 @@ static inline uint32_t get_msp(void) {
 static int hci_stm32_open(const struct device *dev, bt_hci_recv_t recv) {
     DEBUG_HCI_printf("hci_stm32_open\n");
 
-    hci_dev = dev;
-    recv_cb = recv;
-
     // Initialise shared H:4 parser and register recv callback
     mp_bluetooth_zephyr_h4_init(dev, recv);
 
@@ -455,7 +448,6 @@ static int hci_stm32_open(const struct device *dev, bt_hci_recv_t recv) {
 static int hci_stm32_close(const struct device *dev) {
     DEBUG_HCI_printf("hci_stm32_close\n");
 
-    recv_cb = NULL;
     mp_bluetooth_zephyr_h4_deinit();
     mp_bluetooth_zephyr_poll_stop_timer();
 
@@ -655,6 +647,14 @@ void mp_bluetooth_hci_poll_now(void) {
 
 // Port deinit - called during mp_bluetooth_deinit()
 void mp_bluetooth_zephyr_port_deinit(void) {
+    // Drain any queued RX buffers to prevent net_buf leaks
+    struct net_buf *buf;
+    while ((buf = rx_queue_get()) != NULL) {
+        net_buf_unref(buf);
+    }
+    rx_queue_head = 0;
+    rx_queue_tail = 0;
+
     // Clear any partial H:4 parse state
     mp_bluetooth_zephyr_h4_reset();
 
