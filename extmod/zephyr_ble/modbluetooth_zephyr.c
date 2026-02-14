@@ -60,9 +60,8 @@
 #include "lib/cyw43-driver/src/cyw43.h"
 #endif
 
-// HCI RX task functions (implemented in port-specific mpzephyrport_*.c)
-extern void mp_bluetooth_zephyr_hci_rx_task_start(void);
-extern void mp_bluetooth_zephyr_hci_rx_task_stop(void);
+#include "extmod/zephyr_ble/hal/zephyr_ble_port.h"
+#include "extmod/zephyr_ble/hal/zephyr_ble_poll.h"
 
 #if ZEPHYR_BLE_DEBUG
 #define DEBUG_printf(...) mp_printf(&mp_plat_print, "BLE: " __VA_ARGS__)
@@ -733,7 +732,6 @@ void gap_scan_cb_timeout(struct k_timer *timer_id) {
     while (!mp_sched_schedule(MP_OBJ_FROM_PTR(&gap_scan_stop_obj), mp_const_none)) {
         // FIXED: Don't call mp_event_wait_indefinite() - we're already in scheduler!
         // Instead, directly process work queue to make space
-        extern void mp_bluetooth_zephyr_poll(void);
         mp_bluetooth_zephyr_poll();
     }
     // Indicate scanning has stopped so that no more scan result events are generated
@@ -790,7 +788,6 @@ int mp_bluetooth_init(void) {
         if (current_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF) {
             // Initialize port-specific resources (soft timers, sched nodes, etc.)
             #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI
-            extern void mp_bluetooth_zephyr_port_init(void);
             mp_bluetooth_zephyr_port_init();
             #endif
 
@@ -883,8 +880,6 @@ int mp_bluetooth_init(void) {
         extern struct k_work *mp_bluetooth_zephyr_init_work_get(void);
         struct k_work *init_work = NULL;
 
-        // Debug: check HCI RX task status
-        extern bool mp_bluetooth_zephyr_hci_rx_task_active(void);
         while (mp_bluetooth_zephyr_bt_enable_result < 0) {  // -1 = pending
             uint32_t elapsed = mp_hal_ticks_ms() - timeout_start_ticks_ms;
             if (elapsed > ZEPHYR_BLE_STARTUP_TIMEOUT) {
@@ -951,7 +946,6 @@ int mp_bluetooth_init(void) {
         // Start HCI RX task for continuous HCI polling in background
         // The task is stopped first in mp_bluetooth_deinit() to prevent race conditions
         #if MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
-        extern void mp_bluetooth_zephyr_hci_rx_task_start(void);
         mp_bluetooth_zephyr_hci_rx_task_start();
         DEBUG_printf("HCI RX task started\n");
         #endif
@@ -964,7 +958,6 @@ int mp_bluetooth_init(void) {
 
     // Start the HCI polling cycle by triggering the first poll
     // This must be done after state is ACTIVE so mp_bluetooth_hci_poll() will run
-    extern void mp_bluetooth_hci_poll_now(void);
     mp_bluetooth_hci_poll_now();
 
     DEBUG_printf("mp_bluetooth_init: ready\n");
@@ -1103,7 +1096,6 @@ int mp_bluetooth_deinit(void) {
     // Deinit port-specific resources (CYW43 cleanup, soft timers, GATT pool, etc.)
     // This must be done after bt_disable() completes.
     #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI || defined(STM32WB)
-    extern void mp_bluetooth_zephyr_port_deinit(void);
     mp_bluetooth_zephyr_port_deinit();
     #endif
 

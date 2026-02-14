@@ -25,6 +25,7 @@
  */
 
 #include "zephyr_ble_kernel.h"
+#include "zephyr_ble_port.h"
 #include "py/mphal.h"
 #include <zephyr/device.h>
 
@@ -109,7 +110,6 @@ NORETURN void k_panic(void) {
     extern volatile uint32_t hci_tx_count;
     extern volatile uint32_t hci_tx_cmd_count;
     extern volatile uint32_t cyw43_bt_hci_process_count;
-    extern void mp_bluetooth_zephyr_hci_rx_task_debug(uint32_t *polls, uint32_t *packets);
     // HCI RX validation counters
     extern volatile uint32_t hci_rx_total_processed;
     extern volatile uint32_t hci_rx_rejected_len;
@@ -141,7 +141,6 @@ NORETURN void k_panic(void) {
     mp_printf(&mp_plat_print, "HCI: tx=%lu tx_cmd=%lu bt_process=%lu\n",
            (unsigned long)hci_tx_count, (unsigned long)hci_tx_cmd_count,
            (unsigned long)cyw43_bt_hci_process_count);
-    extern uint32_t mp_bluetooth_zephyr_hci_rx_queue_dropped(void);
     uint32_t queue_dropped = mp_bluetooth_zephyr_hci_rx_queue_dropped();
     mp_printf(&mp_plat_print, "HCI RX task: polls=%lu packets=%lu queue_dropped=%lu\n",
            (unsigned long)rx_task_polls, (unsigned long)rx_task_packets, (unsigned long)queue_dropped);

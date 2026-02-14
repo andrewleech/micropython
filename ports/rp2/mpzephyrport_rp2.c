@@ -38,7 +38,6 @@
 #include "py/stream.h"
 #include "py/mphal.h"
 #include "extmod/modbluetooth.h"
-#include "shared/runtime/softtimer.h"
 #include "modmachine.h"
 
 #include <string.h>
@@ -95,10 +94,6 @@ extern int cybt_get_bt_buf_index(cybt_fw_membuf_index_t *p_buf_index);
 static volatile bt_hci_recv_t recv_cb = NULL;  // Returns int: 0 on success, negative on error
 static const struct device *hci_dev = NULL;
 
-// Soft timer for scheduling HCI poll (zero-initialized to prevent startup crashes)
-static soft_timer_entry_t mp_zephyr_hci_soft_timer = {0};
-static mp_sched_node_t mp_zephyr_hci_sched_node = {0};
-
 // Buffer for incoming HCI packets (4-byte CYW43 header + max HCI packet)
 #define CYW43_HCI_HEADER_SIZE 4
 #define HCI_MAX_PACKET_SIZE 1024
@@ -140,8 +135,8 @@ static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len);
 // When disabled, uses cooperative polling via soft timer.
 // ============================================================================
 
-// Forward declaration - defined after #endif, used by both paths
-static bool mp_bluetooth_zephyr_buffers_available(void);
+#include "extmod/zephyr_ble/hal/zephyr_ble_poll.h"
+#include "extmod/zephyr_ble/hal/zephyr_ble_port.h"
 
 #if MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
 #include "FreeRTOS.h"
@@ -416,49 +411,20 @@ uint32_t mp_bluetooth_zephyr_hci_rx_queue_dropped(void) {
     return hci_rx_queue_dropped;
 }
 
+// Strong override: drain HCI packets queued by the FreeRTOS HCI RX task.
+// Called from mp_bluetooth_zephyr_poll() during normal polling.
+void mp_bluetooth_zephyr_hci_uart_process(void) {
+    mp_bluetooth_zephyr_process_hci_queue();
+}
+
 #else // !MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
-
-// Stubs for polling mode (no dedicated HCI RX task)
-void mp_bluetooth_zephyr_hci_rx_task_start(void) {
-}
-
-void mp_bluetooth_zephyr_hci_rx_task_stop(void) {
-}
-
-bool mp_bluetooth_zephyr_hci_rx_task_active(void) {
-    return false;
-}
-
-uint32_t mp_bluetooth_zephyr_hci_rx_queue_dropped(void) {
-    return 0;
-}
 
 void mp_bluetooth_zephyr_process_hci_queue(void) {
     // No queue in polling mode - HCI packets processed directly
 }
 
-void mp_bluetooth_zephyr_hci_rx_task_debug(uint32_t *polls, uint32_t *packets) {
-    // No task stats in polling mode
-    *polls = 0;
-    *packets = 0;
-}
-
 #endif // MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
 // ============================================================================
-
-// Check if Zephyr BT buffer pools have free buffers available
-// Returns true if at least one buffer can be allocated without blocking
-// This is used by both FreeRTOS and polling paths for flow control.
-static bool mp_bluetooth_zephyr_buffers_available(void) {
-    // Try to allocate a buffer with K_NO_WAIT to test availability
-    // If successful, immediately free it and return true
-    struct net_buf *buf = bt_buf_get_rx(BT_BUF_EVT, K_NO_WAIT);
-    if (buf) {
-        net_buf_unref(buf);
-        return true;
-    }
-    return false;
-}
 
 // Process a single HCI packet from the given buffer
 // Used by both FreeRTOS HCI queue processing and polling fallback
@@ -626,17 +592,9 @@ static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len) {
     }
 }
 
-// Forward declarations
-void mp_bluetooth_zephyr_hci_poll_now(void);
-void mp_bluetooth_zephyr_port_poll_in_ms(uint32_t ms);
-
-// This is called by soft_timer and executes at PendSV level
-static void mp_zephyr_hci_soft_timer_callback(soft_timer_entry_t *self) {
-    mp_bluetooth_zephyr_hci_poll_now();
-}
-
-// HCI packet reception handler - called when data arrives from CYW43 SPI
-static void run_zephyr_hci_task(mp_sched_node_t *node) {
+// HCI packet reception handler - called from shared sched_node via soft timer.
+// Strong override of weak default in zephyr_ble_poll.c.
+void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     (void)node;
 
     // Early exit if BLE is not active (recv_cb is set by hci_cyw43_open)
@@ -689,14 +647,6 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
     // Reschedule soft timer for continuous HCI polling (10ms interval)
     // This is critical for receiving scan results and other HCI events
     mp_bluetooth_zephyr_port_poll_in_ms(10);
-}
-
-// Schedule immediate BLE work queue processing in main thread context.
-// Safe to call from PendSV/interrupt context (uses MICROPY_BEGIN_ATOMIC_SECTION).
-// Called by cyw43_bluetooth_hci_process() after HCI data arrives to close the
-// gap between HCI packet reception and work queue processing.
-void mp_bluetooth_zephyr_hci_poll_now(void) {
-    mp_sched_schedule_node(&mp_zephyr_hci_sched_node, run_zephyr_hci_task);
 }
 
 // Zephyr HCI driver implementation
@@ -771,7 +721,7 @@ static int hci_cyw43_close(const struct device *dev) {
     #endif
 
     recv_cb = NULL;
-    soft_timer_remove(&mp_zephyr_hci_soft_timer);
+    mp_bluetooth_zephyr_poll_stop_timer();
 
     // Teardown the HCI transport to allow clean reinitialization
     bt_hci_transport_teardown(dev);
@@ -879,23 +829,6 @@ int bt_hci_transport_teardown(const struct device *dev) {
     return 0;
 }
 
-// Initialize Zephyr port
-void mp_bluetooth_zephyr_port_init(void) {
-    // Initialize soft timer for HCI polling
-    // Always enabled - needed as fallback when HCI RX task is disabled
-    soft_timer_static_init(
-        &mp_zephyr_hci_soft_timer,
-        SOFT_TIMER_MODE_ONE_SHOT,
-        0,
-        mp_zephyr_hci_soft_timer_callback
-        );
-}
-
-// Schedule HCI poll
-void mp_bluetooth_zephyr_port_poll_in_ms(uint32_t ms) {
-    soft_timer_reinsert(&mp_zephyr_hci_soft_timer, ms);
-}
-
 // Poll HCI from CYW43 SPI - called from k_sem_take() wait loop
 // This reads any pending HCI data from the CYW43 chip and passes it to Zephyr
 static volatile bool poll_uart_in_progress = false;
@@ -922,19 +855,12 @@ volatile uint32_t poll_uart_cyw43_calls = 0;
 
 // Deinitialize Zephyr port - called during ble.active(False)
 void mp_bluetooth_zephyr_port_deinit(void) {
-    // Remove soft timer to stop HCI polling during shutdown
-    soft_timer_remove(&mp_zephyr_hci_soft_timer);
+    // Clean up shared soft timer and sched_node
+    mp_bluetooth_zephyr_poll_cleanup();
 
     // Clear recv_cb since bt_disable() has reset the controller
     // On reinit, bt_enable() will set up a fresh HCI transport
     recv_cb = NULL;
-
-    // Clear the scheduler node callback to prevent execution after deinit.
-    // The scheduler queue persists across soft reset, and scheduler.c:103-106 has a safety
-    // check that skips NULL callbacks. This prevents the callback from trying to access
-    // BLE state or CYW43 after deinitialization, which could cause hangs during soft reset.
-    // We're in main thread context here, so it's safe to modify the node.
-    mp_zephyr_hci_sched_node.callback = NULL;
 
     // DO NOT reset bt_loaded - the CYW43 BT firmware should stay loaded.
     // bt_disable() sends HCI_Reset which resets the controller state.
@@ -1039,6 +965,22 @@ void mp_bluetooth_zephyr_poll_uart(void) {
     } while (has_work);
 
     poll_uart_in_progress = false;
+}
+
+// Strong override: read HCI from CYW43 SPI, process Zephyr work, reschedule.
+void mp_bluetooth_hci_poll(void) {
+    if (mp_bluetooth_is_active()) {
+        mp_bluetooth_zephyr_poll_uart();
+        mp_bluetooth_zephyr_poll();
+        mp_bluetooth_hci_poll_in_ms(10);
+    }
+}
+
+// Strong override: read HCI during k_sem_take wait loops.
+// Must call poll_uart directly to drain all pending CYW43 packets.
+void mp_bluetooth_zephyr_hci_uart_wfi(void) {
+    mp_bluetooth_zephyr_poll_uart();
+    mp_bluetooth_zephyr_poll();
 }
 
 #else // !MICROPY_PY_NETWORK_CYW43

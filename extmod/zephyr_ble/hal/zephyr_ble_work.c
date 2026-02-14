@@ -28,6 +28,7 @@
 #include "py/mphal.h"
 #include "py/runtime.h"
 #include "zephyr_ble_work.h"
+#include "zephyr_ble_port.h"
 #include "zephyr_ble_atomic.h"
 
 #include <stddef.h>
@@ -222,7 +223,6 @@ int k_work_submit(struct k_work *work) {
     // EXCEPTION: During init phase, don't trigger immediate processing.
     //            Init work will be manually retrieved and executed by mp_bluetooth_init() wait loop.
     if (ret > 0 && !mp_bluetooth_zephyr_in_init_phase()) {
-        extern void mp_bluetooth_zephyr_port_poll_in_ms(uint32_t ms);
         mp_bluetooth_zephyr_port_poll_in_ms(0);  // Schedule immediate processing
     }
 

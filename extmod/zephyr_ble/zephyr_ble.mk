@@ -59,6 +59,8 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_BLE_EXTMOD_DIR)/hal/, \
 	zephyr_ble_monitor_stubs.c \
 	zephyr_ble_feature_stubs.c \
 	zephyr_ble_array_size_stub.c \
+	zephyr_ble_port_stubs.c \
+	zephyr_ble_gatt_alloc.c \
 	)
 
 # TinyCrypt crypto library for BLE pairing (Legacy + SC)

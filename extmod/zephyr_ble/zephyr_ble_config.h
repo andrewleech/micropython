@@ -40,6 +40,13 @@
 // PART 0: MicroPython Integration Configuration
 // =============================================================================
 
+// Use bump allocator for GATT structures (malloc/free shims).
+// Enable on ports without libc malloc/free (e.g. STM32 Zephyr builds).
+// When enabled, provides malloc()/free() from a static 4KB pool.
+#ifndef MICROPY_BLUETOOTH_ZEPHYR_GATT_POOL
+#define MICROPY_BLUETOOTH_ZEPHYR_GATT_POOL (0)
+#endif
+
 // Use FreeRTOS tasks for BLE processing (HCI RX task, work thread)
 // When enabled (default when MICROPY_PY_THREAD is available):
 //   - Dedicated HCI RX task polls CYW43 at 10ms interval

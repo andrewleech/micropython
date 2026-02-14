@@ -30,6 +30,7 @@
 #include "py/misc.h"
 #include "zephyr_ble_sem.h"
 #include "zephyr_ble_work.h"
+#include "zephyr_ble_port.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -52,12 +53,6 @@
 #include "FreeRTOS.h"
 #include "semphr.h"
 #include "task.h"
-
-// Forward declaration of HCI processing function (implemented in port mpzephyrport.c)
-extern void mp_bluetooth_zephyr_hci_uart_wfi(void);
-
-// Check if HCI RX task is running (true blocking is safe when task handles HCI)
-extern bool mp_bluetooth_zephyr_hci_rx_task_active(void);
 
 void k_sem_init(struct k_sem *sem, unsigned int initial_count, unsigned int limit) {
     DEBUG_SEM_printf("k_sem_init(%p, count=%u, limit=%u)\n", sem, initial_count, limit);
@@ -229,10 +224,8 @@ void k_sem_reset(struct k_sem *sem) {
 // ============================================================================
 #else // !MICROPY_PY_THREAD
 
-// Forward declaration of HCI UART processing function
-extern void mp_bluetooth_zephyr_hci_uart_wfi(void) __attribute__((weak));
-
-// Weak default implementation
+// Weak default implementation for non-threaded builds
+__attribute__((weak))
 void mp_bluetooth_zephyr_hci_uart_wfi(void) {
     // No-op if not implemented yet
 }

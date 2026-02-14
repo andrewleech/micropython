@@ -38,7 +38,8 @@
 #include "py/mphal.h"
 #include "extmod/modbluetooth.h"
 #include "extmod/mpbthci.h"
-#include "shared/runtime/softtimer.h"
+#include "extmod/zephyr_ble/hal/zephyr_ble_poll.h"
+#include "extmod/zephyr_ble/hal/zephyr_ble_port.h"
 
 // Don't include mpbthciport.h - it defines mp_bluetooth_hci_poll_now as static inline
 // which conflicts with our non-inline definition needed by modbluetooth_zephyr.c.
@@ -79,10 +80,6 @@ extern void mp_bluetooth_hci_poll_now_default(void);
 static const struct device *hci_dev = NULL;
 static bt_hci_recv_t recv_cb = NULL;
 
-// Soft timer for scheduling HCI poll (zero-initialized to prevent startup crashes)
-static soft_timer_entry_t mp_zephyr_hci_soft_timer = {0};
-static mp_sched_node_t mp_zephyr_hci_sched_node = {0};
-
 // Queue for completed HCI packets (received from interrupt context)
 // These are deferred for processing in scheduler context to avoid stack overflow
 // Increased from 8 to 32 to handle burst of advertising reports during scanning
@@ -106,10 +103,6 @@ static size_t h4_header_idx;
 static size_t h4_header_len;
 static struct net_buf *h4_buf;
 static size_t h4_payload_remaining;
-
-// Forward declarations
-static void mp_zephyr_hci_poll_now(void);
-void mp_bluetooth_zephyr_port_poll_in_ms(uint32_t ms);
 
 // RX queue helpers (can be called from IRQ context)
 static inline bool rx_queue_is_full(void) {
@@ -142,20 +135,6 @@ static struct net_buf *rx_queue_get(void) {
     rx_queue_tail = (rx_queue_tail + 1) % RX_QUEUE_SIZE;
     MICROPY_PY_BLUETOOTH_EXIT
     return buf;
-}
-
-// Check if Zephyr BT buffer pools have free buffers available.
-// Returns true if at least one buffer can be allocated without blocking.
-// This prevents silent packet drops when buffer pool is exhausted.
-static bool mp_bluetooth_zephyr_buffers_available(void) {
-    // Try to allocate a buffer with K_NO_WAIT to test availability
-    // If successful, immediately free it and return true
-    struct net_buf *buf = bt_buf_get_rx(BT_BUF_EVT, K_NO_WAIT);
-    if (buf) {
-        net_buf_unref(buf);
-        return true;
-    }
-    return false;
 }
 
 // HCI Event Priority Sorting for STM32WB55 IPCC
@@ -436,38 +415,15 @@ static void h4_uart_byte_callback(uint8_t byte) {
             } else {
                 // Schedule task to process queued packets
                 // This is safe from IRQ context (same as NimBLE UART IRQ)
-                mp_zephyr_hci_poll_now();
+                mp_bluetooth_zephyr_port_poll_now();
             }
         }
     }
 }
 
-// This is called by soft_timer and executes at PendSV/scheduler level
-static void mp_zephyr_hci_soft_timer_callback(soft_timer_entry_t *self) {
-    #if ZEPHYR_BLE_DEBUG
-    static int timer_fire_count = 0;
-    timer_fire_count++;
-
-    if (timer_fire_count <= 5) {
-        DEBUG_HCI_printf("[TIMER FIRE #%d]\n", timer_fire_count);
-    }
-    #endif
-
-    // CRITICAL: Reschedule the timer IMMEDIATELY before scheduling the task
-    // This ensures the timer is always active for the next cycle
-    soft_timer_reinsert(&mp_zephyr_hci_soft_timer, 128);
-
-    #if ZEPHYR_BLE_DEBUG
-    if (timer_fire_count <= 5) {
-        DEBUG_HCI_printf("[TIMER FIRE #%d] Rescheduled for 128ms\n", timer_fire_count);
-    }
-    #endif
-
-    mp_zephyr_hci_poll_now();
-}
-
-// HCI packet reception handler - called when data arrives
-static void run_zephyr_hci_task(mp_sched_node_t *node) {
+// HCI packet reception handler - called from shared sched_node via soft timer.
+// Strong override of weak default in zephyr_ble_poll.c.
+void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     (void)node;
 
     // Process Zephyr BLE work queues and semaphores
@@ -507,7 +463,7 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
 
     // Phase 4: Process work queue to trigger rx_work (connection callbacks etc)
     // Only the outermost call (depth==0) should process work to prevent re-entrancy.
-    // Nested calls via k_sem_take→hci_uart_wfi→run_zephyr_hci_task skip work processing.
+    // Nested calls via k_sem_take→hci_uart_wfi→mp_bluetooth_zephyr_port_run_task skip work processing.
     extern volatile int mp_bluetooth_zephyr_hci_processing_depth;
     if (batch_count > 0 && mp_bluetooth_zephyr_hci_processing_depth == 0) {
         mp_bluetooth_zephyr_hci_processing_depth++;
@@ -545,10 +501,6 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
     }
 }
 
-static void mp_zephyr_hci_poll_now(void) {
-    mp_sched_schedule_node(&mp_zephyr_hci_sched_node, run_zephyr_hci_task);
-}
-
 // Called by k_sem_take() to process HCI packets while waiting
 // This is critical for preventing deadlocks when waiting for HCI command responses
 // See docs/BLE_TIMING_ARCHITECTURE.md for detailed timing analysis
@@ -558,16 +510,16 @@ void mp_bluetooth_zephyr_hci_uart_wfi(void) {
     }
 
     // ARCHITECTURAL FIX for regression introduced in commit 6bdcbeb9ef:
-    // Connection events were not being received because run_zephyr_hci_task()
+    // Connection events were not being received because mp_bluetooth_zephyr_port_run_task()
     // was removed from this function. Restoring it fixes connection event reception.
     //
-    // run_zephyr_hci_task() calls mp_bluetooth_zephyr_poll() which is CRITICAL
+    // mp_bluetooth_zephyr_port_run_task() calls mp_bluetooth_zephyr_poll() which is CRITICAL
     // for proper HCI event processing. It must be called BEFORE processing buffers.
-    run_zephyr_hci_task(NULL);
+    mp_bluetooth_zephyr_port_run_task(NULL);
 
     // Process any remaining queued RX buffers directly
-    // This handles buffers that arrived after run_zephyr_hci_task() completed
-    // Apply same batching/sorting as run_zephyr_hci_task for consistency
+    // This handles buffers that arrived after mp_bluetooth_zephyr_port_run_task() completed
+    // Apply same batching/sorting as mp_bluetooth_zephyr_port_run_task for consistency
     struct net_buf *wfi_batch[HCI_EVENT_BATCH_SIZE];
     int wfi_batch_count = 0;
     struct net_buf *buf;
@@ -591,7 +543,7 @@ void mp_bluetooth_zephyr_hci_uart_wfi(void) {
         recv_cb(hci_dev, wfi_batch[i]);
     }
 
-    // Process work queue after wfi events (same pattern as run_zephyr_hci_task)
+    // Process work queue after wfi events (same pattern as mp_bluetooth_zephyr_port_run_task)
     // Only outermost call processes work to prevent re-entrancy
     extern volatile int mp_bluetooth_zephyr_hci_processing_depth;
     if (wfi_batch_count > 0 && mp_bluetooth_zephyr_hci_processing_depth == 0) {
@@ -642,7 +594,7 @@ static int hci_stm32_close(const struct device *dev) {
 
     recv_cb = NULL;
     h4_parser_reset();
-    soft_timer_remove(&mp_zephyr_hci_soft_timer);
+    mp_bluetooth_zephyr_poll_stop_timer();
 
     // Teardown HCI transport
     return bt_hci_transport_teardown(dev);
@@ -789,10 +741,10 @@ int bt_hci_transport_teardown(const struct device *dev) {
 
 // Main polling function (called by mpbthciport.c via mp_bluetooth_hci_poll)
 void mp_bluetooth_hci_poll(void) {
-    // Call run_zephyr_hci_task directly to process HCI events
+    // Call mp_bluetooth_zephyr_port_run_task directly to process HCI events
     // This includes: mp_bluetooth_zephyr_poll(), RX queue processing,
     // work queue processing, and reading HCI packets from transport
-    run_zephyr_hci_task(NULL);
+    mp_bluetooth_zephyr_port_run_task(NULL);
 
     // Schedule next poll if stack is active
     mp_bluetooth_zephyr_port_poll_in_ms(128);
@@ -809,28 +761,9 @@ void mp_bluetooth_zephyr_port_init(void) {
     volatile const void *keep_device = &__device_dts_ord_0;
     (void)keep_device;
 
-    DEBUG_HCI_printf("[INIT] Calling soft_timer_static_init...\n");
-    soft_timer_static_init(
-        &mp_zephyr_hci_soft_timer,
-        SOFT_TIMER_MODE_ONE_SHOT,
-        0,
-        mp_zephyr_hci_soft_timer_callback
-        );
+    // Initialise shared soft timer for periodic HCI polling
+    mp_bluetooth_zephyr_poll_init_timer();
     DEBUG_HCI_printf("[INIT] soft_timer_static_init completed\n");
-}
-
-// Schedule HCI poll in N milliseconds
-void mp_bluetooth_zephyr_port_poll_in_ms(uint32_t ms) {
-    #if ZEPHYR_BLE_DEBUG
-    static int resched_count = 0;
-    resched_count++;
-
-    if (resched_count <= 5) {
-        DEBUG_HCI_printf("[RESCHEDULE #%d for %ums]\n", resched_count, (unsigned)ms);
-    }
-    #endif
-
-    soft_timer_reinsert(&mp_zephyr_hci_soft_timer, ms);
 }
 
 // Debug wrapper for hci_core.c to print device info
@@ -851,20 +784,6 @@ void mp_bluetooth_zephyr_debug_device(const struct device *dev) {
     #endif
 }
 
-// HCI RX task stubs for non-FreeRTOS builds
-// STM32 uses polling-based HCI reception, not a dedicated task
-void mp_bluetooth_zephyr_hci_rx_task_start(void) {
-    // No-op: STM32 uses IPCC interrupts and soft timer polling
-}
-
-void mp_bluetooth_zephyr_hci_rx_task_stop(void) {
-    // No-op
-}
-
-bool mp_bluetooth_zephyr_hci_rx_task_active(void) {
-    return false;  // Always use polling mode on STM32
-}
-
 // Non-inline version of mp_bluetooth_hci_poll_now for extmod code.
 // modbluetooth_zephyr.c uses extern declaration, so we need a linkable symbol.
 void mp_bluetooth_hci_poll_now(void) {
@@ -873,74 +792,13 @@ void mp_bluetooth_hci_poll_now(void) {
 
 // Port deinit - called during mp_bluetooth_deinit()
 void mp_bluetooth_zephyr_port_deinit(void) {
-    // Reset GATT memory pool for next init cycle
-    extern void mp_bluetooth_zephyr_gatt_pool_reset(void);
+    // Clean up shared soft timer and sched_node
+    mp_bluetooth_zephyr_poll_cleanup();
+
+    // Reset GATT memory pool for next init cycle (if using bump allocator)
+    #if MICROPY_BLUETOOTH_ZEPHYR_GATT_POOL
     mp_bluetooth_zephyr_gatt_pool_reset();
-}
-
-// ============================================================================
-// Simple bump allocator for GATT structures (malloc/free shims)
-// ============================================================================
-// Zephyr BLE GATT requires memory that persists outside the GC heap.
-// This provides minimal malloc/free using a static pool. Memory is only
-// truly freed on BLE deinit (gatt_pool_reset).
-
-#define GATT_POOL_SIZE 4096  // 4KB for GATT services/attributes
-
-static uint8_t gatt_pool[GATT_POOL_SIZE];
-static size_t gatt_pool_offset = 0;
-
-// Simple allocation tracking for free() support
-#define MAX_GATT_ALLOCS 64
-static struct {
-    void *ptr;
-    size_t size;
-} gatt_alloc_table[MAX_GATT_ALLOCS];
-static int gatt_alloc_count = 0;
-
-void *malloc(size_t size) {
-    // Align to 4 bytes
-    size = (size + 3) & ~3;
-
-    if (gatt_pool_offset + size > GATT_POOL_SIZE) {
-        error_printf("GATT pool exhausted (need %u, have %u)\n",
-            (unsigned)size, (unsigned)(GATT_POOL_SIZE - gatt_pool_offset));
-        return NULL;
-    }
-
-    void *ptr = &gatt_pool[gatt_pool_offset];
-    gatt_pool_offset += size;
-
-    // Track allocation for potential free()
-    if (gatt_alloc_count < MAX_GATT_ALLOCS) {
-        gatt_alloc_table[gatt_alloc_count].ptr = ptr;
-        gatt_alloc_table[gatt_alloc_count].size = size;
-        gatt_alloc_count++;
-    }
-
-    return ptr;
-}
-
-void free(void *ptr) {
-    // In this bump allocator, individual frees don't reclaim memory.
-    // Memory is only reclaimed on pool reset (BLE deinit).
-    // We just mark the entry as freed for debugging.
-    if (ptr == NULL) {
-        return;
-    }
-
-    for (int i = 0; i < gatt_alloc_count; i++) {
-        if (gatt_alloc_table[i].ptr == ptr) {
-            gatt_alloc_table[i].ptr = NULL;  // Mark as freed
-            return;
-        }
-    }
-}
-
-// Called during BLE deinit to reset the pool for next init cycle
-void mp_bluetooth_zephyr_gatt_pool_reset(void) {
-    gatt_pool_offset = 0;
-    gatt_alloc_count = 0;
+    #endif
 }
 
 #endif // MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR

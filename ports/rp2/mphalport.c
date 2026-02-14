@@ -308,10 +308,10 @@ void *m_tracked_calloc_wrapper(size_t size) {
 // Bluetooth HCI process callback - called by CYW43 driver when BT data is available.
 // Schedule HCI processing on the main task where all BLE state access is serialized.
 volatile uint32_t cyw43_bt_hci_process_count = 0;
-extern void mp_bluetooth_zephyr_hci_poll_now(void);
+extern void mp_bluetooth_zephyr_port_poll_now(void);
 void cyw43_bluetooth_hci_process(void) {
     cyw43_bt_hci_process_count++;
-    mp_bluetooth_zephyr_hci_poll_now();
+    mp_bluetooth_zephyr_port_poll_now();
 }
 #endif // MICROPY_BLUETOOTH_ZEPHYR
 

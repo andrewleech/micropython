@@ -41,6 +41,8 @@ target_sources(micropy_extmod_zephyr_ble INTERFACE
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_monitor_stubs.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_feature_stubs.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_array_size_stub.c
+    ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_port_stubs.c
+    ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_gatt_alloc.c
 
     # Zephyr net_buf library
     ${ZEPHYR_LIB_DIR}/lib/net_buf/buf.c
