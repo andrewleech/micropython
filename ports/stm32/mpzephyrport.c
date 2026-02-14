@@ -40,6 +40,7 @@
 #include "extmod/mpbthci.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_poll.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_port.h"
+#include "extmod/zephyr_ble/hal/zephyr_ble_h4.h"
 
 // Don't include mpbthciport.h - it defines mp_bluetooth_hci_poll_now as static inline
 // which conflicts with our non-inline definition needed by modbluetooth_zephyr.c.
@@ -88,21 +89,6 @@ static struct net_buf *rx_queue[RX_QUEUE_SIZE];
 static volatile size_t rx_queue_head = 0;
 static volatile size_t rx_queue_tail = 0;
 
-
-// H:4 packet parser state
-typedef enum {
-    H4_STATE_TYPE,      // Waiting for packet type byte
-    H4_STATE_HEADER,    // Reading packet header
-    H4_STATE_PAYLOAD,   // Reading packet payload
-} h4_state_t;
-
-static h4_state_t h4_state = H4_STATE_TYPE;
-static uint8_t h4_type;
-static uint8_t h4_header_buf[4];  // Max header size (ACL: 4 bytes)
-static size_t h4_header_idx;
-static size_t h4_header_len;
-static struct net_buf *h4_buf;
-static size_t h4_payload_remaining;
 
 // RX queue helpers (can be called from IRQ context)
 static inline bool rx_queue_is_full(void) {
@@ -256,167 +242,44 @@ static void hci_event_sort_batch(struct net_buf **batch, int count) {
     }
 }
 
-// Reset H:4 parser state
-static void h4_parser_reset(void) {
-    h4_state = H4_STATE_TYPE;
-    h4_header_idx = 0;
-    h4_payload_remaining = 0;
-    if (h4_buf) {
-        net_buf_unref(h4_buf);
-        h4_buf = NULL;
-    }
-}
-
-// Process one byte through H:4 parser
-// Returns true if packet is complete
-static bool h4_parser_process_byte(uint8_t byte) {
-    switch (h4_state) {
-        case H4_STATE_TYPE:
-            h4_type = byte;
-            h4_header_idx = 0;
-
-            // Determine header length based on packet type
-            switch (h4_type) {
-                case H4_EVT:
-                    h4_header_len = 2;  // opcode + length
-                    break;
-                case H4_ACL:
-                    h4_header_len = 4;  // handle(2) + length(2)
-                    break;
-                default:
-                    error_printf("Unknown H:4 packet type: 0x%02x\n", h4_type);
-                    h4_parser_reset();
-                    return false;
-            }
-
-            h4_state = H4_STATE_HEADER;
-            return false;
-
-        case H4_STATE_HEADER:
-            h4_header_buf[h4_header_idx++] = byte;
-
-            if (h4_header_idx >= h4_header_len) {
-                // Header complete, determine payload length
-                size_t payload_len;
-
-                switch (h4_type) {
-                    case H4_EVT:
-                        payload_len = h4_header_buf[1];  // length byte
-
-                        // Allocate net_buf for event
-                        h4_buf = bt_buf_get_evt(h4_header_buf[0], false, K_NO_WAIT);
-                        if (!h4_buf) {
-                            // Buffer exhaustion - don't reset parser, keep state for retry.
-                            // Caller should process work queue to free buffers and retry.
-                            error_printf("Failed to allocate event buffer (Issue #12)\n");
-                            return false;
-                        }
-
-                        // bt_buf_get_evt() -> bt_buf_get_rx() already added H4 type byte
-                        // Just add header to buffer (event code + length)
-                        net_buf_add_mem(h4_buf, h4_header_buf, h4_header_len);
-                        break;
-
-                    case H4_ACL:
-                        payload_len = h4_header_buf[2] | (h4_header_buf[3] << 8);
-
-                        // Allocate net_buf for ACL
-                        h4_buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_NO_WAIT);
-                        if (!h4_buf) {
-                            // Buffer exhaustion - don't reset parser, keep state for retry.
-                            // Caller should process work queue to free buffers and retry.
-                            error_printf("Failed to allocate ACL buffer (Issue #12)\n");
-                            return false;
-                        }
-
-                        // bt_buf_get_rx(BT_BUF_ACL_IN, ...) already added H4 type byte
-                        // Just add header to buffer
-                        net_buf_add_mem(h4_buf, h4_header_buf, h4_header_len);
-                        break;
-
-                    default:
-                        h4_parser_reset();
-                        return false;
-                }
-
-                if (payload_len == 0) {
-                    // No payload, packet is complete
-                    h4_state = H4_STATE_TYPE;
-                    return true;
-                } else {
-                    // Transition to payload state
-                    h4_payload_remaining = payload_len;
-                    h4_state = H4_STATE_PAYLOAD;
-                }
-            }
-            return false;
-
-        case H4_STATE_PAYLOAD:
-            if (!h4_buf) {
-                error_printf("No buffer in payload state\n");
-                h4_parser_reset();
-                return false;
-            }
-
-            net_buf_add_u8(h4_buf, byte);
-            h4_payload_remaining--;
-
-            if (h4_payload_remaining == 0) {
-                // Payload complete, packet is ready
-                h4_state = H4_STATE_TYPE;
-                return true;
-            }
-            return false;
-    }
-
-    return false;
-}
-
-// Callback for mp_bluetooth_hci_uart_readpacket() - called for each byte
+// Callback for mp_bluetooth_hci_uart_readpacket() - called for each byte.
+// Uses shared H:4 parser from extmod/zephyr_ble/hal/zephyr_ble_h4.c.
 // IMPORTANT: This may be called from interrupt context (IPCC IRQ on STM32WB)
 // DO NOT call recv_cb() directly - queue the buffer for processing in scheduler context
 static void h4_uart_byte_callback(uint8_t byte) {
-    if (h4_parser_process_byte(byte)) {
-        if (h4_buf) {
-            struct net_buf *buf = h4_buf;
-            h4_buf = NULL;  // Ownership transferred
-
-            #if ZEPHYR_BLE_DEBUG
-            // Debug: Trace HCI packets (type is first byte in buffer)
-            uint8_t pkt_type = buf->data[0];
-            if (pkt_type == H4_ACL) {
-                // ACL data packet - decode handle and L2CAP/ATT info
-                uint16_t handle = (buf->data[1] | (buf->data[2] << 8)) & 0x0FFF;
-                uint16_t acl_len = buf->data[3] | (buf->data[4] << 8);
-                DEBUG_HCI_printf("RX ACL: handle=0x%03x len=%d, first_byte=0x%02x\n",
-                    handle, acl_len, (buf->len > 9) ? buf->data[9] : 0);
-            } else if (pkt_type == H4_EVT) {
-                // HCI Event - decode event code
-                uint8_t evt_code = buf->data[1];
-                if (evt_code == HCI_EVT_DISCONNECT_COMPLETE) {
-                    // Disconnect Complete: [type=04][evt=05][len=4][status][handle_lo][handle_hi][reason]
-                    uint8_t status = buf->data[3];
-                    uint16_t handle = (buf->data[4] | (buf->data[5] << 8)) & 0x0FFF;
-                    uint8_t reason = buf->data[6];
-                    DEBUG_HCI_printf("RX DISCONNECT: handle=0x%03x status=%d reason=0x%02x\n",
-                        handle, status, reason);
-                } else if (evt_code == HCI_EVT_CMD_COMPLETE) {
-                    uint16_t opcode = buf->data[4] | (buf->data[5] << 8);
-                    DEBUG_HCI_printf("RX CMD_COMPLETE: opcode=0x%04x\n", opcode);
-                }
+    struct net_buf *buf = mp_bluetooth_zephyr_h4_process_byte(byte);
+    if (buf) {
+        #if ZEPHYR_BLE_DEBUG
+        // Debug: Trace HCI packets (type is first byte in buffer)
+        uint8_t pkt_type = buf->data[0];
+        if (pkt_type == H4_ACL) {
+            uint16_t handle = (buf->data[1] | (buf->data[2] << 8)) & 0x0FFF;
+            uint16_t acl_len = buf->data[3] | (buf->data[4] << 8);
+            DEBUG_HCI_printf("RX ACL: handle=0x%03x len=%d, first_byte=0x%02x\n",
+                handle, acl_len, (buf->len > 9) ? buf->data[9] : 0);
+        } else if (pkt_type == H4_EVT) {
+            uint8_t evt_code = buf->data[1];
+            if (evt_code == HCI_EVT_DISCONNECT_COMPLETE) {
+                uint8_t status = buf->data[3];
+                uint16_t handle = (buf->data[4] | (buf->data[5] << 8)) & 0x0FFF;
+                uint8_t reason = buf->data[6];
+                DEBUG_HCI_printf("RX DISCONNECT: handle=0x%03x status=%d reason=0x%02x\n",
+                    handle, status, reason);
+            } else if (evt_code == HCI_EVT_CMD_COMPLETE) {
+                uint16_t opcode = buf->data[4] | (buf->data[5] << 8);
+                DEBUG_HCI_printf("RX CMD_COMPLETE: opcode=0x%04x\n", opcode);
             }
-            #endif
+        }
+        #endif
 
-            // Queue the buffer for processing in scheduler context
-            // This avoids calling bt_hci_recv() from interrupt context
-            if (!rx_queue_put(buf)) {
-                error_printf("RX queue full\n");
-                net_buf_unref(buf);
-            } else {
-                // Schedule task to process queued packets
-                // This is safe from IRQ context (same as NimBLE UART IRQ)
-                mp_bluetooth_zephyr_port_poll_now();
-            }
+        // Queue the buffer for processing in scheduler context
+        // This avoids calling bt_hci_recv() from interrupt context
+        if (!rx_queue_put(buf)) {
+            error_printf("RX queue full\n");
+            net_buf_unref(buf);
+        } else {
+            // Schedule task to process queued packets
+            mp_bluetooth_zephyr_port_poll_now();
         }
     }
 }
@@ -572,8 +435,8 @@ static int hci_stm32_open(const struct device *dev, bt_hci_recv_t recv) {
     hci_dev = dev;
     recv_cb = recv;
 
-    // Reset H:4 parser
-    h4_parser_reset();
+    // Initialise shared H:4 parser and register recv callback
+    mp_bluetooth_zephyr_h4_init(dev, recv);
 
     // Initialize HCI transport (UART or IPCC)
     int ret = bt_hci_transport_setup(dev);
@@ -593,7 +456,7 @@ static int hci_stm32_close(const struct device *dev) {
     DEBUG_HCI_printf("hci_stm32_close\n");
 
     recv_cb = NULL;
-    h4_parser_reset();
+    mp_bluetooth_zephyr_h4_deinit();
     mp_bluetooth_zephyr_poll_stop_timer();
 
     // Teardown HCI transport
@@ -792,6 +655,9 @@ void mp_bluetooth_hci_poll_now(void) {
 
 // Port deinit - called during mp_bluetooth_deinit()
 void mp_bluetooth_zephyr_port_deinit(void) {
+    // Clear any partial H:4 parse state
+    mp_bluetooth_zephyr_h4_reset();
+
     // Clean up shared soft timer and sched_node
     mp_bluetooth_zephyr_poll_cleanup();
 

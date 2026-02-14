@@ -75,6 +75,13 @@ void mp_bluetooth_zephyr_gatt_pool_reset(void);
 // Schedule immediate BLE processing via sched_node (safe from PendSV/IRQ).
 void mp_bluetooth_zephyr_port_poll_now(void);
 
+// --- H:4 UART polling (zephyr_ble_h4.c) ---
+
+// Read bytes from UART, parse H:4 framing, deliver completed packets.
+// Weak default reads from mp_bluetooth_hci_uart_readchar() byte-by-byte.
+// Overridden by ports with non-standard transports (e.g. CYW43 SPI).
+void mp_bluetooth_zephyr_poll_uart(void);
+
 // --- Weak defaults (override if needed) ---
 // Defaults in zephyr_ble_poll.c (soft timer) and zephyr_ble_port_stubs.c (HCI RX task).
 
