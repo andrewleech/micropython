@@ -186,6 +186,11 @@ uint32_t trng_random_u32(void);
 #define MICROPY_HW_USB_MSC                  (0)
 #endif
 
+// Enable USB runtime device support (machine.USBDevice / usb.device).
+#ifndef MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
+#define MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE (1)
+#endif
+
 // Enable USB Host support.
 #ifndef MICROPY_HW_USB_HOST
 #define MICROPY_HW_USB_HOST                 (0)
