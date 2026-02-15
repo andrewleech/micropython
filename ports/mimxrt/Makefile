@@ -307,6 +307,7 @@ SHARED_SRC_C += \
 	shared/tinyusb/mp_usbd.c \
 	shared/tinyusb/mp_usbd_cdc.c \
 	shared/tinyusb/mp_usbd_descriptor.c \
+	shared/tinyusb/mp_usbd_runtime.c \
 
 ifeq ($(MICROPY_HW_USB_HOST),1)
 SHARED_SRC_C += shared/tinyusb/mp_usbh.c
