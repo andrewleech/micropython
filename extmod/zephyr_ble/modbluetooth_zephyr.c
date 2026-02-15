@@ -41,19 +41,25 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/l2cap.h>
 #include <zephyr/device.h>
+#ifndef __ZEPHYR__
 #include "host/att_internal.h"
+#endif
 #include "extmod/modbluetooth.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_work.h"
+#ifndef __ZEPHYR__
 #include "extmod/zephyr_ble/net_buf_pool_registry.h"
+#endif
 
 #if MICROPY_PY_BLUETOOTH_USE_ZEPHYR_FREERTOS
 #include "FreeRTOS.h"
 #include "task.h"
 #endif
 
+#ifndef __ZEPHYR__
 // Access Zephyr's internal bt_dev for force-reset on deinit failure
 // Include path has lib/zephyr/subsys/bluetooth, so use host/ prefix
 #include "host/hci_core.h"
+#endif
 
 #if MICROPY_PY_NETWORK_CYW43
 // For cyw43_t definition (bt_loaded reset on deinit failure)
@@ -297,14 +303,16 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
 
 static int mp_bluetooth_zephyr_ble_state;
 
+#ifndef __ZEPHYR__
 // BLE initialization completion tracking (-1 = pending, 0 = success, >0 = error code)
 static volatile int mp_bluetooth_zephyr_bt_enable_result = -1;
 
-// Track if Zephyr callbacks are registered (persists across bt_enable/bt_disable cycles)
-static bool mp_bt_zephyr_callbacks_registered = false;
-
 // Timeout for BLE initialization (milliseconds)
 #define ZEPHYR_BLE_STARTUP_TIMEOUT 5000
+#endif
+
+// Track if Zephyr callbacks are registered (persists across bt_enable/bt_disable cycles)
+static bool mp_bt_zephyr_callbacks_registered = false;
 
 #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
 static int mp_bluetooth_zephyr_gap_scan_state;
@@ -691,11 +699,13 @@ static void reverse_addr_byte_order(uint8_t *addr_out, const bt_addr_le_t *addr_
     }
 }
 
-// Callback for bt_enable() completion
+#ifndef __ZEPHYR__
+// Callback for bt_enable() completion (HAL build only — native Zephyr uses synchronous bt_enable)
 static void mp_bluetooth_zephyr_bt_ready_cb(int err) {
     DEBUG_printf("bt_ready_cb: err=%d\n", err);
     mp_bluetooth_zephyr_bt_enable_result = err;
 }
+#endif
 
 #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
 
@@ -730,9 +740,13 @@ void gap_scan_cb_timeout(struct k_timer *timer_id) {
     // Cannot call bt_le_scan_stop from a timer callback because this callback may be
     // preempting the BT stack.  So schedule it to be called from the main thread.
     while (!mp_sched_schedule(MP_OBJ_FROM_PTR(&gap_scan_stop_obj), mp_const_none)) {
-        // FIXED: Don't call mp_event_wait_indefinite() - we're already in scheduler!
-        // Instead, directly process work queue to make space
+        #ifdef __ZEPHYR__
+        // Native Zephyr: yield to let main thread drain the scheduler queue.
+        k_yield();
+        #else
+        // HAL build: process work queue to make space.
         mp_bluetooth_zephyr_poll();
+        #endif
     }
     // Indicate scanning has stopped so that no more scan result events are generated
     // (they may still come in until bt_le_scan_stop is called by gap_scan_stop).
@@ -787,7 +801,7 @@ int mp_bluetooth_init(void) {
         // Only do this when coming from OFF state, not when reinitializing from SUSPENDED
         if (current_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF) {
             // Initialize port-specific resources (soft timers, sched nodes, etc.)
-            #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI
+            #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI || defined(STM32WB) || defined(__ZEPHYR__)
             mp_bluetooth_zephyr_port_init();
             #endif
 
@@ -812,6 +826,7 @@ int mp_bluetooth_init(void) {
                 bt_le_scan_cb_register(&mp_bluetooth_zephyr_gap_scan_cb_struct);
                 #endif
 
+                #if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
                 // Configure default IO capability (Just Works / NO_INPUT_NO_OUTPUT)
                 // This must be called before registering auth callbacks
                 mp_bluetooth_set_io_capability(0);
@@ -819,6 +834,7 @@ int mp_bluetooth_init(void) {
                 // Register authentication callbacks for pairing/bonding
                 bt_conn_auth_cb_register(&mp_bt_zephyr_auth_callbacks);
                 bt_conn_auth_info_cb_register(&mp_bt_zephyr_auth_info_callbacks);
+                #endif
 
                 // Register GATT callbacks for MTU updates (handles remote-initiated MTU exchange)
                 bt_gatt_cb_register(&mp_bt_zephyr_gatt_callbacks);
@@ -829,6 +845,19 @@ int mp_bluetooth_init(void) {
         }
 
         // Initialize Zephyr BLE host stack
+
+        #ifdef __ZEPHYR__
+        // Native Zephyr: synchronous bt_enable (real kernel threads handle init)
+        int ret = bt_enable(NULL);
+        if (ret == -EALREADY) {
+            // Stack already enabled from previous init (SUSPENDED state)
+            goto init_complete;
+        }
+        if (ret) {
+            return bt_err_to_errno(ret);
+        }
+        #else
+        // HAL build: async bt_enable with manual init loop
         // Note: After bt_disable(), we can call bt_enable() again to reinitialize
 
         // Reset completion flag
@@ -924,8 +953,10 @@ int mp_bluetooth_init(void) {
         // Exit init phase - work thread can now process work
         extern void mp_bluetooth_zephyr_init_phase_exit(void);
         mp_bluetooth_zephyr_init_phase_exit();
+        #endif // __ZEPHYR__ (closes #ifdef/#else for init sequence)
 
-        // Check result
+        #ifndef __ZEPHYR__
+        // Check result (HAL build only — native Zephyr uses synchronous bt_enable)
         if (mp_bluetooth_zephyr_bt_enable_result != 0) {
             int err = mp_bluetooth_zephyr_bt_enable_result;
             mp_bluetooth_deinit();
@@ -939,16 +970,19 @@ int mp_bluetooth_init(void) {
                 return bt_err_to_errno(err);
             }
         }
+        #endif // !__ZEPHYR__
 
     init_complete:
         DEBUG_printf("BLE initialization successful!\n");
 
+        #ifndef __ZEPHYR__
         // Start HCI RX task for continuous HCI polling in background
         // The task is stopped first in mp_bluetooth_deinit() to prevent race conditions
         #if MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
         mp_bluetooth_zephyr_hci_rx_task_start();
         DEBUG_printf("HCI RX task started\n");
         #endif
+        #endif // !__ZEPHYR__
 
     } else {
         DEBUG_printf("BLE already ACTIVE (state=%d)\n", mp_bluetooth_zephyr_ble_state);
@@ -1045,6 +1079,11 @@ int mp_bluetooth_deinit(void) {
     MP_STATE_PORT(bluetooth_zephyr_root_pointers)->n_services = 0;
     #endif
 
+    #ifdef __ZEPHYR__
+    // Native Zephyr: bt_disable not reliably available across Zephyr versions.
+    // Set SUSPENDED so next init reuses the already-enabled stack.
+    mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_SUSPENDED;
+    #else
     // === PHASE 3: bt_disable() with polling mode ===
     // HCI RX task is stopped, so k_sem_take uses polling for HCI reception.
     // This is reliable for the few HCI commands bt_disable() needs.
@@ -1093,9 +1132,13 @@ int mp_bluetooth_deinit(void) {
     // previous session which can cause crashes on next init.
     mp_net_buf_pool_state_reset();
 
-    // Deinit port-specific resources (CYW43 cleanup, soft timers, GATT pool, etc.)
-    // This must be done after bt_disable() completes.
-    #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI || defined(STM32WB)
+    // Set state to OFF so next init does full re-initialization
+    // (including controller init and callback registration)
+    mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF;
+    #endif // __ZEPHYR__
+
+    // Deinit port-specific resources (soft timers, GATT pool, etc.)
+    #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI || defined(STM32WB) || defined(__ZEPHYR__)
     mp_bluetooth_zephyr_port_deinit();
     #endif
 
@@ -1110,10 +1153,6 @@ int mp_bluetooth_deinit(void) {
     // callback registration functions (bt_conn_cb_register, bt_gatt_cb_register, etc.)
     // append to linked lists without checking for duplicates. Re-registering the
     // same static structures would corrupt Zephyr's internal lists.
-
-    // Set state to OFF so next init does full re-initialization
-    // (including controller init and callback registration)
-    mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF;
 
     return 0;
 }
@@ -1695,7 +1734,9 @@ int mp_bluetooth_gatts_notify_indicate(uint16_t conn_handle, uint16_t value_hand
                     break;
                 }
             }
-        } else if (gatts_op == MP_BLUETOOTH_GATTS_OP_NOTIFY) {
+        }
+        #ifndef __ZEPHYR__
+        if (!attr_val && gatts_op == MP_BLUETOOTH_GATTS_OP_NOTIFY) {
             // Handle not in local GATT DB — send raw ATT notification PDU.
             // This supports cases where a GATTC-discovered remote handle is
             // passed to gatts_notify (e.g. perf_gatt_notify.py).
@@ -1713,6 +1754,7 @@ int mp_bluetooth_gatts_notify_indicate(uint16_t conn_handle, uint16_t value_hand
             }
             mp_bluetooth_zephyr_work_process();
         }
+        #endif // !__ZEPHYR__
     }
 
     return err;

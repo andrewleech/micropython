@@ -32,6 +32,11 @@
 #include <stdbool.h>
 #include "zephyr_ble_timer.h"
 
+#ifdef __ZEPHYR__
+// Native Zephyr: kernel types and work API provided by <zephyr/kernel.h>
+// (already included via zephyr_ble_timer.h)
+#else
+
 // CONTAINER_OF macro (also defined in kernel.h)
 #ifndef CONTAINER_OF
 #define CONTAINER_OF(ptr, type, field) \
@@ -173,6 +178,28 @@ bool k_work_delayable_is_pending(const struct k_work_delayable *dwork);
 // Get delayable work busy status
 int k_work_delayable_busy_get(const struct k_work_delayable *dwork);
 
+// Get delayable work from work (for internal use)
+// work is embedded in the delayable work structure
+static inline struct k_work_delayable *k_work_delayable_from_work(struct k_work *work) {
+    return CONTAINER_OF(work, struct k_work_delayable, work);
+}
+
+// Get thread from work queue
+// Returns &queue->thread so k_current_get() == k_work_queue_thread_get(queue)
+// comparison works correctly when in work queue context.
+static inline void *k_work_queue_thread_get(struct k_work_q *queue) {
+    return &queue->thread;
+}
+
+// Flush work (wait for completion) - no-op in MicroPython
+static inline int k_work_flush(struct k_work *work, void *sync) {
+    (void)work;
+    (void)sync;
+    return 0;
+}
+
+#endif // __ZEPHYR__
+
 // --- MicroPython-specific functions ---
 
 // Waiting flag: When true, allows work processing from within wait loops
@@ -224,25 +251,5 @@ bool mp_bluetooth_zephyr_work_drain(void);
 // Reset work queue state for clean re-initialization
 // Called from mp_bluetooth_deinit() to clear stale queue linkages
 void mp_bluetooth_zephyr_work_reset(void);
-
-// Get delayable work from work (for internal use)
-// work is embedded in the delayable work structure
-static inline struct k_work_delayable *k_work_delayable_from_work(struct k_work *work) {
-    return CONTAINER_OF(work, struct k_work_delayable, work);
-}
-
-// Get thread from work queue
-// Returns &queue->thread so k_current_get() == k_work_queue_thread_get(queue)
-// comparison works correctly when in work queue context.
-static inline void *k_work_queue_thread_get(struct k_work_q *queue) {
-    return &queue->thread;
-}
-
-// Flush work (wait for completion) - no-op in MicroPython
-static inline int k_work_flush(struct k_work *work, void *sync) {
-    (void)work;
-    (void)sync;
-    return 0;
-}
 
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_WORK_H

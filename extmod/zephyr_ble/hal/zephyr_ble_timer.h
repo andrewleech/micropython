@@ -31,6 +31,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifdef __ZEPHYR__
+// Native Zephyr: use real kernel types
+#include <zephyr/kernel.h>
+#else
+
 // Zephyr k_timer abstraction layer for MicroPython
 //
 // When MICROPY_PY_THREAD is enabled (FreeRTOS available):
@@ -81,12 +86,14 @@ void k_timer_stop(struct k_timer *timer);
 // Note: K_MSEC, K_NO_WAIT, K_FOREVER are defined in zephyr_ble_work.h
 // Note: k_yield() is defined in zephyr_ble_kernel.h
 
-// Called by MicroPython scheduler to process timer callbacks
-void mp_bluetooth_zephyr_timer_process(void);
-
 // Check if two timeouts are equal
 static inline bool K_TIMEOUT_EQ(k_timeout_t a, k_timeout_t b) {
     return a.ticks == b.ticks;
 }
+
+#endif // __ZEPHYR__
+
+// Called by MicroPython scheduler to process timer callbacks
+void mp_bluetooth_zephyr_timer_process(void);
 
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_TIMER_H
