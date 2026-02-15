@@ -191,6 +191,13 @@ uint32_t trng_random_u32(void);
 #define MICROPY_HW_USB_MSC                  (0)
 #endif
 
+// Enable USB runtime device support (machine.USBDevice / usb.device).
+// Requires USB device mode; host-only variants disable USBDEV and so get this
+// disabled too, otherwise machine_usb_device.c references undefined CFG_TUD_*.
+#ifndef MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
+#define MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE (MICROPY_HW_ENABLE_USBDEV)
+#endif
+
 // Enable USB Host support.
 #ifndef MICROPY_HW_USB_HOST
 #define MICROPY_HW_USB_HOST                 (0)
