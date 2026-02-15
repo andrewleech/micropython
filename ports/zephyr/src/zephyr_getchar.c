@@ -24,7 +24,7 @@ extern int mp_interrupt_char;
 void mp_sched_keyboard_interrupt(void);
 void mp_hal_signal_event(void);
 
-#define UART_BUFSIZE (512)
+#define UART_BUFSIZE (4096)
 static uint8_t uart_ringbuf[UART_BUFSIZE];
 static uint16_t i_get, i_put;
 
