@@ -89,6 +89,16 @@ static int call_depth = 0;
 #define DEBUG_EXIT(name) do {} while (0)
 #endif
 
+// Temporary SMP diagnostic counters (volatile, read from GDB or Python)
+extern volatile int _smp_diag_confirm;
+extern volatile int _smp_diag_confirm_ret;
+extern volatile int _smp_diag_sec_changed;
+extern volatile int _smp_diag_sec_level;
+extern volatile int _smp_diag_sec_err;
+extern volatile int _smp_diag_pair_complete;
+extern volatile int _smp_diag_pair_failed;
+extern volatile int _smp_diag_pair_fail_reason;
+
 #define BLE_HCI_SCAN_ITVL_MIN 0x10
 #define BLE_HCI_SCAN_ITVL_MAX 0xffff
 #define BLE_HCI_SCAN_WINDOW_MIN 0x10
@@ -604,6 +614,9 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
 }
 
 static void mp_bt_zephyr_security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err) {
+    _smp_diag_sec_changed++;
+    _smp_diag_sec_level = level;
+    _smp_diag_sec_err = err;
     // Decode security level and error for debugging
     const char *level_str;
     switch (level) {
@@ -999,12 +1012,80 @@ int mp_bluetooth_init(void) {
     return 0;
 }
 
+#ifdef __ZEPHYR__
+// Callback for bt_conn_foreach to disconnect and count LE connections.
+static void mp_bt_zephyr_disconnect_count_cb(struct bt_conn *conn, void *data) {
+    int *count = (int *)data;
+    (*count)++;
+    struct bt_conn_info info;
+    int info_err = bt_conn_get_info(conn, &info);
+    if (info_err == 0) {
+        DEBUG_printf("mp_bluetooth_deinit: conn %p state=%d role=%d\n", conn, info.state, info.role);
+    } else {
+        DEBUG_printf("mp_bluetooth_deinit: conn %p (get_info failed: %d)\n", conn, info_err);
+    }
+    int err = bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+    DEBUG_printf("mp_bluetooth_deinit: bt_conn_disconnect returned %d\n", err);
+}
+
+// Callback for bt_conn_foreach to count remaining LE connections.
+static void mp_bt_zephyr_count_conn_cb(struct bt_conn *conn, void *data) {
+    int *count = (int *)data;
+    (*count)++;
+    struct bt_conn_info info;
+    if (bt_conn_get_info(conn, &info) == 0) {
+        DEBUG_printf("  still active: conn %p state=%d\n", conn, info.state);
+    }
+}
+
+// Disconnect all LE connections and wait for them to complete.
+// On native Zephyr the BT RX thread processes disconnect events independently
+// so we just need to yield and check periodically.
+static void mp_bt_zephyr_disconnect_all_wait(void) {
+    int count = 0;
+    bt_conn_foreach(BT_CONN_TYPE_LE, mp_bt_zephyr_disconnect_count_cb, &count);
+    if (count == 0) {
+        return;
+    }
+    DEBUG_printf("mp_bluetooth_deinit: waiting for %d connection(s) to disconnect\n", count);
+    // Wait up to 1 second for disconnections to complete.
+    // The BT RX thread runs at higher priority and will process events.
+    for (int i = 0; i < 100; i++) {
+        k_sleep(K_MSEC(10));
+        count = 0;
+        bt_conn_foreach(BT_CONN_TYPE_LE, mp_bt_zephyr_count_conn_cb, &count);
+        if (count == 0) {
+            DEBUG_printf("mp_bluetooth_deinit: all connections disconnected\n");
+            return;
+        }
+    }
+    DEBUG_printf("mp_bluetooth_deinit: %d connection(s) still active after timeout\n", count);
+}
+#endif
+
 int mp_bluetooth_deinit(void) {
     DEBUG_printf("mp_bluetooth_deinit %d\n", mp_bluetooth_zephyr_ble_state);
-    if (mp_bluetooth_zephyr_ble_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF
-        || mp_bluetooth_zephyr_ble_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_SUSPENDED) {
+    if (mp_bluetooth_zephyr_ble_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF) {
         return 0;
     }
+
+    #ifdef __ZEPHYR__
+    // On native Zephyr, SUSPENDED means the Zephyr BT stack is still active but
+    // MicroPython state from a previous session may be stale (GC heap reinitialized).
+    // Only stop active BLE operations on the Zephyr stack; skip MicroPython heap
+    // cleanup (services, L2CAP channels) since those pointers may be invalid.
+    if (mp_bluetooth_zephyr_ble_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_SUSPENDED) {
+        DEBUG_printf("mp_bluetooth_deinit: SUSPENDED, stopping BLE operations only\n");
+        bt_le_adv_stop();
+        #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
+        bt_le_scan_stop();
+        #endif
+        // Disconnect any active connections and wait for completion.
+        // Connection pool slots must be freed before next bt_le_adv_start.
+        mp_bt_zephyr_disconnect_all_wait();
+        return 0;
+    }
+    #endif
 
     // === PHASE 1: Stop HCI RX task FIRST ===
     // This MUST happen before bt_le_adv_stop/bt_le_scan_stop/bt_disable to prevent race:
@@ -1036,6 +1117,12 @@ int mp_bluetooth_deinit(void) {
     if (ret != 0 && ret != -EALREADY) {
         DEBUG_printf("mp_bluetooth_deinit: bt_le_scan_stop returned %d (ignored)\n", ret);
     }
+    #endif
+
+    #ifdef __ZEPHYR__
+    // On native Zephyr (no bt_disable), explicitly disconnect all connections
+    // and wait for the connection pool slots to be freed.
+    mp_bt_zephyr_disconnect_all_wait();
     #endif
 
     #if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
@@ -3095,7 +3182,17 @@ static void zephyr_passkey_confirm_cb(struct bt_conn *conn, unsigned int passkey
     mp_bluetooth_gap_on_passkey_action(conn_handle, MP_BLUETOOTH_PASSKEY_ACTION_NUMERIC_COMPARISON, passkey);
 }
 
+volatile int _smp_diag_confirm = 0;
+volatile int _smp_diag_confirm_ret = -99;
+volatile int _smp_diag_sec_changed = 0;
+volatile int _smp_diag_sec_level = -1;
+volatile int _smp_diag_sec_err = -1;
+volatile int _smp_diag_pair_complete = 0;
+volatile int _smp_diag_pair_failed = 0;
+volatile int _smp_diag_pair_fail_reason = -1;
+
 static void zephyr_pairing_confirm_cb(struct bt_conn *conn) {
+    _smp_diag_confirm++;
     DEBUG_printf("zephyr_pairing_confirm_cb\n");
 
     uint16_t conn_handle = mp_bt_zephyr_auth_get_conn_handle(conn);
@@ -3114,8 +3211,23 @@ static void zephyr_pairing_confirm_cb(struct bt_conn *conn) {
     // This matches NimBLE behavior where Just Works is auto-accepted internally
     // and applications don't need to handle the passkey action event.
     // Applications that need to reject Just Works pairing can set a different IO capability.
+    // Check connection security BEFORE confirm
+    struct bt_conn_info cinfo;
+    if (bt_conn_get_info(conn, &cinfo) == 0) {
+        DEBUG_printf("  pre-confirm: state=%d role=%d sec.level=%d sec.flags=0x%02x\n",
+                     cinfo.state, cinfo.role,
+                     cinfo.security.level, cinfo.security.flags);
+    }
+
     int err = bt_conn_auth_pairing_confirm(conn);
+    _smp_diag_confirm_ret = err;
     DEBUG_printf("  bt_conn_auth_pairing_confirm: %d\n", err);
+
+    // Check connection security AFTER confirm
+    if (bt_conn_get_info(conn, &cinfo) == 0) {
+        DEBUG_printf("  post-confirm: sec.level=%d sec.flags=0x%02x\n",
+                     cinfo.security.level, cinfo.security.flags);
+    }
 }
 
 static void zephyr_auth_cancel_cb(struct bt_conn *conn) {
@@ -3138,6 +3250,7 @@ static void zephyr_auth_cancel_cb(struct bt_conn *conn) {
 }
 
 static void zephyr_pairing_complete_cb(struct bt_conn *conn, bool bonded) {
+    _smp_diag_pair_complete++;
     DEBUG_printf("zephyr_pairing_complete_cb: bonded=%d\n", bonded);
 
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
@@ -3166,6 +3279,8 @@ static void zephyr_pairing_complete_cb(struct bt_conn *conn, bool bonded) {
 }
 
 static void zephyr_pairing_failed_cb(struct bt_conn *conn, enum bt_security_err reason) {
+    _smp_diag_pair_failed++;
+    _smp_diag_pair_fail_reason = reason;
     DEBUG_printf("zephyr_pairing_failed_cb: reason=%d\n", reason);
 
     uint16_t conn_handle = mp_bt_zephyr_auth_get_conn_handle(conn);
