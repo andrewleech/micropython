@@ -161,6 +161,19 @@ Functions
    There is a finite queue to hold the scheduled functions and `schedule()`
    will raise a `RuntimeError` if the queue is full.
 
+.. function:: stdio_mode_raw(enabled)
+
+   Switch the terminal (stdin/stdout) between raw and original mode.  When
+   *enabled* is ``True`` the terminal is placed in raw mode (no echo, no line
+   editing, characters available immediately).  When *enabled* is ``False`` the
+   terminal settings are restored to their original state.
+
+   This is useful for code that needs to take over terminal I/O, for example
+   an alternative REPL such as `aiorepl`.
+
+   Availability: Unix port.  Requires ``MICROPY_PY_MICROPYTHON_STDIO_RAW``.
+
+
 Classes
 -------
 
