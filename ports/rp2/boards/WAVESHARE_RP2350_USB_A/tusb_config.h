@@ -25,19 +25,18 @@
 #ifndef MICROPY_INCLUDED_RP2_TUSB_CONFIG_H
 #define MICROPY_INCLUDED_RP2_TUSB_CONFIG_H
 
-#include "py/mpconfig.h"
-#include "mpconfigport.h"
-
-// Use the default TinyUSB config
-#include "../../tusb_config.h"
-
-// Use native USB controllers for both host and device mode on RP2350
-#if CFG_TUH_ENABLED
-#define CFG_TUH_RPI_PIO_USB   0  // Disable PIO USB, use native controllers
-#define BOARD_TUH_RHPORT      1  // Use USB1 for host mode
-
-// Use native USB for device mode
-#define BOARD_TUD_RHPORT      0  // Use USB0 for device mode
+// Dual-mode USB: native device (USB-C) + PIO USB host (USB-A)
+// These are defined in mpconfigboard.h for early visibility but
+// repeated here with guards for TinyUSB source files that include
+// tusb_config.h without going through mpconfigboard.h first.
+#ifndef BOARD_TUD_RHPORT
+#define BOARD_TUD_RHPORT     0
+#endif
+#ifndef BOARD_TUH_RHPORT
+#define BOARD_TUH_RHPORT     1
+#endif
+#ifndef CFG_TUH_RPI_PIO_USB
+#define CFG_TUH_RPI_PIO_USB  1
 #endif
 
 #endif // MICROPY_INCLUDED_RP2_TUSB_CONFIG_H
