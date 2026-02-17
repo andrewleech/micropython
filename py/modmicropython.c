@@ -31,6 +31,9 @@
 #include "py/runtime.h"
 #include "py/gc.h"
 #include "py/mphal.h"
+#include "py/repl.h"
+#include "shared/readline/readline.h"
+#include "shared/runtime/pyexec.h"
 
 #if MICROPY_PY_MICROPYTHON
 
@@ -178,6 +181,96 @@ static mp_obj_t mp_micropython_stdio_mode_raw(mp_obj_t enabled) {
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_micropython_stdio_mode_raw_obj, mp_micropython_stdio_mode_raw);
 #endif
 
+#if MICROPY_HELPER_REPL
+// Continuation prompt interned as qstr at init time for GC safety.
+static qstr repl_ps2_qstr;
+
+// micropython.repl_readline_init(ps1, ps2)
+// Initialise readline state for a new input line.
+static mp_obj_t mp_micropython_repl_readline_init(mp_obj_t ps1_in, mp_obj_t ps2_in) {
+    const char *ps1 = mp_obj_str_get_str(ps1_in);
+    repl_ps2_qstr = qstr_from_str(mp_obj_str_get_str(ps2_in));
+    if (MP_STATE_VM(mp_readline_line) == NULL) {
+        MP_STATE_VM(mp_readline_line) = vstr_new(32);
+    } else {
+        vstr_reset(MP_STATE_VM(mp_readline_line));
+    }
+    readline_init(MP_STATE_VM(mp_readline_line), ps1);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mp_micropython_repl_readline_init_obj, mp_micropython_repl_readline_init);
+
+// micropython.repl_readline_process_char(c)
+// Feed one character to readline. Returns -1 (continue) or (line_str, ret_code) tuple.
+// Handles multi-line continuation internally using ps2 from init.
+static mp_obj_t mp_micropython_repl_readline_process_char(mp_obj_t c_in) {
+    int c = mp_obj_get_int(c_in);
+    int ret = readline_process_char(c);
+    if (ret == -1) {
+        return MP_OBJ_NEW_SMALL_INT(-1);
+    }
+    vstr_t *line = MP_STATE_VM(mp_readline_line);
+    if (ret == 0) {
+        // Line complete — check if continuation is needed.
+        if (mp_repl_continue_with_input(vstr_null_terminated_str(line))) {
+            vstr_add_byte(line, '\n');
+            readline_note_newline(qstr_str(repl_ps2_qstr));
+            return MP_OBJ_NEW_SMALL_INT(-1);
+        }
+    }
+    // Terminal condition: return (line_str, ret_code).
+    mp_obj_t items[2] = {
+        mp_obj_new_str(vstr_null_terminated_str(line), line->len),
+        MP_OBJ_NEW_SMALL_INT(ret),
+    };
+    return mp_obj_new_tuple(2, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_micropython_repl_readline_process_char_obj, mp_micropython_repl_readline_process_char);
+
+// micropython.repl_readline_push()
+// Save readline state and vstr buffer for reentrant REPL.
+// Returns True if saved, False if already saved.
+static mp_obj_t mp_micropython_repl_readline_push(void) {
+    if (!readline_push()) {
+        return mp_const_false;
+    }
+    // Save the current vstr and allocate a fresh one for the inner session.
+    MP_STATE_VM(mp_readline_line_saved) = MP_STATE_VM(mp_readline_line);
+    MP_STATE_VM(mp_readline_line) = NULL;
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mp_micropython_repl_readline_push_obj, mp_micropython_repl_readline_push);
+
+// micropython.repl_readline_pop()
+// Restore previously saved readline state and vstr buffer.
+static mp_obj_t mp_micropython_repl_readline_pop(void) {
+    readline_pop();
+    // Free the inner session's vstr and restore the outer one.
+    if (MP_STATE_VM(mp_readline_line) != NULL) {
+        vstr_free(MP_STATE_VM(mp_readline_line));
+        m_del_obj(vstr_t, MP_STATE_VM(mp_readline_line));
+    }
+    MP_STATE_VM(mp_readline_line) = MP_STATE_VM(mp_readline_line_saved);
+    MP_STATE_VM(mp_readline_line_saved) = NULL;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mp_micropython_repl_readline_pop_obj, mp_micropython_repl_readline_pop);
+
+// micropython.repl()
+// Enter a blocking interactive REPL. Ctrl-D exits back to the caller.
+// Handles readline state push/pop internally for reentrant use.
+static mp_obj_t mp_micropython_repl(void) {
+    mp_hal_stdio_mode_raw();
+    pyexec_repl_breakpoint();
+    mp_hal_stdio_mode_orig();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mp_micropython_repl_obj, mp_micropython_repl);
+
+MP_REGISTER_ROOT_POINTER(vstr_t * mp_readline_line);
+MP_REGISTER_ROOT_POINTER(vstr_t * mp_readline_line_saved);
+#endif
+
 static const mp_rom_map_elem_t mp_module_micropython_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_micropython) },
     { MP_ROM_QSTR(MP_QSTR_const), MP_ROM_PTR(&mp_identity_obj) },
@@ -220,6 +313,13 @@ static const mp_rom_map_elem_t mp_module_micropython_globals_table[] = {
     #endif
     #if MICROPY_PY_MICROPYTHON_STDIO_RAW
     { MP_ROM_QSTR(MP_QSTR_stdio_mode_raw), MP_ROM_PTR(&mp_micropython_stdio_mode_raw_obj) },
+    #endif
+    #if MICROPY_HELPER_REPL
+    { MP_ROM_QSTR(MP_QSTR_repl_readline_init), MP_ROM_PTR(&mp_micropython_repl_readline_init_obj) },
+    { MP_ROM_QSTR(MP_QSTR_repl_readline_process_char), MP_ROM_PTR(&mp_micropython_repl_readline_process_char_obj) },
+    { MP_ROM_QSTR(MP_QSTR_repl_readline_push), MP_ROM_PTR(&mp_micropython_repl_readline_push_obj) },
+    { MP_ROM_QSTR(MP_QSTR_repl_readline_pop), MP_ROM_PTR(&mp_micropython_repl_readline_pop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_repl), MP_ROM_PTR(&mp_micropython_repl_obj) },
     #endif
 };
 
