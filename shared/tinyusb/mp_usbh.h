@@ -73,51 +73,7 @@ void mp_usbh_int_enable(void);
 void mp_usbh_int_disable(void);
 
 // Initialize TinyUSB for host mode.
-static inline void mp_usbh_init_tuh(void) {
-    // On single-port boards where host and device share the same USB controller,
-    // properly deinitialize device mode before switching to host mode.
-    // This removes the device IRQ handler before hcd_init() resets the hardware,
-    // preventing the device ISR from firing during the transition.
-    #if MICROPY_HW_ENABLE_USBDEV && (BOARD_TUH_RHPORT == TUD_OPT_RHPORT)
-    tud_deinit(TUD_OPT_RHPORT);
-    #endif
-    // Reset USB peripheral to clear any device mode configuration
-    #if defined(STM32F4) && defined(__HAL_RCC_USB_OTG_FS_FORCE_RESET)
-    __HAL_RCC_USB_OTG_FS_FORCE_RESET();
-    // Add delay after reset for peripheral to stabilize
-    for (volatile int i = 0; i < 10000; i++) {;
-    }
-    __HAL_RCC_USB_OTG_FS_RELEASE_RESET();
-    for (volatile int i = 0; i < 10000; i++) {;
-    }
-    #endif
-    // Initialize USB hardware - call low-level init directly to bypass tusb_inited() check
-    // which prevents re-init when switching from device to host mode
-    #if defined(STM32F4) || defined(STM32F7) || defined(STM32F2)
-    mp_usbd_ll_init_fs();
-    mp_usbh_ll_init_vbus_fs();
-    #elif defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
-    usb_phy_init_host();
-    #elif defined(MICROPY_HW_TINYUSB_LL_INIT)
-    MICROPY_HW_TINYUSB_LL_INIT();
-    #endif
-    // Pre-set host role before tuh_init() to prevent an ISR race condition:
-    // tuh_init() enables the host interrupt before setting _tusb_rhport_role,
-    // so if a device is already connected the ISR fires immediately, finds
-    // role=INVALID, leaves the interrupt uncleared, and loops forever.
-    #ifndef NO_QSTR
-    {
-        // TinyUSB internal (verified against TinyUSB 0.20.0 / commit 3af1bec1a9).
-        // TODO: propose upstream fix so tuh_init() sets role before enabling interrupts.
-        extern tusb_role_t _tusb_rhport_role[];
-        _tusb_rhport_role[BOARD_TUH_RHPORT] = TUSB_ROLE_HOST;
-    }
-    #endif
-    tuh_init(BOARD_TUH_RHPORT);
-    // Note: tuh_init() already calls hcd_int_enable() internally.
-    // Don't call mp_usbh_int_enable() again as it causes double interrupt
-    // allocation on ESP32 (esp_intr_alloc called twice).
-}
+void mp_usbh_init_tuh(void);
 
 // Fetch string descriptors (manufacturer/product/serial) for a device.
 // Called lazily on first property access. Safe to call from Python context only.
