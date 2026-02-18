@@ -880,6 +880,12 @@ typedef uint64_t mp_uint_t;
 #define MICROPY_REPL_EVENT_DRIVEN (0)
 #endif
 
+// Whether to boot into an asyncio-based REPL (aiorepl) instead of the
+// blocking friendly REPL. Requires aiorepl in the frozen manifest.
+#ifndef MICROPY_REPL_ASYNCIO
+#define MICROPY_REPL_ASYNCIO (0)
+#endif
+
 // The number of items to keep in the readline history.
 #ifndef MICROPY_READLINE_HISTORY_SIZE
 #define MICROPY_READLINE_HISTORY_SIZE (8)
