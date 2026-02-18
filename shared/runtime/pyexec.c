@@ -723,6 +723,80 @@ friendly_repl_reset:
 }
 
 #endif // MICROPY_REPL_EVENT_DRIVEN
+
+#if MICROPY_HELPER_REPL
+// Blocking breakpoint REPL: no banner, Ctrl-D returns to caller.
+// Terminal raw mode must be set by caller (e.g. from aiorepl).
+// Uses readline push/pop for reentrant state.
+int pyexec_repl_breakpoint(void) {
+    vstr_t line;
+    vstr_init(&line, 32);
+
+    readline_push();
+
+    for (;;) {
+    breakpoint_input_restart:
+        vstr_reset(&line);
+        int ret = readline(&line, mp_repl_get_ps1());
+
+        if (ret == CHAR_CTRL_C) {
+            mp_hal_stdout_tx_str("\r\n");
+            continue;
+        } else if (ret == CHAR_CTRL_D) {
+            // Exit breakpoint, return to caller.
+            mp_hal_stdout_tx_str("\r\n");
+            break;
+        } else if (ret == CHAR_CTRL_A || ret == CHAR_CTRL_B || ret == CHAR_CTRL_E) {
+            // Ignore raw REPL, banner reset, and paste mode in breakpoint.
+            mp_hal_stdout_tx_str("\r\n");
+            continue;
+        } else if (vstr_len(&line) == 0) {
+            continue;
+        } else {
+            // Multi-line continuation.
+            while (mp_repl_continue_with_input(vstr_null_terminated_str(&line))) {
+                vstr_add_byte(&line, '\n');
+                ret = readline(&line, mp_repl_get_ps2());
+                if (ret == CHAR_CTRL_C) {
+                    mp_hal_stdout_tx_str("\r\n");
+                    goto breakpoint_input_restart;
+                } else if (ret == CHAR_CTRL_D) {
+                    break;
+                }
+            }
+        }
+
+        mp_hal_stdio_mode_orig();
+        ret = parse_compile_execute(&line, MP_PARSE_SINGLE_INPUT,
+            EXEC_FLAG_ALLOW_DEBUGGING | EXEC_FLAG_IS_REPL | EXEC_FLAG_SOURCE_IS_VSTR);
+        mp_hal_stdio_mode_raw();
+        if (ret & PYEXEC_FORCED_EXIT) {
+            break;
+        }
+    }
+
+    vstr_clear(&line);
+    readline_pop();
+    return 0;
+}
+#endif // MICROPY_HELPER_REPL
+
+#if MICROPY_REPL_ASYNCIO
+int pyexec_asyncio_repl(void) {
+    static const char boot_code[] =
+        "import asyncio\n"
+        "import asyncio.arepl\n"
+        "asyncio.new_event_loop()\n"
+        "asyncio.create_task(asyncio.arepl.task())\n"
+        "asyncio.get_event_loop().run_forever()\n";
+    vstr_t vstr = {0};
+    vstr.buf = (char *)boot_code;
+    vstr.len = sizeof(boot_code) - 1;
+    return parse_compile_execute(&vstr, MP_PARSE_FILE_INPUT,
+        EXEC_FLAG_SOURCE_IS_VSTR | EXEC_FLAG_ALLOW_DEBUGGING);
+}
+#endif
+
 #endif // MICROPY_ENABLE_COMPILER
 
 int pyexec_file(const char *filename) {
