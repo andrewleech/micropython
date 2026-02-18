@@ -710,7 +710,8 @@ extern const struct device __device_dts_ord_0;
 // Optional features (disabled)
 // Note: CONFIG_BT_BONDABLE now enabled in SMP section above
 #define CONFIG_BT_BONDING_REQUIRED 0
-#define CONFIG_BT_BONDABLE_PER_CONNECTION 0
+/* CONFIG_BT_BONDABLE_PER_CONNECTION - not enabled (must not be defined;
+   Zephyr uses #if defined() checks so defining as 0 incorrectly enables it) */
 #define CONFIG_BT_AUTO_PHY_UPDATE 0
 #define CONFIG_BT_AUTO_DATA_LEN_UPDATE 0
 #define CONFIG_BT_CONN_DISABLE_SECURITY 0

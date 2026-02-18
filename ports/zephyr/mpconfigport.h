@@ -36,6 +36,11 @@
 #define MICROPY_CONFIG_ROM_LEVEL (MICROPY_CONFIG_ROM_LEVEL_BASIC_FEATURES)
 #endif
 
+// Enable random module (not included at BASIC_FEATURES level).
+// Zephyr provides entropy via CONFIG_ENTROPY_GENERATOR / hardware RNG.
+#define MICROPY_PY_RANDOM           (1)
+#define MICROPY_PY_RANDOM_EXTRA_FUNCS (1)
+
 // Usually passed from Makefile
 #ifndef MICROPY_HEAP_SIZE
 #define MICROPY_HEAP_SIZE (16 * 1024)

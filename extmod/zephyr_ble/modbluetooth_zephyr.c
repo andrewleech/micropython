@@ -41,6 +41,9 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/l2cap.h>
 #include <zephyr/device.h>
+#if defined(CONFIG_SETTINGS)
+#include <zephyr/settings/settings.h>
+#endif
 #ifndef __ZEPHYR__
 #include "host/att_internal.h"
 #endif
@@ -89,15 +92,6 @@ static int call_depth = 0;
 #define DEBUG_EXIT(name) do {} while (0)
 #endif
 
-// Temporary SMP diagnostic counters (volatile, read from GDB or Python)
-extern volatile int _smp_diag_confirm;
-extern volatile int _smp_diag_confirm_ret;
-extern volatile int _smp_diag_sec_changed;
-extern volatile int _smp_diag_sec_level;
-extern volatile int _smp_diag_sec_err;
-extern volatile int _smp_diag_pair_complete;
-extern volatile int _smp_diag_pair_failed;
-extern volatile int _smp_diag_pair_fail_reason;
 
 #define BLE_HCI_SCAN_ITVL_MIN 0x10
 #define BLE_HCI_SCAN_ITVL_MAX 0xffff
@@ -199,10 +193,6 @@ typedef struct _mp_bluetooth_zephyr_l2cap_channel_t {
     uint16_t mtu;                      // Our configured MTU
     uint8_t *rx_buf;                   // RX accumulation buffer
     size_t rx_len;                     // Current data length in rx_buf
-    // TX stall handling
-    struct net_buf *tx_pending;        // Pending TX buffer waiting for credits
-    bool credit_stalled;               // Credit exhaustion stall (no TX credits)
-    bool mem_stalled;                  // Memory stall (buffer pool low)
 } mp_bluetooth_zephyr_l2cap_channel_t;
 
 // L2CAP Server structure (for listening)
@@ -273,6 +263,7 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
     bool gattc_subscribe_active; // Track if subscription callback is registered
     bool gattc_subscribe_changing; // Track if we're intentionally switching subscription types
     bool gattc_unsubscribing; // Track if we're explicitly unsubscribing via CCCD write
+    bool gattc_subscribe_pending; // Track if bt_gatt_subscribe was explicitly called
 
     // Auto-subscriptions for notification delivery without explicit CCCD write.
     // Zephyr's architecture requires subscriptions to be registered for notification
@@ -295,12 +286,17 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
     uint32_t auth_passkey;        // Passkey for display/comparison
 
     // Pairing state tracking (for deferred encryption callback)
-    bool pairing_in_progress;      // True from pairing_confirm until pairing_complete
-    bool pending_security_update;  // True if security_changed happened during pairing
-    uint16_t pending_sec_conn;     // Connection handle for pending update
-    bool pending_sec_encrypted;    // Encryption state
+    // On different platforms, security_changed and pairing_complete can arrive
+    // in either order. We collect both pieces of data and fire _IRQ_ENCRYPTION_UPDATE
+    // only when both have arrived.
+    bool pairing_in_progress;       // True from pairing_confirm until encryption update fired
+    bool pending_security_update;   // True if security_changed happened during pairing
+    bool pairing_complete_received; // True if pairing_complete happened during pairing
+    bool pending_pairing_bonded;    // Bonded flag from pairing_complete
+    uint16_t pending_sec_conn;      // Connection handle for pending update
+    bool pending_sec_encrypted;     // Encryption state
     bool pending_sec_authenticated; // Authentication state
-    uint8_t pending_sec_key_size;  // Key size
+    uint8_t pending_sec_key_size;   // Key size
 
     #if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
     // L2CAP Connection-Oriented Channels state
@@ -477,8 +473,10 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
         return;
     }
 
-    // Enable bondable flag for this connection (required for pairing)
-    bt_conn_set_bondable(conn, true);
+    #if defined(CONFIG_BT_BONDABLE_PER_CONNECTION) && CONFIG_BT_BONDABLE_PER_CONNECTION
+    // Set per-connection bondable to match the current global setting
+    bt_conn_set_bondable(conn, mp_bt_zephyr_bonding);
+    #endif
 
     struct bt_conn_info info;
     bt_conn_get_info(conn, &info);
@@ -596,6 +594,7 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
         rp->gattc_subscribe_active = false;
         rp->gattc_subscribe_changing = false;
         rp->gattc_unsubscribing = false;
+        rp->gattc_subscribe_pending = false;
         rp->gattc_subscribe_conn_handle = 0;
         rp->gattc_subscribe_ccc_handle = 0;
         rp->gattc_subscribe_value_handle = 0;
@@ -604,6 +603,16 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
     // Clear auto-subscriptions for this connection
     gattc_clear_auto_subscriptions(conn_handle);
     #endif // MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+
+    // Clear pairing state on disconnect
+    {
+        mp_bluetooth_zephyr_root_pointers_t *rp2 = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+        if (rp2) {
+            rp2->pairing_in_progress = false;
+            rp2->pending_security_update = false;
+            rp2->pairing_complete_received = false;
+        }
+    }
 
     // Fire Python callback BEFORE removing from list, so cleanup operations
     // in the callback can still access the connection if needed.
@@ -614,9 +623,6 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
 }
 
 static void mp_bt_zephyr_security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err) {
-    _smp_diag_sec_changed++;
-    _smp_diag_sec_level = level;
-    _smp_diag_sec_err = err;
     // Decode security level and error for debugging
     const char *level_str;
     switch (level) {
@@ -680,15 +686,26 @@ static void mp_bt_zephyr_security_changed(struct bt_conn *conn, bt_security_t le
 
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
 
-    // If pairing is in progress, defer the encryption callback until pairing_complete
-    // This allows us to get the correct bonded flag from the pairing result
+    // During pairing, security_changed and pairing_complete can arrive in either order
+    // depending on the platform (HAL vs native Zephyr). We store the security info and
+    // fire _IRQ_ENCRYPTION_UPDATE only when both have arrived.
     if (rp && rp->pairing_in_progress) {
-        DEBUG_printf("Security changed: pairing in progress, deferring callback\n");
+        DEBUG_printf("Security changed: pairing in progress, storing security info\n");
         rp->pending_security_update = true;
         rp->pending_sec_conn = conn_handle;
         rp->pending_sec_encrypted = encrypted;
         rp->pending_sec_authenticated = authenticated;
         rp->pending_sec_key_size = key_size;
+
+        // Check if pairing_complete already arrived (it fires first on HAL builds)
+        if (rp->pairing_complete_received) {
+            DEBUG_printf("Both security_changed and pairing_complete received, firing callback\n");
+            rp->pairing_in_progress = false;
+            rp->pending_security_update = false;
+            rp->pairing_complete_received = false;
+            mp_bluetooth_gatts_on_encryption_update(conn_handle, encrypted, authenticated,
+                                                    rp->pending_pairing_bonded, key_size);
+        }
         return;
     }
 
@@ -988,6 +1005,21 @@ int mp_bluetooth_init(void) {
     init_complete:
         DEBUG_printf("BLE initialization successful!\n");
 
+        #if defined(CONFIG_SETTINGS)
+        // Load settings from flash (required for BT_SETTINGS to restore keys).
+        // Must be called after bt_enable() and before any BLE operations.
+        settings_load();
+        #endif
+
+        #if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING && defined(CONFIG_BT_SETTINGS)
+        // Clear all bond keys on init. Bonds persist across hardware resets
+        // when BT_SETTINGS is enabled, which can cause stale key mismatches
+        // on reconnection. CONFIG_BT_KEYS_OVERWRITE_OLDEST handles storage
+        // overflow, but stale bonds can still interfere with fresh pairing.
+        int unpair_err = bt_unpair(BT_ID_DEFAULT, NULL);
+        DEBUG_printf("bt_unpair: %d\n", unpair_err);
+        #endif
+
         #ifndef __ZEPHYR__
         // Start HCI RX task for continuous HCI polling in background
         // The task is stopped first in mp_bluetooth_deinit() to prevent race conditions
@@ -1137,9 +1169,6 @@ int mp_bluetooth_deinit(void) {
             bt_l2cap_chan_disconnect(&chan->le_chan.chan);
         }
         // Cleanup inline (l2cap_destroy_channel checks rp->l2cap_chan which is now NULL)
-        if (chan->tx_pending) {
-            net_buf_unref(chan->tx_pending);
-        }
         if (chan->rx_buf) {
             m_del(uint8_t, chan->rx_buf, L2CAP_RX_BUF_SIZE);
         }
@@ -2414,17 +2443,30 @@ static uint8_t gattc_characteristic_discover_cb(struct bt_conn *conn,
 }
 
 // Subscription complete callback (called when CCCD write completes)
+// Note: Zephyr calls this from gatt_write_ccc_rsp for BOTH subscribe and
+// unsubscribe CCCD writes. We only want to fire WRITE_DONE for explicit
+// bt_gatt_subscribe calls, not for bt_gatt_unsubscribe completions.
 static void gattc_subscribe_cb(struct bt_conn *conn, uint8_t err,
     struct bt_gatt_subscribe_params *params) {
 
-    DEBUG_printf("gattc_subscribe_cb: err=%d ccc_handle=0x%04x value=0x%04x\n",
-                 err, params->ccc_handle, params->value);
+    DEBUG_printf("gattc_subscribe_cb: err=%d ccc_handle=0x%04x value=0x%04x pending=%d\n",
+                 err, params->ccc_handle, params->value,
+                 mp_bluetooth_is_active() ? MP_STATE_PORT(bluetooth_zephyr_root_pointers)->gattc_subscribe_pending : -1);
 
     if (!mp_bluetooth_is_active()) {
         return;
     }
 
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+
+    // Only process if we explicitly called bt_gatt_subscribe.
+    // Zephyr also calls this callback from unsubscribe CCCD write responses
+    // (gatt_write_ccc_rsp calls params->subscribe for all CCCD writes).
+    // Without this guard, unsubscribe operations generate spurious WRITE_DONE.
+    if (!rp->gattc_subscribe_pending) {
+        return;
+    }
+    rp->gattc_subscribe_pending = false;
 
     // Clear subscription-changing flag (new subscription is now set up)
     rp->gattc_subscribe_changing = false;
@@ -2471,6 +2513,14 @@ static uint8_t gattc_notify_cb(struct bt_conn *conn,
             // Fire WRITE_DONE for the CCCD write that triggered unsubscribe
             mp_bluetooth_gattc_on_read_write_status(MP_BLUETOOTH_IRQ_GATTC_WRITE_DONE,
                 conn_handle, rp->gattc_subscribe_ccc_handle, 0);
+
+            // Re-register auto-subscription for the value handle so that forced
+            // gatts_notify() from the peripheral is still delivered. Zephyr requires
+            // a registered subscription callback to deliver notifications; without
+            // this, notifications after explicit unsubscribe are silently dropped.
+            // Use NOTIFY property since auto-subscription prefers NOTIFY when available.
+            gattc_register_auto_subscription(conn, conn_handle,
+                rp->gattc_subscribe_value_handle, BT_GATT_CHRC_NOTIFY);
         }
         return BT_GATT_ITER_STOP;
     }
@@ -2685,6 +2735,7 @@ static uint8_t gattc_descriptor_discover_cb(struct bt_conn *conn,
         rp->gattc_subscribe_active = false;
         rp->gattc_subscribe_changing = false;
         rp->gattc_unsubscribing = false;
+        rp->gattc_subscribe_pending = false;
     }
 
     // Report descriptor
@@ -3032,6 +3083,7 @@ int mp_bluetooth_gattc_write(uint16_t conn_handle, uint16_t value_handle, const 
             atomic_set_bit(rp->gattc_subscribe_params.flags, BT_GATT_SUBSCRIBE_FLAG_VOLATILE);
 
             rp->gattc_subscribe_conn_handle = conn_handle;
+            rp->gattc_subscribe_pending = true;
 
             err = bt_gatt_subscribe(conn, &rp->gattc_subscribe_params);
             if (err == 0) {
@@ -3041,11 +3093,13 @@ int mp_bluetooth_gattc_write(uint16_t conn_handle, uint16_t value_handle, const 
                 return 0;
             } else if (err == -EALREADY) {
                 // Already subscribed, treat as success
+                rp->gattc_subscribe_pending = false;
                 rp->gattc_subscribe_active = true;
                 mp_bluetooth_gattc_on_read_write_status(MP_BLUETOOTH_IRQ_GATTC_WRITE_DONE,
                     conn_handle, value_handle, 0);
                 return 0;
             }
+            rp->gattc_subscribe_pending = false;
             DEBUG_printf("CCCD write: subscribe failed err=%d\n", err);
             return bt_err_to_errno(err);
         }
@@ -3182,19 +3236,8 @@ static void zephyr_passkey_confirm_cb(struct bt_conn *conn, unsigned int passkey
     mp_bluetooth_gap_on_passkey_action(conn_handle, MP_BLUETOOTH_PASSKEY_ACTION_NUMERIC_COMPARISON, passkey);
 }
 
-volatile int _smp_diag_confirm = 0;
-volatile int _smp_diag_confirm_ret = -99;
-volatile int _smp_diag_sec_changed = 0;
-volatile int _smp_diag_sec_level = -1;
-volatile int _smp_diag_sec_err = -1;
-volatile int _smp_diag_pair_complete = 0;
-volatile int _smp_diag_pair_failed = 0;
-volatile int _smp_diag_pair_fail_reason = -1;
-
 static void zephyr_pairing_confirm_cb(struct bt_conn *conn) {
-    _smp_diag_confirm++;
     DEBUG_printf("zephyr_pairing_confirm_cb\n");
-
     uint16_t conn_handle = mp_bt_zephyr_auth_get_conn_handle(conn);
     if (conn_handle == 0xFF) {
         DEBUG_printf("  ERROR: Connection not found!\n");
@@ -3211,23 +3254,8 @@ static void zephyr_pairing_confirm_cb(struct bt_conn *conn) {
     // This matches NimBLE behavior where Just Works is auto-accepted internally
     // and applications don't need to handle the passkey action event.
     // Applications that need to reject Just Works pairing can set a different IO capability.
-    // Check connection security BEFORE confirm
-    struct bt_conn_info cinfo;
-    if (bt_conn_get_info(conn, &cinfo) == 0) {
-        DEBUG_printf("  pre-confirm: state=%d role=%d sec.level=%d sec.flags=0x%02x\n",
-                     cinfo.state, cinfo.role,
-                     cinfo.security.level, cinfo.security.flags);
-    }
-
     int err = bt_conn_auth_pairing_confirm(conn);
-    _smp_diag_confirm_ret = err;
     DEBUG_printf("  bt_conn_auth_pairing_confirm: %d\n", err);
-
-    // Check connection security AFTER confirm
-    if (bt_conn_get_info(conn, &cinfo) == 0) {
-        DEBUG_printf("  post-confirm: sec.level=%d sec.flags=0x%02x\n",
-                     cinfo.security.level, cinfo.security.flags);
-    }
 }
 
 static void zephyr_auth_cancel_cb(struct bt_conn *conn) {
@@ -3250,7 +3278,6 @@ static void zephyr_auth_cancel_cb(struct bt_conn *conn) {
 }
 
 static void zephyr_pairing_complete_cb(struct bt_conn *conn, bool bonded) {
-    _smp_diag_pair_complete++;
     DEBUG_printf("zephyr_pairing_complete_cb: bonded=%d\n", bonded);
 
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
@@ -3258,17 +3285,21 @@ static void zephyr_pairing_complete_cb(struct bt_conn *conn, bool bonded) {
         return;
     }
 
-    // Clear pairing state
-    rp->pairing_in_progress = false;
+    // Clear auth state
     rp->auth_conn_handle = 0;
     rp->auth_action = 0;
     rp->auth_passkey = 0;
 
-    // Fire deferred encryption callback if security_changed was called during pairing
+    // Store bonded flag from pairing result
+    rp->pairing_complete_received = true;
+    rp->pending_pairing_bonded = bonded;
+
+    // Check if security_changed already arrived (it fires first on native Zephyr)
     if (rp->pending_security_update) {
-        DEBUG_printf("Firing deferred _IRQ_ENCRYPTION_UPDATE: encrypted=%d authenticated=%d bonded=%d key_size=%d\n",
-                     rp->pending_sec_encrypted, rp->pending_sec_authenticated, bonded, rp->pending_sec_key_size);
+        DEBUG_printf("Both pairing_complete and security_changed received, firing callback\n");
+        rp->pairing_in_progress = false;
         rp->pending_security_update = false;
+        rp->pairing_complete_received = false;
         mp_bluetooth_gatts_on_encryption_update(
             rp->pending_sec_conn,
             rp->pending_sec_encrypted,
@@ -3276,11 +3307,11 @@ static void zephyr_pairing_complete_cb(struct bt_conn *conn, bool bonded) {
             bonded,
             rp->pending_sec_key_size);
     }
+    // Otherwise, security_changed hasn't fired yet (HAL builds).
+    // Keep pairing_in_progress=true so security_changed will pick up the bonded flag.
 }
 
 static void zephyr_pairing_failed_cb(struct bt_conn *conn, enum bt_security_err reason) {
-    _smp_diag_pair_failed++;
-    _smp_diag_pair_fail_reason = reason;
     DEBUG_printf("zephyr_pairing_failed_cb: reason=%d\n", reason);
 
     uint16_t conn_handle = mp_bt_zephyr_auth_get_conn_handle(conn);
@@ -3294,6 +3325,7 @@ static void zephyr_pairing_failed_cb(struct bt_conn *conn, enum bt_security_err 
     if (rp) {
         rp->pairing_in_progress = false;
         rp->pending_security_update = false;
+        rp->pairing_complete_received = false;
         rp->auth_conn_handle = 0;
         rp->auth_action = 0;
         rp->auth_passkey = 0;
@@ -3379,8 +3411,26 @@ int mp_bluetooth_gap_pair(uint16_t conn_handle) {
         }
     }
 
+    // Mark pairing in progress before starting SMP. This ensures security_changed
+    // callback defers until pairing_complete provides the bonded flag.
+    // On the central side, Zephyr's SMP doesn't call pairing_confirm for SC Just Works
+    // when the central initiates (SMP_FLAG_SEC_REQ is not set), so pairing_confirm_cb
+    // won't set this flag. Setting it here covers all pairing initiation paths.
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    if (rp) {
+        rp->pairing_in_progress = true;
+        rp->pending_security_update = false;
+        rp->pairing_complete_received = false;
+    }
+
     int err = bt_conn_set_security(conn, sec_level);
     DEBUG_printf("  bt_conn_set_security returned %d\n", err);
+
+    if (err && rp) {
+        // bt_conn_set_security failed, clear pairing state
+        rp->pairing_in_progress = false;
+    }
+
     return bt_err_to_errno(err);
 }
 
@@ -3437,8 +3487,9 @@ int mp_bluetooth_gap_passkey(uint16_t conn_handle, uint8_t action, mp_int_t pass
 void mp_bluetooth_set_bonding(bool enabled) {
     mp_bt_zephyr_bonding = enabled;
     DEBUG_printf("mp_bluetooth_set_bonding: enabled=%d\n", enabled);
-    // Note: CONFIG_BT_BONDABLE_PER_CONNECTION=0, so bonding is controlled globally
-    // This flag is stored for Phase 3 (persistent bond storage via _IRQ_GET/SET_SECRET)
+    // Set Zephyr's global bondable flag. This controls whether SMP_FLAG_BOND
+    // is set during pairing, which determines the bonded flag in pairing_complete.
+    bt_set_bondable(enabled);
 }
 
 void mp_bluetooth_set_le_secure(bool enabled) {
@@ -3593,9 +3644,6 @@ static int l2cap_create_channel(uint16_t mtu, mp_bluetooth_zephyr_l2cap_channel_
     // Initialize channel state
     chan->mtu = mtu;
     chan->rx_len = 0;
-    chan->tx_pending = NULL;
-    chan->credit_stalled = false;
-    chan->mem_stalled = false;
 
     // Set up the Zephyr channel with our callbacks (matching Zephyr example pattern)
     chan->le_chan.chan.ops = &l2cap_chan_ops;
@@ -3619,11 +3667,6 @@ static void l2cap_destroy_channel(void) {
     // Save pointer and clear root pointer first to prevent concurrent access
     mp_bluetooth_zephyr_l2cap_channel_t *chan = rp->l2cap_chan;
     rp->l2cap_chan = NULL;
-
-    // Free any pending TX buffer
-    if (chan->tx_pending) {
-        net_buf_unref(chan->tx_pending);
-    }
 
     // Free RX accumulation buffer
     if (chan->rx_buf) {
@@ -3718,56 +3761,10 @@ static int l2cap_recv_cb(struct bt_l2cap_chan *chan, struct net_buf *buf) {
     return 0;
 }
 
-// Helper to try sending pending TX buffer or notify ready after stall.
-// Returns true if there was a pending buffer (regardless of send success).
-static bool l2cap_try_send_pending(struct bt_l2cap_chan *chan) {
-    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
-    if (!rp || !rp->l2cap_chan) {
-        return false;
-    }
-
-    mp_bluetooth_zephyr_l2cap_channel_t *l2cap_chan = rp->l2cap_chan;
-    struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
-    uint16_t conn_handle = l2cap_chan_get_conn_handle(chan);
-    long credits = atomic_get(&le_chan->tx.credits);
-
-    // If we have a pending TX buffer, try to send it now
-    if (l2cap_chan->tx_pending) {
-        // Calculate PDUs needed for the pending buffer
-        uint16_t len = l2cap_chan->tx_pending->len;
-        uint16_t mps = le_chan->tx.mps;
-        uint16_t sdu_with_header = len + 2;
-        uint16_t pdus_needed = (sdu_with_header + mps - 1) / mps;
-
-        if (credits >= pdus_needed) {
-            // Have enough credits - send it
-            int ret = bt_l2cap_chan_send(&le_chan->chan, l2cap_chan->tx_pending);
-            if (ret == 0) {
-                l2cap_chan->tx_pending = NULL;
-                l2cap_chan->credit_stalled = false;
-                l2cap_chan->mem_stalled = false;
-                mp_bluetooth_on_l2cap_send_ready(conn_handle, le_chan->rx.cid, 0);
-            } else {
-                // Error - discard the buffer
-                net_buf_unref(l2cap_chan->tx_pending);
-                l2cap_chan->tx_pending = NULL;
-                l2cap_chan->credit_stalled = false;
-                mp_bluetooth_on_l2cap_send_ready(conn_handle, le_chan->rx.cid, ret);
-            }
-        }
-        // If not enough credits, just wait for status_cb or next sent_cb
-        return true;
-    }
-
-    // No pending buffer - if stalled, notify ready
-    if (l2cap_chan->credit_stalled || l2cap_chan->mem_stalled) {
-        l2cap_chan->credit_stalled = false;
-        l2cap_chan->mem_stalled = false;
-        mp_bluetooth_on_l2cap_send_ready(conn_handle, le_chan->rx.cid, 0);
-    }
-    return false;
-}
-
+// Sent callback - fires when an SDU has been fully transmitted.
+// Always notify Python that the channel is ready for more data.
+// This eliminates race conditions with flag-based stall tracking — the event
+// accumulates harmlessly in Python's waiting_events if nobody is waiting.
 static void l2cap_sent_cb(struct bt_l2cap_chan *chan) {
     DEBUG_printf("l2cap_sent_cb\n");
 
@@ -3775,21 +3772,17 @@ static void l2cap_sent_cb(struct bt_l2cap_chan *chan) {
         return;
     }
 
-    l2cap_try_send_pending(chan);
+    struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
+    uint16_t conn_handle = l2cap_chan_get_conn_handle(chan);
+    mp_bluetooth_on_l2cap_send_ready(conn_handle, le_chan->rx.cid, 0);
 }
 
-// Status callback - called when channel status changes (e.g., credits become available)
+// Status callback - called when channel status changes (e.g., credits become available).
+// Not used for flow control — Zephyr handles credit management internally via
+// bt_l2cap_chan_send queueing.  Kept for debug visibility.
 static void l2cap_status_cb(struct bt_l2cap_chan *chan, atomic_t *status) {
-    bool can_send = atomic_test_bit(status, BT_L2CAP_STATUS_OUT);
-    DEBUG_printf("l2cap_status_cb: can_send=%d\n", can_send);
-
-    if (!mp_bluetooth_is_active()) {
-        return;
-    }
-
-    if (can_send) {
-        l2cap_try_send_pending(chan);
-    }
+    DEBUG_printf("l2cap_status_cb: can_send=%d\n",
+                 atomic_test_bit(status, BT_L2CAP_STATUS_OUT));
 }
 
 static struct net_buf *l2cap_alloc_buf_cb(struct bt_l2cap_chan *chan) {
@@ -3822,17 +3815,34 @@ static int l2cap_server_accept_cb(struct bt_conn *conn, struct bt_l2cap_server *
         return -EINVAL;  // Use EINVAL instead of ENOENT for consistency
     }
 
+    // On native Zephyr, this callback runs on the BT RX thread which doesn't
+    // hold the MicroPython GIL. We need the GIL because l2cap_create_channel()
+    // allocates from the GC heap (m_new) and mp_bluetooth_on_l2cap_accept()
+    // invokes the Python IRQ handler. Zephyr mutexes are recursive, so this
+    // is safe even though invoke_irq_handler also acquires the GIL.
+    #if MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS_WITH_INTERLOCK
+    mp_state_thread_t *ts_orig = mp_thread_get_state();
+    mp_state_thread_t ts;
+    if (ts_orig == NULL) {
+        mp_thread_init_state(&ts, MICROPY_PY_BLUETOOTH_SYNC_EVENT_STACK_SIZE, NULL, NULL);
+        MP_THREAD_GIL_ENTER();
+    }
+    #endif
+
+    int result = -EINVAL;
+
     // Get connection handle (MicroPython connection index, not HCI handle)
     uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
     if (conn_handle == 0xFFFF) {
-        return -EINVAL;
+        goto done;
     }
 
     // Create a channel for this incoming connection
     mp_bluetooth_zephyr_l2cap_channel_t *l2cap_chan;
     int ret = l2cap_create_channel(mp_bluetooth_zephyr_l2cap_static_server.mtu, &l2cap_chan);
     if (ret != 0) {
-        return ret;
+        result = ret;
+        goto done;
     }
 
     // Set the PSM on the channel
@@ -3851,12 +3861,22 @@ static int l2cap_server_accept_cb(struct bt_conn *conn, struct bt_l2cap_server *
     if (ret != 0) {
         // Application rejected the connection
         l2cap_destroy_channel();
-        return ret;
+        result = ret;
+        goto done;
     }
 
     // Return our channel to Zephyr
     *chan = &l2cap_chan->le_chan.chan;
-    return 0;
+    result = 0;
+
+done:
+    #if MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS_WITH_INTERLOCK
+    if (ts_orig == NULL) {
+        MP_THREAD_GIL_EXIT();
+        mp_thread_set_state(ts_orig);
+    }
+    #endif
+    return result;
 }
 
 // --- L2CAP API Functions ---
@@ -3990,19 +4010,15 @@ int mp_bluetooth_l2cap_send(uint16_t conn_handle, uint16_t cid,
         return MP_EINVAL;
     }
 
-    // Check if we already have a pending TX buffer (shouldn't happen if Python waits properly)
-    if (chan->tx_pending) {
-        return MP_EBUSY;
-    }
-
-    // Allocate buffer from our pool
+    // Allocate buffer from our pool.  K_NO_WAIT because we hold the GIL and
+    // l2cap_sent_cb (which frees buffers) needs the GIL on native Zephyr.
     struct net_buf *sdu_buf = net_buf_alloc(&l2cap_sdu_pool, K_NO_WAIT);
     if (!sdu_buf) {
-        // Pool exhausted - stall and let the caller retry later
+        // Pool exhausted — cannot accept data.  Return error so Python knows
+        // the payload was NOT consumed (unlike *stalled which means "accepted
+        // but wait before sending more").
         DEBUG_printf("mp_bluetooth_l2cap_send: pool exhausted\n");
-        chan->mem_stalled = true;
-        *stalled = true;
-        return 0;  // Success but stalled - Python will wait for SEND_READY
+        return MP_ENOMEM;
     }
 
     // Reserve headroom for L2CAP SDU header
@@ -4011,54 +4027,26 @@ int mp_bluetooth_l2cap_send(uint16_t conn_handle, uint16_t cid,
     // Copy data into buffer
     net_buf_add_mem(sdu_buf, buf, len);
 
-    // Calculate how many PDUs (credits) this SDU will need
-    // SDU = SDU length header (2 bytes) + payload
-    // Each PDU can carry up to MPS bytes
-    uint16_t mps = le_chan->tx.mps;
-    if (mps == 0) {
-        // Channel not fully established yet
-        net_buf_unref(sdu_buf);
-        return MP_EINVAL;
-    }
-    uint16_t sdu_with_header = len + 2;  // 2 bytes for SDU length field
-    uint16_t pdus_needed = (sdu_with_header + mps - 1) / mps;
-
-    long credits = atomic_get(&le_chan->tx.credits);
-
-    // Check if we have enough credits to send this SDU
-    // Zephyr's bt_l2cap_chan_send just queues without checking - we must check ourselves
-    if (credits < pdus_needed) {
-        // Not enough credits - save buffer and stall
-        DEBUG_printf("mp_bluetooth_l2cap_send: stalled (need %d credits, have %ld)\n",
-                     pdus_needed, credits);
-        chan->tx_pending = sdu_buf;
-        chan->credit_stalled = true;
-        *stalled = true;
-        return 0;  // Success but stalled - Python will wait for SEND_READY
-    }
-
-    // Have enough credits - send the data
+    // Send — Zephyr handles credit-based flow control internally.
+    // The SDU is queued and transmitted as credits become available.
+    // l2cap_sent_cb fires when the SDU is fully consumed.
     int ret = bt_l2cap_chan_send(&le_chan->chan, sdu_buf);
     if (ret < 0) {
-        // Error - free the buffer
         DEBUG_printf("mp_bluetooth_l2cap_send: error %d\n", ret);
         net_buf_unref(sdu_buf);
         return bt_err_to_errno(ret);
     }
 
-    // Process work queue to actually transmit the data
+    // Process work queue (no-op on native Zephyr, needed for HAL builds)
     mp_bluetooth_zephyr_work_process();
 
-    // After processing, check credits remaining
-    credits = atomic_get(&le_chan->tx.credits);
-
-    // If credits are now exhausted, tell caller we're stalled
-    // This allows Python to wait for SEND_READY before sending more
-    if (credits == 0) {
-        DEBUG_printf("mp_bluetooth_l2cap_send: stalled (credits exhausted)\n");
-        chan->credit_stalled = true;
-        *stalled = true;
-    }
+    // Data accepted.  Always stall after each send so Python waits for
+    // l2cap_sent_cb (SEND_READY) before sending more.  This ensures at most
+    // one SDU is in-flight at a time, preventing net_buf pool exhaustion and
+    // avoiding the race condition where l2cap_sent_cb fires between the pool
+    // check and the stall flag being set.  Throughput is still adequate —
+    // each send completes within 1-2 BLE connection events (~30-60ms).
+    *stalled = true;
 
     return 0;
 }
