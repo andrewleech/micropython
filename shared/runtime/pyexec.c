@@ -789,6 +789,9 @@ int pyexec_asyncio_repl(void) {
         "asyncio.new_event_loop()\n"
         "asyncio.create_task(asyncio.arepl.task())\n"
         "asyncio.get_event_loop().run_forever()\n";
+    // Wrap boot_code in a read-only vstr for parse_compile_execute.
+    // EXEC_FLAG_SOURCE_IS_VSTR causes the vstr to be used as-is without
+    // modification or freeing — safe to alias static const data.
     vstr_t vstr = {0};
     vstr.buf = (char *)boot_code;
     vstr.len = sizeof(boot_code) - 1;
