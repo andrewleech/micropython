@@ -92,7 +92,6 @@ static int call_depth = 0;
 #define DEBUG_EXIT(name) do {} while (0)
 #endif
 
-
 #define BLE_HCI_SCAN_ITVL_MIN 0x10
 #define BLE_HCI_SCAN_ITVL_MAX 0xffff
 #define BLE_HCI_SCAN_WINDOW_MIN 0x10
@@ -587,9 +586,10 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
         stored->conn = NULL;
     }
 
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+
     // Reset subscription state if this was the subscribed connection
     #if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
-    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
     if (rp && rp->gattc_subscribe_conn_handle == conn_handle) {
         rp->gattc_subscribe_active = false;
         rp->gattc_subscribe_changing = false;
@@ -605,13 +605,10 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
     #endif // MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
 
     // Clear pairing state on disconnect
-    {
-        mp_bluetooth_zephyr_root_pointers_t *rp2 = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
-        if (rp2) {
-            rp2->pairing_in_progress = false;
-            rp2->pending_security_update = false;
-            rp2->pairing_complete_received = false;
-        }
+    if (rp) {
+        rp->pairing_in_progress = false;
+        rp->pending_security_update = false;
+        rp->pairing_complete_received = false;
     }
 
     // Fire Python callback BEFORE removing from list, so cleanup operations
@@ -1009,15 +1006,6 @@ int mp_bluetooth_init(void) {
         // Load settings from flash (required for BT_SETTINGS to restore keys).
         // Must be called after bt_enable() and before any BLE operations.
         settings_load();
-        #endif
-
-        #if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING && defined(CONFIG_BT_SETTINGS)
-        // Clear all bond keys on init. Bonds persist across hardware resets
-        // when BT_SETTINGS is enabled, which can cause stale key mismatches
-        // on reconnection. CONFIG_BT_KEYS_OVERWRITE_OLDEST handles storage
-        // overflow, but stale bonds can still interfere with fresh pairing.
-        int unpair_err = bt_unpair(BT_ID_DEFAULT, NULL);
-        DEBUG_printf("bt_unpair: %d\n", unpair_err);
         #endif
 
         #ifndef __ZEPHYR__
@@ -2449,9 +2437,8 @@ static uint8_t gattc_characteristic_discover_cb(struct bt_conn *conn,
 static void gattc_subscribe_cb(struct bt_conn *conn, uint8_t err,
     struct bt_gatt_subscribe_params *params) {
 
-    DEBUG_printf("gattc_subscribe_cb: err=%d ccc_handle=0x%04x value=0x%04x pending=%d\n",
-                 err, params->ccc_handle, params->value,
-                 mp_bluetooth_is_active() ? MP_STATE_PORT(bluetooth_zephyr_root_pointers)->gattc_subscribe_pending : -1);
+    DEBUG_printf("gattc_subscribe_cb: err=%d ccc_handle=0x%04x value=0x%04x\n",
+                 err, params->ccc_handle, params->value);
 
     if (!mp_bluetooth_is_active()) {
         return;
@@ -4046,6 +4033,8 @@ int mp_bluetooth_l2cap_send(uint16_t conn_handle, uint16_t cid,
     // avoiding the race condition where l2cap_sent_cb fires between the pool
     // check and the stall flag being set.  Throughput is still adequate —
     // each send completes within 1-2 BLE connection events (~30-60ms).
+    // TODO: Could allow 2-3 in-flight SDUs via atomic counter instead of
+    // boolean stall for higher throughput.
     *stalled = true;
 
     return 0;

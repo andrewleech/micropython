@@ -37,7 +37,8 @@
 #endif
 
 // Enable random module (not included at BASIC_FEATURES level).
-// Zephyr provides entropy via CONFIG_ENTROPY_GENERATOR / hardware RNG.
+// Zephyr provides entropy via hardware RNG (device tree) or
+// CONFIG_TEST_RANDOM_GENERATOR fallback (prj.conf).
 #define MICROPY_PY_RANDOM           (1)
 #define MICROPY_PY_RANDOM_EXTRA_FUNCS (1)
 
