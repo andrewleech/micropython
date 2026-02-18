@@ -227,6 +227,7 @@ static mp_obj_t mp_micropython_repl_readline_process_char(mp_obj_t c_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_micropython_repl_readline_process_char_obj, mp_micropython_repl_readline_process_char);
 
+#if MICROPY_REPL_ASYNCIO_BREAKPOINT
 // micropython.repl_readline_push()
 // Save readline state and vstr buffer for reentrant REPL.
 // Returns True if saved, False if already saved.
@@ -256,19 +257,25 @@ static mp_obj_t mp_micropython_repl_readline_pop(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mp_micropython_repl_readline_pop_obj, mp_micropython_repl_readline_pop);
 
+MP_REGISTER_ROOT_POINTER(vstr_t * mp_readline_line_saved);
+#endif // MICROPY_REPL_ASYNCIO_BREAKPOINT
+
 // micropython.repl()
 // Enter a blocking interactive REPL. Ctrl-D exits back to the caller.
 // Handles readline state push/pop internally for reentrant use.
 static mp_obj_t mp_micropython_repl(void) {
     mp_hal_stdio_mode_raw();
-    pyexec_repl_breakpoint();
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        pyexec_repl_breakpoint();
+        nlr_pop();
+    }
     mp_hal_stdio_mode_orig();
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mp_micropython_repl_obj, mp_micropython_repl);
 
 MP_REGISTER_ROOT_POINTER(vstr_t * mp_readline_line);
-MP_REGISTER_ROOT_POINTER(vstr_t * mp_readline_line_saved);
 #endif
 
 static const mp_rom_map_elem_t mp_module_micropython_globals_table[] = {
