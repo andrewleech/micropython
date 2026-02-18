@@ -324,8 +324,10 @@ static const mp_rom_map_elem_t mp_module_micropython_globals_table[] = {
     #if MICROPY_HELPER_REPL
     { MP_ROM_QSTR(MP_QSTR_repl_readline_init), MP_ROM_PTR(&mp_micropython_repl_readline_init_obj) },
     { MP_ROM_QSTR(MP_QSTR_repl_readline_process_char), MP_ROM_PTR(&mp_micropython_repl_readline_process_char_obj) },
+    #if MICROPY_REPL_ASYNCIO_BREAKPOINT
     { MP_ROM_QSTR(MP_QSTR_repl_readline_push), MP_ROM_PTR(&mp_micropython_repl_readline_push_obj) },
     { MP_ROM_QSTR(MP_QSTR_repl_readline_pop), MP_ROM_PTR(&mp_micropython_repl_readline_pop_obj) },
+    #endif
     { MP_ROM_QSTR(MP_QSTR_repl), MP_ROM_PTR(&mp_micropython_repl_obj) },
     #endif
 };

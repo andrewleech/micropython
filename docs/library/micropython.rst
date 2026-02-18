@@ -169,9 +169,42 @@ Functions
    terminal settings are restored to their original state.
 
    This is useful for code that needs to take over terminal I/O, for example
-   an alternative REPL such as `aiorepl`.
+   an alternative REPL such as `asyncio.arepl`.
 
    Availability: Unix port.  Requires ``MICROPY_PY_MICROPYTHON_STDIO_RAW``.
+
+.. function:: repl()
+
+   Enter a blocking interactive REPL.  Ctrl-D exits back to the caller.
+   Terminal raw mode is set internally; the terminal is restored on return
+   even if an exception occurs.
+
+   This is intended for use from an asyncio-based REPL (``asyncio.arepl``)
+   to provide a synchronous ``breakpoint()`` experience within async code.
+
+   Availability: Requires ``MICROPY_HELPER_REPL`` and
+   ``MICROPY_REPL_ASYNCIO_BREAKPOINT``.
+
+.. function:: repl_readline_init(ps1, ps2)
+
+   Initialise readline state for a new input line with prompts *ps1* (primary)
+   and *ps2* (continuation).  Must be called before
+   :func:`repl_readline_process_char`.  The *ps2* prompt is interned and used
+   automatically when multi-line continuation is needed.
+
+   Availability: Requires ``MICROPY_HELPER_REPL``.
+
+.. function:: repl_readline_process_char(c)
+
+   Feed one character *c* (integer) to readline.  Returns ``-1`` if more input
+   is needed, or a ``(line, code)`` tuple when the line is complete.  *code* is
+   ``0`` for a normal line, or the control character that terminated input
+   (e.g. 3 for Ctrl-C, 4 for Ctrl-D).
+
+   Multi-line continuation (e.g. after ``if True:``) is handled internally
+   using the *ps2* prompt from :func:`repl_readline_init`.
+
+   Availability: Requires ``MICROPY_HELPER_REPL``.
 
 
 Classes
