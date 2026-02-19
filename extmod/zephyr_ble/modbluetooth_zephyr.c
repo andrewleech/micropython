@@ -40,13 +40,12 @@
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/l2cap.h>
+#include <zephyr/sys/byteorder.h>
 #include <zephyr/device.h>
 #if defined(CONFIG_SETTINGS)
 #include <zephyr/settings/settings.h>
 #endif
-#ifndef __ZEPHYR__
 #include "host/att_internal.h"
-#endif
 #include "extmod/modbluetooth.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_work.h"
 #ifndef __ZEPHYR__
@@ -58,11 +57,9 @@
 #include "task.h"
 #endif
 
-#ifndef __ZEPHYR__
 // Access Zephyr's internal bt_dev for force-reset on deinit failure
 // Include path has lib/zephyr/subsys/bluetooth, so use host/ prefix
 #include "host/hci_core.h"
-#endif
 
 #if MICROPY_PY_NETWORK_CYW43
 // For cyw43_t definition (bt_loaded reset on deinit failure)
@@ -1006,6 +1003,11 @@ int mp_bluetooth_init(void) {
         // Load settings from flash (required for BT_SETTINGS to restore keys).
         // Must be called after bt_enable() and before any BLE operations.
         settings_load();
+        // Clear all bonds on init so each ble.active(True) starts with
+        // clean pairing state. Without this, CONFIG_BT_SETTINGS restores
+        // stale bonds/CCC values from flash that break sequential tests
+        // and can cause unexpected notifications to previously-bonded peers.
+        bt_unpair(BT_ID_DEFAULT, NULL);
         #endif
 
         #ifndef __ZEPHYR__
@@ -1839,7 +1841,6 @@ int mp_bluetooth_gatts_notify_indicate(uint16_t conn_handle, uint16_t value_hand
                 }
             }
         }
-        #ifndef __ZEPHYR__
         if (!attr_val && gatts_op == MP_BLUETOOTH_GATTS_OP_NOTIFY) {
             // Handle not in local GATT DB — send raw ATT notification PDU.
             // This supports cases where a GATTC-discovered remote handle is
@@ -1858,7 +1859,6 @@ int mp_bluetooth_gatts_notify_indicate(uint16_t conn_handle, uint16_t value_hand
             }
             mp_bluetooth_zephyr_work_process();
         }
-        #endif // !__ZEPHYR__
     }
 
     return err;

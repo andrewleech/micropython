@@ -162,6 +162,7 @@ if(CONFIG_BT)
     list(APPEND MICROPY_SOURCE_QSTR ${MICROPY_SOURCE_ZEPHYR_BLE})
     zephyr_library_include_directories(
         ${MICROPY_DIR}/extmod/zephyr_ble/hal
+        ${ZEPHYR_BASE}/subsys/bluetooth
     )
     zephyr_library_compile_definitions(
         MICROPY_BLUETOOTH_ZEPHYR=1
