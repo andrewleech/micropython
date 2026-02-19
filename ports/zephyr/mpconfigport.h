@@ -59,6 +59,9 @@
 #define MICROPY_ENABLE_FINALISER    (MICROPY_VFS)
 #define MICROPY_HELPER_REPL         (1)
 #define MICROPY_REPL_AUTO_INDENT    (1)
+// Reduce raw-paste window to 32 bytes for UART-bridge connections (JLink OB).
+// Default 256 (window=128) overflows USB-UART bridge buffers at 115200 baud.
+#define MICROPY_REPL_STDIN_BUFFER_MAX (64)
 #define MICROPY_ENABLE_EMERGENCY_EXCEPTION_BUF  (1)
 #define MICROPY_KBD_EXCEPTION       (1)
 #define MICROPY_PY_BUILTINS_BYTES_HEX (1)
