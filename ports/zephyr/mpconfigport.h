@@ -59,6 +59,9 @@
 #define MICROPY_ENABLE_FINALISER    (MICROPY_VFS)
 #define MICROPY_HELPER_REPL         (1)
 #define MICROPY_REPL_AUTO_INDENT    (1)
+// Reduce raw-paste window to 32 bytes for UART-bridge connections (JLink OB).
+// Default 256 (window=128) overflows USB-UART bridge buffers at 115200 baud.
+#define MICROPY_REPL_STDIN_BUFFER_MAX (64)
 #define MICROPY_ENABLE_EMERGENCY_EXCEPTION_BUF  (1)
 #define MICROPY_KBD_EXCEPTION       (1)
 #define MICROPY_PY_BUILTINS_BYTES_HEX (1)
@@ -187,8 +190,7 @@ typedef long mp_off_t;
 #if MICROPY_PY_THREAD
 #define MICROPY_EVENT_POLL_HOOK \
     do { \
-        extern void mp_handle_pending(bool); \
-        mp_handle_pending(true); \
+        mp_handle_pending(MP_HANDLE_PENDING_CALLBACKS_AND_EXCEPTIONS); \
         MP_THREAD_GIL_EXIT(); \
         k_msleep(1); \
         MP_THREAD_GIL_ENTER(); \
@@ -196,8 +198,7 @@ typedef long mp_off_t;
 #else
 #define MICROPY_EVENT_POLL_HOOK \
     do { \
-        extern void mp_handle_pending(bool); \
-        mp_handle_pending(true); \
+        mp_handle_pending(MP_HANDLE_PENDING_CALLBACKS_AND_EXCEPTIONS); \
         k_msleep(1); \
     } while (0);
 #endif
