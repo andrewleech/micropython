@@ -1,0 +1,7 @@
+/* Enable UART hardware flow control (RTS/CTS) for reliable raw REPL.
+ * Pins already routed on nRF52840 DK: RTS=P0.5, CTS=P0.7.
+ * JLink OB UART bridge supports hardware flow control.
+ */
+&uart0 {
+	hw-flow-control;
+};

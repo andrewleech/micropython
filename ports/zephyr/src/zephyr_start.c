@@ -24,17 +24,47 @@
  * THE SOFTWARE.
  */
 #include <zephyr/kernel.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/drivers/uart.h>
 #include "zephyr_getchar.h"
 
 int real_main(void);
 int mp_console_init(void);
 
+#if defined(CONFIG_USB_DEVICE_STACK_NEXT)
+extern int mp_usbd_init(void);
+#endif
+
+// Check if the console device is a CDC ACM UART (USB serial).
+#define MP_CONSOLE_IS_CDC_ACM DT_NODE_HAS_COMPAT(DT_CHOSEN(zephyr_console), zephyr_cdc_acm_uart)
+
+#if MP_CONSOLE_IS_CDC_ACM && defined(CONFIG_UART_LINE_CTRL)
+static void mp_wait_for_usb_dtr(void) {
+    const struct device *dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
+    uint32_t dtr = 0;
+
+    while (!dtr) {
+        uart_line_ctrl_get(dev, UART_LINE_CTRL_DTR, &dtr);
+        k_msleep(100);
+    }
+}
+#endif
+
 int main(void) {
+    #if defined(CONFIG_USB_DEVICE_STACK_NEXT)
+    mp_usbd_init();
+    #endif
+
+    #if MP_CONSOLE_IS_CDC_ACM && defined(CONFIG_UART_LINE_CTRL)
+    mp_wait_for_usb_dtr();
+    #endif
+
     #ifdef CONFIG_CONSOLE_SUBSYS
     mp_console_init();
     #else
     zephyr_getchar_init();
     #endif
+
     real_main();
 
     return 0;
