@@ -85,10 +85,6 @@ DT_FOREACH_STATUS_OKAY(micropython_heap, MICROPY_HEAP_DEFINE)
 
 static char heap[MICROPY_HEAP_SIZE];
 
-#if defined(CONFIG_USB_DEVICE_STACK_NEXT)
-extern int mp_usbd_init(void);
-#endif // defined(CONFIG_USB_DEVICE_STACK_NEXT)
-
 void init_zephyr(void) {
     // We now rely on CONFIG_NET_APP_SETTINGS to set up bootstrap
     // network addresses.
@@ -139,9 +135,8 @@ soft_reset:
     usb_enable(NULL);
     #endif
 
-    #ifdef CONFIG_USB_DEVICE_STACK_NEXT
-    mp_usbd_init();
-    #endif
+    // Note: CONFIG_USB_DEVICE_STACK_NEXT init is in zephyr_start.c main()
+    // so it runs before the console is initialised (required for CDC ACM).
 
     #if MICROPY_VFS && MICROPY_MODULE_FROZEN_MPY
     // Mount and/or create the filesystem
