@@ -9,6 +9,7 @@ package(
         "funcs.py",
         "lock.py",
         "stream.py",
+        "arepl.py",
     ),
     base_path="..",
     opt=3,
