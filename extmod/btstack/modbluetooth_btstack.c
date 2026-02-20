@@ -1265,6 +1265,27 @@ int mp_bluetooth_gap_pair(uint16_t conn_handle) {
     return 0;
 }
 
+int mp_bluetooth_gap_unpair(uint8_t addr_type, const uint8_t *addr) {
+    DEBUG_printf("mp_bluetooth_gap_unpair: addr=%p\n", addr);
+    int count = le_device_db_max_count();
+    for (int i = 0; i < count; i++) {
+        int entry_type;
+        bd_addr_t entry_addr;
+        sm_key_t irk;
+        le_device_db_info(i, &entry_type, entry_addr, irk);
+        if (entry_type == (int)BD_ADDR_TYPE_UNKNOWN) {
+            continue;
+        }
+        if (addr == NULL || ((int)addr_type == entry_type && memcmp(addr, entry_addr, BD_ADDR_LEN) == 0)) {
+            le_device_db_remove(i);
+            if (addr != NULL) {
+                return 0;
+            }
+        }
+    }
+    return (addr == NULL) ? 0 : MP_ENOENT;
+}
+
 int mp_bluetooth_gap_passkey(uint16_t conn_handle, uint8_t action, mp_int_t passkey) {
     DEBUG_printf("mp_bluetooth_gap_passkey: conn_handle=%d action=%d passkey=%d\n", conn_handle, action, (int)passkey);
     return MP_EOPNOTSUPP;

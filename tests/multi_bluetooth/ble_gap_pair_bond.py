@@ -137,4 +137,5 @@ def instance1():
 ble = bluetooth.BLE()
 ble.config(mitm=True, le_secure=True, bond=True)
 ble.active(1)
+ble.gap_unpair()  # Clear stale bonds/CCC from persistent storage
 ble.irq(irq)

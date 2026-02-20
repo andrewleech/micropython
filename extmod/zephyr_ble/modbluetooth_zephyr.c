@@ -1003,11 +1003,6 @@ int mp_bluetooth_init(void) {
         // Load settings from flash (required for BT_SETTINGS to restore keys).
         // Must be called after bt_enable() and before any BLE operations.
         settings_load();
-        // Clear all bonds on init so each ble.active(True) starts with
-        // clean pairing state. Without this, CONFIG_BT_SETTINGS restores
-        // stale bonds/CCC values from flash that break sequential tests
-        // and can cause unexpected notifications to previously-bonded peers.
-        bt_unpair(BT_ID_DEFAULT, NULL);
         #endif
 
         #ifndef __ZEPHYR__
@@ -3419,6 +3414,17 @@ int mp_bluetooth_gap_pair(uint16_t conn_handle) {
     }
 
     return bt_err_to_errno(err);
+}
+
+int mp_bluetooth_gap_unpair(uint8_t addr_type, const uint8_t *addr) {
+    DEBUG_printf("mp_bluetooth_gap_unpair: addr=%p\n", addr);
+    if (addr == NULL) {
+        return bt_unpair(BT_ID_DEFAULT, NULL);
+    }
+    bt_addr_le_t le_addr;
+    le_addr.type = addr_type;
+    memcpy(le_addr.a.val, addr, 6);
+    return bt_unpair(BT_ID_DEFAULT, &le_addr);
 }
 
 int mp_bluetooth_gap_passkey(uint16_t conn_handle, uint8_t action, mp_int_t passkey) {

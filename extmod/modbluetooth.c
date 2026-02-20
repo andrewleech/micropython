@@ -61,6 +61,7 @@ static inline void __attribute__((unused)) _force_qstr_extraction(void) {
     (void)MP_QSTR_le_secure;
     (void)MP_QSTR_gap_pair;
     (void)MP_QSTR_gap_passkey;
+    (void)MP_QSTR_gap_unpair;
 }
 
 // NimBLE can have fragmented data for GATTC events, so requires reassembly.
@@ -730,6 +731,23 @@ static mp_obj_t bluetooth_ble_gap_pair(mp_obj_t self_in, mp_obj_t conn_handle_in
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(bluetooth_ble_gap_pair_obj, bluetooth_ble_gap_pair);
 
+static mp_obj_t bluetooth_ble_gap_unpair(size_t n_args, const mp_obj_t *args) {
+    (void)args[0]; // self
+    if (n_args == 1) {
+        // No args: clear all bonds.
+        return bluetooth_handle_errno(mp_bluetooth_gap_unpair(0, NULL));
+    }
+    // Two args: addr_type, addr.
+    uint8_t addr_type = mp_obj_get_int(args[1]);
+    mp_buffer_info_t bufinfo = {0};
+    mp_get_buffer_raise(args[2], &bufinfo, MP_BUFFER_READ);
+    if (bufinfo.len != 6) {
+        mp_raise_ValueError(MP_ERROR_TEXT("invalid addr"));
+    }
+    return bluetooth_handle_errno(mp_bluetooth_gap_unpair(addr_type, bufinfo.buf));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(bluetooth_ble_gap_unpair_obj, 1, 3, bluetooth_ble_gap_unpair);
+
 static mp_obj_t bluetooth_ble_gap_passkey(size_t n_args, const mp_obj_t *args) {
     uint16_t conn_handle = mp_obj_get_int(args[1]);
     uint8_t action = mp_obj_get_int(args[2]);
@@ -986,6 +1004,7 @@ static const mp_rom_map_elem_t bluetooth_ble_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_gap_disconnect), MP_ROM_PTR(&bluetooth_ble_gap_disconnect_obj) },
     #if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
     { MP_ROM_QSTR(MP_QSTR_gap_pair), MP_ROM_PTR(&bluetooth_ble_gap_pair_obj) },
+    { MP_ROM_QSTR(MP_QSTR_gap_unpair), MP_ROM_PTR(&bluetooth_ble_gap_unpair_obj) },
     { MP_ROM_QSTR(MP_QSTR_gap_passkey), MP_ROM_PTR(&bluetooth_ble_gap_passkey_obj) },
     #endif
     // GATT Server
