@@ -360,6 +360,9 @@ int mp_bluetooth_gap_pair(uint16_t conn_handle);
 
 // Respond to a pairing request.
 int mp_bluetooth_gap_passkey(uint16_t conn_handle, uint8_t action, mp_int_t passkey);
+
+// Remove bond for addr, or all bonds if addr is NULL.
+int mp_bluetooth_gap_unpair(uint8_t addr_type, const uint8_t *addr);
 #endif // MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
 
 #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
