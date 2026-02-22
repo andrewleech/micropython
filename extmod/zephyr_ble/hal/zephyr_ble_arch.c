@@ -6,29 +6,29 @@
 #include <stdint.h>
 
 // Platform-specific interrupt control
-#if defined(__arm__) && defined(PICO_BUILD)
-// RP2 (Raspberry Pi Pico) - use Pico SDK functions
-#include "hardware/sync.h"
+#if defined(__arm__) || defined(__thumb__)
+// ARM Cortex-M: use PRIMASK for interrupt control.
 
 unsigned int arch_irq_lock(void) {
-    return save_and_disable_interrupts();
+    unsigned int key;
+    __asm volatile ("mrs %0, primask" : "=r" (key));
+    __asm volatile ("cpsid i" ::: "memory");
+    return key;
 }
 
 void arch_irq_unlock(unsigned int key) {
-    restore_interrupts(key);
+    __asm volatile ("msr primask, %0" :: "r" (key) : "memory");
 }
 
 #else
-// Unix and other ports - simplified stub implementation
-// In MicroPython's cooperative scheduler, we typically don't need real interrupt control
+// Unix and other non-ARM ports — no real interrupt control needed
 
 unsigned int arch_irq_lock(void) {
-    // Return 0 as a placeholder key
     return 0;
 }
 
 void arch_irq_unlock(unsigned int key) {
-    (void)key;  // Unused in stub implementation
+    (void)key;
 }
 
 #endif
