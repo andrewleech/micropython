@@ -22,6 +22,9 @@ def base_path(*p):
 sys.path.append(base_path("../tools"))
 import pyboard
 
+# Prefix used by run-tests.py to tag flaky-retry results.
+FLAKY_REASON_PREFIX = "flaky"
+
 # File with the test results.
 _RESULTS_FILE = "_results.json"
 
@@ -322,6 +325,28 @@ def create_test_report(args, test_results, testcase_count=None):
     print("{} tests performed{}".format(num_tests_performed, testcase_count_info))
 
     print("{} tests passed".format(len(passed_tests)))
+
+    flaky_tests = [
+        r for r in test_results if r[1] == "pass" and r[2].startswith(FLAKY_REASON_PREFIX)
+    ]
+    if len(flaky_tests) > 0:
+        print(
+            "{} tests passed with retries: {}".format(
+                len(flaky_tests),
+                " ".join("{} [{}]".format(t[0], t[2]) for t in flaky_tests),
+            )
+        )
+
+    flaky_failed = [
+        r for r in test_results if r[1] == "fail" and r[2].startswith(FLAKY_REASON_PREFIX)
+    ]
+    if len(flaky_failed) > 0:
+        print(
+            "{} flaky tests still failed after retries: {}".format(
+                len(flaky_failed),
+                " ".join(t[0] for t in flaky_failed),
+            )
+        )
 
     if len(skipped_tests) > 0:
         print(

@@ -31,6 +31,7 @@ from test_utils import (
     get_test_instance,
     prepare_script_for_target,
     create_test_report,
+    FLAKY_REASON_PREFIX,
 )
 
 RV32_ARCH_FLAGS = {
@@ -38,6 +39,25 @@ RV32_ARCH_FLAGS = {
     "zcmp": 1 << 1,
 }
 
+# Tests with known intermittent failures. When these fail, they are
+# automatically retried up to FLAKY_TEST_MAX_RETRIES additional times.
+# Paths are relative to the tests/ directory (must match test_file format
+# used by run_one_test, which normalises backslashes to forward slashes).
+#
+# Values are (reason, platform) tuples where platform is None (all platforms)
+# or a sys.platform string to restrict retries to that platform only.
+FLAKY_TESTS = {
+    "thread/thread_gc1.py": ("GC race condition", None),
+    "thread/stress_aes.py": ("timeout under QEMU emulation", None),
+    "thread/stress_schedule.py": ("intermittent crash under QEMU", None),
+    "thread/stress_recurse.py": ("stack overflow under emulation", None),
+    "thread/stress_heap.py": ("flaky on macOS", "darwin"),
+    "cmdline/repl_lock.py": ("REPL timing under QEMU", None),
+    "cmdline/repl_cont.py": ("REPL escaping on macOS", "darwin"),
+    "extmod/time_time_ns.py": ("CI runner clock precision", None),
+}
+
+FLAKY_TEST_MAX_RETRIES = 2  # 3 total runs including initial
 # Tests require at least CPython 3.3. If your default python3 executable
 # is of lower version, you can point MICROPY_CPYTHON3 environment var
 # to the correct executable.
@@ -1036,6 +1056,62 @@ def run_tests(pyb, tests, args, result_dir, num_threads=1):
             print(line)
         sys.exit(2)
 
+    # Retry known-flaky tests that failed.
+    # Safety: this runs single-threaded after pool.map()/sequential loop
+    # completes, so direct list access without ThreadSafeCounter's lock is safe.
+    if not args.no_retry:
+
+        def _is_flaky(test_file):
+            """Check if test_file is a known-flaky test on this platform."""
+            if test_file not in FLAKY_TESTS:
+                return False, ""
+            reason, platform = FLAKY_TESTS[test_file]
+            if platform is not None and platform != sys.platform:
+                return False, ""
+            return True, reason
+
+        results = test_results.value  # direct ref to internal list
+        saved_testcase_count = testcase_count.value
+        flaky_failures = []
+        for i, r in enumerate(results):
+            if r[1] == "fail":
+                flaky, reason = _is_flaky(r[0])
+                if flaky:
+                    flaky_failures.append((i, r, reason))
+        for orig_idx, (test_file, _, _), flaky_reason in flaky_failures:
+            retried_pass = False
+            for attempt in range(1, FLAKY_TEST_MAX_RETRIES + 1):
+                print(
+                    "retry {} ({}/{}, {})".format(
+                        test_file, attempt, FLAKY_TEST_MAX_RETRIES, flaky_reason
+                    )
+                )
+                pre_len = len(results)
+                run_one_test(test_file)
+                retry_entries = results[pre_len:]
+                del results[pre_len:]  # clean up all entries appended during retry
+                if len(retry_entries) == 1 and retry_entries[0][1] == "pass":
+                    results[orig_idx] = (
+                        test_file,
+                        "pass",
+                        "{} (retried {})".format(FLAKY_REASON_PREFIX, attempt),
+                    )
+                    retried_pass = True
+                    print("pass  {} (retried {}, {})".format(test_file, attempt, flaky_reason))
+                    break
+            if not retried_pass:
+                results[orig_idx] = (
+                    test_file,
+                    "fail",
+                    "{} (retried {})".format(FLAKY_REASON_PREFIX, FLAKY_TEST_MAX_RETRIES),
+                )
+                print(
+                    "FAIL  {} (retried {}, {})".format(
+                        test_file, FLAKY_TEST_MAX_RETRIES, flaky_reason
+                    )
+                )
+        testcase_count._value = saved_testcase_count
+
     # Return test results.
     return test_results.value, testcase_count.value
 
@@ -1154,6 +1230,12 @@ the last matching regex is used:
         "--target-wiring",
         default=None,
         help="force the given script to be used as target_wiring.py",
+    )
+    cmd_parser.add_argument(
+        "--no-retry",
+        action="store_true",
+        default=False,
+        help="disable automatic retry of known-flaky tests",
     )
     args = cmd_parser.parse_args()
 
