@@ -10,6 +10,10 @@ ZEPHYR_BLE_EXTMOD_DIR = $(EXTMOD_DIR)/zephyr_ble
 ZEPHYR_BLE_DEBUG ?= 0
 CFLAGS_EXTMOD += -DZEPHYR_BLE_DEBUG=$(ZEPHYR_BLE_DEBUG)
 
+# Suppress LTO type-mismatch warnings at link time — our stub declarations
+# intentionally differ from Zephyr's internal declarations (monitor.h, ecb.h, etc.)
+LDFLAGS += -Wno-lto-type-mismatch
+
 SRC_EXTMOD_C += $(ZEPHYR_BLE_EXTMOD_DIR)/modbluetooth_zephyr.c
 SRC_EXTMOD_C += $(ZEPHYR_BLE_EXTMOD_DIR)/net_buf_pool_registry.c
 # hci_driver_stub.c not needed when port provides its own HCI driver (e.g., mpzephyrport.c)
@@ -31,6 +35,9 @@ CFLAGS_EXTMOD += -DMICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS=1
 
 # Enable pairing and bonding with synchronous events
 CFLAGS_EXTMOD += -DMICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING=1
+
+# Enable L2CAP dynamic channels (COC)
+CFLAGS_EXTMOD += -DMICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS=1
 
 # Note: No force-include needed - the stub toolchain/gcc.h includes autoconf.h
 # before forwarding to the real gcc.h, ensuring CONFIG_ARM is defined in time.
@@ -86,7 +93,10 @@ $(BUILD)/$(ZEPHYR_LIB_DIR)/lib/net_buf/buf_simple.o: CFLAGS += -Wno-attributes
 # Suppress warnings in BLE host (third-party Zephyr code)
 # Use broad suppression for all BLE host files to avoid warning churn
 # -Wno-format: Zephyr uses %u for uint32_t which varies by platform
-$(BUILD)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/%.o: CFLAGS += -Wno-error -Wno-format
+# -Wno-lto-type-mismatch: stub function declarations intentionally differ from
+# real Zephyr implementations (monitor.h, settings.h, ecb.h, etc.)
+$(BUILD)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/%.o: CFLAGS += -Wno-error -Wno-format -Wno-lto-type-mismatch
+$(BUILD)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/common/%.o: CFLAGS += -Wno-lto-type-mismatch
 
 # gatt.c has "initializer element is not constant" error with ARRAY_SIZE
 # This is a GCC limitation: sizeof(external_array) not recognized as compile-time constant
@@ -159,6 +169,121 @@ INC += -I$(TOP)/$(NIMBLE_LIB_DIR)/ext/tinycrypt/include
 
 # Suppress warnings in TinyCrypt (third-party code)
 $(BUILD)/$(NIMBLE_LIB_DIR)/ext/tinycrypt/%.o: CFLAGS += -Wno-error
+
+# =============================================================================
+# Zephyr BLE Controller (on-core, Nordic nRF5x only)
+# =============================================================================
+ifeq ($(MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER),1)
+
+CFLAGS_EXTMOD += -DMICROPY_BLUETOOTH_ZEPHYR_CONTROLLER=1
+
+# Controller HCI interface
+SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/hci/, \
+	hci_driver.c \
+	hci.c \
+	)
+
+# Nordic vendor HCI (reads FICR device address for stable BLE identity)
+SRC_THIRDPARTY_C += $(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/ll_sw/nordic/hci/hci_vendor.c
+
+# Upper Link Layer (ULL) — core
+SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/ll_sw/, \
+	ull.c \
+	ull_adv.c \
+	ull_scan.c \
+	ull_conn.c \
+	ull_central.c \
+	ull_peripheral.c \
+	ull_filter.c \
+	ull_chan.c \
+	ull_sched.c \
+	ull_tx_queue.c \
+	ll_addr.c \
+	ll_feat.c \
+	ll_settings.c \
+	ll_tx_pwr.c \
+	lll_common.c \
+	lll_chan.c \
+	)
+
+# ULL Link Layer Control Procedure (LLCP) files
+SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/ll_sw/, \
+	ull_llcp.c \
+	ull_llcp_cc.c \
+	ull_llcp_chmu.c \
+	ull_llcp_common.c \
+	ull_llcp_conn_upd.c \
+	ull_llcp_enc.c \
+	ull_llcp_local.c \
+	ull_llcp_past.c \
+	ull_llcp_pdu.c \
+	ull_llcp_remote.c \
+	)
+
+# Lower Link Layer (LLL) — Nordic-specific
+SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/ll_sw/nordic/lll/, \
+	lll.c \
+	lll_adv.c \
+	lll_scan.c \
+	lll_conn.c \
+	lll_central.c \
+	lll_peripheral.c \
+	)
+
+# Nordic HAL
+SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/ll_sw/nordic/hal/nrf5/, \
+	radio/radio.c \
+	ticker.c \
+	cntr.c \
+	ecb.c \
+	mayfly.c \
+	)
+
+# Controller ticker
+SRC_THIRDPARTY_C += $(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/ticker/ticker.c
+
+# Controller utilities
+SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/util/, \
+	mayfly.c \
+	memq.c \
+	dbuf.c \
+	mem.c \
+	util.c \
+	)
+
+# IRQ management shims, ISR stubs, and controller kernel stubs
+SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_BLE_EXTMOD_DIR)/hal/, \
+	zephyr_ble_irq.c \
+	zephyr_ble_isr.c \
+	zephyr_ble_clock.c \
+	zephyr_ble_controller_stubs.c \
+	)
+
+# Controller include paths
+INC += -I$(TOP)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller
+INC += -I$(TOP)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/include
+INC += -I$(TOP)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/ll_sw
+INC += -I$(TOP)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/ll_sw/nordic
+INC += -I$(TOP)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/ll_sw/nordic/hal/nrf5
+INC += -I$(TOP)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/ll_sw/nordic/hci
+
+# nRF SoC common headers (nrf_sys_event.h needed by radio.c)
+INC += -I$(TOP)/$(ZEPHYR_LIB_DIR)/soc/nordic/common
+
+# Suppress warnings in controller sources (third-party code)
+# Force-include headers needed by controller that aren't transitively included:
+# - hci_vs.h: bt_hci_vs_static_addr used in hci_internal.h
+# - buf.h: bt_buf_get_evt/rx used in hci_driver.c
+# - zephyr_ble_irq.h: irq_enable/disable/connect used by HAL code
+# nrfx CCM event name compatibility (older nrfx uses ENDCRYPT, newer uses END)
+CFLAGS_CONTROLLER_COMPAT = -DNRF_CCM_EVENT_END=NRF_CCM_EVENT_ENDCRYPT
+
+$(BUILD)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/%.o: CFLAGS += -Wno-error -Wno-format -Wno-unused-variable \
+	-Wno-lto-type-mismatch \
+	-include zephyr/bluetooth/hci_vs.h -include zephyr/bluetooth/buf.h \
+	-include zephyr_ble_irq.h $(CFLAGS_CONTROLLER_COMPAT)
+
+endif # MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
 
 endif
 

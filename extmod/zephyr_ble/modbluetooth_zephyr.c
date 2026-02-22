@@ -948,7 +948,7 @@ int mp_bluetooth_init(void) {
                 DEBUG_SEQ_printf("Attempting to get init work\n");
                 init_work = mp_bluetooth_zephyr_init_work_get();
                 if (init_work != NULL && init_work->handler != NULL) {
-                    DEBUG_printf("Got init work=%p, handler=%p\n", init_work, init_work->handler);
+                    DEBUG_printf("init work=%p handler=%p\n", init_work, init_work->handler);
                     DEBUG_SEQ_printf("Executing init work handler\n");
                     DEBUG_ENTER("init_work->handler");
                     // Set work queue context so k_current_get() returns &k_sys_work_q.thread
@@ -958,12 +958,12 @@ int mp_bluetooth_init(void) {
                     init_work->handler(init_work);
                     mp_bluetooth_zephyr_set_sys_work_q_context(false);
                     DEBUG_EXIT("init_work->handler");
-                    DEBUG_printf("Init work handler completed\n");
-                    DEBUG_SEQ_printf("Init work handler done\n");
+                    DEBUG_printf("init handler done, result=%d\n",
+                        mp_bluetooth_zephyr_bt_enable_result);
                     // Handler has completed (bt_init ran to completion)
                     // bt_ready_cb should have been called and set result flag
                 } else {
-                    DEBUG_printf("No init work available (work=%p)\n", init_work);
+                    DEBUG_printf("no init work (work=%p)\n", init_work);
                     DEBUG_SEQ_printf("No init work found\n");
                 }
             }

@@ -15,6 +15,16 @@
 // In a real Zephyr build, this file contains generated macros for all devicetree nodes.
 // For MicroPython, we have no devicetree, so the iteration helper expands to nothing.
 
+// Device tree stubs — provide missing node/property definitions
+// The real devicetree.h macros expand to generated token-pasting expressions
+// e.g. DT_NODE_HAS_PROP(DT_NODELABEL(hfxo), startup_time_us) expands to:
+//   IS_ENABLED(DT_CAT4(DT_N_NODELABEL_hfxo, _P_, startup_time_us, _EXISTS))
+// DT_NODELABEL(hfxo) → DT_N_NODELABEL_hfxo (must be defined as a node_id token)
+// Then DT_CAT4 produces: <node_id>_P_startup_time_us_EXISTS
+// We define the node label and property _EXISTS as 0 so the check fails gracefully.
+#define DT_N_NODELABEL_hfxo DT_N_NODELABEL_hfxo
+#define DT_N_NODELABEL_hfxo_P_startup_time_us_EXISTS 0
+
 // The helper macro that DT_FOREACH_STATUS_OKAY_NODE uses to iterate over nodes.
 // With no nodes, this expands to nothing.
 #define DT_FOREACH_OKAY_HELPER(fn) /* empty - no devicetree nodes */
@@ -31,15 +41,10 @@
 // Indicate that the chosen node exists (required by DT_HAS_CHOSEN macro)
 #define DT_CHOSEN_zephyr_bt_hci_EXISTS 1
 
-// Define dependency ordinal macro (required by Zephyr devicetree system)
-// This macro is normally generated in devicetree_generated.h
-// Need double expansion for token concatenation to work with macro arguments
-#define DT_DEP_ORD_HELPER(node_id) node_id ## _ORD
-#define DT_DEP_ORD(node_id) DT_DEP_ORD_HELPER(node_id)
-
-// Define dependency ordinal for our BT HCI device node
+// DT_DEP_ORD is provided by Zephyr's devicetree/ordinals.h (included later).
+// We only need to define the ordinal _value_ for our BT HCI device node.
 // Zephyr's DT_DEP_ORD(node_id) expands to DT_CAT(node_id, _ORD)
-// So we need mp_zephyr_bt_hci_node_ORD (matching DT_CHOSEN_zephyr_bt_hci)
+// So DT_DEP_ORD(mp_zephyr_bt_hci_node) → mp_zephyr_bt_hci_node_ORD → 0
 #define mp_zephyr_bt_hci_node_ORD 0
 
 // ARM NVIC devicetree node stub

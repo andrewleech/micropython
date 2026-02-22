@@ -73,6 +73,11 @@ static inline int bt_hci_send(const struct device *dev, struct net_buf *buf) {
     return api->send(dev, buf);
 }
 
+// HCI command response buffer allocation (provided by host's hci_common.c)
+// Used by the controller's hci.c to create command complete/status responses
+struct net_buf *bt_hci_cmd_complete_create(uint16_t op, uint8_t plen);
+struct net_buf *bt_hci_cmd_status_create(uint16_t op, uint8_t status);
+
 // MicroPython-specific HCI transport setup/teardown functions
 int bt_hci_transport_setup(const struct device *dev);
 int bt_hci_transport_teardown(const struct device *dev);

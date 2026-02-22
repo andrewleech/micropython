@@ -17,6 +17,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+// Devicetree macros (DT_NODE_HAS_PROP, DT_NODELABEL, etc.)
+// Real Zephyr kernel.h includes this; controller code uses DT macros
+// without explicitly including devicetree.h.
+#include <zephyr/devicetree.h>
+
 // Singly-linked list types (needed by net_buf)
 #include <zephyr/sys/slist.h>
 
@@ -241,6 +246,97 @@ extern struct k_work_q k_sys_work_q;
 
 // Note: device_is_ready() is declared in <zephyr/device.h> from real Zephyr headers
 // and implemented in zephyr_ble_kernel.c
+
+// --- k_fifo_cancel_wait (no-op in cooperative scheduler) ---
+static inline void k_fifo_cancel_wait(struct k_fifo *fifo) {
+    (void)fifo;
+}
+
+// --- k_cpu_atomic_idle (enter idle until next interrupt) ---
+static inline void k_cpu_atomic_idle(unsigned int key) {
+    (void)key;
+    __asm__ volatile("wfe" ::: "memory");
+}
+
+// --- k_poll API (controller recv thread polling) ---
+// In real Zephyr k_poll blocks on multiple kernel objects.
+// In cooperative mode, we stub this — the recv thread loop body
+// checks semaphores and FIFOs directly via existing shims.
+
+enum k_poll_types {
+    K_POLL_TYPE_SEM_AVAILABLE = 1,
+    K_POLL_TYPE_FIFO_DATA_AVAILABLE = 2,
+    K_POLL_TYPE_SIGNAL = 3,
+};
+
+enum k_poll_modes {
+    K_POLL_MODE_NOTIFY_ONLY = 0,
+};
+
+enum k_poll_states {
+    K_POLL_STATE_NOT_READY = 0,
+    K_POLL_STATE_SEM_AVAILABLE = 1,
+    K_POLL_STATE_FIFO_DATA_AVAILABLE = 2,
+    K_POLL_STATE_SIGNALED = 3,
+};
+
+struct k_poll_event {
+    uint32_t type;
+    uint32_t state;
+    uint32_t mode;
+    union {
+        void *obj;
+        struct k_sem *sem;
+        struct k_fifo *fifo;
+        struct k_poll_signal *signal;
+    };
+    uint32_t tag;
+};
+
+// Static initializer for poll events — stores type, mode, and object pointer
+#define K_POLL_EVENT_STATIC_INITIALIZER(event_type, event_mode, event_obj, event_tag) \
+    { .type = (event_type), .mode = (event_mode), .obj = (void *)(event_obj), \
+      .state = K_POLL_STATE_NOT_READY, .tag = (event_tag) }
+
+// k_poll — check kernel objects for readiness
+// In cooperative mode, check semaphore/FIFO state directly and return.
+// Returns 0 on success (at least one object ready), -EAGAIN on timeout.
+int k_poll(struct k_poll_event *events, int num_events, k_timeout_t timeout);
+
+// k_poll_signal_init stub
+static inline void k_poll_signal_init(struct k_poll_signal *sig) {
+    sig->signaled = 0;
+    sig->result = 0;
+}
+
+// --- k_thread (controller recv threads) ---
+// In cooperative mode, threads are registered as poll functions called
+// from the main loop rather than preemptive OS threads.
+
+typedef void (*k_thread_entry_t)(void *, void *, void *);
+
+struct k_thread {
+    k_thread_entry_t entry;
+    void *p1;
+    void *p2;
+    void *p3;
+    const char *name;
+    bool started;
+};
+
+// Note: k_tid_t is defined as void* in zephyr_ble_kernel.h (included via zephyr_ble_hal.h above)
+// We don't redefine it here — void* is compatible with struct k_thread* in C.
+
+// k_thread_create — register a thread entry for cooperative polling.
+// The thread won't actually run as a preemptive thread. The controller's
+// recv_thread and prio_recv_thread functions will be called cooperatively.
+// Returns k_tid_t (void*) — caller stores as opaque handle.
+void *k_thread_create(struct k_thread *new_thread,
+                      k_thread_stack_t *stack, size_t stack_size,
+                      k_thread_entry_t entry,
+                      void *p1, void *p2, void *p3,
+                      int prio, uint32_t options,
+                      k_timeout_t delay);
 
 // This prevents the real kernel.h from being included later
 #define ZEPHYR_INCLUDE_KERNEL_H_
