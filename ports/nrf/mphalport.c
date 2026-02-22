@@ -44,6 +44,10 @@
 #include "nrf_clock.h"
 #endif
 
+#ifdef MICROPY_SOFT_TIMER_TICKS_MS
+#include "shared/runtime/softtimer.h"
+#endif
+
 #if !defined(USE_WORKAROUND_FOR_ANOMALY_132) && \
     (defined(NRF52832_XXAA) || defined(NRF52832_XXAB))
 // ANOMALY 132 - LFCLK needs to avoid frame from 66us to 138us after LFCLK stop.
@@ -389,6 +393,52 @@ void mp_hal_delay_ms(mp_uint_t ms) {
     }
 }
 #endif
+
+#ifdef MICROPY_SOFT_TIMER_TICKS_MS
+
+// SysTick-based millisecond counter for soft timer support.
+volatile uint32_t uwTick;
+
+#define PENDSV_DISPATCH_MAX 1
+
+static pendsv_dispatch_t pendsv_dispatch_table[PENDSV_DISPATCH_MAX];
+
+void pendsv_schedule_dispatch(size_t slot, pendsv_dispatch_t handler) {
+    pendsv_dispatch_table[slot] = handler;
+    SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;
+}
+
+void PendSV_Handler(void) {
+    for (size_t i = 0; i < PENDSV_DISPATCH_MAX; i++) {
+        pendsv_dispatch_t f = pendsv_dispatch_table[i];
+        if (f != NULL) {
+            pendsv_dispatch_table[i] = NULL;
+            f();
+        }
+    }
+}
+
+void SysTick_Handler(void) {
+    uint32_t uw_tick = uwTick + 1;
+    uwTick = uw_tick;
+
+    if (soft_timer_next == uw_tick) {
+        pendsv_schedule_dispatch(PENDSV_DISPATCH_SOFT_TIMER, soft_timer_handler);
+    }
+}
+
+void mp_nrf_systick_init(void) {
+    // Set PendSV to lowest priority.
+    NVIC_SetPriority(PendSV_IRQn, (1 << __NVIC_PRIO_BITS) - 1);
+    // Enable SEVONPEND so WFE wakes on any pending exception (including SysTick).
+    // Without this, __WFE() in MICROPY_EVENT_POLL_HOOK doesn't wake on SysTick,
+    // causing the soft timer to run at ~95Hz instead of 1kHz.
+    SCB->SCR |= SCB_SCR_SEVONPEND_Msk;
+    // Configure SysTick for 1kHz (1ms period).
+    SysTick_Config(SystemCoreClock / 1000);
+}
+
+#endif // MICROPY_SOFT_TIMER_TICKS_MS
 
 #if defined(NRFX_LOG_ENABLED) && (NRFX_LOG_ENABLED == 1)
 

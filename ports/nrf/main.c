@@ -121,6 +121,10 @@ soft_reset:
     rtc1_init_time_ticks();
     #endif
 
+    #ifdef MICROPY_SOFT_TIMER_TICKS_MS
+    mp_nrf_systick_init();
+    #endif
+
     led_init();
 
     led_state(1, 1); // MICROPY_HW_LED_1 aka MICROPY_HW_LED_RED
