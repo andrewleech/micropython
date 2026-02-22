@@ -15,10 +15,11 @@
 #include <stddef.h>  // for offsetof
 
 // Undef macros that may conflict with real util.h definitions
-// These may come from zephyr_ble_config.h or pico-sdk headers
+// These may come from zephyr_ble_config.h, nrfx, or pico-sdk headers
 #undef BITS_PER_BYTE
 #undef FLEXIBLE_ARRAY_DECLARE
 #undef CONTAINER_OF
+#undef ARRAY_SIZE
 // Pico-SDK defines KHZ/MHZ as constants, Zephyr defines them as function-like macros
 #undef KHZ
 #undef MHZ

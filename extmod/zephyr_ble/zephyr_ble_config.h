@@ -47,6 +47,13 @@
 #define MICROPY_BLUETOOTH_ZEPHYR_GATT_POOL (0)
 #endif
 
+// Use on-core Zephyr BLE controller (nRF5x only).
+// When enabled, compiles the Zephyr BLE controller alongside the host stack.
+// When disabled (default), uses external HCI transport (H:4, IPCC, etc.)
+#ifndef MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
+#define MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER (0)
+#endif
+
 // Use FreeRTOS tasks for BLE processing (HCI RX task, work thread)
 // When enabled (default when MICROPY_PY_THREAD is available):
 //   - Dedicated HCI RX task polls CYW43 at 10ms interval
@@ -108,6 +115,9 @@ extern const struct device __device_dts_ord_0;
 // Block printk.h to avoid conflicts with our stub
 #define ZEPHYR_INCLUDE_SYS_PRINTK_H_
 
+// Block real zephyr/init.h — we provide our own SYS_INIT stub below
+#define ZEPHYR_INCLUDE_INIT_H_
+
 // System initialization macro (no-op in MicroPython)
 // SYS_INIT(func, level, priority) registers an init function
 // In MicroPython we call init functions explicitly, so stub this out
@@ -115,6 +125,8 @@ extern const struct device __device_dts_ord_0;
 #define SYS_INIT(func, level, priority) \
     static inline int __sys_init_##func(void) { return 0; }
 #endif
+#define SYS_INIT_NAMED(name, func, level, priority) \
+    static inline int __sys_init_named_##name(void) { return 0; }
 
 // Init levels (not used, but referenced in SYS_INIT calls)
 #define POST_KERNEL 0
@@ -566,7 +578,9 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_ECC 1
 #define CONFIG_BT_TINYCRYPT_ECC 1
 #define CONFIG_BT_TINYCRYPT_AES_CMAC 1
-#define CONFIG_BT_CTLR_CRYPTO 0  // No controller crypto
+#if !MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
+#define CONFIG_BT_CTLR_CRYPTO 0  // No controller crypto (host-only mode)
+#endif
 
 // --- Settings/Storage - Disabled for Phase 1 (RAM-only) ---
 #define CONFIG_BT_SETTINGS 0
@@ -646,7 +660,12 @@ extern const struct device __device_dts_ord_0;
 
 // --- Zephyr System Config ---
 #define CONFIG_LITTLE_ENDIAN 1
+// VS HCI commands enabled when controller runs on-core (reads FICR device address)
+#if MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
+#define CONFIG_BT_HCI_VS 1
+#else
 #define CONFIG_BT_HCI_VS 0
+#endif
 #define CONFIG_BT_HCI_VS_EXT 0
 
 // System clock configuration (1 tick = 1 millisecond)
@@ -656,6 +675,7 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_SYS_CLOCK_MAX_TIMEOUT_DAYS 365  // Maximum timeout in days (for overflow checking)
 #define MSEC_PER_SEC 1000
 #define USEC_PER_MSEC 1000
+#define USEC_PER_SEC  1000000
 
 // RPA (Resolvable Private Address) timeout in seconds
 #define CONFIG_BT_RPA_TIMEOUT 900  // 15 minutes
@@ -760,15 +780,18 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_CHANNEL_SOUNDING_REASSEMBLY_BUFFER_SIZE 0
 #define CONFIG_BT_CHANNEL_SOUNDING_TEST 0
 
-// Controller-specific (when using Zephyr controller, not applicable here)
+// Controller-specific defaults (host-only mode)
+#if !MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
 #define CONFIG_BT_CTLR_PER_INIT_FEAT_XCHG 0
 #define CONFIG_BT_CTLR_SCAN_DATA_LEN_MAX 31
+#endif
 
-// Work queue for TX notifications - disabled (use synchronous model)
-#define CONFIG_BT_CONN_TX_NOTIFY_WQ 0
-#define CONFIG_BT_CONN_TX_NOTIFY_WQ_PRIO 8
-#define CONFIG_BT_CONN_TX_NOTIFY_WQ_INIT_PRIORITY 99
-#define CONFIG_BT_CONN_TX_NOTIFY_WQ_STACK_SIZE 1024
+// Work queue for TX notifications — NOT defined.
+// Zephyr uses #if defined() so defining it to 0 still enables the separate
+// work queue, but our SYS_INIT stub never calls bt_conn_tx_workq_init()
+// so it would be unprocessed.  Leave undefined to route TX completion
+// through k_sys_work_q.
+// #define CONFIG_BT_CONN_TX_NOTIFY_WQ 0
 
 // Forward declarations for stub functions (defined in HAL layer)
 #include <stddef.h>
@@ -833,6 +856,122 @@ int lll_csrand_get(void *buf, size_t len);  // Controller crypto stub
 // Note: Buffer types (enum bt_buf_type) and buffer allocation functions
 // (bt_buf_get_evt, bt_buf_get_rx, bt_buf_get_tx, bt_buf_get_type) are defined
 // in zephyr/bluetooth/buf.h. Include that header in files that need them.
+
+// =============================================================================
+// PART 6: Zephyr BLE Controller Configuration (on-core, nRF5x)
+// =============================================================================
+
+#if MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
+
+// --- Controller Core ---
+#define CONFIG_BT_CTLR                          1
+#define CONFIG_BT_LL_SW_SPLIT                   1
+#define CONFIG_BT_CTLR_ADVANCED_FEATURES        0
+
+// --- Controller Features ---
+#define CONFIG_BT_CTLR_DATA_LENGTH_MAX          251
+#define CONFIG_BT_CTLR_RX_BUFFERS              10
+#define CONFIG_BT_CTLR_CRYPTO                   1
+#define CONFIG_BT_CTLR_LE_ENC                   1
+#undef CONFIG_BT_CTLR_PRIVACY  // Leave disabled initially
+#define CONFIG_BT_CTLR_FILTER_ACCEPT_LIST       1
+#define CONFIG_BT_CTLR_FAL_SIZE                8  // Filter Accept List entries
+
+// --- Nordic SoC ---
+#define CONFIG_SOC_FAMILY_NORDIC_NRF            1
+#define CONFIG_SOC_SERIES_NRF52X                1
+#define CONFIG_SOC_COMPATIBLE_NRF52X            1
+#define CONFIG_SOC_NRF52840                     1
+
+// --- Radio ---
+// Note: Features that Zephyr checks with #if defined() must NOT be
+// defined here when disabled. Features checked with #if VALUE can be 0.
+// CONFIG_BT_CTLR_CONN_RSSI — left undefined (disabled)
+// CONFIG_BT_CTLR_ADV_EXT — left undefined (disabled, uses #if defined)
+// CONFIG_BT_CTLR_PHY — left undefined (1M PHY only)
+// CONFIG_BT_CTLR_MIN_USED_CHAN — left undefined (disabled)
+#define CONFIG_BT_CTLR_TIFS_HW                1  // Use hardware tIFS (150us) switching
+#define CONFIG_BT_CTLR_TIFS_HW_SUPPORT        1  // nRF52840 supports hw tIFS
+#define CONFIG_BT_CTLR_CHAN_SEL_2              1
+#define CONFIG_BT_CTLR_PER_INIT_FEAT_XCHG     0
+#define CONFIG_BT_CTLR_SCAN_DATA_LEN_MAX      31
+
+// --- Ticker ---
+// Ticker features — leave undefined when disabled (Zephyr uses #if !defined())
+// CONFIG_BT_TICKER_COMPATIBILITY_MODE — left undefined (disabled)
+// CONFIG_BT_TICKER_SLOT_AGNOSTIC — left undefined (use slot-based scheduling)
+// CONFIG_BT_TICKER_LOW_LAT — left undefined (disabled)
+#define CONFIG_BT_TICKER_UPDATE                1
+#define CONFIG_BT_TICKER_NEXT_SLOT_GET         1
+
+// --- Link Layer ---
+#define CONFIG_BT_CTLR_TX_PWR_PLUS_8           0  // Use default TX power
+#define CONFIG_BT_CTLR_TX_BUFFER_SIZE          27
+#define CONFIG_BT_CTLR_TX_BUFFERS              3
+#define CONFIG_BT_CTLR_LLCP_CONN               4  // Match CONFIG_BT_MAX_CONN
+#define CONFIG_BT_CTLR_ULL_HIGH_PRIO           1  // SWI4 priority
+#define CONFIG_BT_CTLR_ULL_LOW_PRIO            2  // SWI5 priority
+#define CONFIG_BT_CTLR_LLL_PRIO               0  // RADIO priority
+
+// --- Controller Threading ---
+// In cooperative mode, controller recv threads run as polling functions
+#define CONFIG_BT_RECV_BLOCKING                 0
+#define CONFIG_BT_CTLR_RX_STACK_SIZE           512  // Used for recv_thread stack array sizing
+
+// --- PPI Configuration ---
+// nRF52840 has 20 PPI channels (0-19) and 12 channel groups (0-11)
+// Controller uses channels for radio<->timer event routing
+#define CONFIG_BT_CTLR_PPI_CHANNELS            8
+
+// --- Vendor Identification ---
+#define CONFIG_BT_CTLR_COMPANY_ID              0xFFFF  // "not assigned" per BT SIG
+#define CONFIG_BT_CTLR_SUBVERSION_NUMBER       0x0000
+
+// --- Extended Advertising (disabled) ---
+// Must be 0 since CONFIG_BT_CTLR_ADV_EXT is 0
+#define CONFIG_BT_CTLR_ADV_AUX_SET             0
+#define CONFIG_BT_CTLR_SCAN_AUX_SET            0
+
+// --- SoC compatibility (needed by hci_vendor.h and HAL headers) ---
+#define CONFIG_SOC_COMPATIBLE_NRF              1
+
+// --- Kernel init priority (used by DEVICE_DT_INST_DEFINE) ---
+#define CONFIG_KERNEL_INIT_PRIORITY_DEVICE     0
+
+// --- Advertising Data ---
+#define CONFIG_BT_CTLR_ADV_DATA_LEN_MAX       31
+#define CONFIG_BT_CTLR_ADV_INTERVAL_MAX       0x4000  // 10.24s (BT spec default)
+
+// --- Extended Advertising RX PDU (needed even when ADV_EXT=0) ---
+#define CONFIG_BT_CTLR_ADV_EXT_RX_PDU_LEN_MAX 31
+
+// --- LLCP TX control buffer ---
+#define CONFIG_BT_CTLR_LLCP_TX_PER_CONN_TX_CTRL_BUF_NUM_MAX  1
+
+// --- HCI VS Build Info ---
+#define CONFIG_BT_CTLR_HCI_VS_BUILD_INFO      ""
+
+// --- LLCP TX control buffers ---
+#define CONFIG_BT_CTLR_LLCP_COMMON_TX_CTRL_BUF_NUM   2
+#define CONFIG_BT_CTLR_LLCP_PER_CONN_TX_CTRL_BUF_NUM 1
+
+// --- Timing ---
+#define CONFIG_BT_CTLR_EVENT_IFS_LOW_LAT_US   0  // No low-latency IFS override
+
+// --- ADV AUX (disabled, CONFIG_BT_CTLR_ADV_AUX_SET=0) ---
+#define CONFIG_BT_CTLR_ADV_AUX_PDU_LEN_MAX    31
+
+// --- Advertising Data Buffering ---
+#define CONFIG_BT_CTLR_ADV_DATA_BUF_MAX       1  // Double-buffered advertising data
+
+// --- LLCP Context Buffers ---
+#define CONFIG_BT_CTLR_LLCP_LOCAL_PROC_CTX_BUF_NUM   2
+#define CONFIG_BT_CTLR_LLCP_REMOTE_PROC_CTX_BUF_NUM  1
+
+// --- Connection Scheduling ---
+#define CONFIG_BT_CTLR_CENTRAL_SPACING        625  // Min spacing between central events (us)
+
+#endif // MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
 
 // ===== Endian Conversion Macros =====
 // Required for HCI parameter encoding in scan.c and other Zephyr BLE host code

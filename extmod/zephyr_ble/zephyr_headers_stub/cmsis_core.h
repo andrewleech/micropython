@@ -46,6 +46,11 @@
 // STM32: Use STM32 HAL CMSIS headers (already included via board support)
 // No action needed - STM32 ports include appropriate CMSIS headers automatically
 
+#elif defined(NRF52840_XXAA) || defined(NRF52832_XXAA) || defined(NRF52832_XXAB)
+// nRF52: Real CMSIS provided via lib/cmsis/inc and lib/nrfx/mdk
+// Include nrf.h which chains to core_cm4.h -> cmsis_gcc.h for all intrinsics
+#include "nrf.h"
+
 #else
 // Fallback: Provide minimal stub implementations of required CMSIS intrinsics
 // This ensures compilation succeeds even if proper CMSIS headers aren't available
