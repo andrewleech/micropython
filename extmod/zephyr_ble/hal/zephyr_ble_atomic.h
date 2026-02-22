@@ -289,16 +289,31 @@ static inline void *atomic_ptr_clear(atomic_ptr_t *target) {
 
 typedef unsigned int irq_lock_key_t;
 
-// Lock IRQs and return key
+// Lock IRQs and return key.
+// When the controller runs on-core, ISRs access shared data structures so
+// irq_lock must actually disable hardware interrupts via PRIMASK.
+// For host-only builds (CYW43, IPCC) the no-op MICROPY_PY_BLUETOOTH_ENTER
+// is sufficient since there are no local BLE ISRs.
 static inline irq_lock_key_t irq_lock(void) {
+    #if MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER && (defined(__arm__) || defined(__thumb__))
+    unsigned int key;
+    __asm volatile ("mrs %0, primask" : "=r" (key));
+    __asm volatile ("cpsid i" ::: "memory");
+    return key;
+    #else
     MICROPY_PY_BLUETOOTH_ENTER
     return atomic_state;
+    #endif
 }
 
 // Unlock IRQs with key
 static inline void irq_unlock(irq_lock_key_t key) {
+    #if MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER && (defined(__arm__) || defined(__thumb__))
+    __asm volatile ("msr primask, %0" :: "r" (key) : "memory");
+    #else
     uint32_t atomic_state = key;
     MICROPY_PY_BLUETOOTH_EXIT
+    #endif
 }
 
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_ATOMIC_H
