@@ -80,6 +80,33 @@ const char *nrfx_error_code_lookup(uint32_t err_code);
 
 void mp_nrf_start_lfclk(void);
 
+#ifdef MICROPY_SOFT_TIMER_TICKS_MS
+extern volatile uint32_t uwTick;
+void mp_nrf_systick_init(void);
+
+// PendSV dispatch for soft timer.
+typedef void (*pendsv_dispatch_t)(void);
+void pendsv_schedule_dispatch(size_t slot, pendsv_dispatch_t handler);
+
+#define PENDSV_DISPATCH_SOFT_TIMER 0
+#define IRQ_PRI_PENDSV ((1 << __NVIC_PRIO_BITS) - 1)
+
+static inline uint32_t raise_irq_pri(uint32_t pri) {
+    uint32_t basepri = __get_BASEPRI();
+    pri <<= (8 - __NVIC_PRIO_BITS);
+    __ASM volatile ("msr basepri_max, %0" : : "r" (pri) : "memory");
+    return basepri;
+}
+
+static inline void restore_irq_pri(uint32_t basepri) {
+    __set_BASEPRI(basepri);
+}
+
+#define MICROPY_PY_PENDSV_ENTER   uint32_t atomic_state = raise_irq_pri(IRQ_PRI_PENDSV);
+#define MICROPY_PY_PENDSV_REENTER atomic_state = raise_irq_pri(IRQ_PRI_PENDSV);
+#define MICROPY_PY_PENDSV_EXIT    restore_irq_pri(atomic_state);
+#endif // MICROPY_SOFT_TIMER_TICKS_MS
+
 #define MP_HAL_PIN_FMT           "%q"
 #define mp_hal_pin_obj_t const pin_obj_t *
 #define mp_hal_get_pin_obj(o)    pin_find(o)
