@@ -375,12 +375,47 @@ long unsigned int rng_generate_random_word(void);
 #endif
 #endif // MICROPY_HW_ENABLE_USBDEV
 
+#if MICROPY_BLUETOOTH_ZEPHYR
+// Zephyr BLE configuration
+#define MICROPY_PY_BLUETOOTH                        (1)
+#define MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE    (1)
+#ifndef MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
+#define MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS  (1)
+#endif
+#ifndef MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
+#define MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING (1)
+#endif
+#ifndef MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS
+#define MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS        (1)
+#endif
+
+// Soft timer uses SysTick-based uwTick counter
+#define MICROPY_SOFT_TIMER_TICKS_MS uwTick
+
+// ENTER/EXIT macros from mpbluetoothport.h
+#include "mpbluetoothport.h"
+
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+        /* Poll BLE directly since SysTick stops during WFE/WFI on nRF52840 */ \
+        /* (CPU clock gated in System ON idle), breaking soft timer scheduling. */ \
+        extern void mp_bluetooth_hci_poll(void); \
+        mp_bluetooth_hci_poll(); \
+        __WFE(); \
+    } while (0);
+
+// Wake CPU from WFE when scheduler has work
+#define MICROPY_SCHED_HOOK_SCHEDULED __SEV()
+#else
 #define MICROPY_EVENT_POLL_HOOK \
     do { \
         extern void mp_handle_pending(bool); \
         mp_handle_pending(true); \
         __WFI(); \
     } while (0);
+#endif
 
 // We need to provide a declaration/definition of alloca()
 #include <alloca.h>

@@ -74,6 +74,10 @@
 #include "softpwm.h"
 #endif
 
+#if MICROPY_PY_BLUETOOTH
+#include "extmod/modbluetooth.h"
+#endif
+
 #if MICROPY_HW_ENABLE_USBDEV && MICROPY_HW_USB_CDC
 #include "usb_cdc.h"
 #endif
@@ -278,6 +282,10 @@ soft_reset:
 
     #if MICROPY_PY_MACHINE_HW_PWM
     pwm_deinit_all();
+    #endif
+
+    #if MICROPY_PY_BLUETOOTH
+    mp_bluetooth_deinit();
     #endif
 
     mp_deinit();
