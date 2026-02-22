@@ -28,13 +28,21 @@
 
 // Random number generation
 // Used by BLE stack for generating keys, nonces, etc.
-// Uses platform hardware RNG
+// Uses platform hardware RNG or controller entropy when available
 int bt_rand(void *buf, size_t len) {
     if (!buf) {
         return -22; // -EINVAL
     }
 
-    #if defined(__ARM_ARCH_6M__)
+    #if MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
+    // When controller is running on-core, use controller's entropy path.
+    // lll_csrand_get() uses the hardware RNG peripheral via the controller's
+    // entropy driver (if CONFIG_ENTROPY_HAS_DRIVER) or returns uninitialized
+    // buffer contents as a fallback (see lll.c FIXME).
+    extern int lll_csrand_get(void *buf, size_t len);
+    return lll_csrand_get(buf, len);
+
+    #elif defined(__ARM_ARCH_6M__)
     // RP2040/RP2350: Use ROSC hardware RNG
     extern uint8_t rosc_random_u8(size_t cycles);
     uint8_t *p = (uint8_t *)buf;
@@ -71,7 +79,8 @@ int bt_rand(void *buf, size_t len) {
 
 // AES ECB encryption stub
 // Used by rpa.c for generating resolvable private addresses
-// TODO Phase 3: Implement using TinyCrypt AES-ECB
+// When controller is enabled, ecb.c provides the real ecb_encrypt via hardware ECB.
+#if !MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
 int ecb_encrypt(const uint8_t *key, const uint8_t *clear_text,
                 uint8_t *cipher_text, uint8_t length) {
     (void)key;
@@ -81,12 +90,15 @@ int ecb_encrypt(const uint8_t *key, const uint8_t *clear_text,
     // Return error - RPA not implemented yet
     return -1;
 }
+#endif
 
 // Controller random number generator stub
-// This is referenced in rpa.c but should never be called since CONFIG_BT_CTLR_CRYPTO=0
+// When controller is enabled, lll.c provides the real lll_csrand_get.
+#if !MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
 int lll_csrand_get(void *buf, size_t len) {
     (void)buf;
     (void)len;
     // Return error - controller crypto not available
     return -1;
 }
+#endif

@@ -110,9 +110,19 @@ static inline k_tid_t k_current_get(void) {
     #endif
 }
 
-// Check if in ISR context (always returns false in MicroPython scheduler)
+// Check if in ISR context.
+// For on-core controller builds, check the ARM IPSR register to detect real
+// ISR context. The controller's mayfly system uses this (via mayfly_is_running)
+// to decide whether to execute work inline or queue it.
+// For host-only builds, always returns false (no real ISRs).
 static inline bool k_is_in_isr(void) {
+    #if MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER && defined(CONFIG_CPU_CORTEX_M)
+    uint32_t ipsr;
+    __asm__ volatile ("mrs %0, ipsr" : "=r" (ipsr));
+    return (ipsr & 0x1FF) != 0;
+    #else
     return false;
+    #endif
 }
 
 // Check if pre-emptible (always returns false, no preemption in scheduler)

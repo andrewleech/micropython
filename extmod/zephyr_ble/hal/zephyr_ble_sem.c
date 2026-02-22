@@ -237,7 +237,7 @@ void k_sem_init(struct k_sem *sem, unsigned int initial_count, unsigned int limi
 }
 
 int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
-    DEBUG_SEM_printf("k_sem_take(%p, timeout=%u)\n", sem, timeout.ticks);
+    DEBUG_SEM_printf("k_sem_take(%p, timeout=%u, caller=%p)\n", sem, timeout.ticks, __builtin_return_address(0));
 
     // Fast path: semaphore available
     if (sem->count > 0) {
@@ -260,7 +260,7 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
         timeout_ms = ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS;
     }
 
-    DEBUG_SEM_printf("  --> waiting (timeout=%u ms)\n", timeout_ms);
+    DEBUG_SEM_printf("  --> waiting (timeout=%u ms, caller=%p)\n", timeout_ms, __builtin_return_address(0));
 
     // Set wait loop flag to allow work processing
     extern volatile bool mp_bluetooth_zephyr_in_wait_loop;

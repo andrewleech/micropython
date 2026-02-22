@@ -24,6 +24,10 @@
  * THE SOFTWARE.
  */
 
+// stdarg.h must come first: py/mpprint.h guards mp_vprintf behind #ifdef va_start,
+// and it gets included early via the zephyr_ble_config.h -> py/mpconfig.h chain.
+#include <stdarg.h>
+
 #include "zephyr_ble_kernel.h"
 #include "zephyr_ble_port.h"
 #include "py/mphal.h"
@@ -72,8 +76,8 @@ void k_sched_unlock(void) {
 
 // --- Fatal Error Handlers ---
 
+#include <stdarg.h>  // must be before py/mpprint.h for mp_vprintf declaration
 #include "py/runtime.h"
-#include <stdarg.h>
 
 // For debugging, we'll track the panic location
 static const char *panic_file = NULL;
@@ -84,8 +88,7 @@ static unsigned int panic_line = 0;
 void assert_print(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    // Use vprintf since mp_vprintf is not readily available
-    vprintf(fmt, ap);
+    mp_vprintf(&mp_plat_print, fmt, ap);
     va_end(ap);
 }
 
