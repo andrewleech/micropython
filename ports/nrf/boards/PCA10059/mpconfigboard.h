@@ -37,8 +37,12 @@
 
 #define MICROPY_HW_ENABLE_RNG       (1)
 
+#ifndef MICROPY_HW_ENABLE_USBDEV
 #define MICROPY_HW_ENABLE_USBDEV    (1)
+#endif
+#ifndef MICROPY_HW_USB_CDC
 #define MICROPY_HW_USB_CDC          (1)
+#endif
 
 #define MICROPY_HW_HAS_LED          (1)
 #define MICROPY_HW_LED_COUNT        (4)

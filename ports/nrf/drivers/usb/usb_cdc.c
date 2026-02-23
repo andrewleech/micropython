@@ -58,7 +58,13 @@ static void board_init(void) {
 
     // Priorities 0, 1, 4 (nRF52) are reserved for SoftDevice
     // 2 is highest for application
+    #if MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
+    // BLE controller uses priorities 0-2 (RADIO, RTC0/LLL, ULL).
+    // USB must be below all BLE ISRs to avoid delaying controller processing.
+    NRFX_IRQ_PRIORITY_SET(USBD_IRQn, 4);
+    #else
     NRFX_IRQ_PRIORITY_SET(USBD_IRQn, 2);
+    #endif
 
     // USB power may already be ready at this time -> no event generated
     // We need to invoke the handler based on the status initially
