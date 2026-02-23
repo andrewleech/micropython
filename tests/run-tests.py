@@ -44,16 +44,16 @@ RV32_ARCH_FLAGS = {
 # Paths are relative to the tests/ directory (must match test_file format
 # used by run_one_test, which normalises backslashes to forward slashes).
 #
-# Values are (reason, platform) tuples where platform is None (all platforms)
-# or a sys.platform string to restrict retries to that platform only.
+# Values are (reason, platforms) tuples where platforms is None (all platforms)
+# or a tuple of sys.platform strings to restrict retries to those platforms.
 FLAKY_TESTS = {
     "thread/thread_gc1.py": ("GC race condition", None),
     "thread/stress_aes.py": ("timeout under QEMU emulation", None),
     "thread/stress_schedule.py": ("intermittent crash under QEMU", None),
     "thread/stress_recurse.py": ("stack overflow under emulation", None),
-    "thread/stress_heap.py": ("flaky on macOS", "darwin"),
+    "thread/stress_heap.py": ("flaky on macOS", ("darwin",)),
     "cmdline/repl_lock.py": ("REPL timing under QEMU", None),
-    "cmdline/repl_cont.py": ("REPL escaping on macOS", "darwin"),
+    "cmdline/repl_cont.py": ("REPL escaping on macOS", ("darwin",)),
     "extmod/time_time_ns.py": ("CI runner clock precision", None),
 }
 
@@ -1065,8 +1065,8 @@ def run_tests(pyb, tests, args, result_dir, num_threads=1):
             """Check if test_file is a known-flaky test on this platform."""
             if test_file not in FLAKY_TESTS:
                 return False, ""
-            reason, platform = FLAKY_TESTS[test_file]
-            if platform is not None and platform != sys.platform:
+            reason, platforms = FLAKY_TESTS[test_file]
+            if platforms is not None and sys.platform not in platforms:
                 return False, ""
             return True, reason
 
