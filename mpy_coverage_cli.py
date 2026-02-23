@@ -50,22 +50,23 @@ def _extract_json_from_output(output):
 def _generate_wrapper_script(test_script, include, exclude, mode="unix", collect_arcs=False):
     """Generate a temporary wrapper script for coverage collection."""
     abs_test = os.path.abspath(test_script)
+    test_basename = os.path.basename(test_script)
 
     inc_arg = repr(include) if include else "None"
     exc_arg = repr(exclude) if exclude else "None"
     arcs_arg = "True" if collect_arcs else "False"
+    test_script_arg = repr(os.path.splitext(test_basename)[0])
 
     if mode == "unix":
         run_line = f'exec(compile(open("{abs_test}").read(), "{abs_test}", "exec"))'
     else:
         # Hardware: test script is deployed alongside wrapper
-        basename = os.path.basename(test_script)
-        run_line = f'exec(compile(open("{basename}").read(), "{basename}", "exec"))'
+        run_line = f'exec(compile(open("{test_basename}").read(), "{test_basename}", "exec"))'
 
     return (
         "import mpy_coverage\n"
         f"mpy_coverage.start(include={inc_arg}, exclude={exc_arg}, "
-        f"collect_arcs={arcs_arg})\n"
+        f"collect_arcs={arcs_arg}, test_script={test_script_arg})\n"
         f"{run_line}\n"
         "mpy_coverage.stop()\n"
         "mpy_coverage.export_json()\n"
@@ -360,6 +361,101 @@ def cmd_clean(args):
     return 0
 
 
+def _extract_test_name(json_path, data):
+    """Extract test name from JSON metadata, falling back to filename parsing.
+
+    Args:
+        json_path: Path to the JSON file.
+        data: Already-loaded JSON data dict.
+    """
+    meta = data.get("_metadata", {})
+    if "test_script" in meta:
+        return meta["test_script"]
+    # Fallback: strip "YYYYMMDD_HHMMSS_" prefix (16 chars) and ".json" suffix
+    basename = os.path.basename(json_path)
+    if len(basename) > 21 and basename[8] == "_" and basename[15] == "_":
+        return basename[16:].removesuffix(".json")
+    return basename.removesuffix(".json")
+
+
+def _write_aligned_csv(rows, headers, file=None):
+    """Write CSV with space-padding for column alignment."""
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, val in enumerate(row):
+            widths[i] = max(widths[i], len(str(val)))
+
+    def _format_row(values):
+        parts = []
+        for i, val in enumerate(values):
+            parts.append(str(val).ljust(widths[i]))
+        return ", ".join(parts)
+
+    print(_format_row(headers), file=file)
+    for row in rows:
+        print(_format_row(row), file=file)
+
+
+def cmd_test_map(args):
+    """Execute 'test-map' subcommand — show which tests cover each file/line."""
+    data_dir = args.data_dir
+    json_files = sorted(glob.glob(os.path.join(data_dir, "*.json")))
+
+    if not json_files:
+        print(f"No coverage data files found in {data_dir}", file=sys.stderr)
+        return 1
+
+    line_detail = args.line_detail
+
+    # file_map: {app_file: set(test_names)}
+    # line_map: {app_file: {line: set(test_names)}}
+    file_map = {}
+    line_map = {}
+
+    for json_path in json_files:
+        try:
+            with open(json_path) as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"Warning: skipping {json_path}: {e}", file=sys.stderr)
+            continue
+
+        test_name = _extract_test_name(json_path, data)
+
+        for filename, lines in data.get("executed", {}).items():
+            if filename not in file_map:
+                file_map[filename] = set()
+            file_map[filename].add(test_name)
+
+            if line_detail:
+                if filename not in line_map:
+                    line_map[filename] = {}
+                for line in lines:
+                    if line not in line_map[filename]:
+                        line_map[filename][line] = set()
+                    line_map[filename][line].add(test_name)
+
+    if not file_map:
+        print("No coverage entries found in data files", file=sys.stderr)
+        return 1
+
+    if line_detail:
+        rows = []
+        for app_file in sorted(line_map):
+            for line in sorted(line_map[app_file]):
+                for test in sorted(line_map[app_file][line]):
+                    rows.append((app_file, str(line), test))
+        _write_aligned_csv(rows, ["app_file", "line", "test"])
+    else:
+        rows = []
+        for app_file in sorted(file_map):
+            for test in sorted(file_map[app_file]):
+                rows.append((app_file, test))
+        _write_aligned_csv(rows, ["app_file", "test"])
+
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="mpy-coverage",
@@ -438,6 +534,17 @@ def main():
     # --- list ---
     p_list = subparsers.add_parser("list", help="List collected coverage data files")
     p_list.set_defaults(func=cmd_list)
+
+    # --- test-map ---
+    p_testmap = subparsers.add_parser(
+        "test-map", help="Show which tests cover each application file"
+    )
+    p_testmap.add_argument(
+        "--line-detail",
+        action="store_true",
+        help="Show per-line test associations instead of file-level",
+    )
+    p_testmap.set_defaults(func=cmd_test_map)
 
     # --- clean ---
     p_clean = subparsers.add_parser("clean", help="Remove collected coverage data")

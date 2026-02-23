@@ -12,6 +12,7 @@ _exclude = None
 _collect_executable = False
 _collect_arcs = False
 _seen_codes = set()
+_test_script = None
 
 
 def _should_trace(filename):
@@ -81,8 +82,10 @@ def _global_trace(frame, event, arg):
     return None
 
 
-def start(include=None, exclude=None, collect_executable=False, collect_arcs=False):
-    global _include, _exclude, _collect_executable, _collect_arcs
+def start(
+    include=None, exclude=None, collect_executable=False, collect_arcs=False, test_script=None
+):
+    global _include, _exclude, _collect_executable, _collect_arcs, _test_script
     _executed.clear()
     _executable.clear()
     _arcs.clear()
@@ -92,6 +95,7 @@ def start(include=None, exclude=None, collect_executable=False, collect_arcs=Fal
     _exclude = exclude
     _collect_executable = collect_executable
     _collect_arcs = collect_arcs
+    _test_script = test_script
     sys.settrace(_global_trace)
 
 
@@ -101,6 +105,8 @@ def stop():
 
 def get_data():
     data = {"executed": {}}
+    if _test_script is not None:
+        data["_metadata"] = {"test_script": _test_script}
     for filename, lines in _executed.items():
         data["executed"][filename] = sorted(list(lines))
     if _collect_executable:
@@ -128,14 +134,28 @@ def export_json(path=None):
 
 
 class coverage:
-    def __init__(self, include=None, exclude=None, collect_executable=False, collect_arcs=False):
+    def __init__(
+        self,
+        include=None,
+        exclude=None,
+        collect_executable=False,
+        collect_arcs=False,
+        test_script=None,
+    ):
         self.include = include
         self.exclude = exclude
         self.collect_executable = collect_executable
         self.collect_arcs = collect_arcs
+        self.test_script = test_script
 
     def __enter__(self):
-        start(self.include, self.exclude, self.collect_executable, self.collect_arcs)
+        start(
+            self.include,
+            self.exclude,
+            self.collect_executable,
+            self.collect_arcs,
+            self.test_script,
+        )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):

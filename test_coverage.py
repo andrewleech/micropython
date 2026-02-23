@@ -603,6 +603,175 @@ def trial_branch_cli():
         shutil.rmtree(data_dir, ignore_errors=True)
 
 
+def trial_test_map():
+    """Test test-map subcommand: two runs, verify file-level and line-level mapping."""
+    print("=== CLI test-map ===")
+    data_dir = tempfile.mkdtemp(prefix="mpy_cov_testmap_")
+    cli_script = os.path.join(SCRIPT_DIR, "mpy_coverage_cli.py")
+
+    # Create two test scripts that exercise different paths
+    test1 = os.path.join(SCRIPT_DIR, "_cov_test_pass1.py")
+    test2 = os.path.join(SCRIPT_DIR, "_cov_test_pass2.py")
+
+    try:
+        with open(test1, "w") as f:
+            f.write("import test_target\ntest_target.run()\n")
+        with open(test2, "w") as f:
+            f.write("import test_target\ntest_target.with_nested()\ntest_target.branching(-1)\n")
+
+        # Run pass 1
+        r = subprocess.run(
+            [
+                sys.executable,
+                cli_script,
+                "--data-dir",
+                data_dir,
+                "run",
+                test1,
+                "--micropython",
+                MPY_BINARY,
+                "--include",
+                "test_target",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=SCRIPT_DIR,
+        )
+        if r.returncode != 0:
+            print(f"FAIL: pass 1 error: {r.stderr}")
+            return False
+
+        # Run pass 2
+        r = subprocess.run(
+            [
+                sys.executable,
+                cli_script,
+                "--data-dir",
+                data_dir,
+                "run",
+                test2,
+                "--micropython",
+                MPY_BINARY,
+                "--include",
+                "test_target",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=SCRIPT_DIR,
+        )
+        if r.returncode != 0:
+            print(f"FAIL: pass 2 error: {r.stderr}")
+            return False
+
+        # Verify JSON files have _metadata
+        json_files = sorted([f for f in os.listdir(data_dir) if f.endswith(".json")])
+        if len(json_files) != 2:
+            print(f"FAIL: expected 2 data files, got {len(json_files)}")
+            return False
+
+        for jf in json_files:
+            with open(os.path.join(data_dir, jf)) as f:
+                data = json.load(f)
+            if "_metadata" not in data:
+                print(f"FAIL: {jf} missing _metadata")
+                return False
+            if "test_script" not in data["_metadata"]:
+                print(f"FAIL: {jf} _metadata missing test_script")
+                return False
+        print("  _metadata present in both data files")
+
+        # test-map (file-level)
+        r = subprocess.run(
+            [sys.executable, cli_script, "--data-dir", data_dir, "test-map"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=SCRIPT_DIR,
+        )
+        if r.returncode != 0:
+            print(f"FAIL: test-map error: {r.stderr}")
+            return False
+
+        output = r.stdout
+        if "_cov_test_pass1" not in output or "_cov_test_pass2" not in output:
+            print("FAIL: test-map output missing test names")
+            print(f"  output: {output}")
+            return False
+        if "test_target.py" not in output:
+            print("FAIL: test-map output missing test_target.py")
+            print(f"  output: {output}")
+            return False
+        # Verify CSV header
+        lines = output.strip().split("\n")
+        if not lines[0].startswith("app_file"):
+            print(f"FAIL: unexpected header: {lines[0]}")
+            return False
+        print("  file-level test-map OK")
+
+        # test-map --line-detail
+        r = subprocess.run(
+            [
+                sys.executable,
+                cli_script,
+                "--data-dir",
+                data_dir,
+                "test-map",
+                "--line-detail",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=SCRIPT_DIR,
+        )
+        if r.returncode != 0:
+            print(f"FAIL: test-map --line-detail error: {r.stderr}")
+            return False
+
+        output = r.stdout
+        lines = output.strip().split("\n")
+        # Header should have 3 columns
+        header_parts = [p.strip() for p in lines[0].split(",")]
+        if header_parts != ["app_file", "line", "test"]:
+            print(f"FAIL: unexpected line-detail header: {header_parts}")
+            return False
+        # Should have data rows with line numbers
+        if len(lines) < 2:
+            print("FAIL: no data rows in line-detail output")
+            return False
+        # Check a data row has a numeric line column
+        data_parts = [p.strip() for p in lines[1].split(",")]
+        if len(data_parts) != 3:
+            print(f"FAIL: expected 3 columns, got {len(data_parts)}: {data_parts}")
+            return False
+        if not data_parts[1].isdigit():
+            print(f"FAIL: line column not numeric: {data_parts[1]}")
+            return False
+        print("  line-detail test-map OK")
+
+        # Verify alignment: all commas in same column positions
+        comma_positions = None
+        for line in lines:
+            positions = [i for i, c in enumerate(line) if c == ","]
+            if comma_positions is None:
+                comma_positions = positions
+            elif positions != comma_positions:
+                print("FAIL: misaligned columns")
+                print(f"  expected commas at {comma_positions}, got {positions}")
+                print(f"  line: {line!r}")
+                return False
+        print("  column alignment OK")
+
+        print("PASS")
+        return True
+    finally:
+        shutil.rmtree(data_dir, ignore_errors=True)
+        for f in (test1, test2):
+            if os.path.exists(f):
+                os.unlink(f)
+
+
 def main():
     if not os.path.exists(MPY_BINARY):
         print(f"Error: MicroPython coverage binary not found at {MPY_BINARY}")
@@ -620,6 +789,7 @@ def main():
         trial_cli_multipass,
         trial_branch,
         trial_branch_cli,
+        trial_test_map,
     ]
     for trial in trials:
         try:
