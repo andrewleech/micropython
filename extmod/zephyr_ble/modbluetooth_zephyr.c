@@ -48,6 +48,7 @@
 #include "host/att_internal.h"
 #include "extmod/modbluetooth.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_work.h"
+#include "extmod/zephyr_ble/hal/zephyr_ble_settings.h"
 #ifndef __ZEPHYR__
 #include "extmod/zephyr_ble/net_buf_pool_registry.h"
 #endif
@@ -1003,6 +1004,12 @@ int mp_bluetooth_init(void) {
         // Load settings from flash (required for BT_SETTINGS to restore keys).
         // Must be called after bt_enable() and before any BLE operations.
         settings_load();
+        #endif
+
+        #if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING && !defined(__ZEPHYR__)
+        // Load stored bond keys from Python secret callbacks into Zephyr's key_pool.
+        // Native Zephyr port uses settings_load() above instead.
+        mp_bluetooth_zephyr_load_keys();
         #endif
 
         #ifndef __ZEPHYR__
@@ -3418,13 +3425,47 @@ int mp_bluetooth_gap_pair(uint16_t conn_handle) {
 
 int mp_bluetooth_gap_unpair(uint8_t addr_type, const uint8_t *addr) {
     DEBUG_printf("mp_bluetooth_gap_unpair: addr=%p\n", addr);
-    if (addr == NULL) {
-        return bt_unpair(BT_ID_DEFAULT, NULL);
-    }
+
     bt_addr_le_t le_addr;
-    le_addr.type = addr_type;
-    memcpy(le_addr.a.val, addr, 6);
-    return bt_unpair(BT_ID_DEFAULT, &le_addr);
+    if (addr != NULL) {
+        le_addr.type = addr_type;
+        memcpy(le_addr.a.val, addr, 6);
+    }
+
+    #if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING && !defined(__ZEPHYR__)
+    // Delete stored bond keys from Python secret storage.
+    // With CONFIG_BT_SETTINGS=0, Zephyr's bt_keys_clear() skips the IS_ENABLED
+    // delete path, so we handle deletion at the MicroPython API level instead.
+    if (addr == NULL) {
+        // Delete all: always request index 0 since each deletion shifts entries down.
+        // Copy addr to stack local before calling set_secret to avoid GC collecting
+        // the Python bytes object backing the get_secret return value.
+        const uint8_t *value;
+        size_t value_len;
+        bt_addr_le_t del_addr;
+        for (uint8_t i = 0; i < CONFIG_BT_MAX_PAIRED; i++) {
+            if (!mp_bluetooth_gap_on_get_secret(
+                    MP_BLUETOOTH_ZEPHYR_SECRET_KEYS, 0,
+                    NULL, 0, &value, &value_len)) {
+                break;
+            }
+            if (value_len >= sizeof(bt_addr_le_t)) {
+                memcpy(&del_addr, value, sizeof(bt_addr_le_t));
+                mp_bluetooth_gap_on_set_secret(
+                    MP_BLUETOOTH_ZEPHYR_SECRET_KEYS,
+                    (const uint8_t *)&del_addr, sizeof(bt_addr_le_t),
+                    NULL, 0);
+            }
+        }
+    } else {
+        mp_bluetooth_gap_on_set_secret(
+            MP_BLUETOOTH_ZEPHYR_SECRET_KEYS,
+            (const uint8_t *)&le_addr, sizeof(bt_addr_le_t),
+            NULL, 0);
+    }
+    #endif
+
+    return bt_unpair(BT_ID_DEFAULT, addr == NULL ? NULL : &le_addr);
 }
 
 int mp_bluetooth_gap_passkey(uint16_t conn_handle, uint8_t action, mp_int_t passkey) {

@@ -10,6 +10,15 @@ ZEPHYR_BLE_EXTMOD_DIR = $(EXTMOD_DIR)/zephyr_ble
 ZEPHYR_BLE_DEBUG ?= 0
 CFLAGS_EXTMOD += -DZEPHYR_BLE_DEBUG=$(ZEPHYR_BLE_DEBUG)
 
+# Route Zephyr printk to mp_printf (for SMP debug in lib/zephyr sources)
+# Enabled automatically with ZEPHYR_BLE_DEBUG=1, or set independently
+ZEPHYR_BLE_PRINTK_DEBUG ?= $(ZEPHYR_BLE_DEBUG)
+CFLAGS_EXTMOD += -DZEPHYR_BLE_PRINTK_DEBUG=$(ZEPHYR_BLE_PRINTK_DEBUG)
+
+# No-op settings stub for isolation testing (Step 3)
+ZEPHYR_BLE_SETTINGS_NOOP ?= 0
+CFLAGS_EXTMOD += -DZEPHYR_BLE_SETTINGS_NOOP=$(ZEPHYR_BLE_SETTINGS_NOOP)
+
 # Suppress LTO type-mismatch warnings at link time — our stub declarations
 # intentionally differ from Zephyr's internal declarations (monitor.h, ecb.h, etc.)
 LDFLAGS += -Wno-lto-type-mismatch
