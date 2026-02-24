@@ -37,7 +37,11 @@
 
 // Maximum time to poll before returning -EAGAIN. Caps K_FOREVER to prevent
 // infinite hang if HCI transport is broken or during deinit.
-#define ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS 5000
+// Must be short enough that nested k_sem_take calls (from work handlers
+// blocking inside poll→work_process→k_sem_take→hci_uart_wfi→poll recursion)
+// don't exceed the test runner's 10-second timeout. With depth-2 nesting,
+// 1000ms per level = 2 seconds total.
+#define ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS 1000
 
 #if ZEPHYR_BLE_DEBUG
 #define DEBUG_SEM_printf(...) mp_printf(&mp_plat_print, "SEM: " __VA_ARGS__)
@@ -150,17 +154,9 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
 
         // Process work items that might signal this semaphore
         // This is critical during init - bt_enable() submits work that must execute
-        // SKIP if we're already processing HCI events to prevent re-entrancy
-        // (tx_work running from here causes assertion in process_pending_cmd)
         extern void mp_bluetooth_zephyr_work_process(void);
-        extern volatile int mp_bluetooth_zephyr_hci_processing_depth;
-        if (mp_bluetooth_zephyr_hci_processing_depth == 0) {
-            DEBUG_SEM_printf("SEM_POLL: calling work_process\n");
-            mp_bluetooth_zephyr_work_process();
-        } else {
-            DEBUG_SEM_printf("SEM_POLL: skipping work_process (HCI event processing depth=%d)\n",
-                mp_bluetooth_zephyr_hci_processing_depth);
-        }
+        DEBUG_SEM_printf("SEM_POLL: calling work_process\n");
+        mp_bluetooth_zephyr_work_process();
 
         // Check for timeout
         uint32_t elapsed = mp_hal_ticks_ms() - start_ms;
@@ -250,6 +246,16 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
     if (timeout.ticks == 0) {
         DEBUG_SEM_printf("  --> no wait, returning EBUSY\n");
         return -EBUSY;
+    }
+
+    // During BLE deinit, fail K_FOREVER waits immediately. Stale work handlers
+    // (from dead connections) would block on semaphores that will never be signaled.
+    // bt_disable() uses K_SECONDS(10) not K_FOREVER, so its own HCI_RESET wait
+    // is unaffected. Uses deiniting flag (not shutting_down) because poll_uart
+    // must still work during bt_disable for HCI transport.
+    extern volatile bool mp_bluetooth_zephyr_deiniting;
+    if (mp_bluetooth_zephyr_deiniting && timeout.ticks == 0xFFFFFFFF) {
+        return -EAGAIN;
     }
 
     // K_FOREVER: Block indefinitely (capped to prevent infinite hang)

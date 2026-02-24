@@ -159,11 +159,7 @@ void mp_bluetooth_zephyr_poll(void) {
 
     // Process work queues (k_work)
     // This executes pending work handlers including rx_work from HCI events
-    // SKIP if we're already processing HCI events to prevent re-entrancy
-    // (poll can be called from k_sem_take→hci_uart_wfi→run_zephyr_hci_task)
-    if (mp_bluetooth_zephyr_hci_processing_depth == 0) {
-        mp_bluetooth_zephyr_work_process();
-    }
+    mp_bluetooth_zephyr_work_process();
 
     // Note: Rescheduling is handled by port's mp_bluetooth_zephyr_port_poll_in_ms()
 }

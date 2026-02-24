@@ -306,6 +306,17 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
 
 static int mp_bluetooth_zephyr_ble_state;
 
+// Set during BLE deinit Phase 3 to make k_sem_take(K_FOREVER) fail immediately.
+// Prevents stale work handlers from blocking on dead-connection semaphores
+// during the bt_disable → k_sem_take → work_process recursion chain.
+// Does NOT affect poll_uart — HCI transport must remain operational for bt_disable.
+volatile bool mp_bluetooth_zephyr_deiniting = false;
+
+// Set AFTER bt_disable() returns to prevent CYW43 SPI reads on the post-HCI_RESET
+// controller. SPI reads on a reset controller can hang indefinitely, freezing the
+// entire Pico W (including USB). Checked by poll_uart() and run_task().
+volatile bool mp_bluetooth_zephyr_shutting_down = false;
+
 #ifndef __ZEPHYR__
 // BLE initialization completion tracking (-1 = pending, 0 = success, >0 = error code)
 static volatile int mp_bluetooth_zephyr_bt_enable_result = -1;
@@ -1193,8 +1204,23 @@ int mp_bluetooth_deinit(void) {
     mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_SUSPENDED;
     #else
     // === PHASE 3: bt_disable() with polling mode ===
-    // HCI RX task is stopped, so k_sem_take uses polling for HCI reception.
-    // This is reliable for the few HCI commands bt_disable() needs.
+    // Signal deiniting to make k_sem_take(K_FOREVER) fail immediately. This
+    // prevents stale work handlers (from bt_conn_cleanup_all inside bt_disable)
+    // from blocking on dead-connection semaphores during the
+    // bt_disable → k_sem_take → hci_uart_wfi → work_process chain.
+    mp_bluetooth_zephyr_deiniting = true;
+
+    // Block CYW43 SPI reads from non-wait-loop callers (run_task via soft timer).
+    // poll_uart() allows reads when in_wait_loop=true (k_sem_take polling) so
+    // bt_disable's HCI_RESET can complete. After bt_disable returns and the wait
+    // loop exits, all SPI reads are blocked — the controller is in reset state.
+    mp_bluetooth_zephyr_shutting_down = true;
+
+    // Discard stale work items left over from the now-dead BLE connection.
+    // bt_disable() will submit fresh tx_work for the HCI_Reset command.
+    extern void mp_bluetooth_zephyr_work_clear_pending(void);
+    mp_bluetooth_zephyr_work_clear_pending();
+
     DEBUG_printf("mp_bluetooth_deinit: calling bt_disable\n");
     ret = bt_disable();
     DEBUG_printf("mp_bluetooth_deinit: bt_disable returned %d\n", ret);
@@ -1246,9 +1272,7 @@ int mp_bluetooth_deinit(void) {
     #endif // __ZEPHYR__
 
     // Deinit port-specific resources (soft timers, GATT pool, etc.)
-    #if MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_USE_ZEPHYR_HCI || defined(STM32WB) || defined(__ZEPHYR__)
     mp_bluetooth_zephyr_port_deinit();
-    #endif
 
     MP_STATE_PORT(bluetooth_zephyr_root_pointers) = NULL;
     mp_bt_zephyr_next_conn = NULL;
@@ -1262,6 +1286,8 @@ int mp_bluetooth_deinit(void) {
     // append to linked lists without checking for duplicates. Re-registering the
     // same static structures would corrupt Zephyr's internal lists.
 
+    mp_bluetooth_zephyr_deiniting = false;
+    mp_bluetooth_zephyr_shutting_down = false;
     return 0;
 }
 

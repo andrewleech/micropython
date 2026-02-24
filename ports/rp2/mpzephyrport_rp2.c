@@ -598,9 +598,10 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     (void)node;
 
     // Early exit if BLE is not active (recv_cb is set by hci_cyw43_open)
-    // This prevents processing stale Zephyr state after soft reset
-    if (recv_cb == NULL) {
-        // Don't use mp_printf here - it can trigger scheduler recursion
+    // This prevents processing stale Zephyr state after soft reset.
+    // Also skip during deinit to prevent CYW43 SPI reads on a post-reset controller.
+    extern volatile bool mp_bluetooth_zephyr_shutting_down;
+    if (recv_cb == NULL || mp_bluetooth_zephyr_shutting_down) {
         return;
     }
 
@@ -642,6 +643,14 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     if (ret == 0 && len > CYW43_HCI_HEADER_SIZE) {
         // Use process_hci_rx_packet for consistent validation
         process_hci_rx_packet(hci_rx_buffer, len);
+
+        // Process any work items queued by recv_cb() during HCI event delivery.
+        // Without this, disconnect and other events that queue Zephyr work items
+        // inside recv_cb() won't be processed until the next poll cycle. If the
+        // soft timer / sched_node rescheduling races with the current execution,
+        // the next poll may never fire — causing timeout on disconnect events.
+        extern void mp_bluetooth_zephyr_work_process(void);
+        mp_bluetooth_zephyr_work_process();
     }
 
     // Reschedule soft timer for continuous HCI polling (10ms interval)
@@ -900,6 +909,18 @@ void mp_bluetooth_zephyr_port_deinit(void) {
 
 void mp_bluetooth_zephyr_poll_uart(void) {
     poll_uart_count++;
+
+    // Skip CYW43 SPI reads during BLE deinit unless we're inside k_sem_take's
+    // wait loop (where HCI transport must work for bt_disable's HCI_RESET).
+    // After bt_disable sends HCI_RESET, the CYW43 controller enters reset state
+    // and SPI reads can hang indefinitely, freezing the Pico W. The soft timer
+    // fires run_task() (not in wait loop) which would trigger this hang.
+    // k_sem_take calls (in wait loop) are allowed so bt_disable can complete.
+    extern volatile bool mp_bluetooth_zephyr_shutting_down;
+    extern volatile bool mp_bluetooth_zephyr_in_wait_loop;
+    if (mp_bluetooth_zephyr_shutting_down && !mp_bluetooth_zephyr_in_wait_loop) {
+        return;
+    }
 
     // Prevent recursion - but allow re-entry from semaphore wait loops
     // When mp_bluetooth_zephyr_in_wait_loop is true, we're in k_sem_take() polling
