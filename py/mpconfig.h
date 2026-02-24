@@ -880,10 +880,20 @@ typedef uint64_t mp_uint_t;
 #define MICROPY_REPL_EVENT_DRIVEN (0)
 #endif
 
-// Whether to boot into an asyncio-based REPL (aiorepl) instead of the
-// blocking friendly REPL. Requires aiorepl in the frozen manifest.
+// Whether to boot into an asyncio-based REPL (asyncio.arepl) instead of the
+// blocking friendly REPL. Requires asyncio.arepl in the frozen manifest.
 #ifndef MICROPY_REPL_ASYNCIO
+#if MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES
+#define MICROPY_REPL_ASYNCIO (1)
+#else
 #define MICROPY_REPL_ASYNCIO (0)
+#endif
+#endif
+
+// Whether to expose repl_readline_push/pop to Python for async breakpoint().
+// Requires MICROPY_REPL_ASYNCIO. Disabled by default to minimise API surface.
+#ifndef MICROPY_REPL_ASYNCIO_BREAKPOINT
+#define MICROPY_REPL_ASYNCIO_BREAKPOINT (0)
 #endif
 
 // The number of items to keep in the readline history.
