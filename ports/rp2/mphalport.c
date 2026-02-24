@@ -68,6 +68,9 @@ uintptr_t mp_hal_stdio_poll(uintptr_t poll_flags) {
     ret |= mp_usbd_cdc_poll_interfaces(poll_flags);
     #endif
     #if MICROPY_HW_ENABLE_UART_REPL
+    if ((poll_flags & MP_STREAM_POLL_RD) && ringbuf_peek(&stdin_ringbuf) != -1) {
+        ret |= MP_STREAM_POLL_RD;
+    }
     if (poll_flags & MP_STREAM_POLL_WR) {
         ret |= MP_STREAM_POLL_WR;
     }
