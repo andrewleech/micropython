@@ -1855,7 +1855,12 @@ int mp_bluetooth_gatts_notify_indicate(uint16_t conn_handle, uint16_t value_hand
     mp_bt_zephyr_conn_t *connection = mp_bt_zephyr_find_connection(conn_handle);
 
     if (connection) {
-        struct bt_gatt_attr *attr_val = mp_bt_zephyr_find_attr_by_handle(value_handle + 1);
+        // Look up attr by value_handle directly. This works for both:
+        // - Declaration handles (from gatts_register_services): bt_gatt_notify_cb
+        //   detects CHRC UUID and auto-adjusts to value handle internally.
+        // - GATTC-discovered value handles (e.g. perf_gatt_notify.py): used directly.
+        // If not in local GATT DB, falls through to raw ATT fallback below.
+        struct bt_gatt_attr *attr_val = mp_bt_zephyr_find_attr_by_handle(value_handle);
 
         if (attr_val) {
             switch (gatts_op) {
