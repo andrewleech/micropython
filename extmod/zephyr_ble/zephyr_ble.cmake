@@ -112,11 +112,23 @@ if(NOT DEFINED ZEPHYR_BLE_DEBUG)
     set(ZEPHYR_BLE_DEBUG 0)
 endif()
 
+# When debug is enabled, also route Zephyr printk to console
+if(ZEPHYR_BLE_DEBUG EQUAL 1)
+    set(ZEPHYR_BLE_PRINTK_DEBUG 1)
+else()
+    set(ZEPHYR_BLE_PRINTK_DEBUG 0)
+endif()
+if(NOT DEFINED ZEPHYR_BLE_SETTINGS_NOOP)
+    set(ZEPHYR_BLE_SETTINGS_NOOP 0)
+endif()
+
 target_compile_definitions(micropy_extmod_zephyr_ble INTERFACE
     MICROPY_BLUETOOTH_ZEPHYR=1
     MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS=1
     MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING=1
     ZEPHYR_BLE_DEBUG=${ZEPHYR_BLE_DEBUG}
+    ZEPHYR_BLE_PRINTK_DEBUG=${ZEPHYR_BLE_PRINTK_DEBUG}
+    ZEPHYR_BLE_SETTINGS_NOOP=${ZEPHYR_BLE_SETTINGS_NOOP}
 )
 
 # Note: No force-include needed - the stub toolchain/gcc.h includes autoconf.h
