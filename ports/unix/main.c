@@ -188,9 +188,7 @@ static char *strjoin(const char *s1, int sep_char, const char *s2) {
 #endif
 
 static int do_repl(void) {
-    #if MICROPY_REPL_ASYNCIO
-    return pyexec_asyncio_repl();
-    #elif MICROPY_USE_READLINE == 1
+    #if MICROPY_USE_READLINE == 1
 
     // use MicroPython supplied readline-based REPL
 

@@ -607,10 +607,31 @@ raw_repl_reset:
 }
 
 int pyexec_friendly_repl(void) {
+    #if MICROPY_REPL_ASYNCIO
+    mp_hal_stdout_tx_str(MICROPY_BANNER_NAME_AND_VERSION);
+    mp_hal_stdout_tx_str("; " MICROPY_BANNER_MACHINE);
+    mp_hal_stdout_tx_str("\r\n");
+    #if MICROPY_PY_BUILTINS_HELP
+    mp_hal_stdout_tx_str("Type \"help()\" for more information.\r\n");
+    #endif
+    int ret = pyexec_asyncio_repl();
+    // Normal completion (Ctrl-D in arepl) returns 0 from parse_compile_execute.
+    // Map to PYEXEC_FORCED_EXIT so port main loops trigger soft reset.
+    if (ret == 0) {
+        return PYEXEC_FORCED_EXIT;
+    }
+    // asyncio REPL failed (import error etc.) — fall through to blocking REPL.
+    // Banner already printed above, skip reprinting on initial fallback.
+    #endif // MICROPY_REPL_ASYNCIO
+
     vstr_t line;
     vstr_init(&line, 32);
 
     mp_hal_stdio_mode_raw();
+
+    #if MICROPY_REPL_ASYNCIO
+    goto friendly_repl_input;
+    #endif
 
 friendly_repl_reset:
     mp_hal_stdout_tx_str(MICROPY_BANNER_NAME_AND_VERSION);
@@ -638,6 +659,9 @@ friendly_repl_reset:
     }
     */
 
+    #if MICROPY_REPL_ASYNCIO
+friendly_repl_input:
+    #endif
     for (;;) {
     input_restart:
         // If the GC is locked at this point there is no way out except a reset,
