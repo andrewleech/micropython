@@ -36,6 +36,10 @@
 #include "drivers/dht/dht.h"
 #endif
 
+#if MICROPY_HW_USB_HOST
+#include "shared/tinyusb/mp_usbh.h"
+#endif
+
 #if !MICROPY_PY_SYS_EXIT
 #error MICROPY_PY_MACHINE requires MICROPY_PY_SYS_EXIT
 #endif
@@ -236,6 +240,9 @@ static const mp_rom_map_elem_t machine_module_globals_table[] = {
     #endif
     #if MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
     { MP_ROM_QSTR(MP_QSTR_USBDevice), MP_ROM_PTR(&machine_usb_device_type) },
+    #endif
+    #if MICROPY_HW_USB_HOST
+    { MP_ROM_QSTR(MP_QSTR_USBHost), MP_ROM_PTR(&machine_usb_host_type) },
     #endif
     #if MICROPY_PY_MACHINE_WDT
     { MP_ROM_QSTR(MP_QSTR_WDT), MP_ROM_PTR(&machine_wdt_type) },

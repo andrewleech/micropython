@@ -317,3 +317,8 @@ extern void lwip_lock_release(void);
 #ifndef MICROPY_BOARD_END_SOFT_RESET
 #define MICROPY_BOARD_END_SOFT_RESET()
 #endif
+
+// Include USB host configuration if enabled
+#if MICROPY_HW_USB_HOST
+#include "mpconfigport_usbhost.h"
+#endif

@@ -1,0 +1,1 @@
+../NUCLEO_F429ZI/manifest.py

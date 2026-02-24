@@ -135,6 +135,13 @@ set(MICROPY_SOURCE_LIB
     ${MICROPY_DIR}/shared/tinyusb/mp_usbd_runtime.c
 )
 
+# Add USB host support if enabled
+if(MICROPY_HW_USB_HOST)
+    list(APPEND MICROPY_SOURCE_LIB
+        ${MICROPY_DIR}/shared/tinyusb/mp_usbh.c
+    )
+endif()
+
 if(PICO_ARM)
     list(APPEND MICROPY_SOURCE_LIB
         ${MICROPY_DIR}/shared/runtime/gchelper_thumb1.s
@@ -201,6 +208,13 @@ set(MICROPY_SOURCE_QSTR
     ${CMAKE_BINARY_DIR}/pins_${MICROPY_BOARD}.c
 )
 
+# Add USB host source to QSTR processing if enabled
+if(MICROPY_HW_USB_HOST)
+    list(APPEND MICROPY_SOURCE_QSTR
+        ${MICROPY_DIR}/shared/tinyusb/mp_usbh.c
+    )
+endif()
+
 set(PICO_SDK_COMPONENTS
     boot_bootrom_headers
     hardware_adc
@@ -247,6 +261,20 @@ set(PICO_SDK_COMPONENTS
     tinyusb_common
     tinyusb_device
 )
+
+# Add USB host components if enabled
+if(MICROPY_HW_USB_HOST)
+    list(APPEND PICO_SDK_COMPONENTS
+        tinyusb_host
+    )
+    # Add PIO USB support if available (used for dual-mode boards where
+    # native USB stays in device mode and PIO USB provides host mode)
+    if(TARGET tinyusb_pico_pio_usb)
+        list(APPEND PICO_SDK_COMPONENTS
+            tinyusb_pico_pio_usb
+        )
+    endif()
+endif()
 
 if(PICO_ARM)
     list(APPEND PICO_SDK_COMPONENTS
@@ -535,6 +563,12 @@ target_link_options(${MICROPY_TARGET} PRIVATE
     -Wl,--wrap=runtime_init_clocks
 )
 
+if(MICROPY_HW_USB_HOST)
+    target_link_options(${MICROPY_TARGET} PRIVATE
+        -Wl,--wrap=hcd_event_handler
+    )
+endif()
+
 if(DEFINED PICO_FLASH_SIZE_BYTES)
     target_link_options(${MICROPY_TARGET} PRIVATE
         -Wl,--defsym=__micropy_flash_size__=${PICO_FLASH_SIZE_BYTES}
@@ -577,6 +611,18 @@ set_source_files_properties(
     PROPERTIES
     COMPILE_OPTIONS "-Wno-error=array-bounds;-Wno-error=unused-but-set-variable"
 )
+
+# Suppress warnings in PIO USB sources (third-party code)
+if(TARGET tinyusb_pico_pio_usb)
+    set_source_files_properties(
+        ${PICO_TINYUSB_PATH}/hw/mcu/raspberry_pi/Pico-PIO-USB/src/pio_usb.c
+        ${PICO_TINYUSB_PATH}/hw/mcu/raspberry_pi/Pico-PIO-USB/src/pio_usb_host.c
+        ${PICO_TINYUSB_PATH}/hw/mcu/raspberry_pi/Pico-PIO-USB/src/pio_usb_device.c
+        ${PICO_TINYUSB_PATH}/src/portable/raspberrypi/pio_usb/hcd_pio_usb.c
+        PROPERTIES
+        COMPILE_OPTIONS "-Wno-error=conversion;-Wno-error=cast-qual;-Wno-error=attributes"
+    )
+endif()
 
 target_compile_definitions(${MICROPY_TARGET} PRIVATE
     ${MICROPY_DEF_BOARD}

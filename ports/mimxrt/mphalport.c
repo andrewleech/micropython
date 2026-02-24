@@ -30,7 +30,9 @@
 #include "py/mphal.h"
 #include "shared/timeutils/timeutils.h"
 #include "shared/runtime/interrupt_char.h"
+#if MICROPY_HW_USB_CDC
 #include "shared/tinyusb/mp_usbd_cdc.h"
+#endif
 #include "extmod/misc.h"
 #include "ticks.h"
 #include "tusb.h"

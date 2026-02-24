@@ -88,6 +88,12 @@
 #include "usb.h"
 #endif
 
+#if MICROPY_HW_USB_HOST && !MICROPY_HW_TINYUSB_STACK
+// USB Host mode needs TinyUSB for host functionality
+#include "tusb.h"
+#endif
+
+// PCD handles for HAL USB stack (both Device and Host modes use these on STM32)
 #if defined(MICROPY_HW_USB_FS)
 extern PCD_HandleTypeDef pcd_fs_handle;
 #endif
@@ -361,8 +367,8 @@ void USB_LP_IRQHandler(void) {
 #if MICROPY_HW_USB_FS
 void OTG_FS_IRQHandler(void) {
     IRQ_ENTER(OTG_FS_IRQn);
-    #if MICROPY_HW_TINYUSB_STACK
-    tud_int_handler(0);
+    #if MICROPY_HW_TINYUSB_STACK || MICROPY_HW_USB_HOST
+    tusb_int_handler(0, true);
     #else
     HAL_PCD_IRQHandler(&pcd_fs_handle);
     #endif
@@ -373,8 +379,8 @@ void OTG_FS_IRQHandler(void) {
 #if defined(STM32N6)
 void USB1_OTG_HS_IRQHandler(void) {
     IRQ_ENTER(USB1_OTG_HS_IRQn);
-    #if MICROPY_HW_TINYUSB_STACK
-    tud_int_handler(0);
+    #if MICROPY_HW_TINYUSB_STACK || MICROPY_HW_USB_HOST
+    tusb_int_handler(0, true);
     #else
     HAL_PCD_IRQHandler(&pcd_hs_handle);
     #endif
@@ -383,8 +389,8 @@ void USB1_OTG_HS_IRQHandler(void) {
 #else
 void OTG_HS_IRQHandler(void) {
     IRQ_ENTER(OTG_HS_IRQn);
-    #if MICROPY_HW_TINYUSB_STACK
-    tud_int_handler(0);
+    #if MICROPY_HW_TINYUSB_STACK || MICROPY_HW_USB_HOST
+    tusb_int_handler(0, true);
     #else
     HAL_PCD_IRQHandler(&pcd_hs_handle);
     #endif
@@ -393,7 +399,8 @@ void OTG_HS_IRQHandler(void) {
 #endif
 #endif
 
-#if (MICROPY_HW_USB_FS || MICROPY_HW_USB_HS) && !defined(STM32N6)
+// USB wakeup handler only for Device mode (uses PCD handle)
+#if (MICROPY_HW_USB_FS || MICROPY_HW_USB_HS) && !defined(STM32N6) && MICROPY_HW_ENABLE_USBDEV
 /**
   * @brief  This function handles USB OTG Common FS/HS Wakeup functions.
   * @param  *pcd_handle for FS or HS
@@ -457,7 +464,8 @@ static void OTG_CMD_WKUP_Handler(PCD_HandleTypeDef *pcd_handle) {
 }
 #endif
 
-#if MICROPY_HW_USB_FS
+// USB FS Wakeup IRQ - only for Device mode (needs pcd_fs_handle)
+#if MICROPY_HW_USB_FS && MICROPY_HW_ENABLE_USBDEV
 /**
   * @brief  This function handles USB OTG FS Wakeup IRQ Handler.
   * @param  None
@@ -479,7 +487,8 @@ void OTG_FS_WKUP_IRQHandler(void) {
 }
 #endif
 
-#if MICROPY_HW_USB_HS && !defined(STM32N6)
+// USB HS Wakeup IRQ - only for Device mode (needs pcd_hs_handle)
+#if MICROPY_HW_USB_HS && !defined(STM32N6) && MICROPY_HW_ENABLE_USBDEV
 /**
   * @brief  This function handles USB OTG HS Wakeup IRQ Handler.
   * @param  None
