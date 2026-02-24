@@ -913,6 +913,26 @@ int mp_bluetooth_init(void) {
         // bt_enable() tries to allocate buffers from corrupted pools.
         mp_net_buf_pool_state_reset();
 
+        // Clear any stale bond keys from previous session. If bt_disable()
+        // failed (e.g. CYW43 SPI hang), bt_keys_reset() in bt_disable was
+        // never reached and stale keys persist. These cause the host to attempt
+        // re-encryption with dead keys on the next connection, breaking Z2Z.
+        #if defined(CONFIG_BT_SMP)
+        extern void bt_keys_reset(void);
+        bt_keys_reset();
+        #endif
+
+        // Clear stale GATT client subscriptions from previous session. After
+        // soft reset, bt_gatt_subscribe_params on the GC heap are freed but
+        // Zephyr's static subscriptions[] array still references them. On the
+        // next disconnect, remove_subscriptions() calls params->notify()
+        // through the stale pointer → HardFault. This is a raw memset that
+        // doesn't call any callbacks (unlike bt_gatt_clear_subscriptions).
+        #if defined(CONFIG_BT_GATT_CLIENT)
+        extern void bt_gatt_reset_subscriptions(void);
+        bt_gatt_reset_subscriptions();
+        #endif
+
         // Enter init phase - work will be processed synchronously in this loop
         extern void mp_bluetooth_zephyr_init_phase_enter(void);
         mp_bluetooth_zephyr_init_phase_enter();
@@ -1242,6 +1262,12 @@ int mp_bluetooth_deinit(void) {
         DEBUG_printf("mp_bluetooth_deinit: resetting cyw43_state.bt_loaded\n");
         cyw43_state.bt_loaded = false;
         #endif
+
+        // Clear stale bond keys left behind when bt_disable() failed before
+        // reaching bt_keys_reset(). Without this, the next bt_enable() starts
+        // with stale keys which can cause spurious re-encryption attempts.
+        extern void bt_keys_reset(void);
+        bt_keys_reset();
 
         // Re-initialize the command credit semaphore so bt_enable can start fresh.
         // After a timeout, ncmd_sem may be depleted (0 credits) preventing new commands.
@@ -2629,6 +2655,11 @@ static bool gattc_register_auto_subscription_type(struct bt_conn *conn, uint16_t
     // Set to value_handle + 1 which is typically where CCCD is
     params->ccc_handle = value_handle + 1;
     params->value = sub_value;
+    // Mark as volatile so Zephyr removes it on disconnect rather than preserving
+    // it for bonded peers. We re-register during characteristic discovery on each
+    // connection, so persistence isn't needed. Without VOLATILE, bonded peer
+    // subscriptions survive disconnect and point to freed GC heap after soft reset.
+    atomic_set_bit(params->flags, BT_GATT_SUBSCRIBE_FLAG_VOLATILE);
 
     // Register with Zephyr - this adds to internal subscription list without CCCD write
     int err = bt_gatt_resubscribe(info->id, info->le.dst, params);
