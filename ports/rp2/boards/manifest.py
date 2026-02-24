@@ -1,5 +1,5 @@
 freeze("$(PORT_DIR)/modules")
-include("$(MPY_DIR)/extmod/asyncio")
+include("$(MPY_DIR)/extmod/asyncio", repl_asyncio=True)
 require("onewire")
 require("ds18x20")
 require("dht")

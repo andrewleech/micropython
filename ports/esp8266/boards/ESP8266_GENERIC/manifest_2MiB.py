@@ -2,7 +2,7 @@
 include("$(PORT_DIR)/boards/manifest.py")
 
 # asyncio
-include("$(MPY_DIR)/extmod/asyncio")
+include("$(MPY_DIR)/extmod/asyncio", repl_asyncio=True)
 
 # drivers
 require("ssd1306")
