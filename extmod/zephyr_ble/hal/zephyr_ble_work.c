@@ -415,9 +415,13 @@ static volatile bool init_work_processor_running = false;
 // Set by k_sem_take() during its wait loop (exported in zephyr_ble_work.h)
 volatile bool mp_bluetooth_zephyr_in_wait_loop = false;
 
-// HCI event processing depth: Prevents work_process from k_sem_take() during post-recv_cb work
-// Incremented by run_zephyr_hci_task() during post-batch work processing (exported in zephyr_ble_work.h)
+// HCI event processing depth: Used by STM32 port to prevent re-entrancy.
 volatile int mp_bluetooth_zephyr_hci_processing_depth = 0;
+
+// Recursion depth counter: bounds the blocking time from stale post-disconnect
+// work handlers that call k_sem_take(K_FOREVER) inside work_process recursion.
+// Without this, each nesting level adds ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS delay.
+static int work_process_depth = 0;
 
 // Debug counters for work processing investigation
 static int work_process_call_count = 0;
@@ -449,6 +453,16 @@ void mp_bluetooth_zephyr_work_process(void) {
         return;
     }
 
+    // Limit recursion depth to bound blocking from stale post-disconnect work.
+    // Depth 0→1: Normal poll → work_process.
+    // Depth 1→2: k_sem_take → hci_uart_wfi → poll → work_process (needed for HCI responses).
+    // Depth 2+: Stale handler → k_sem_take → ... → work_process — blocked to prevent
+    //   cascading timeouts where each level adds ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS.
+    if (work_process_depth >= 2) {
+        return;
+    }
+
+    work_process_depth++;
     regular_work_processor_running = true;
 
     // Process all work queues EXCEPT k_init_work_q (similar to NimBLE's eventq_run_all)
@@ -458,6 +472,7 @@ void mp_bluetooth_zephyr_work_process(void) {
             continue;
         }
 
+        int iter_count = 0;
         while (q->head != NULL) {
             // Dequeue work item
             struct k_work *work = q->head;
@@ -479,10 +494,16 @@ void mp_bluetooth_zephyr_work_process(void) {
                 if (is_sys_wq) {
                     in_sys_work_q_context = true;
                 }
+
                 work->handler(work);
                 if (is_sys_wq) {
                     in_sys_work_q_context = false;
                 }
+            }
+
+            iter_count++;
+            if (iter_count > 100) {
+                break;
             }
 
             // Note: We intentionally do NOT break if work was re-enqueued.
@@ -495,6 +516,7 @@ void mp_bluetooth_zephyr_work_process(void) {
     }
 
     regular_work_processor_running = false;
+    work_process_depth--;
 }
 
 // Called by mp_bluetooth_init() wait loop to process initialization work synchronously
@@ -796,6 +818,26 @@ void mp_bluetooth_zephyr_work_thread_stop(void) {
 
 #endif // MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
 
+// Discard all pending work items without executing their handlers.
+// Called before bt_disable() to clear stale post-disconnect work items that
+// would otherwise block in k_sem_take() during the bt_disable→k_sem_take→
+// hci_uart_wfi→poll→work_process recursion chain.
+void mp_bluetooth_zephyr_work_clear_pending(void) {
+    MICROPY_PY_BLUETOOTH_ENTER
+
+    for (struct k_work_q *q = global_work_q; q != NULL; q = q->nextq) {
+        while (q->head != NULL) {
+            struct k_work *work = q->head;
+            q->head = work->next;
+            work->next = NULL;
+            work->prev = NULL;
+            work->pending = false;
+        }
+    }
+
+    MICROPY_PY_BLUETOOTH_EXIT
+}
+
 // Drain any pending work items before shutdown
 // Called from mp_bluetooth_deinit() before stopping work thread
 // This ensures connection events and other pending work is processed before cleanup
@@ -864,11 +906,12 @@ void mp_bluetooth_zephyr_work_reset(void) {
     in_bt_enable_init = false;
     in_sys_work_q_context = false;
 
-    // Reset HCI event processing depth
-    mp_bluetooth_zephyr_hci_processing_depth = 0;
-
     // Reset wait loop flag (could be stuck if test aborted during k_sem_take)
     mp_bluetooth_zephyr_in_wait_loop = false;
+    mp_bluetooth_zephyr_hci_processing_depth = 0;
+
+    // Reset recursion depth counter
+    work_process_depth = 0;
 
     // Reset debug counters
     work_process_call_count = 0;
