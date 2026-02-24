@@ -607,6 +607,22 @@ raw_repl_reset:
 }
 
 int pyexec_friendly_repl(void) {
+    #if MICROPY_REPL_ASYNCIO
+    mp_hal_stdout_tx_str(MICROPY_BANNER_NAME_AND_VERSION);
+    mp_hal_stdout_tx_str("; " MICROPY_BANNER_MACHINE);
+    mp_hal_stdout_tx_str("\r\n");
+    #if MICROPY_PY_BUILTINS_HELP
+    mp_hal_stdout_tx_str("Type \"help()\" for more information.\r\n");
+    #endif
+    int ret = pyexec_asyncio_repl();
+    // Normal completion (Ctrl-D in arepl) returns 0 from parse_compile_execute.
+    // Map to PYEXEC_FORCED_EXIT so port main loops trigger soft reset.
+    if (ret == 0) {
+        ret = PYEXEC_FORCED_EXIT;
+    }
+    return ret;
+    #else // !MICROPY_REPL_ASYNCIO
+
     vstr_t line;
     vstr_init(&line, 32);
 
@@ -720,6 +736,8 @@ friendly_repl_reset:
         }
         mp_hal_stdio_mode_raw();
     }
+
+    #endif // !MICROPY_REPL_ASYNCIO
 }
 
 #endif // MICROPY_REPL_EVENT_DRIVEN
