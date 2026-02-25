@@ -188,6 +188,7 @@ typedef struct _mp_bt_zephyr_conn_t {
 typedef struct _mp_bluetooth_zephyr_l2cap_channel_t {
     struct bt_l2cap_le_chan le_chan;   // Zephyr L2CAP LE channel (embedded)
     uint16_t mtu;                      // Our configured MTU
+    bool disconnected;                 // True after L2CAP disconnect callback fired
     uint8_t *rx_buf;                   // RX accumulation buffer
     size_t rx_len;                     // Current data length in rx_buf
 } mp_bluetooth_zephyr_l2cap_channel_t;
@@ -1067,7 +1068,7 @@ int mp_bluetooth_init(void) {
     return 0;
 }
 
-#ifdef __ZEPHYR__
+#if defined(__ZEPHYR__) || MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
 // Callback for bt_conn_foreach to disconnect and count LE connections.
 static void mp_bt_zephyr_disconnect_count_cb(struct bt_conn *conn, void *data) {
     int *count = (int *)data;
@@ -1124,9 +1125,9 @@ int mp_bluetooth_deinit(void) {
         return 0;
     }
 
-    #ifdef __ZEPHYR__
-    // On native Zephyr, SUSPENDED means the Zephyr BT stack is still active but
-    // MicroPython state from a previous session may be stale (GC heap reinitialized).
+    #if defined(__ZEPHYR__) || MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
+    // SUSPENDED means the Zephyr BT stack is still active but MicroPython state
+    // from a previous session may be stale (GC heap reinitialized).
     // Only stop active BLE operations on the Zephyr stack; skip MicroPython heap
     // cleanup (services, L2CAP channels) since those pointers may be invalid.
     if (mp_bluetooth_zephyr_ble_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_SUSPENDED) {
@@ -1140,6 +1141,11 @@ int mp_bluetooth_deinit(void) {
         mp_bt_zephyr_disconnect_all_wait();
         return 0;
     }
+    #endif
+
+    #if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
+    // Deferred L2CAP channel free — set in Phase 2, freed after bt_disable().
+    mp_bluetooth_zephyr_l2cap_channel_t *l2cap_chan_to_free = NULL;
     #endif
 
     // === PHASE 1: Stop HCI RX task FIRST ===
@@ -1174,34 +1180,28 @@ int mp_bluetooth_deinit(void) {
     }
     #endif
 
-    #ifdef __ZEPHYR__
-    // On native Zephyr (no bt_disable), explicitly disconnect all connections
+    #if defined(__ZEPHYR__) || MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
+    // On-core controller (no bt_disable): explicitly disconnect all connections
     // and wait for the connection pool slots to be freed.
     mp_bt_zephyr_disconnect_all_wait();
     #endif
 
     #if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
-    // Disconnect active L2CAP channels and clean up.
-    // Clear root pointer FIRST to prevent callbacks from double-freeing.
+    // Disconnect active L2CAP channel but do NOT free the struct yet.
+    // The channel struct embeds bt_l2cap_le_chan which Zephyr's bt_disable() →
+    // bt_conn_cleanup_all() → bt_l2cap_disconnected() still needs to access.
+    // Memory is freed after bt_disable() completes (see "L2CAP channel memory
+    // free" below).
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
     if (rp && rp->l2cap_chan) {
         DEBUG_printf("mp_bluetooth_deinit: disconnecting L2CAP channel\n");
-        mp_bluetooth_zephyr_l2cap_channel_t *chan = rp->l2cap_chan;
-        rp->l2cap_chan = NULL;  // Prevent callback from double-freeing
-        if (chan->le_chan.chan.conn) {
-            bt_l2cap_chan_disconnect(&chan->le_chan.chan);
+        l2cap_chan_to_free = rp->l2cap_chan;
+        rp->l2cap_chan = NULL;  // Prevent callbacks from accessing stale pointer
+        if (!l2cap_chan_to_free->disconnected && l2cap_chan_to_free->le_chan.chan.conn) {
+            bt_l2cap_chan_disconnect(&l2cap_chan_to_free->le_chan.chan);
         }
-        // Cleanup inline (l2cap_destroy_channel checks rp->l2cap_chan which is now NULL)
-        if (chan->rx_buf) {
-            m_del(uint8_t, chan->rx_buf, L2CAP_RX_BUF_SIZE);
-        }
-        m_del(mp_bluetooth_zephyr_l2cap_channel_t, chan, 1);
     }
     if (rp) {
-        // Note: Zephyr has no bt_l2cap_server_unregister() for LE L2CAP.
-        // The static server structure persists across soft resets and we
-        // track registration with mp_bluetooth_zephyr_l2cap_server_registered.
-        // Just clear the session-level listening flag.
         rp->l2cap_listening = false;
     }
     #endif
@@ -1218,9 +1218,11 @@ int mp_bluetooth_deinit(void) {
     MP_STATE_PORT(bluetooth_zephyr_root_pointers)->n_services = 0;
     #endif
 
-    #ifdef __ZEPHYR__
-    // Native Zephyr: bt_disable not reliably available across Zephyr versions.
-    // Set SUSPENDED so next init reuses the already-enabled stack.
+    #if defined(__ZEPHYR__) || MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
+    // On-core controller (native Zephyr or nRF port with Zephyr controller):
+    // bt_disable() → hci_driver_close() → ll_deinit() asserts if the link layer
+    // has residual state (e.g. after scanning). Use SUSPENDED mode instead —
+    // the Zephyr BT stack stays initialized and is reused on next bt_enable().
     mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_SUSPENDED;
     #else
     // === PHASE 3: bt_disable() with polling mode ===
@@ -1296,6 +1298,18 @@ int mp_bluetooth_deinit(void) {
     // (including controller init and callback registration)
     mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF;
     #endif // __ZEPHYR__
+
+    #if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
+    // L2CAP channel memory free — deferred from Phase 2.
+    // bt_disable() / disconnect_all_wait() have now completed, so Zephyr no
+    // longer references the channel struct via conn->channels.
+    if (l2cap_chan_to_free) {
+        if (l2cap_chan_to_free->rx_buf) {
+            m_del(uint8_t, l2cap_chan_to_free->rx_buf, L2CAP_RX_BUF_SIZE);
+        }
+        m_del(mp_bluetooth_zephyr_l2cap_channel_t, l2cap_chan_to_free, 1);
+    }
+    #endif
 
     // Deinit port-specific resources (soft timers, GATT pool, etc.)
     mp_bluetooth_zephyr_port_deinit();
@@ -3714,9 +3728,15 @@ static int l2cap_create_channel(uint16_t mtu, mp_bluetooth_zephyr_l2cap_channel_
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
 
     if (rp->l2cap_chan != NULL) {
-        // Only one L2CAP channel allowed at a time (matches NimBLE)
-        DEBUG_printf("l2cap_create_channel: channel already in use\n");
-        return MP_EALREADY;
+        if (rp->l2cap_chan->disconnected) {
+            // Previous channel finished but wasn't freed (deferred free pattern).
+            // Safe to free now — Zephyr's GAP disconnect has already completed.
+            l2cap_destroy_channel();
+        } else {
+            // Only one L2CAP channel allowed at a time (matches NimBLE)
+            DEBUG_printf("l2cap_create_channel: channel already in use\n");
+            return MP_EALREADY;
+        }
     }
 
     // Allocate channel structure
@@ -3801,11 +3821,26 @@ static void l2cap_connected_cb(struct bt_l2cap_chan *chan) {
 static void l2cap_disconnected_cb(struct bt_l2cap_chan *chan) {
     DEBUG_printf("l2cap_disconnected_cb\n");
 
+    // This callback is called twice:
+    // 1. From L2CAP-level disconnect (Disconnect Response processing)
+    // 2. From GAP-level disconnect (bt_l2cap_disconnected → l2cap_chan_del)
+    // Only notify Python on the first call.
+    mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+    mp_bluetooth_zephyr_l2cap_channel_t *l2cap_chan = rp ? rp->l2cap_chan : NULL;
+    if (l2cap_chan && l2cap_chan->disconnected) {
+        DEBUG_printf("l2cap_disconnected_cb: already disconnected, skipping\n");
+        return;
+    }
+
     struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
     uint16_t conn_handle = l2cap_chan_get_conn_handle(chan);
 
     DEBUG_printf("l2cap_disconnected_cb: conn=%d cid=%d active=%d\n",
                  conn_handle, le_chan->rx.cid, mp_bluetooth_is_active());
+
+    if (l2cap_chan) {
+        l2cap_chan->disconnected = true;
+    }
 
     // Only notify Python if BLE is still active (not during deinit)
     if (mp_bluetooth_is_active()) {
@@ -3815,9 +3850,12 @@ static void l2cap_disconnected_cb(struct bt_l2cap_chan *chan) {
                                           0); // status=0 for normal disconnect
     }
 
-    // Always clean up channel resources, even during deinit.
-    // This ensures Zephyr's internal state is properly cleaned up.
-    l2cap_destroy_channel();
+    // Do NOT call l2cap_destroy_channel() here. The channel struct embeds
+    // bt_l2cap_le_chan which Zephyr still references via conn->channels.
+    // If we free it now, the GAP disconnect cleanup (bt_l2cap_disconnected →
+    // l2cap_chan_del) will access freed memory, causing a hang or crash.
+    // The channel is cleaned up in mp_bluetooth_deinit() Phase 2 or when
+    // a new channel is created.
 }
 
 static int l2cap_recv_cb(struct bt_l2cap_chan *chan, struct net_buf *buf) {
@@ -3863,7 +3901,6 @@ static int l2cap_recv_cb(struct bt_l2cap_chan *chan, struct net_buf *buf) {
 // accumulates harmlessly in Python's waiting_events if nobody is waiting.
 static void l2cap_sent_cb(struct bt_l2cap_chan *chan) {
     DEBUG_printf("l2cap_sent_cb\n");
-
     if (!mp_bluetooth_is_active()) {
         return;
     }
