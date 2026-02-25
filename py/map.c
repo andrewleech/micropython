@@ -61,6 +61,53 @@
 #define MAP_CACHE_SET(index, pos)
 #endif
 
+// Macros and functions to deal with key/value table and hash table.
+// map->table points to the key/value table, then the hash table follows,
+// which can be uint8_t, uint16_t, or uint32_t depending on allocation size.
+#define MP_MAP_IS_UINT8(alloc) ((alloc) < 255)
+#define MP_MAP_IS_UINT16(alloc) ((alloc) < 65535)
+#if MICROPY_PY_MAP_LARGE
+#define MP_MAP_INDEX_SIZE(alloc) (MP_MAP_IS_UINT8(alloc) ? 1 : (MP_MAP_IS_UINT16(alloc) ? 2 : 4))
+#else
+#define MP_MAP_INDEX_SIZE(alloc) (MP_MAP_IS_UINT8(alloc) ? 1 : 2)
+#endif
+#define MP_MAP_TABLE_BYTE_SIZE(alloc) ((sizeof(mp_map_elem_t) + MP_MAP_INDEX_SIZE(alloc)) * (alloc))
+#define MP_MAP_GET_HASH_TABLE(map) ((void *)&(map)->table[(map)->alloc])
+
+static inline size_t mp_map_hash_table_get(const mp_map_t *map, void *hash_table, size_t pos) {
+    if (MP_MAP_IS_UINT8(map->alloc)) {
+        return ((uint8_t *)hash_table)[pos];
+    }
+    #if MICROPY_PY_MAP_LARGE
+    else if (MP_MAP_IS_UINT16(map->alloc)) {
+        return ((uint16_t *)hash_table)[pos];
+    } else {
+        return ((uint32_t *)hash_table)[pos];
+    }
+    #else
+    else {
+        return ((uint16_t *)hash_table)[pos];
+    }
+    #endif
+}
+
+static inline void mp_map_hash_table_put(const mp_map_t *map, void *hash_table, size_t pos, size_t value) {
+    if (MP_MAP_IS_UINT8(map->alloc)) {
+        ((uint8_t *)hash_table)[pos] = value;
+    }
+    #if MICROPY_PY_MAP_LARGE
+    else if (MP_MAP_IS_UINT16(map->alloc)) {
+        ((uint16_t *)hash_table)[pos] = value;
+    } else {
+        ((uint32_t *)hash_table)[pos] = value;
+    }
+    #else
+    else {
+        ((uint16_t *)hash_table)[pos] = value;
+    }
+    #endif
+}
+
 // This table of sizes is used to control the growth of hash tables.
 // The first set of sizes are chosen so the allocation fits exactly in a
 // 4-word GC block, and it's not so important for these small values to be
@@ -92,9 +139,10 @@ void mp_map_init(mp_map_t *map, size_t n) {
         map->table = NULL;
     } else {
         map->alloc = n;
-        map->table = m_new0(mp_map_elem_t, map->alloc);
+        map->table = m_malloc0(MP_MAP_TABLE_BYTE_SIZE(map->alloc));
     }
     map->used = 0;
+    map->filled = 0;
     map->all_keys_are_qstrs = 1;
     map->is_fixed = 0;
     map->is_ordered = 0;
@@ -103,10 +151,23 @@ void mp_map_init(mp_map_t *map, size_t n) {
 void mp_map_init_fixed_table(mp_map_t *map, size_t n, const mp_obj_t *table) {
     map->alloc = n;
     map->used = n;
+    map->filled = n;
     map->all_keys_are_qstrs = 1;
     map->is_fixed = 1;
     map->is_ordered = 1;
     map->table = (mp_map_elem_t *)table;
+}
+
+void mp_map_init_copy(mp_map_t *map, const mp_map_t *src) {
+    map->alloc = src->alloc;
+    map->used = src->used;
+    map->filled = src->filled;
+    map->all_keys_are_qstrs = src->all_keys_are_qstrs;
+    map->is_fixed = 0;
+    map->is_ordered = src->is_ordered;
+    size_t n = MP_MAP_TABLE_BYTE_SIZE(map->alloc);
+    map->table = m_malloc0(n);
+    memcpy(map->table, src->table, n);
 }
 
 // Differentiate from mp_map_clear() - semantics is different
@@ -114,7 +175,7 @@ void mp_map_deinit(mp_map_t *map) {
     if (!map->is_fixed) {
         m_del(mp_map_elem_t, map->table, map->alloc);
     }
-    map->used = map->alloc = 0;
+    map->used = map->alloc = map->filled = 0;
 }
 
 void mp_map_clear(mp_map_t *map) {
@@ -123,20 +184,46 @@ void mp_map_clear(mp_map_t *map) {
     }
     map->alloc = 0;
     map->used = 0;
+    map->filled = 0;
     map->all_keys_are_qstrs = 1;
     map->is_fixed = 0;
     map->table = NULL;
 }
 
+// Rehash map to a larger size (used when table is full during insert).
 static void mp_map_rehash(mp_map_t *map) {
     size_t old_alloc = map->alloc;
     size_t new_alloc = get_hash_alloc_greater_or_equal_to(map->alloc + 1);
     DEBUG_printf("mp_map_rehash(%p): " UINT_FMT " -> " UINT_FMT "\n", map, old_alloc, new_alloc);
     mp_map_elem_t *old_table = map->table;
-    mp_map_elem_t *new_table = m_new0(mp_map_elem_t, new_alloc);
+    mp_map_elem_t *new_table = m_malloc0(MP_MAP_TABLE_BYTE_SIZE(new_alloc));
     // If we reach this point, table resizing succeeded, now we can edit the old map.
     map->alloc = new_alloc;
     map->used = 0;
+    map->filled = 0;
+    map->all_keys_are_qstrs = 1;
+    map->table = new_table;
+    for (size_t i = 0; i < old_alloc; i++) {
+        if (old_table[i].key != MP_OBJ_NULL && old_table[i].key != MP_OBJ_SENTINEL) {
+            mp_map_lookup(map, old_table[i].key, MP_MAP_LOOKUP_ADD_IF_NOT_FOUND)->value = old_table[i].value;
+        }
+    }
+    m_del(mp_map_elem_t, old_table, old_alloc);
+}
+
+// Compact map by removing tombstones, potentially shrinking allocation.
+// Size is based on filled count, not current allocation.
+void mp_map_compact(mp_map_t *map) {
+    size_t old_alloc = map->alloc;
+    // Size based on filled entries, not current alloc - allows shrinking
+    size_t new_alloc = get_hash_alloc_greater_or_equal_to(map->filled + 1);
+    DEBUG_printf("mp_map_compact(%p): " UINT_FMT " -> " UINT_FMT "\n", map, old_alloc, new_alloc);
+    mp_map_elem_t *old_table = map->table;
+    mp_map_elem_t *new_table = m_malloc0(MP_MAP_TABLE_BYTE_SIZE(new_alloc));
+    // If we reach this point, table resizing succeeded, now we can edit the old map.
+    map->alloc = new_alloc;
+    map->used = 0;
+    map->filled = 0;
     map->all_keys_are_qstrs = 1;
     map->table = new_table;
     for (size_t i = 0; i < old_alloc; i++) {
@@ -197,6 +284,7 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
                     // remove the found element by moving the rest of the array down
                     mp_obj_t value = elem->value;
                     --map->used;
+                    --map->filled;
                     memmove(elem, elem + 1, (top - elem - 1) * sizeof(*elem));
                     // put the found element after the end so the caller can access it if needed
                     // note: caller must NULL the value so the GC can clean up (e.g. see dict_get_helper).
@@ -220,6 +308,7 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
             mp_seq_clear(map->table, map->used, map->alloc, sizeof(*map->table));
         }
         mp_map_elem_t *elem = map->table + map->used++;
+        ++map->filled;
         elem->key = index;
         elem->value = MP_OBJ_NULL;
         if (!mp_obj_is_qstr(index)) {
@@ -249,18 +338,22 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
         hash = MP_OBJ_SMALL_INT_VALUE(mp_unary_op(MP_UNARY_OP_HASH, index));
     }
 
+    void *hash_table = MP_MAP_GET_HASH_TABLE(map);
     size_t pos = hash % map->alloc;
     size_t start_pos = pos;
-    mp_map_elem_t *avail_slot = NULL;
     for (;;) {
-        mp_map_elem_t *slot = &map->table[pos];
-        if (slot->key == MP_OBJ_NULL) {
+        size_t idx = mp_map_hash_table_get(map, hash_table, pos);
+        mp_map_elem_t *slot = NULL;
+        if (idx != 0 && idx <= map->used) {
+            slot = &map->table[idx - 1];
+        }
+        if (slot == NULL) {
             // found NULL slot, so index is not in table
             if (lookup_kind == MP_MAP_LOOKUP_ADD_IF_NOT_FOUND) {
+                mp_map_hash_table_put(map, hash_table, pos, map->used + 1);
+                mp_map_elem_t *avail_slot = &map->table[map->used];
                 map->used += 1;
-                if (avail_slot == NULL) {
-                    avail_slot = slot;
-                }
+                map->filled += 1;
                 avail_slot->key = index;
                 avail_slot->value = MP_OBJ_NULL;
                 if (!mp_obj_is_qstr(index)) {
@@ -271,23 +364,26 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
                 return NULL;
             }
         } else if (slot->key == MP_OBJ_SENTINEL) {
-            // found deleted slot, remember for later
-            if (avail_slot == NULL) {
-                avail_slot = slot;
-            }
+            // found deleted slot, just skip it
         } else if (slot->key == index || (!compare_only_ptrs && mp_obj_equal(slot->key, index))) {
             // found index
             // Note: CPython does not replace the index; try x={True:'true'};x[1]='one';x
             if (lookup_kind == MP_MAP_LOOKUP_REMOVE_IF_FOUND) {
+                // Save value for caller before any table changes
+                mp_obj_t value = slot->value;
                 // delete element in this slot
-                map->used--;
-                if (map->table[(pos + 1) % map->alloc].key == MP_OBJ_NULL) {
-                    // optimisation if next slot is empty
+                map->filled -= 1;
+                slot->key = MP_OBJ_SENTINEL;
+                // Compact if tombstones exceed 50% of live entries to prevent unbounded growth.
+                // Skip if dict is now empty (no point compacting an empty dict).
+                if (map->filled > 0 && map->used - map->filled > map->filled / 2) {
+                    mp_map_compact(map);
+                    // After compact, original slot is invalid; return value in first empty slot
+                    slot = &map->table[map->used];
                     slot->key = MP_OBJ_NULL;
-                } else {
-                    slot->key = MP_OBJ_SENTINEL;
+                    slot->value = value;
                 }
-                // keep slot->value so that caller can access it if needed
+                // Note: if no compact, slot->value is still valid from original location
             }
             MAP_CACHE_SET(index, pos);
             return slot;
@@ -299,21 +395,20 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
         if (pos == start_pos) {
             // search got back to starting position, so index is not in table
             if (lookup_kind == MP_MAP_LOOKUP_ADD_IF_NOT_FOUND) {
-                if (avail_slot != NULL) {
-                    // there was an available slot, so use that
-                    map->used++;
-                    avail_slot->key = index;
-                    avail_slot->value = MP_OBJ_NULL;
-                    if (!mp_obj_is_qstr(index)) {
-                        map->all_keys_are_qstrs = 0;
-                    }
-                    return avail_slot;
-                } else {
-                    // not enough room in table, rehash it
-                    mp_map_rehash(map);
-                    // restart the search for the new element
+                #if MICROPY_PY_MAP_REUSE_TAIL_TOMBSTONE
+                // If tail slot is tombstone, reclaim it (common in exception handling).
+                // Decrementing used makes stale hash entry point beyond used, treated as empty.
+                if (map->used > 0 && map->table[map->used - 1].key == MP_OBJ_SENTINEL) {
+                    map->used--;
                     start_pos = pos = hash % map->alloc;
+                    continue;
                 }
+                #endif
+                // not enough room in table, rehash it
+                mp_map_rehash(map);
+                // restart the search for the new element
+                hash_table = MP_MAP_GET_HASH_TABLE(map);
+                start_pos = pos = hash % map->alloc;
             } else {
                 return NULL;
             }

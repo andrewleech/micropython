@@ -45,6 +45,7 @@ const mp_obj_dict_t mp_const_empty_dict_obj = {
         .is_ordered = 1,
         .used = 0,
         .alloc = 0,
+        .filled = 0,
         .table = NULL,
     }
 };
@@ -66,7 +67,7 @@ static mp_map_elem_t *dict_iter_next(mp_obj_dict_t *dict, size_t *cur) {
         }
     }
 
-    assert(map->used == 0 || i == max);
+    assert(map->filled == 0 || i == max);
     return NULL;
 }
 
@@ -133,9 +134,9 @@ static mp_obj_t dict_unary_op(mp_unary_op_t op, mp_obj_t self_in) {
     mp_obj_dict_t *self = MP_OBJ_TO_PTR(self_in);
     switch (op) {
         case MP_UNARY_OP_BOOL:
-            return mp_obj_new_bool(self->map.used != 0);
+            return mp_obj_new_bool(self->map.filled != 0);
         case MP_UNARY_OP_LEN:
-            return MP_OBJ_NEW_SMALL_INT(self->map.used);
+            return MP_OBJ_NEW_SMALL_INT(self->map.filled);
         #if MICROPY_PY_SYS_GETSIZEOF
         case MP_UNARY_OP_SIZEOF: {
             size_t sz = sizeof(*self) + sizeof(*self->map.table) * self->map.alloc;
@@ -172,7 +173,7 @@ static mp_obj_t dict_binary_op(mp_binary_op_t op, mp_obj_t lhs_in, mp_obj_t rhs_
 
             if (mp_obj_is_type(rhs_in, &mp_type_dict)) {
                 mp_obj_dict_t *rhs = MP_OBJ_TO_PTR(rhs_in);
-                if (o->map.used != rhs->map.used) {
+                if (o->map.filled != rhs->map.filled) {
                     return mp_const_false;
                 }
 
@@ -262,15 +263,10 @@ static MP_DEFINE_CONST_FUN_OBJ_1(dict_clear_obj, dict_clear);
 mp_obj_t mp_obj_dict_copy(mp_obj_t self_in) {
     mp_check_self(mp_obj_is_dict_or_ordereddict(self_in));
     mp_obj_dict_t *self = MP_OBJ_TO_PTR(self_in);
-    mp_obj_t other_out = mp_obj_new_dict(self->map.alloc);
-    mp_obj_dict_t *other = MP_OBJ_TO_PTR(other_out);
+    mp_obj_dict_t *other = m_new_obj(mp_obj_dict_t);
     other->base.type = self->base.type;
-    other->map.used = self->map.used;
-    other->map.all_keys_are_qstrs = self->map.all_keys_are_qstrs;
-    other->map.is_fixed = 0;
-    other->map.is_ordered = self->map.is_ordered;
-    memcpy(other->map.table, self->map.table, self->map.alloc * sizeof(mp_map_elem_t));
-    return other_out;
+    mp_map_init_copy(&other->map, &self->map);
+    return MP_OBJ_FROM_PTR(other);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(dict_copy_obj, mp_obj_dict_copy);
 
@@ -355,21 +351,34 @@ static mp_obj_t dict_popitem(mp_obj_t self_in) {
     mp_check_self(mp_obj_is_dict_or_ordereddict(self_in));
     mp_obj_dict_t *self = MP_OBJ_TO_PTR(self_in);
     mp_ensure_not_fixed(self);
-    if (self->map.used == 0) {
+    if (self->map.filled == 0) {
         mp_raise_msg(&mp_type_KeyError, MP_ERROR_TEXT("popitem(): dictionary is empty"));
     }
     size_t cur = 0;
     #if MICROPY_PY_COLLECTIONS_ORDEREDDICT
     if (self->map.is_ordered) {
+        // For ordered maps, used == filled, so get the last element
         cur = self->map.used - 1;
     }
     #endif
     mp_map_elem_t *next = dict_iter_next(self, &cur);
     assert(next);
-    self->map.used--;
+    self->map.filled--;
+    if (self->map.is_ordered) {
+        // For ordered maps, also decrement used since there are no tombstones
+        self->map.used--;
+    }
     mp_obj_t items[] = {next->key, next->value};
     next->key = MP_OBJ_SENTINEL; // must mark key as sentinel to indicate that it was deleted
     next->value = MP_OBJ_NULL;
+
+    // For non-ordered maps, compact if tombstones exceed 50% of live entries.
+    // Ordered maps don't have tombstones (used is decremented above).
+    if (!self->map.is_ordered && self->map.filled > 0 &&
+        self->map.used - self->map.filled > self->map.filled / 2) {
+        mp_map_compact(&self->map);
+    }
+
     mp_obj_t tuple = mp_obj_new_tuple(2, items);
 
     return tuple;
@@ -654,7 +663,7 @@ mp_obj_t mp_obj_new_dict(size_t n_args) {
 
 size_t mp_obj_dict_len(mp_obj_t self_in) {
     mp_obj_dict_t *self = MP_OBJ_TO_PTR(self_in);
-    return self->map.used;
+    return self->map.filled;
 }
 
 mp_obj_t mp_obj_dict_store(mp_obj_t self_in, mp_obj_t key, mp_obj_t value) {
