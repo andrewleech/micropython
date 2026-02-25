@@ -1,6 +1,8 @@
 # MicroPython Code Coverage Toolchain
 
-Split-architecture coverage toolchain: a lightweight on-device tracer (MicroPython) paired with host-side reporting via coverage.py.
+Split-architecture coverage toolchain: a lightweight on-device tracer (MicroPython) paired with host-side reporting via [coverage.py](https://coverage.readthedocs.io/).
+
+The on-device tracer uses `sys.settrace` to record executed lines and arcs. Coverage data is exported as JSON and processed on the host where coverage.py generates reports in all its standard formats.
 
 ## Prerequisites
 
@@ -12,7 +14,7 @@ cd ports/unix && make submodules && make VARIANT=coverage  # unix test binary
 
 **Host Python packages:**
 ```bash
-pip install coverage mpy-cross
+pip install coverage
 ```
 
 **Hardware targets:** firmware must be built with `MICROPY_PY_SYS_SETTRACE=1`.
@@ -22,21 +24,39 @@ pip install coverage mpy-cross
 The `mpy_coverage_cli.py` wrapper handles instrumentation, data collection, and reporting. Each test run stores a timestamped JSON file; the report command merges all collected data.
 
 ```bash
-# Collect coverage for individual tests
+# Collect line coverage
 python3 mpy_coverage_cli.py run test_foo.py --include myapp
 python3 mpy_coverage_cli.py run test_bar.py --include myapp
 
-# Generate merged report
-python3 mpy_coverage_cli.py report --method auto --show-missing
+# Collect with branch coverage (pass --branch on run, like coverage.py)
+python3 mpy_coverage_cli.py run test_foo.py --include myapp --branch
 
-# List collected data files
+# Generate merged report (auto-detects branch data)
+python3 mpy_coverage_cli.py report --method ast --show-missing
+
+# List / clean collected data files
 python3 mpy_coverage_cli.py list
-
-# Remove collected data
 python3 mpy_coverage_cli.py clean
 ```
 
 The micropython binary is auto-detected from `ports/unix/build-coverage/micropython` (relative to the script) or `micropython` in PATH. Override with `--micropython`.
+
+### Branch coverage
+
+Branch coverage follows the same pattern as [coverage.py's branch measurement](https://coverage.readthedocs.io/en/latest/branch.html): `--branch` is a collection-time flag on `run`. Report commands auto-detect branch data from the JSON files and include branch columns when arc data is present — no `--branch` flag on `report`.
+
+```bash
+# Collect with arcs
+python3 mpy_coverage_cli.py run test_foo.py --include myapp --branch
+
+# Report auto-detects arc data and shows branch columns
+python3 mpy_coverage_cli.py report --show-missing
+
+# Force line-only report even when arc data exists
+python3 mpy_coverage_cli.py report --show-missing --no-branch
+```
+
+This matches [coverage.py's CLI](https://coverage.readthedocs.io/en/latest/commands/cmd_run.html) where `coverage run --branch` enables collection and `coverage report` auto-detects.
 
 ### Hardware targets
 
@@ -44,7 +64,7 @@ The micropython binary is auto-detected from `ports/unix/build-coverage/micropyt
 # Auto-deploys mpy_coverage.py to device, runs test, collects data
 python3 mpy_coverage_cli.py run test_foo.py \
     --device /dev/serial/by-id/usb-... \
-    --include myapp
+    --include myapp --branch
 
 # Skip auto-deploy if mpy_coverage.py is already on device
 python3 mpy_coverage_cli.py run test_foo.py \
@@ -57,15 +77,24 @@ python3 mpy_coverage_cli.py run test_foo.py \
 Run each test separately to accumulate coverage data, then generate a single merged report:
 
 ```bash
-python3 mpy_coverage_cli.py run tests/test_network.py --include myapp
-python3 mpy_coverage_cli.py run tests/test_storage.py --include myapp
-python3 mpy_coverage_cli.py run tests/test_ui.py --include myapp
+python3 mpy_coverage_cli.py run tests/test_network.py --include myapp --branch
+python3 mpy_coverage_cli.py run tests/test_storage.py --include myapp --branch
+python3 mpy_coverage_cli.py run tests/test_ui.py --include myapp --branch
 
 # Report merges all .json files from the data directory
 python3 mpy_coverage_cli.py report --show-missing --format html --output-dir htmlcov
 ```
 
 Data files are stored in `.mpy_coverage/` by default (override with `--data-dir`).
+
+### Test-to-file mapping
+
+See which tests cover each source file (or individual lines):
+
+```bash
+python3 mpy_coverage_cli.py test-map
+python3 mpy_coverage_cli.py test-map --line-detail
+```
 
 ## Quick Start (Manual)
 
@@ -75,7 +104,7 @@ For direct control over the tracer without the CLI wrapper:
 # On MicroPython (unix coverage variant or settrace-enabled firmware)
 import mpy_coverage
 
-mpy_coverage.start(include=['myapp'], collect_executable=True)
+mpy_coverage.start(include=['myapp'], collect_arcs=True)
 import myapp
 myapp.main()
 mpy_coverage.stop()
@@ -83,19 +112,35 @@ mpy_coverage.export_json('coverage.json')
 ```
 
 ```bash
-# On host
-python3 mpy_coverage_report.py coverage.json --method co_lines --show-missing
+# On host (auto-detects branch data from arcs in JSON)
+python3 mpy_coverage_report.py coverage.json --method ast --show-missing
 ```
 
-## Executable Line Detection Pathways
+## Report Formats
+
+Reports are generated by coverage.py's reporting infrastructure, so all standard formats are supported with identical output to `coverage report`, `coverage html`, etc. See coverage.py's documentation for format details:
+
+| Format | Flag | Description | coverage.py docs |
+|--------|------|-------------|-----------------|
+| `text` | `--format text` (default) | Terminal summary table | [cmd_report](https://coverage.readthedocs.io/en/latest/commands/cmd_report.html) |
+| `html` | `--format html` | Annotated source HTML | [cmd_html](https://coverage.readthedocs.io/en/latest/commands/cmd_html.html) |
+| `json` | `--format json` | Machine-readable JSON | [cmd_json](https://coverage.readthedocs.io/en/latest/commands/cmd_json.html) |
+| `xml` | `--format xml` | Cobertura XML for CI | [cmd_xml](https://coverage.readthedocs.io/en/latest/commands/cmd_xml.html) |
+| `lcov` | `--format lcov` | LCOV tracefile | [cmd_lcov](https://coverage.readthedocs.io/en/latest/commands/cmd_lcov.html) |
+
+Multiple formats in one invocation: `--format text --format html --format xml`
+
+## Executable Line Detection Methods
+
+Computing "missing" lines and coverage percentages requires knowing which source lines are executable statements. Three methods are available:
 
 | Method | Where | Pros | Cons |
 |--------|-------|------|------|
-| `co_lines` | On-device | No host tools needed, exact MicroPython view | Only sees called functions |
-| `ast` | Host CPython | Sees all code, matches coverage.py conventions | May differ from MicroPython's view |
+| `co_lines` | On-device | No host tools needed, exact MicroPython view | Only sees called functions; uncalled code is invisible |
+| `ast` | Host CPython | Sees all code, same parser as coverage.py | May differ from MicroPython's view on edge cases |
 | `mpy` | Host via mpy-cross | Exact MicroPython bytecode view, sees all code | Requires mpy-cross binary |
 
-Use `--method auto` (default) which uses `mpy` — the most accurate method for MicroPython since it reflects the actual bytecode the VM executes. The `ast` method uses CPython's parser which may disagree with MicroPython's grammar on edge cases.
+`--method auto` (default) tries `mpy` first, falling back through the others. For cross-validation against coverage.py, `ast` is preferred since both sides use the same `PythonParser` — any differences in executed/missing lines reveal genuine tracing divergences rather than parser disagreements.
 
 ## On-Device Tracer API (`mpy_coverage.py`)
 
@@ -103,15 +148,20 @@ Use `--method auto` (default) which uses `mpy` — the most accurate method for 
 import mpy_coverage
 
 # Functional API
-mpy_coverage.start(include=['mymod'], exclude=['test_'], collect_executable=False)
-# ... run code ...
+mpy_coverage.start(
+    include=['mymod'],          # filename substring filters (list or None)
+    exclude=['test_'],          # exclusion filters (list or None)
+    collect_executable=False,   # collect co_lines data for pathway A
+    collect_arcs=False,         # collect line-to-line arcs for branch coverage
+)
+# ... run code under test ...
 mpy_coverage.stop()
-data = mpy_coverage.get_data()
-mpy_coverage.export_json('out.json')    # to file
-mpy_coverage.export_json()              # to stdout with serial delimiters
+data = mpy_coverage.get_data()       # returns dict
+mpy_coverage.export_json('out.json') # to file
+mpy_coverage.export_json()           # to stdout with serial delimiters
 
 # Context manager
-with mpy_coverage.coverage(include=['mymod'], collect_executable=True):
+with mpy_coverage.coverage(include=['mymod'], collect_arcs=True):
     import mymod
     mymod.run()
 ```
@@ -125,11 +175,11 @@ Filtering uses substring matching on filenames. `mpy_coverage` itself is always 
 3. Run coverage collection — `export_json()` with no argument prints delimited JSON to stdout:
    ```
    ---MPY_COV_START---
-   {"executed": {...}}
+   {"executed": {...}, "arcs": {...}}
    ---MPY_COV_END---
    ```
 4. Capture serial output, extract the JSON block, save to file
-5. Run `mpy_coverage_report.py` with `--path-map` to remap device paths:
+5. Run report with `--path-map` to remap device paths:
    ```bash
    python3 mpy_coverage_report.py serial_capture.json \
        --method ast \
@@ -146,10 +196,11 @@ Filtering uses substring matching on filenames. `mpy_coverage` itself is always 
 python3 mpy_coverage_cli.py [--data-dir DIR] COMMAND [OPTIONS]
 
 Commands:
-  run       Collect coverage for a test script
-  report    Generate merged coverage report from collected data
-  list      List collected coverage data files
-  clean     Remove collected coverage data
+  run        Collect coverage for a test script
+  report     Generate merged coverage report from collected data
+  list       List collected coverage data files
+  test-map   Show which tests cover each source file
+  clean      Remove collected coverage data
 
 Global options:
   --data-dir DIR    Directory for coverage data files (default: .mpy_coverage)
@@ -163,6 +214,7 @@ Global options:
   --include PATTERN        Filename substring filter to include (repeatable)
   --exclude PATTERN        Filename substring filter to exclude (repeatable)
   --no-deploy              Skip auto-deploy of mpy_coverage.py to device
+  --branch                 Collect arc data for branch coverage
 ```
 
 **report options:**
@@ -175,6 +227,14 @@ Global options:
   --format {text,html,json,xml,lcov} Output format (repeatable, default: text)
   --output-dir DIR                   Output directory for report files
   --show-missing                     Show missing line numbers in text report
+  --no-branch                        Force line-only report even if arc data exists
+```
+
+Branch coverage is auto-detected from arc data in the JSON files. No `--branch` flag is needed on `report`.
+
+**test-map options:**
+```
+  --line-detail    Show per-line test associations instead of file-level
 ```
 
 **clean options:**
@@ -183,6 +243,8 @@ Global options:
 ```
 
 ### mpy_coverage_report.py (standalone)
+
+Standalone report script for use with manually collected JSON data.
 
 ```
 python3 mpy_coverage_report.py DATA_FILE [OPTIONS]
@@ -196,22 +258,32 @@ Options:
   --format {text,html,json,xml,lcov} Output format (repeatable)
   --output-dir DIR                   Output directory for generated reports
   --show-missing                     Show missing line numbers in text report
+  --no-branch                        Force line-only report even if arc data exists
 ```
 
 ## JSON Data Format
 
 ```json
 {
+  "_metadata": {
+    "test_script": "test_foo"
+  },
   "executed": {
-    "filename.py": [1, 3, 5, 7]
+    "myapp.py": [1, 3, 5, 7, 10, 15]
   },
   "executable": {
-    "filename.py": [1, 2, 3, 5, 6, 7, 10]
+    "myapp.py": [1, 2, 3, 5, 6, 7, 10, 12, 15]
+  },
+  "arcs": {
+    "myapp.py": [[1, 3], [3, 5], [5, 7], [7, -1]]
   }
 }
 ```
 
-`executable` is only present when `collect_executable=True` was used.
+- `executed`: always present — lines traced during execution
+- `executable`: only present when `collect_executable=True` (co_lines pathway)
+- `arcs`: only present when `collect_arcs=True` or `--branch` was used — each arc is `[from_line, to_line]` where negative values encode function entry/exit boundaries
+- `_metadata`: added by the CLI wrapper, includes `test_script` name for test-map
 
 ## Data Directory Structure
 
@@ -222,12 +294,61 @@ Options:
   20260213_143030_test_baz.json
 ```
 
-Files are named `<YYYYMMDD_HHMMSS>_<script_basename>.json`.
+Files are named `<YYYYMMDD_HHMMSS>_<script_basename>.json`. The `report` command merges all JSON files in the directory.
+
+## Divergences from CPython / coverage.py
+
+### `--branch` flag placement
+
+In [coverage.py](https://coverage.readthedocs.io/en/latest/branch.html), `--branch` is a collection-time flag on `coverage run`. Report commands auto-detect branch data. This toolchain follows the same pattern: `--branch` on `run`, auto-detect on `report`.
+
+### except-header line tracing
+
+MicroPython's compiler emits `set_source_line` for `except XxxError:` handler lines even when the exception path is not taken. CPython only traces these lines when the handler actually executes. This causes MicroPython to report one extra "executed" line per unvisited except clause.
+
+In practice this means slightly higher coverage percentages for code with exception handlers that aren't exercised. The cross-validation tests document this as a known divergence.
+
+### Arc encoding conventions
+
+MicroPython's settrace produces raw line-to-line transition arcs recorded as `(previous_line, current_line)` pairs. coverage.py's `PythonParser` models arcs using AST-derived conventions where negative line numbers encode function entry (`-co_firstlineno → first_body_line`) and exit (`last_line → -co_firstlineno`).
+
+These representations don't map 1:1:
+- Function entry arcs: MicroPython records `(def_line, first_body_line)` as a positive transition; coverage.py uses `(-def_line, first_body_line)`
+- While/for loop arcs: MicroPython's bytecode produces different line-to-line transitions than CPython's AST-derived arc model
+- Class body: Sequential class body lines appear as interior arcs in MicroPython but are modeled as entry arcs by coverage.py
+
+Line-level coverage metrics (statements, executed, missing, percentage) are unaffected by these arc convention differences and match exactly between the two systems when using the `ast` method.
+
+### Constructs not cross-validated
+
+The following constructs are excluded from cross-validation tests due to known irreconcilable differences:
+
+- **List comprehensions**: CPython 3.12+ creates a hidden function scope; MicroPython doesn't. This produces different arc structures.
+- **Generators/yield**: arc encoding for yield vs return differs between VMs.
+- **Boolean short-circuit**: arc differences within a single line aren't detectable at line-level coverage.
+
+## Cross-validation Tests
+
+`test_coverage.py` includes 4 cross-validation trials that run the same code under both CPython+coverage.py and MicroPython+mpy_coverage, then compare metrics:
+
+| Trial | Description |
+|-------|-------------|
+| `trial_xval_lines` | Line coverage with partial path execution (~66%) |
+| `trial_xval_lines_full` | Line coverage with full path execution (100%) |
+| `trial_xval_branches` | Branch data collection with partial paths |
+| `trial_xval_branches_full` | Branch data collection with full paths |
+
+The test target (`test_target_xval.py`) covers: if/elif/else, for+break+else, while, try/except/finally, nested closures, classes with methods, ternary expressions, multiple return points, and with-statements.
+
+Run all trials:
+```bash
+python3 test_coverage.py
+```
 
 ## Limitations
 
-- **settrace overhead:** tracing adds significant runtime cost; not suitable for timing-sensitive code
-- **co_lines incompleteness:** pathway A only reports executable lines for functions that were entered; uncalled functions are invisible rather than showing 0%
-- **bytecode only:** native/viper functions are not traced by settrace
-- **memory on constrained devices:** large `_executed` dicts may hit memory limits on small targets
-- **coverage.py private API:** the report integration overrides `Coverage._get_file_reporter()` which may change across coverage.py versions
+- **settrace overhead**: tracing adds significant runtime cost; not suitable for timing-sensitive code
+- **co_lines incompleteness**: the co_lines pathway only reports executable lines for functions that were entered; uncalled functions are invisible rather than showing 0%
+- **bytecode only**: native/viper functions are not traced by settrace
+- **memory on constrained devices**: the `_executed` and `_arcs` dicts may hit memory limits on small targets
+- **coverage.py internal API**: report integration overrides `Coverage._get_file_reporter()` and uses `analysis_from_file_reporter` which may change across coverage.py versions

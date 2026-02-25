@@ -225,9 +225,18 @@ def run_report(
     formats=None,
     output_dir=None,
     show_missing=False,
-    branch=False,
+    branch=None,
 ):
     """Generate coverage reports from collected data.
+
+    Branch coverage is auto-detected from arc data presence in cov_data,
+    matching coverage.py's behaviour where ``coverage report`` auto-detects
+    branch data collected by ``coverage run --branch``.
+
+    Args:
+        branch: Override auto-detection. True forces branch mode (warns if
+            no arc data), False forces line-only mode, None (default)
+            auto-detects from arc data presence.
 
     Returns the total coverage percentage.
     """
@@ -236,11 +245,13 @@ def run_report(
     if path_maps is None:
         path_maps = []
 
-    # Check if branch was requested but no arc data available
+    # Auto-detect branch mode from arc data presence (matches coverage.py behaviour)
     arc_data = cov_data.get("arcs", {})
-    if branch and not arc_data:
+    if branch is None:
+        branch = bool(arc_data)
+    elif branch and not arc_data:
         print(
-            "Warning: --branch requested but no arc data in coverage JSON. "
+            "Warning: branch mode requested but no arc data in coverage JSON. "
             "Falling back to line-only mode.",
             file=sys.stderr,
         )
@@ -376,7 +387,11 @@ def main():
     )
     parser.add_argument("--output-dir", default=None, help="Output directory for report files")
     parser.add_argument("--show-missing", action="store_true", help="Show missing line numbers")
-    parser.add_argument("--branch", action="store_true", help="Enable branch coverage reporting")
+    parser.add_argument(
+        "--no-branch",
+        action="store_true",
+        help="Disable branch coverage even if arc data is present",
+    )
 
     args = parser.parse_args()
 
@@ -384,6 +399,9 @@ def main():
         args.formats = ["text"]
 
     cov_data = _load_json(args.data_file)
+
+    # Auto-detect branch from arc data; --no-branch overrides to line-only
+    branch = False if args.no_branch else None
 
     run_report(
         cov_data,
@@ -395,7 +413,7 @@ def main():
         formats=args.formats,
         output_dir=args.output_dir,
         show_missing=args.show_missing,
-        branch=args.branch,
+        branch=branch,
     )
 
 

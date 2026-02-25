@@ -295,6 +295,9 @@ def cmd_report(args):
 
     formats = args.formats or ["text"]
 
+    # Auto-detect branch from arc data; --no-branch overrides to line-only
+    branch = False if getattr(args, "no_branch", False) else None
+
     run_report(
         merged,
         method=args.method,
@@ -305,7 +308,7 @@ def cmd_report(args):
         formats=formats,
         output_dir=args.output_dir,
         show_missing=args.show_missing,
-        branch=getattr(args, "branch", False),
+        branch=branch,
     )
     return 0
 
@@ -528,7 +531,11 @@ def main():
     p_report.add_argument(
         "--show-missing", action="store_true", help="Show missing line numbers in text report"
     )
-    p_report.add_argument("--branch", action="store_true", help="Enable branch coverage reporting")
+    p_report.add_argument(
+        "--no-branch",
+        action="store_true",
+        help="Disable branch coverage even if arc data is present",
+    )
     p_report.set_defaults(func=cmd_report)
 
     # --- list ---

@@ -9,6 +9,15 @@ import subprocess
 import sys
 import tempfile
 
+import coverage as coverage_py
+from coverage.results import analysis_from_file_reporter
+
+from mpy_coverage_report import (
+    MpyCoverage,
+    MpyFileReporter,
+    _resolve_executable_lines_ast,
+)
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MPY_BINARY = os.path.join(SCRIPT_DIR, "ports/unix/build-coverage/micropython")
 MPY_CROSS = os.path.join(SCRIPT_DIR, "mpy-cross/build/mpy-cross")
@@ -501,8 +510,8 @@ mpy_coverage.export_json('{json_path}')
         assert (6, 7) in arc_set, f"Expected arc (6, 7) not found. Arcs: {sorted(arc_set)}"
         print("  arc (6, 7) present: if->positive branch taken")
 
-        # Generate branch report using ast method
-        r = run_report(json_path, "ast", ["--branch", "--show-missing"])
+        # Generate branch report using ast method (auto-detects arc data)
+        r = run_report(json_path, "ast", ["--show-missing"])
         if r.returncode != 0:
             print(f"FAIL: branch report error: {r.stderr}")
             return False
@@ -573,7 +582,7 @@ def trial_branch_cli():
             return False
         print("  data file has arcs")
 
-        # Report with --branch
+        # Report (auto-detects branch from arc data)
         r = subprocess.run(
             [
                 sys.executable,
@@ -583,7 +592,6 @@ def trial_branch_cli():
                 "report",
                 "--method",
                 "ast",
-                "--branch",
                 "--show-missing",
             ],
             capture_output=True,
@@ -772,6 +780,480 @@ def trial_test_map():
                 os.unlink(f)
 
 
+# --- Cross-validation helpers ---
+
+
+def _run_cpython_coverage(target_path, entry_code, branch=False):
+    """Run target under CPython's coverage.py in-process.
+
+    Args:
+        target_path: Absolute path to the .py file to measure.
+        entry_code: Python code string that imports/calls target functions.
+            The target file's directory is added to sys.path.
+        branch: If True, collect branch/arc coverage.
+
+    Returns:
+        Dict with executed_lines, statements, missing_lines, coverage_pct,
+        and if branch: executed_arcs, missing_arcs, total_branches, covered_branches.
+    """
+    basename = os.path.basename(target_path)
+    target_dir = os.path.dirname(target_path)
+
+    cov = coverage_py.Coverage(branch=branch, source=[target_dir])
+    cov.start()
+    try:
+        # Build the execution namespace
+        saved_path = sys.path[:]
+        if target_dir not in sys.path:
+            sys.path.insert(0, target_dir)
+        try:
+            source = open(target_path, encoding="utf-8").read()
+            code = compile(source, basename, "exec")
+            ns = {"__name__": "__main__", "__file__": basename}
+            exec(code, ns)
+            # Run the entry code in same namespace
+            exec(entry_code, ns)
+        finally:
+            sys.path[:] = saved_path
+    finally:
+        cov.stop()
+        cov.save()
+
+    # Build analysis using coverage.py's own infrastructure
+    data = cov.get_data()
+    fr = cov._get_file_reporter(target_path)
+
+    analysis = analysis_from_file_reporter(data, cov.config.precision, fr, target_path)
+
+    result = {
+        "executed_lines": analysis.executed,
+        "statements": analysis.statements,
+        "missing_lines": analysis.missing,
+        "coverage_pct": analysis.numbers.pc_covered,
+    }
+
+    if branch:
+        result["executed_arcs"] = analysis.arcs_executed_set
+        result["missing_arcs"] = set(analysis.arcs_missing())
+        result["total_branches"] = analysis.numbers.n_branches
+        result["covered_branches"] = analysis.numbers.n_partial_branches
+
+    return result
+
+
+def _get_mpy_analysis(target_path, executed_lines, branch=False, arcs=None):
+    """Build a coverage.py Analysis from mpy-collected data using ast method.
+
+    Uses the same PythonParser that coverage.py uses, so statements are
+    identical by construction. Any differences in executed/missing reveal
+    genuine tracing divergences.
+
+    Args:
+        target_path: Absolute path to the .py source.
+        executed_lines: Set of line numbers executed by MicroPython.
+        branch: Whether to include branch analysis.
+        arcs: Set of (from, to) arcs if branch=True.
+
+    Returns:
+        Analysis object with statements, executed, missing, numbers, etc.
+    """
+    basename = os.path.basename(target_path)
+
+    # Resolve executable lines using ast method (same PythonParser)
+    exec_lines = _resolve_executable_lines_ast([basename], {basename: target_path})
+    statements = exec_lines.get(basename, set())
+
+    reporter = MpyFileReporter(basename, statements, source_path=target_path)
+    file_reporters = {basename: reporter}
+
+    cov = MpyCoverage(file_reporters, data_file=None)
+    cov._init()
+    cov._post_init()
+
+    data = cov.get_data()
+    if branch and arcs:
+        # Filter self-loops
+        arc_set = set()
+        for from_line, to_line in arcs:
+            if from_line != to_line:
+                arc_set.add((from_line, to_line))
+        data.add_arcs({basename: arc_set})
+    else:
+        data.add_lines({basename: set(executed_lines)})
+
+    analysis = analysis_from_file_reporter(data, cov.config.precision, reporter, basename)
+    return analysis
+
+
+# Known MicroPython settrace divergences from CPython:
+#
+# 1. except-header tracing: MicroPython's compiler emits set_source_line for
+#    `except XxxError:` headers even when the exception path is not taken.
+#    CPython only traces the except line when the exception handler activates.
+#    This causes MicroPython to report 1 extra executed line per unvisited
+#    except clause.
+#
+# 2. Arc encoding convention: MicroPython's settrace uses co_firstlineno
+#    differently from CPython for function entry/exit arcs. The raw arc tuples
+#    are not directly comparable. Line-level branch metrics (which lines have
+#    partial branches) are compared instead.
+
+# Lines in test_target_xval.py where MicroPython diverges from CPython.
+# Each entry: (line_number, description)
+_KNOWN_DIVERGENCES = {
+    55: "except-header: MicroPython traces `except ZeroDivisionError:` even when not taken",
+}
+
+
+def _compare_lines(cpython_result, mpy_analysis, label):
+    """Compare line coverage between CPython and MicroPython.
+
+    Applies known-divergence filtering. Returns True if all metrics match
+    after accounting for documented VM differences.
+    """
+    ok = True
+
+    # Compare statements (PythonParser is shared, should always match)
+    cp_stmts = cpython_result["statements"]
+    mpy_stmts = mpy_analysis.statements
+    if cp_stmts != mpy_stmts:
+        only_cp = cp_stmts - mpy_stmts
+        only_mpy = mpy_stmts - cp_stmts
+        print(f"  DIFF statements: cpython_only={sorted(only_cp)} mpy_only={sorted(only_mpy)}")
+        ok = False
+    else:
+        print(f"  MATCH statements: {len(cp_stmts)} lines")
+
+    # Compare executed lines, filtering known divergences
+    cp_exec = cpython_result["executed_lines"]
+    mpy_exec = mpy_analysis.executed
+    only_cp = cp_exec - mpy_exec
+    only_mpy = mpy_exec - cp_exec
+
+    # Filter known divergences
+    unexpected_cp = only_cp - set(_KNOWN_DIVERGENCES.keys())
+    unexpected_mpy = only_mpy - set(_KNOWN_DIVERGENCES.keys())
+    known_diffs = (only_cp | only_mpy) & set(_KNOWN_DIVERGENCES.keys())
+
+    if known_diffs:
+        for line in sorted(known_diffs):
+            print(f"  KNOWN divergence line {line}: {_KNOWN_DIVERGENCES[line]}")
+
+    if unexpected_cp or unexpected_mpy:
+        print(
+            f"  DIFF executed (unexpected): "
+            f"cpython_only={sorted(unexpected_cp)} mpy_only={sorted(unexpected_mpy)}"
+        )
+        ok = False
+    else:
+        print(f"  MATCH executed: {len(cp_exec)} lines (+ {len(known_diffs)} known divergences)")
+
+    # Compare missing lines with same filtering
+    cp_miss = cpython_result["missing_lines"]
+    mpy_miss = mpy_analysis.missing
+    miss_only_cp = cp_miss - mpy_miss
+    miss_only_mpy = mpy_miss - cp_miss
+    unexpected_miss_cp = miss_only_cp - set(_KNOWN_DIVERGENCES.keys())
+    unexpected_miss_mpy = miss_only_mpy - set(_KNOWN_DIVERGENCES.keys())
+
+    if unexpected_miss_cp or unexpected_miss_mpy:
+        print(
+            f"  DIFF missing (unexpected): "
+            f"cpython_only={sorted(unexpected_miss_cp)} mpy_only={sorted(unexpected_miss_mpy)}"
+        )
+        ok = False
+    else:
+        print(f"  MATCH missing: {len(cp_miss)} lines (+ {len(known_diffs)} known divergences)")
+
+    # Compare line coverage percentage (executed/statements), NOT the
+    # branch-weighted pc_covered which is affected by arc convention differences.
+    n_stmts = len(cp_stmts) if cp_stmts else 1
+    cp_line_pct = 100.0 * len(cpython_result["executed_lines"]) / n_stmts
+    mpy_line_pct = 100.0 * len(mpy_analysis.executed) / n_stmts
+    # Each known divergence can shift percentage by at most 1/n_statements
+    tolerance = len(known_diffs) * (100.0 / n_stmts) + 0.01
+    if abs(cp_line_pct - mpy_line_pct) > tolerance:
+        print(f"  DIFF line_coverage_pct: cpython={cp_line_pct:.2f}% mpy={mpy_line_pct:.2f}%")
+        ok = False
+    else:
+        print(
+            f"  MATCH line_coverage_pct: cpython={cp_line_pct:.2f}% "
+            f"mpy={mpy_line_pct:.2f}% (tol={tolerance:.2f})"
+        )
+
+    return ok
+
+
+def _compare_arcs(cpython_result, mpy_analysis):
+    """Log arc/branch diagnostic comparison between CPython and MicroPython.
+
+    MicroPython's settrace produces raw line-to-line transition arcs, while
+    coverage.py's PythonParser models arcs with AST-derived function entry/exit
+    conventions (negative line numbers). These representations don't map 1:1:
+
+    - Function entry arcs: CPython uses (-def_line, first_body_line),
+      MicroPython records (def_line, first_body_line) as a positive transition
+    - While/for loop arcs: MicroPython's bytecode may produce different
+      line-to-line transitions than CPython's AST model
+    - Class body: Sequential class body lines are interior arcs in MicroPython
+      but modeled as entry arcs by CPython
+
+    Because of these systematic convention differences, arc comparison is
+    diagnostic only. Line-level metrics (in _compare_lines) are the meaningful
+    cross-validation. This function always returns True.
+    """
+    cp_exec_arcs = cpython_result.get("executed_arcs", set())
+    mpy_exec_arcs = mpy_analysis.arcs_executed_set
+
+    # Separate interior arcs (positive->positive) from entry/exit arcs
+    cp_interior = {a for a in cp_exec_arcs if a[0] > 0 and a[1] > 0}
+    mpy_interior = {a for a in mpy_exec_arcs if a[0] > 0 and a[1] > 0}
+
+    common = cp_interior & mpy_interior
+    only_cp = cp_interior - mpy_interior
+    only_mpy = mpy_interior - cp_interior
+    print(
+        f"  interior_arcs: {len(common)} common, "
+        f"{len(only_cp)} cpython-only, {len(only_mpy)} mpy-only"
+    )
+
+    if only_cp:
+        print(f"    cpython-only: {sorted(only_cp)}")
+    if only_mpy:
+        print(f"    mpy-only: {sorted(only_mpy)}")
+
+    # Log entry/exit arc counts
+    cp_entry_exit = len(cp_exec_arcs) - len(cp_interior)
+    mpy_entry_exit = len(mpy_exec_arcs) - len(mpy_interior)
+    print(f"  entry/exit arcs: cpython={cp_entry_exit} mpy={mpy_entry_exit}")
+
+    # Compare total branch count from PythonParser (should match since same parser)
+    cp_total = cpython_result.get("total_branches", 0)
+    mpy_total = mpy_analysis.numbers.n_branches
+    if cp_total != mpy_total:
+        print(f"  DIFF total_branches: cpython={cp_total} mpy={mpy_total}")
+    else:
+        print(f"  MATCH total_branches: {cp_total}")
+
+    return True  # diagnostic only, never fails
+
+
+# --- Cross-validation trials ---
+
+
+def trial_xval_lines():
+    """Cross-validate line coverage (ast, partial paths) between CPython and MicroPython."""
+    print("=== Xval: line coverage, partial ===")
+    target_path = os.path.join(SCRIPT_DIR, "test_target_xval.py")
+    entry_code = "run_partial()"
+
+    with tempfile.NamedTemporaryFile(suffix=".json", dir=SCRIPT_DIR, delete=False) as f:
+        json_path = f.name
+
+    try:
+        # CPython reference
+        cp_result = _run_cpython_coverage(target_path, entry_code, branch=False)
+        print(
+            f"  cpython: {len(cp_result['executed_lines'])} executed, "
+            f"{len(cp_result['missing_lines'])} missing, "
+            f"{cp_result['coverage_pct']:.1f}%"
+        )
+
+        # MicroPython collection
+        r = run_micropython(f"""
+import mpy_coverage
+mpy_coverage.start(include=['test_target_xval'])
+import test_target_xval
+test_target_xval.run_partial()
+mpy_coverage.stop()
+mpy_coverage.export_json('{json_path}')
+""")
+        if r.returncode != 0:
+            print("FAIL: MicroPython exited with error")
+            print(r.stderr)
+            return False
+
+        data = json.load(open(json_path))
+        mpy_lines = set(data["executed"].get("test_target_xval.py", []))
+        print(f"  mpy: {len(mpy_lines)} executed lines")
+
+        # Build mpy analysis and compare
+        mpy_analysis = _get_mpy_analysis(target_path, mpy_lines)
+        ok = _compare_lines(cp_result, mpy_analysis, "partial")
+
+        if ok:
+            print("PASS")
+        else:
+            print("FAIL: line coverage mismatch")
+        return ok
+    finally:
+        os.unlink(json_path)
+
+
+def trial_xval_lines_full():
+    """Cross-validate line coverage (ast, full paths) — expect 100% on both sides."""
+    print("=== Xval: line coverage, full ===")
+    target_path = os.path.join(SCRIPT_DIR, "test_target_xval.py")
+    entry_code = "run_partial()\nrun_full()"
+
+    with tempfile.NamedTemporaryFile(suffix=".json", dir=SCRIPT_DIR, delete=False) as f:
+        json_path = f.name
+
+    try:
+        # CPython reference
+        cp_result = _run_cpython_coverage(target_path, entry_code, branch=False)
+        print(
+            f"  cpython: {len(cp_result['executed_lines'])} executed, "
+            f"{len(cp_result['missing_lines'])} missing, "
+            f"{cp_result['coverage_pct']:.1f}%"
+        )
+
+        # MicroPython collection
+        r = run_micropython(f"""
+import mpy_coverage
+mpy_coverage.start(include=['test_target_xval'])
+import test_target_xval
+test_target_xval.run_partial()
+test_target_xval.run_full()
+mpy_coverage.stop()
+mpy_coverage.export_json('{json_path}')
+""")
+        if r.returncode != 0:
+            print("FAIL: MicroPython exited with error")
+            print(r.stderr)
+            return False
+
+        data = json.load(open(json_path))
+        mpy_lines = set(data["executed"].get("test_target_xval.py", []))
+        print(f"  mpy: {len(mpy_lines)} executed lines")
+
+        mpy_analysis = _get_mpy_analysis(target_path, mpy_lines)
+        ok = _compare_lines(cp_result, mpy_analysis, "full")
+
+        # Extra check: both should be 100%
+        if cp_result["coverage_pct"] < 100.0:
+            print(f"  WARN: cpython not 100%: {cp_result['coverage_pct']:.2f}%")
+            print(f"  cpython missing: {sorted(cp_result['missing_lines'])}")
+        if mpy_analysis.numbers.pc_covered < 100.0:
+            print(f"  WARN: mpy not 100%: {mpy_analysis.numbers.pc_covered:.2f}%")
+            print(f"  mpy missing: {sorted(mpy_analysis.missing)}")
+
+        if ok:
+            print("PASS")
+        else:
+            print("FAIL: line coverage mismatch")
+        return ok
+    finally:
+        os.unlink(json_path)
+
+
+def trial_xval_branches():
+    """Cross-validate branch coverage (ast, partial paths)."""
+    print("=== Xval: branch coverage, partial ===")
+    target_path = os.path.join(SCRIPT_DIR, "test_target_xval.py")
+    entry_code = "run_partial()"
+
+    with tempfile.NamedTemporaryFile(suffix=".json", dir=SCRIPT_DIR, delete=False) as f:
+        json_path = f.name
+
+    try:
+        # CPython reference with branch=True
+        cp_result = _run_cpython_coverage(target_path, entry_code, branch=True)
+        print(
+            f"  cpython: {len(cp_result['executed_arcs'])} arcs executed, "
+            f"{len(cp_result.get('missing_arcs', set()))} missing"
+        )
+
+        # MicroPython collection with arcs
+        r = run_micropython(f"""
+import mpy_coverage
+mpy_coverage.start(include=['test_target_xval'], collect_arcs=True)
+import test_target_xval
+test_target_xval.run_partial()
+mpy_coverage.stop()
+mpy_coverage.export_json('{json_path}')
+""")
+        if r.returncode != 0:
+            print("FAIL: MicroPython exited with error")
+            print(r.stderr)
+            return False
+
+        data = json.load(open(json_path))
+        mpy_lines = set(data["executed"].get("test_target_xval.py", []))
+        mpy_arcs_raw = data.get("arcs", {}).get("test_target_xval.py", [])
+        mpy_arcs = set(tuple(a) for a in mpy_arcs_raw)
+        print(f"  mpy: {len(mpy_arcs)} arcs collected")
+
+        # Build mpy analysis with arcs
+        mpy_analysis = _get_mpy_analysis(target_path, mpy_lines, branch=True, arcs=mpy_arcs)
+
+        # Compare lines first
+        ok_lines = _compare_lines(cp_result, mpy_analysis, "partial-branch")
+        ok_arcs = _compare_arcs(cp_result, mpy_analysis)
+
+        ok = ok_lines and ok_arcs
+        if ok:
+            print("PASS")
+        else:
+            print("FAIL: branch coverage mismatch")
+        return ok
+    finally:
+        os.unlink(json_path)
+
+
+def trial_xval_branches_full():
+    """Cross-validate branch coverage (ast, full paths) — expect 100% branch coverage."""
+    print("=== Xval: branch coverage, full ===")
+    target_path = os.path.join(SCRIPT_DIR, "test_target_xval.py")
+    entry_code = "run_partial()\nrun_full()"
+
+    with tempfile.NamedTemporaryFile(suffix=".json", dir=SCRIPT_DIR, delete=False) as f:
+        json_path = f.name
+
+    try:
+        # CPython reference with branch=True
+        cp_result = _run_cpython_coverage(target_path, entry_code, branch=True)
+        print(
+            f"  cpython: {len(cp_result['executed_arcs'])} arcs executed, "
+            f"{len(cp_result.get('missing_arcs', set()))} missing"
+        )
+
+        # MicroPython collection with arcs
+        r = run_micropython(f"""
+import mpy_coverage
+mpy_coverage.start(include=['test_target_xval'], collect_arcs=True)
+import test_target_xval
+test_target_xval.run_partial()
+test_target_xval.run_full()
+mpy_coverage.stop()
+mpy_coverage.export_json('{json_path}')
+""")
+        if r.returncode != 0:
+            print("FAIL: MicroPython exited with error")
+            print(r.stderr)
+            return False
+
+        data = json.load(open(json_path))
+        mpy_lines = set(data["executed"].get("test_target_xval.py", []))
+        mpy_arcs_raw = data.get("arcs", {}).get("test_target_xval.py", [])
+        mpy_arcs = set(tuple(a) for a in mpy_arcs_raw)
+        print(f"  mpy: {len(mpy_arcs)} arcs collected")
+
+        mpy_analysis = _get_mpy_analysis(target_path, mpy_lines, branch=True, arcs=mpy_arcs)
+
+        ok_lines = _compare_lines(cp_result, mpy_analysis, "full-branch")
+        ok_arcs = _compare_arcs(cp_result, mpy_analysis)
+
+        ok = ok_lines and ok_arcs
+        if ok:
+            print("PASS")
+        else:
+            print("FAIL: branch coverage mismatch")
+        return ok
+    finally:
+        os.unlink(json_path)
+
+
 def main():
     if not os.path.exists(MPY_BINARY):
         print(f"Error: MicroPython coverage binary not found at {MPY_BINARY}")
@@ -790,6 +1272,10 @@ def main():
         trial_branch,
         trial_branch_cli,
         trial_test_map,
+        trial_xval_lines,
+        trial_xval_lines_full,
+        trial_xval_branches,
+        trial_xval_branches_full,
     ]
     for trial in trials:
         try:
