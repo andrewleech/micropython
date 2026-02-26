@@ -45,11 +45,6 @@
 
 int bt_settings_store_keys(uint8_t id, const bt_addr_le_t *addr,
     const void *value, size_t val_len) {
-    DEBUG_printf(">>> bt_settings_store_keys: addr=%02x:%02x:%02x:%02x:%02x:%02x id=%d val_len=%d\n",
-        addr->a.val[5], addr->a.val[4], addr->a.val[3],
-        addr->a.val[2], addr->a.val[1], addr->a.val[0],
-        id, (int)val_len);
-
     #if ZEPHYR_BLE_SETTINGS_NOOP
     DEBUG_printf("<<< bt_settings_store_keys: NO-OP stub (isolation test)\n");
     return 0;
@@ -106,15 +101,13 @@ int bt_settings_delete_keys(uint8_t id, const bt_addr_le_t *addr) {
 }
 
 void mp_bluetooth_zephyr_load_keys(void) {
-    DEBUG_printf(">>> mp_bluetooth_zephyr_load_keys\n");
-
     #if ZEPHYR_BLE_SETTINGS_NOOP
-    DEBUG_printf("<<< mp_bluetooth_zephyr_load_keys: NO-OP stub (isolation test)\n");
     return;
     #endif
 
     const uint8_t *value;
     size_t value_len;
+    int loaded = 0;
 
     for (uint8_t idx = 0; idx < CONFIG_BT_MAX_PAIRED; idx++) {
         if (!mp_bluetooth_gap_on_get_secret(
@@ -139,6 +132,7 @@ void mp_bluetooth_zephyr_load_keys(void) {
         struct bt_keys *keys = bt_keys_get_addr(id, addr);
         if (keys && keys_data_len <= BT_KEYS_STORAGE_LEN) {
             memcpy(keys->storage_start, keys_data, keys_data_len);
+            loaded++;
         }
     }
 }

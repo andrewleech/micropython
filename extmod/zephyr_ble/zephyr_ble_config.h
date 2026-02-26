@@ -965,8 +965,8 @@ int lll_csrand_get(void *buf, size_t len);  // Controller crypto stub
 #define CONFIG_BT_CTLR_ADV_DATA_BUF_MAX       1  // Double-buffered advertising data
 
 // --- LLCP Context Buffers ---
-#define CONFIG_BT_CTLR_LLCP_LOCAL_PROC_CTX_BUF_NUM   2
-#define CONFIG_BT_CTLR_LLCP_REMOTE_PROC_CTX_BUF_NUM  1
+#define CONFIG_BT_CTLR_LLCP_LOCAL_PROC_CTX_BUF_NUM   4
+#define CONFIG_BT_CTLR_LLCP_REMOTE_PROC_CTX_BUF_NUM  2
 
 // --- Connection Scheduling ---
 #define CONFIG_BT_CTLR_CENTRAL_SPACING        625  // Min spacing between central events (us)

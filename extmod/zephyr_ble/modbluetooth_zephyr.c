@@ -46,6 +46,8 @@
 #include <zephyr/settings/settings.h>
 #endif
 #include "host/att_internal.h"
+#include "host/conn_internal.h"
+#include "host/keys.h"
 #include "extmod/modbluetooth.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_work.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_settings.h"
@@ -716,9 +718,14 @@ static void mp_bt_zephyr_security_changed(struct bt_conn *conn, bt_security_t le
         return;
     }
 
-    // No pairing in progress - this is re-encryption with existing keys
-    // Fire callback immediately with bonded=false (no new bond created)
+    // No pairing in progress - this is re-encryption with existing keys.
+    // For the central role (initiator), report bonded=true if stored keys exist.
+    // For the peripheral role (responder), report bonded=false since no new
+    // pairing occurred — matching NimBLE behavior.
     bool bonded = false;
+    if (info.role == BT_HCI_ROLE_CENTRAL && conn->le.keys != NULL) {
+        bonded = true;
+    }
     DEBUG_printf("Firing _IRQ_ENCRYPTION_UPDATE: encrypted=%d authenticated=%d bonded=%d key_size=%d\n",
                  encrypted, authenticated, bonded, key_size);
     mp_bluetooth_gatts_on_encryption_update(conn_handle, encrypted, authenticated, bonded, key_size);
@@ -3476,13 +3483,35 @@ int mp_bluetooth_gap_pair(uint16_t conn_handle) {
         }
     }
 
+    // Check if this will be re-encryption (existing keys) or fresh pairing.
+    // For centrals with stored LTK, bt_smp_start_security() calls
+    // bt_conn_le_start_encryption() directly — no SMP pairing occurs, so
+    // pairing_complete_cb will never fire. In that case, don't set
+    // pairing_in_progress so security_changed fires immediately.
+    bool is_reencryption = false;
+    {
+        struct bt_keys *found_keys = bt_keys_find(BT_KEYS_LTK_P256, conn->id, &conn->le.dst);
+        if (!found_keys) {
+            found_keys = bt_keys_find(BT_KEYS_LTK, conn->id, &conn->le.dst);
+        }
+        struct bt_conn_info pair_info;
+        if (bt_conn_get_info(conn, &pair_info) == 0) {
+            // Central with stored keys → re-encryption, not SMP pairing
+            if (pair_info.role == BT_HCI_ROLE_CENTRAL && found_keys &&
+                (found_keys->keys & (BT_KEYS_LTK | BT_KEYS_LTK_P256))) {
+                is_reencryption = true;
+            }
+        }
+    }
+
     // Mark pairing in progress before starting SMP. This ensures security_changed
     // callback defers until pairing_complete provides the bonded flag.
     // On the central side, Zephyr's SMP doesn't call pairing_confirm for SC Just Works
     // when the central initiates (SMP_FLAG_SEC_REQ is not set), so pairing_confirm_cb
     // won't set this flag. Setting it here covers all pairing initiation paths.
+    // Skip for re-encryption: no SMP pairing means no pairing_complete_cb.
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
-    if (rp) {
+    if (rp && !is_reencryption) {
         rp->pairing_in_progress = true;
         rp->pending_security_update = false;
         rp->pairing_complete_received = false;
