@@ -126,9 +126,14 @@ static void mp_bluetooth_zephyr_controller_poll_rx(void) {
 // Strong override: process Zephyr work queues and reschedule timer.
 // The on-core controller delivers HCI events via ISR -> work queue -> sched_node.
 // This function processes those queued events.
+// Must guard against post-deinit execution since the scheduler node may
+// still be enqueued after poll_cleanup() stops the soft timer.
 static uint32_t run_task_count;
 void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     (void)node;
+    if (!mp_bluetooth_is_active()) {
+        return;
+    }
     run_task_count++;
     mp_bluetooth_zephyr_controller_poll_rx();
     mp_bluetooth_zephyr_poll();
