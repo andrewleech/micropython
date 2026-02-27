@@ -116,7 +116,9 @@ int mp_bluetooth_hci_uart_init(uint32_t port, uint32_t baudrate) {
 
 int mp_bluetooth_hci_uart_deinit(void) {
     DEBUG_printf("mp_bluetooth_hci_uart_deinit (stm32 rfcore)\n");
-    rfcore_ble_reset();
+    // Do NOT call rfcore_ble_reset() here. Sending BLE_INIT / HCI_Reset to
+    // CPU2 causes it to corrupt all of SRAM1. The controller is reset during
+    // init via rfcore_ble_reset() in mp_bluetooth_hci_uart_init().
     return 0;
 }
 

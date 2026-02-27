@@ -470,6 +470,16 @@ static void mp_zephyr_hci_soft_timer_callback(soft_timer_entry_t *self) {
 static void run_zephyr_hci_task(mp_sched_node_t *node) {
     (void)node;
 
+    // Guard: IPCC IRQ can fire after deinit, scheduling this function via
+    // mp_bluetooth_hci_poll_now(). Check if H:4 recv callback is still registered
+    // — it's set during hci_stm32_open() and cleared during hci_stm32_close().
+    // This allows processing during init (callback set) but blocks post-deinit
+    // (callback cleared by bt_disable → hci_stm32_close).
+    if (mp_bluetooth_zephyr_h4_get_recv_cb() == NULL) {
+        DEBUG_HCI_printf("port_run_task: GUARD BLOCKED (h4_recv_cb=NULL)\n");
+        return;
+    }
+
     // Process Zephyr BLE work queues and semaphores
     mp_bluetooth_zephyr_poll();
 
@@ -758,6 +768,11 @@ int bt_hci_transport_setup(const struct device *dev) {
     #if defined(STM32WB)
     // STM32WB: IPCC transport, no external controller
     // rfcore_ble_init() is called by mp_bluetooth_hci_uart_init()
+    //
+    // Re-enable IPCC NVIC IRQ — disabled by bt_hci_transport_teardown() on previous
+    // deinit cycle. rfcore_init() / ipcc_init() only runs once at boot from main.c,
+    // not on subsequent bt_enable() cycles, so we must re-enable here explicitly.
+    NVIC_EnableIRQ(IPCC_C1_RX_IRQn);
     return mp_bluetooth_hci_uart_init(MICROPY_HW_BLE_UART_ID, MICROPY_HW_BLE_UART_BAUDRATE);
 
     #else
@@ -780,7 +795,17 @@ int bt_hci_transport_teardown(const struct device *dev) {
     (void)dev;
     DEBUG_HCI_printf("bt_hci_transport_teardown\n");
 
-    #if !defined(STM32WB)
+    #if defined(STM32WB)
+    // Disable IPCC to prevent post-teardown callbacks from RF coprocessor.
+    // CPU2 can send unsolicited events after HCI_Reset which would trigger
+    // IPCC_C1_RX_IRQHandler → mp_bluetooth_hci_poll_now() into freed state.
+    // Re-enabled in bt_hci_transport_setup() on next bt_enable().
+    NVIC_DisableIRQ(IPCC_C1_RX_IRQn);
+    NVIC_ClearPendingIRQ(IPCC_C1_RX_IRQn);
+    // Barrier + delay to ensure in-flight IPCC handler completes
+    __DSB();
+    __ISB();
+    #else
     mp_bluetooth_hci_controller_deinit();
     #endif
 
@@ -789,7 +814,12 @@ int bt_hci_transport_teardown(const struct device *dev) {
 
 // Main polling function (called by mpbthciport.c via mp_bluetooth_hci_poll)
 void mp_bluetooth_hci_poll(void) {
-    // Call run_zephyr_hci_task directly to process HCI events
+    if (!mp_bluetooth_is_active()) {
+        DEBUG_HCI_printf("mp_bluetooth_hci_poll: NOT ACTIVE, skipping\n");
+        return;
+    }
+
+    // Call mp_bluetooth_zephyr_port_run_task directly to process HCI events
     // This includes: mp_bluetooth_zephyr_poll(), RX queue processing,
     // work queue processing, and reading HCI packets from transport
     run_zephyr_hci_task(NULL);
@@ -817,6 +847,14 @@ void mp_bluetooth_zephyr_port_init(void) {
         mp_zephyr_hci_soft_timer_callback
         );
     DEBUG_HCI_printf("[INIT] soft_timer_static_init completed\n");
+
+    #if defined(STM32WB)
+    // Re-enable IPCC IRQ — disabled during deinit (mp_bluetooth_zephyr_port_deinit).
+    // In SUSPENDED mode, bt_hci_transport_setup() is not called on re-init, so
+    // this is the only place the IRQ gets re-enabled for subsequent BLE cycles.
+    // On first boot this is a harmless no-op (IRQ is already enabled from ipcc_init).
+    NVIC_EnableIRQ(IPCC_C1_RX_IRQn);
+    #endif
 }
 
 // Schedule HCI poll in N milliseconds
@@ -873,9 +911,35 @@ void mp_bluetooth_hci_poll_now(void) {
 
 // Port deinit - called during mp_bluetooth_deinit()
 void mp_bluetooth_zephyr_port_deinit(void) {
-    // Reset GATT memory pool for next init cycle
-    extern void mp_bluetooth_zephyr_gatt_pool_reset(void);
+    #if defined(STM32WB)
+    // Disable IPCC IRQ FIRST to prevent post-deinit callbacks from CPU2.
+    // In SUSPENDED mode bt_hci_transport_teardown() is not called, so this
+    // is the only place the IRQ gets disabled. Re-enabled in
+    // bt_hci_transport_setup() on next init.
+    NVIC_DisableIRQ(IPCC_C1_RX_IRQn);
+    NVIC_ClearPendingIRQ(IPCC_C1_RX_IRQn);
+    __DSB();
+    __ISB();
+    #endif
+
+    // Drain any queued RX buffers to prevent net_buf leaks
+    struct net_buf *buf;
+    while ((buf = rx_queue_get()) != NULL) {
+        net_buf_unref(buf);
+    }
+    rx_queue_head = 0;
+    rx_queue_tail = 0;
+
+    // Clear any partial H:4 parse state
+    mp_bluetooth_zephyr_h4_reset();
+
+    // Clean up shared soft timer and sched_node
+    mp_bluetooth_zephyr_poll_cleanup();
+
+    // Reset GATT memory pool for next init cycle (if using bump allocator)
+    #if MICROPY_BLUETOOTH_ZEPHYR_GATT_POOL
     mp_bluetooth_zephyr_gatt_pool_reset();
+    #endif
 }
 
 // ============================================================================
