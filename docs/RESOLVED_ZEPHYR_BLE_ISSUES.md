@@ -85,3 +85,17 @@ Historical record of issues encountered and fixed during Zephyr BLE integration.
 ## BLE Perf Test Fixes (RP2 Pico W)
 - `perf_gatt_notify.py`: raw ATT PDU fallback for non-local handles
 - `perf_l2cap.py`: fixed L2CAP SDU buffer sizing, increased CONFIG_BT_L2CAP_TX_MTU to 512, listen-before-advertise race (c0db699afa)
+
+## STM32WB55 SRAM1 Corruption on BLE Deinit
+- `rfcore_ble_reset()` in `mp_bluetooth_hci_uart_deinit()` sent HCI_Reset to CPU2 (M0+ RF coprocessor) which corrupted all 192KB of SRAM1 during reinit
+- The Zephyr host also sent HCI_Reset via `bt_enable()` → `common_init()` → `hci_reset()`
+- Fixed: Removed `rfcore_ble_reset()` from deinit path (controller reset only during init). Added `drv_quirk_no_reset()` returning true for `__ZEPHYR_BLE_STM32_PORT__` builds in `lib/zephyr/subsys/bluetooth/host/hci_core.c`
+- Also added IPCC NVIC IRQ disable during teardown/deinit to prevent post-deinit callbacks from CPU2, re-enabled during setup/init
+- Commit: 8fb70be3e8
+
+## Scheduler Node NULL Callback Crash on BLE Deinit
+- `mp_bluetooth_zephyr_poll_cleanup()` set `sched_node.callback = NULL` while the node was already enqueued in the scheduler queue
+- `mp_sched_run_pending()` dequeued the node, loaded callback (NULL), called `callback(node)` → HardFault at PC=0x00000000 (CFSR=INVSTATE)
+- Affected all ports using the Zephyr BLE poll infrastructure, observed on STM32WB55
+- Fixed: Removed NULL assignment from `poll_cleanup()`. Added `mp_bluetooth_is_active()` guard to the weak default `run_task` and the nRF port override (STM32 and RP2 already had guards)
+- Commit: bcc9d5198a
