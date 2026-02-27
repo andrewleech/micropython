@@ -62,9 +62,14 @@ void mp_bluetooth_zephyr_port_poll_now(void) {
 
 // Weak default task: just runs the shared poll function.
 // Ports override this to add HCI transport reading, event sorting, etc.
+// Must guard against post-deinit execution since the scheduler node may
+// still be enqueued after poll_cleanup() stops the soft timer.
 __attribute__((weak))
 void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     (void)node;
+    if (!mp_bluetooth_is_active()) {
+        return;
+    }
     mp_bluetooth_zephyr_poll();
 }
 
@@ -98,14 +103,14 @@ void mp_bluetooth_zephyr_poll_stop_timer(void) {
     soft_timer_remove(&mp_zephyr_hci_soft_timer);
 }
 
-// Clean up shared soft timer and sched_node state.
+// Clean up shared soft timer.
 // Called by the weak default port_deinit and by port overrides.
+// Note: does NOT clear sched_node.callback — if the node is already enqueued
+// in the scheduler, setting callback to NULL would cause a NULL function call
+// when the scheduler runs it. Instead, port run_task callbacks must guard
+// against post-deinit execution (e.g. check mp_bluetooth_is_active()).
 void mp_bluetooth_zephyr_poll_cleanup(void) {
     soft_timer_remove(&mp_zephyr_hci_soft_timer);
-    // Clear the scheduler node callback to prevent execution after deinit.
-    // The scheduler queue persists across soft reset, and scheduler.c has a
-    // safety check that skips NULL callbacks.
-    mp_zephyr_hci_sched_node.callback = NULL;
 }
 
 // Weak default port_deinit: just clean up timer/sched.
