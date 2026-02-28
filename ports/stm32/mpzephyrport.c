@@ -47,6 +47,7 @@ extern void mp_bluetooth_hci_poll_now_default(void);
 
 #include <string.h>
 
+#include "uart.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_hal.h"
 #include "zephyr/device.h"
 #include <zephyr/net_buf.h>
@@ -158,6 +159,7 @@ static bool mp_bluetooth_zephyr_buffers_available(void) {
     return false;
 }
 
+#if defined(STM32WB)
 // HCI Event Priority Sorting for STM32WB55 IPCC
 // The RF coprocessor can send CONNECTION_COMPLETE and DISCONNECT_COMPLETE
 // in the same IPCC transaction, causing wrong event ordering.
@@ -276,6 +278,7 @@ static void hci_event_sort_batch(struct net_buf **batch, int count) {
         batch[j + 1] = key;
     }
 }
+#endif // defined(STM32WB)
 
 // Reset H:4 parser state
 static void h4_parser_reset(void) {
@@ -488,24 +491,22 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
     }
 
     // Process any queued RX buffers (from interrupt context)
+    #if defined(STM32WB)
     // STM32WB55 IPCC Fix: Batch collect and sort events to ensure CONNECTION_COMPLETE
-    // is processed before DISCONNECT_COMPLETE when both arrive in same transaction.
+    // is processed before DISCONNECT_COMPLETE when both arrive in same IPCC transaction.
     #define HCI_EVENT_BATCH_SIZE 16
     struct net_buf *batch[HCI_EVENT_BATCH_SIZE];
     int batch_count = 0;
 
-    // Phase 1: Collect all queued events into batch
     struct net_buf *buf;
     while (batch_count < HCI_EVENT_BATCH_SIZE && (buf = rx_queue_get()) != NULL) {
         batch[batch_count++] = buf;
     }
 
-    // Phase 2: Sort batch by priority (connection events before disconnect)
     if (batch_count > 1) {
         hci_event_sort_batch(batch, batch_count);
     }
 
-    // Phase 3: Process sorted batch
     for (int i = 0; i < batch_count; i++) {
         buf = batch[i];
         int ret = recv_cb(hci_dev, buf);
@@ -524,6 +525,27 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
         mp_bluetooth_zephyr_work_process();
         mp_bluetooth_zephyr_hci_processing_depth--;
     }
+    #else
+    // UART transport: events arrive one at a time, no reordering needed.
+    {
+        struct net_buf *buf;
+        int count = 0;
+        while ((buf = rx_queue_get()) != NULL) {
+            int ret = mp_bluetooth_zephyr_h4_get_recv_cb()(mp_bluetooth_zephyr_h4_get_dev(), buf);
+            if (ret < 0) {
+                error_printf("recv_cb failed: %d\n", ret);
+                net_buf_unref(buf);
+            }
+            count++;
+        }
+
+        if (count > 0 && mp_bluetooth_zephyr_hci_processing_depth == 0) {
+            mp_bluetooth_zephyr_hci_processing_depth++;
+            mp_bluetooth_zephyr_work_process();
+            mp_bluetooth_zephyr_hci_processing_depth--;
+        }
+    }
+    #endif
 
     // Check buffer availability before reading from IPCC.
     // If no buffers available, process work queue to free some.
@@ -575,44 +597,56 @@ void mp_bluetooth_zephyr_hci_uart_wfi(void) {
     // for proper HCI event processing. It must be called BEFORE processing buffers.
     run_zephyr_hci_task(NULL);
 
-    // Process any remaining queued RX buffers directly
-    // This handles buffers that arrived after run_zephyr_hci_task() completed
-    // Apply same batching/sorting as run_zephyr_hci_task for consistency
-    struct net_buf *wfi_batch[HCI_EVENT_BATCH_SIZE];
-    int wfi_batch_count = 0;
-    struct net_buf *buf;
-    while (wfi_batch_count < HCI_EVENT_BATCH_SIZE && (buf = rx_queue_get()) != NULL) {
-        wfi_batch[wfi_batch_count++] = buf;
-    }
+    // Process any remaining queued RX buffers that arrived after port_run_task completed
+    #if defined(STM32WB)
+    {
+        struct net_buf *wfi_batch[HCI_EVENT_BATCH_SIZE];
+        int wfi_batch_count = 0;
+        struct net_buf *buf;
+        while (wfi_batch_count < HCI_EVENT_BATCH_SIZE && (buf = rx_queue_get()) != NULL) {
+            wfi_batch[wfi_batch_count++] = buf;
+        }
 
-    // CRITICAL: Process work queue BEFORE processing events
-    // This ensures connection callbacks fire before disconnect events are processed
-    if (wfi_batch_count > 0) {
-        mp_bluetooth_zephyr_poll();
-    }
+        if (wfi_batch_count > 0) {
+            mp_bluetooth_zephyr_poll();
+        }
 
-    // Sort batch by priority (connection events before disconnect)
-    if (wfi_batch_count > 1) {
-        hci_event_sort_batch(wfi_batch, wfi_batch_count);
-    }
+        if (wfi_batch_count > 1) {
+            hci_event_sort_batch(wfi_batch, wfi_batch_count);
+        }
 
-    // Process events
-    for (int i = 0; i < wfi_batch_count; i++) {
-        recv_cb(hci_dev, wfi_batch[i]);
-    }
+        for (int i = 0; i < wfi_batch_count; i++) {
+            mp_bluetooth_zephyr_h4_get_recv_cb()(mp_bluetooth_zephyr_h4_get_dev(), wfi_batch[i]);
+        }
 
-    // Process work queue after wfi events (same pattern as run_zephyr_hci_task)
-    // Only outermost call processes work to prevent re-entrancy
-    extern volatile int mp_bluetooth_zephyr_hci_processing_depth;
-    if (wfi_batch_count > 0 && mp_bluetooth_zephyr_hci_processing_depth == 0) {
-        mp_bluetooth_zephyr_hci_processing_depth++;
-        mp_bluetooth_zephyr_work_process();
-        mp_bluetooth_zephyr_hci_processing_depth--;
+        if (wfi_batch_count > 0 && mp_bluetooth_zephyr_hci_processing_depth == 0) {
+            mp_bluetooth_zephyr_hci_processing_depth++;
+            mp_bluetooth_zephyr_work_process();
+            mp_bluetooth_zephyr_hci_processing_depth--;
+        }
     }
+    #else
+    {
+        struct net_buf *buf;
+        int count = 0;
+        while ((buf = rx_queue_get()) != NULL) {
+            mp_bluetooth_zephyr_h4_get_recv_cb()(mp_bluetooth_zephyr_h4_get_dev(), buf);
+            count++;
+        }
 
+        if (count > 0 && mp_bluetooth_zephyr_hci_processing_depth == 0) {
+            mp_bluetooth_zephyr_hci_processing_depth++;
+            mp_bluetooth_zephyr_work_process();
+            mp_bluetooth_zephyr_hci_processing_depth--;
+        }
+    }
+    #endif
+
+    #if defined(STM32WB)
     // Give IPCC hardware minimal time to complete any ongoing transfers
-    // 100μs is sufficient for hardware without introducing significant latency
+    // 100us is sufficient for hardware without introducing significant latency
     mp_hal_delay_us(100);
+    #endif
 }
 
 // Stack monitoring helper
@@ -776,16 +810,23 @@ int bt_hci_transport_setup(const struct device *dev) {
     return mp_bluetooth_hci_uart_init(MICROPY_HW_BLE_UART_ID, MICROPY_HW_BLE_UART_BAUDRATE);
 
     #else
-    // Other STM32: UART transport with external controller
-    // Initialize external BLE controller
-    int ret = mp_bluetooth_hci_controller_init();
+    // Other STM32: UART transport with external controller (e.g. CYW43 on PYBD)
+    // UART must be initialized before controller init — the CYW43 firmware
+    // download uses mp_bluetooth_hci_uart_write/readchar via HAL macros.
+    int ret = mp_bluetooth_hci_uart_init(MICROPY_HW_BLE_UART_ID, MICROPY_HW_BLE_UART_BAUDRATE);
+    if (ret != 0) {
+        error_printf("UART init failed: %d\n", ret);
+        return ret;
+    }
+
+    // Initialize external BLE controller (power on, download firmware)
+    ret = mp_bluetooth_hci_controller_init();
     if (ret != 0) {
         error_printf("Controller init failed: %d\n", ret);
         return ret;
     }
 
-    // Initialize UART HCI transport
-    return mp_bluetooth_hci_uart_init(MICROPY_HW_BLE_UART_ID, MICROPY_HW_BLE_UART_BAUDRATE);
+    return 0;
     #endif
 }
 

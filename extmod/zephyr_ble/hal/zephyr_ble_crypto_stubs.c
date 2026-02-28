@@ -51,8 +51,8 @@ int bt_rand(void *buf, size_t len) {
     }
     return 0;
 
-    #elif defined(STM32WB)
-    // STM32WB: Use hardware RNG peripheral
+    #elif defined(STM32_HAL_H)
+    // STM32: Use hardware RNG peripheral (rng_get() available on all STM32 ports)
     extern uint32_t rng_get(void);
     uint8_t *p = (uint8_t *)buf;
     for (size_t i = 0; i < len; i++) {
