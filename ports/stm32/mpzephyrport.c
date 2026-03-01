@@ -48,6 +48,7 @@ extern void mp_bluetooth_hci_poll_now_default(void);
 #include <string.h>
 
 #include "uart.h"
+#include "rfcore.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_hal.h"
 #include "zephyr/device.h"
 #include <zephyr/net_buf.h>
@@ -846,6 +847,8 @@ int bt_hci_transport_teardown(const struct device *dev) {
     // Barrier + delay to ensure in-flight IPCC handler completes
     __DSB();
     __ISB();
+    // Clean all IPCC channel state so no stale messages carry over.
+    rfcore_ipcc_reset();
     #else
     mp_bluetooth_hci_controller_deinit();
     #endif
@@ -889,13 +892,9 @@ void mp_bluetooth_zephyr_port_init(void) {
         );
     DEBUG_HCI_printf("[INIT] soft_timer_static_init completed\n");
 
-    #if defined(STM32WB)
-    // Re-enable IPCC IRQ — disabled during deinit (mp_bluetooth_zephyr_port_deinit).
-    // In SUSPENDED mode, bt_hci_transport_setup() is not called on re-init, so
-    // this is the only place the IRQ gets re-enabled for subsequent BLE cycles.
-    // On first boot this is a harmless no-op (IRQ is already enabled from ipcc_init).
-    NVIC_EnableIRQ(IPCC_C1_RX_IRQn);
-    #endif
+    // Note: STM32WB IPCC IRQ is re-enabled by bt_hci_transport_setup() during
+    // bt_enable(). No need to enable it here — full shutdown always goes through
+    // the transport setup/teardown cycle.
 }
 
 // Schedule HCI poll in N milliseconds
@@ -953,10 +952,9 @@ void mp_bluetooth_hci_poll_now(void) {
 // Port deinit - called during mp_bluetooth_deinit()
 void mp_bluetooth_zephyr_port_deinit(void) {
     #if defined(STM32WB)
-    // Disable IPCC IRQ FIRST to prevent post-deinit callbacks from CPU2.
-    // In SUSPENDED mode bt_hci_transport_teardown() is not called, so this
-    // is the only place the IRQ gets disabled. Re-enabled in
-    // bt_hci_transport_setup() on next init.
+    // Safety: ensure IPCC IRQ is disabled. bt_disable() → hci_stm32_close() →
+    // bt_hci_transport_teardown() should have already done this, but guard
+    // against partial teardown (e.g. bt_disable() failure).
     NVIC_DisableIRQ(IPCC_C1_RX_IRQn);
     NVIC_ClearPendingIRQ(IPCC_C1_RX_IRQn);
     __DSB();

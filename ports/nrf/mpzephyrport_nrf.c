@@ -99,6 +99,19 @@ const struct device __device_dts_ord_0 = {
 };
 #endif
 
+#if MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
+// Drain all pending mayflies to ensure no stale jobs survive ll_deinit().
+// Without this, mayfly job link pointers persist across the deinit/init
+// cycle and corrupt memq chains (mayfly_init is one-shot guarded).
+// Called from modbluetooth_zephyr.c before bt_disable().
+void mp_bluetooth_zephyr_controller_drain_mayflies(void) {
+    for (int i = 0; i < 50; i++) {
+        mayfly_run(TICKER_USER_ID_ULL_HIGH);
+        mayfly_run(TICKER_USER_ID_ULL_LOW);
+    }
+}
+#endif
+
 // Process all pending controller mayflies and then poll HCI rx.
 //
 // The controller's link layer queues deferred work (mayflies) at different

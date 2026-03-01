@@ -622,8 +622,132 @@ static const struct {
     0, // HwVersion
 };
 
+void rfcore_ipcc_reset(void) {
+    DEBUG_printf("rfcore_ipcc_reset\n");
+
+    // Clear CPU1's IPCC channel flags and disable CPU1's channels.
+    // Only touch CPU1 (C1) registers — writing to C2 registers from CPU1
+    // disables CPU2's interrupt masks, preventing it from receiving commands.
+    LL_C1_IPCC_ClearFlag_CHx(IPCC,
+        LL_IPCC_CHANNEL_1 | LL_IPCC_CHANNEL_2 | LL_IPCC_CHANNEL_3 |
+        LL_IPCC_CHANNEL_4 | LL_IPCC_CHANNEL_5 | LL_IPCC_CHANNEL_6);
+
+    // Disable all CPU1 transmit and receive channel interrupts.
+    LL_C1_IPCC_DisableTransmitChannel(IPCC,
+        LL_IPCC_CHANNEL_1 | LL_IPCC_CHANNEL_2 | LL_IPCC_CHANNEL_3 |
+        LL_IPCC_CHANNEL_4 | LL_IPCC_CHANNEL_5 | LL_IPCC_CHANNEL_6);
+    LL_C1_IPCC_DisableReceiveChannel(IPCC,
+        LL_IPCC_CHANNEL_1 | LL_IPCC_CHANNEL_2 | LL_IPCC_CHANNEL_3 |
+        LL_IPCC_CHANNEL_4 | LL_IPCC_CHANNEL_5 | LL_IPCC_CHANNEL_6);
+}
+
+// SHCI event codes from STM32_WPAN middleware / BTstack.
+// CPU2 sends SHCI_SUB_EVT_CODE_READY on the system channel after boot or
+// reinit to signal it's ready to accept commands.
+#define SHCI_EVTCODE                0xFF
+#define SHCI_SUB_EVT_CODE_READY     0x9200
+#define SHCI_WIRELESS_FW_RUNNING    0x00
+
+// Wait for CPU2 to signal readiness on the IPCC system channel.
+//
+// After power-on (rfcore_init → C2BOOT) or after a full reinit, CPU2 sends
+// an SHCI_SUB_EVT_CODE_READY event as a TL_EvtPacket on the system queue:
+//   body[0] = 0x12 (HCI_KIND_VENDOR_EVENT)
+//   body[1] = 0xFF (SHCI_EVTCODE)
+//   body[2] = plen (0x03)
+//   body[3..4] = subevtcode LE (0x00 0x92 = SHCI_SUB_EVT_CODE_READY)
+//   body[5] = 0x00 (WIRELESS_FW_RUNNING)
+//
+// This function polls for that event with a timeout. On success it consumes
+// the event (and any other queued system events) via tl_check_msg.
+//
+// BTstack implements this as an interrupt-driven state machine
+// (CPU2_STATE_WAIT_FOR_STARTED → CPU2_STATE_W2_INIT_BLE). ST middleware uses
+// an RTOS callback via shci_init(). Both validate the READY subevent code.
+// We use polling which matches rfcore.c's existing architecture.
+//
+// Returns true if READY was detected, false on timeout.
+bool rfcore_ble_wait_ready(uint32_t timeout_ms) {
+    DEBUG_printf("rfcore_ble_wait_ready: waiting up to %lu ms\n",
+        (unsigned long)timeout_ms);
+    uint32_t t0 = mp_hal_ticks_ms();
+
+    while (mp_hal_ticks_ms() - t0 < timeout_ms) {
+        // Check if CPU2 has placed anything on the system channel.
+        if (LL_C2_IPCC_IsActiveFlag_CHx(IPCC, IPCC_CH_SYS)) {
+            // Walk the sys_queue to look for the READY event before consuming.
+            // The queue is a circular doubly-linked list with ipcc_mem_sys_queue
+            // as the sentinel. Nodes are in shared SRAM2, body[] starts after
+            // the 8-byte tl_list_node_t header (next + prev pointers).
+            volatile tl_list_node_t *cur = ipcc_mem_sys_queue.next;
+            bool found_ready = false;
+            while (cur != &ipcc_mem_sys_queue) {
+                uint8_t *body = (uint8_t *)cur->body;
+                // Check for SHCI READY: type=0x12, evtcode=0xFF, subevt=0x9200 LE
+                if (body[0] == HCI_KIND_VENDOR_EVENT
+                    && body[1] == SHCI_EVTCODE
+                    && body[2] >= 3) {
+                    uint16_t subevtcode = body[3] | ((uint16_t)body[4] << 8);
+                    if (subevtcode == SHCI_SUB_EVT_CODE_READY) {
+                        DEBUG_printf("rfcore_ble_wait_ready: READY event "
+                            "received (rsp=%d, %s)\n", body[5],
+                            body[5] == SHCI_WIRELESS_FW_RUNNING
+                                ? "wireless_fw" : "rss_fw");
+                        found_ready = true;
+                        break;
+                    }
+                }
+                cur = cur->next;
+            }
+
+            // Consume all queued system events (including READY).
+            tl_check_msg(&ipcc_mem_sys_queue, IPCC_CH_SYS, NULL);
+
+            if (found_ready) {
+                return true;
+            }
+            // C2 sent something on sys channel but it wasn't READY.
+            // Keep polling in case READY comes next.
+        }
+        mp_hal_delay_ms(1);
+    }
+
+    DEBUG_printf("rfcore_ble_wait_ready: timeout\n");
+    return false;
+}
+
 void rfcore_ble_init(void) {
     DEBUG_printf("rfcore_ble_init\n");
+
+    // Re-enable IPCC channels needed for BLE communication.
+    // On first boot, ipcc_init() already set these up. On subsequent
+    // init cycles (after rfcore_ipcc_reset() in transport teardown),
+    // CPU1's channels were disabled and need to be restored.
+    LL_C1_IPCC_EnableIT_RXO(IPCC);
+    LL_C1_IPCC_EnableReceiveChannel(IPCC, IPCC_CH_BLE);
+
+    #if MICROPY_HW_RFCORE_WAIT_READY
+    // Wait for CPU2 to confirm it's ready before sending commands.
+    // On first boot after rfcore_init(), CPU2 may still be starting up.
+    // On subsequent BLE cycles, the READY event from the previous boot is
+    // typically already in the sys_queue and is consumed immediately.
+    //
+    // This is modelled on BTstack's CPU2_STATE_WAIT_FOR_STARTED check and
+    // ST middleware's shci_init() → SHCI_SUB_EVT_CODE_READY path. Without
+    // this, rfcore_ble_reset() can race ahead of CPU2 boot — the BLE_INIT
+    // vendor command either times out or gets a corrupt response.
+    if (!rfcore_ble_wait_ready(5000)) {
+        // CPU2 didn't respond — try full reinit (reboot CPU2)
+        DEBUG_printf("rfcore_ble_init: CPU2 not ready, reinitialising\n");
+        LL_RCC_HSI_Disable();
+        mp_hal_delay_ms(100);
+        LL_RCC_HSI_Enable();
+        rfcore_init();
+        if (!rfcore_ble_wait_ready(5000)) {
+            DEBUG_printf("rfcore_ble_init: CPU2 still not ready after reinit\n");
+        }
+    }
+    #endif
 
     // Configure and reset the BLE controller.
     if (!rfcore_ble_reset()) {

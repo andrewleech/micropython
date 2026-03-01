@@ -879,20 +879,6 @@ bool mp_bluetooth_zephyr_work_drain(void) {
     return any_work;
 }
 
-// Reset only the guard flags and recursion counters, not the queue structure.
-// Safe for SUSPENDED mode where the on-core controller is still running and
-// the work queue infrastructure (global_work_q, k_sys_work_q, pending flags
-// on work items) must remain intact for the next activation cycle.
-void mp_bluetooth_zephyr_work_reset_guards(void) {
-    regular_work_processor_running = false;
-    init_work_processor_running = false;
-    in_bt_enable_init = false;
-    in_sys_work_q_context = false;
-    mp_bluetooth_zephyr_in_wait_loop = false;
-    mp_bluetooth_zephyr_hci_processing_depth = 0;
-    work_process_depth = 0;
-}
-
 // Reset work queue state for clean re-initialization
 // This clears the global work queue list and resets the system work queue
 // Called from mp_bluetooth_deinit() to prevent stale queue linkages

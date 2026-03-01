@@ -576,6 +576,14 @@
 #define MICROPY_HW_STM32WB_FLASH_SYNCRONISATION (1)
 #endif
 
+// Wait for CPU2 READY event before sending BLE commands during rfcore_ble_init().
+// Matches BTstack / ST middleware approach of confirming CPU2 readiness via
+// SHCI_SUB_EVT_CODE_READY on the IPCC system channel. Disabled by default;
+// enable if BLE init reliability issues are observed on warm reinit paths.
+#ifndef MICROPY_HW_RFCORE_WAIT_READY
+#define MICROPY_HW_RFCORE_WAIT_READY (0)
+#endif
+
 // RF core BLE configuration (a board should define
 // MICROPY_HW_RFCORE_BLE_NUM_GATT_ATTRIBUTES to override all values)
 #ifndef MICROPY_HW_RFCORE_BLE_NUM_GATT_ATTRIBUTES
