@@ -914,11 +914,17 @@ int mp_bluetooth_init(void) {
         // This must also be started before bt_enable() to process work items
         mp_bluetooth_zephyr_work_thread_start();
 
-        // Reset net_buf pool state before BLE initialization.
+        // Reset net_buf pool state before first BLE initialization.
         // After a soft reset, pools retain stale runtime state (free list,
         // uninit_count) from the previous session. This causes crashes when
         // bt_enable() tries to allocate buffers from corrupted pools.
-        mp_net_buf_pool_state_reset();
+        // Skip this on SUSPENDED reinit: the on-core controller is still
+        // running and holds active references to pool buffers. Resetting
+        // the pool infrastructure under it corrupts controller state and
+        // prevents HCI events (e.g. connection complete) from being delivered.
+        if (current_state == MP_BLUETOOTH_ZEPHYR_BLE_STATE_OFF) {
+            mp_net_buf_pool_state_reset();
+        }
 
         // Clear any stale bond keys from previous session. If bt_disable()
         // failed (e.g. CYW43 SPI hang), bt_keys_reset() in bt_disable was
@@ -1101,8 +1107,11 @@ static void mp_bt_zephyr_count_conn_cb(struct bt_conn *conn, void *data) {
 }
 
 // Disconnect all LE connections and wait for them to complete.
-// On native Zephyr the BT RX thread processes disconnect events independently
-// so we just need to yield and check periodically.
+// Must process HCI events and work items during the wait so that:
+// 1. HCI Disconnect Complete events are received from the controller
+// 2. Zephyr work items (state transitions, cleanup) run to release connection refs
+// Without this, k_sleep alone just delays without processing, leaving stale connections
+// in the pool that block subsequent gap_connect calls with EINVAL.
 static void mp_bt_zephyr_disconnect_all_wait(void) {
     int count = 0;
     bt_conn_foreach(BT_CONN_TYPE_LE, mp_bt_zephyr_disconnect_count_cb, &count);
@@ -1110,10 +1119,12 @@ static void mp_bt_zephyr_disconnect_all_wait(void) {
         return;
     }
     DEBUG_printf("mp_bluetooth_deinit: waiting for %d connection(s) to disconnect\n", count);
-    // Wait up to 1 second for disconnections to complete.
-    // The BT RX thread runs at higher priority and will process events.
-    for (int i = 0; i < 100; i++) {
-        k_sleep(K_MSEC(10));
+    // Wait up to 500ms for graceful disconnections to complete.
+    // Process HCI events and work queue on each iteration so disconnect
+    // responses from the controller are handled and connection cleanup runs.
+    for (int i = 0; i < 50; i++) {
+        mp_bluetooth_zephyr_hci_uart_wfi();
+        mp_hal_delay_ms(10);
         count = 0;
         bt_conn_foreach(BT_CONN_TYPE_LE, mp_bt_zephyr_count_conn_cb, &count);
         if (count == 0) {
@@ -1121,7 +1132,16 @@ static void mp_bt_zephyr_disconnect_all_wait(void) {
             return;
         }
     }
-    DEBUG_printf("mp_bluetooth_deinit: %d connection(s) still active after timeout\n", count);
+    // Graceful disconnect timed out. Force-destroy remaining connections by
+    // transitioning them directly to DISCONNECTED state. This enqueues
+    // deferred_work for each connection which releases the final bt_conn ref.
+    DEBUG_printf("mp_bluetooth_deinit: force-destroying %d stale connection(s)\n", count);
+    bt_conn_cleanup_all();
+    // Drain work queue to execute deferred_work handlers and release conn refs.
+    for (int i = 0; i < 10; i++) {
+        mp_bluetooth_zephyr_hci_uart_wfi();
+        mp_hal_delay_ms(1);
+    }
 }
 #endif
 
@@ -1145,6 +1165,34 @@ int mp_bluetooth_deinit(void) {
         // Disconnect any active connections and wait for completion.
         // Connection pool slots must be freed before next bt_le_adv_start.
         mp_bt_zephyr_disconnect_all_wait();
+
+        #if CONFIG_BT_GATT_DYNAMIC_DB
+        // Unregister GATT services from Zephyr's database while we still have
+        // the service pointers. After soft reset, GC reinitializes root_pointers
+        // with n_services=0, losing our references. If we don't unregister here,
+        // the stale services remain in Zephyr's GATT database with freed attribute
+        // data, causing GATTC discovery to return garbage or empty results.
+        if (MP_STATE_PORT(bluetooth_zephyr_root_pointers)) {
+            mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
+            for (size_t i = 0; i < rp->n_services; ++i) {
+                if (rp->services[i] != NULL) {
+                    bt_gatt_service_unregister(rp->services[i]);
+                    mp_bt_zephyr_free_service(rp->services[i]);
+                    rp->services[i] = NULL;
+                }
+            }
+            rp->n_services = 0;
+        }
+        #endif
+
+        // Force-reset connection pool slots. disconnect_all_wait() sends HCI
+        // disconnect commands, but in SUSPENDED mode the deferred_work handler
+        // that releases the final bt_conn ref may not execute before we return.
+        // Stale connection slots with refcount > 0 cause bt_conn_le_create()
+        // to return EINVAL on the next activation cycle.
+        extern void bt_conn_pool_reset(void);
+        bt_conn_pool_reset();
+
         return 0;
     }
     #endif
@@ -1162,9 +1210,19 @@ int mp_bluetooth_deinit(void) {
     // By stopping HCI RX task first, all HCI operations fall back to polling mode.
     mp_bluetooth_zephyr_hci_rx_task_stop();
 
-    // Clean up pre-allocated connection object
+    // Clean up pre-allocated connection object.
+    // If gap_connect() was called but the connected callback hasn't fired yet,
+    // next_conn->conn holds a bt_conn ref that must be released to free the
+    // connection pool slot. Without this, the slot stays allocated with
+    // refcount > 0 across bt_disable()/bt_enable() cycles, causing EINVAL
+    // on the next gap_connect() to the same peer address.
     if (mp_bt_zephyr_next_conn != NULL) {
-        DEBUG_printf("mp_bluetooth_deinit: cleaning up pre-allocated connection\n");
+        if (mp_bt_zephyr_next_conn->conn != NULL) {
+            DEBUG_printf("mp_bluetooth_deinit: unreffing pending connection %p\n",
+                mp_bt_zephyr_next_conn->conn);
+            bt_conn_unref(mp_bt_zephyr_next_conn->conn);
+            mp_bt_zephyr_next_conn->conn = NULL;
+        }
         mp_bt_zephyr_next_conn = NULL;
     }
 
@@ -1194,6 +1252,22 @@ int mp_bluetooth_deinit(void) {
     // connections are cleanly disconnected before bt_disable() runs.
     mp_bt_zephyr_disconnect_all_wait();
     #endif
+
+    // Release bt_conn refs held by our stored connection list.
+    // The disconnect callbacks should have already released most of these,
+    // but if deferred_work didn't execute (work queue stall) or the disconnect
+    // callback was skipped, refs will still be held. Unreleased refs keep
+    // connection pool slots allocated, causing EINVAL on next gap_connect().
+    if (MP_STATE_PORT(bluetooth_zephyr_root_pointers)) {
+        for (mp_bt_zephyr_conn_t *c = MP_STATE_PORT(bluetooth_zephyr_root_pointers)->connections;
+             c != NULL; c = c->next) {
+            if (c->conn != NULL) {
+                DEBUG_printf("mp_bluetooth_deinit: releasing stored conn ref %p\n", c->conn);
+                bt_conn_unref(c->conn);
+                c->conn = NULL;
+            }
+        }
+    }
 
     #if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
     // Disconnect active L2CAP channel but do NOT free the struct yet.
@@ -1225,6 +1299,9 @@ int mp_bluetooth_deinit(void) {
         }
     }
     MP_STATE_PORT(bluetooth_zephyr_root_pointers)->n_services = 0;
+    #if MICROPY_BLUETOOTH_ZEPHYR_GATT_POOL
+    mp_bluetooth_zephyr_gatt_pool_reset();
+    #endif
     #endif
 
     #if defined(__ZEPHYR__) || MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
@@ -1234,23 +1311,34 @@ int mp_bluetooth_deinit(void) {
     mp_bluetooth_zephyr_ble_state = MP_BLUETOOTH_ZEPHYR_BLE_STATE_SUSPENDED;
 
     #if !defined(__ZEPHYR__)
-    // HAL builds (non-native Zephyr): drain work queue and reset net_buf pools.
-    // In SUSPENDED mode we skip bt_disable() and Phase 4, but the HAL work queue
-    // and net_buf pools accumulate stale state that must be cleaned up before
-    // the next bt_enable(). Native Zephyr manages these via real kernel threads.
+    // HAL builds (non-native Zephyr): drain work queue and clean up connections.
+    // In SUSPENDED mode we skip bt_disable(), but pending work from the
+    // disconnected session must be processed and connection pool slots freed.
     DEBUG_printf("mp_bluetooth_deinit: draining work (SUSPENDED)\n");
     extern bool mp_bluetooth_zephyr_work_drain(void);
     mp_bluetooth_zephyr_work_drain();
 
+    // Force-reset connection pool (same as Phase 4 in bt_disable path).
+    extern void bt_conn_pool_reset(void);
+    bt_conn_pool_reset();
+
     DEBUG_printf("mp_bluetooth_deinit: stopping work thread (SUSPENDED)\n");
     mp_bluetooth_zephyr_work_thread_stop();
 
-    DEBUG_printf("mp_bluetooth_deinit: resetting work queue (SUSPENDED)\n");
-    extern void mp_bluetooth_zephyr_work_reset(void);
-    mp_bluetooth_zephyr_work_reset();
+    // Reset guard flags (recursion guards, depth counters, wait-loop flag) so
+    // they don't carry stale state into the next activation. This is safe
+    // because work_drain() above has completed — no work handlers are running.
+    // DO NOT call mp_bluetooth_zephyr_work_reset() which destroys the work
+    // queue infrastructure (global_work_q, pending flags) needed by the
+    // still-running on-core controller.
+    extern void mp_bluetooth_zephyr_work_reset_guards(void);
+    mp_bluetooth_zephyr_work_reset_guards();
 
-    DEBUG_printf("mp_bluetooth_deinit: resetting net_buf pools (SUSPENDED)\n");
-    mp_net_buf_pool_state_reset();
+    // DO NOT call mp_net_buf_pool_state_reset() here. The on-core controller
+    // still holds active references to net_buf objects. Resetting the pool
+    // free lists and uninit_count causes double-allocation of buffer slots —
+    // the controller's buffers become invisible to the pool, and the next
+    // allocation returns the same slot the controller is still using.
     #endif
     #else
     // === PHASE 3: bt_disable() with polling mode ===
@@ -1311,6 +1399,14 @@ int mp_bluetooth_deinit(void) {
     DEBUG_printf("mp_bluetooth_deinit: draining work\n");
     extern bool mp_bluetooth_zephyr_work_drain(void);
     mp_bluetooth_zephyr_work_drain();
+
+    // Force-reset connection pool to free any slots with residual refcount.
+    // In cooperative (non-threaded) environments, deferred_work may not have
+    // executed during bt_disable() or work_drain(), leaving connection pool
+    // slots with refcount > 0. These stale slots cause EINVAL on the next
+    // bt_conn_le_create() to the same peer address.
+    extern void bt_conn_pool_reset(void);
+    bt_conn_pool_reset();
 
     // Stop work thread
     DEBUG_printf("mp_bluetooth_deinit: stopping work thread\n");
@@ -1510,6 +1606,11 @@ int mp_bluetooth_gatts_register_service_begin(bool append) {
         }
     }
     MP_STATE_PORT(bluetooth_zephyr_root_pointers)->n_services = 0;
+
+    // Reset bump allocator so freed service memory can be reused.
+    #if MICROPY_BLUETOOTH_ZEPHYR_GATT_POOL
+    mp_bluetooth_zephyr_gatt_pool_reset();
+    #endif
 
     // Reset the gatt characteristic value db.
     mp_bluetooth_gatts_db_reset(MP_STATE_PORT(bluetooth_zephyr_root_pointers)->gatts_db);
@@ -3904,6 +4005,14 @@ static void l2cap_disconnected_cb(struct bt_l2cap_chan *chan) {
 
     // Only notify Python if BLE is still active (not during deinit)
     if (mp_bluetooth_is_active()) {
+        // Fire SEND_READY first to unblock any Python sender waiting in
+        // wait_for_event(_IRQ_L2CAP_SEND_READY). On slower HCI transports
+        // (e.g. CYW43 UART), the remote's disconnect can arrive before the
+        // local l2cap_sent_cb fires — leaving Python stuck waiting for
+        // SEND_READY that will never come. Firing it here is harmless if
+        // nobody is waiting (accumulates in waiting_events and gets ignored).
+        mp_bluetooth_on_l2cap_send_ready(conn_handle, le_chan->rx.cid, 0);
+
         mp_bluetooth_on_l2cap_disconnect(conn_handle,
                                           le_chan->rx.cid,
                                           le_chan->psm,
