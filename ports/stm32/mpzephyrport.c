@@ -160,126 +160,9 @@ static bool mp_bluetooth_zephyr_buffers_available(void) {
     return false;
 }
 
-#if defined(STM32WB)
-// HCI Event Priority Sorting for STM32WB55 IPCC
-// The RF coprocessor can send CONNECTION_COMPLETE and DISCONNECT_COMPLETE
-// in the same IPCC transaction, causing wrong event ordering.
-// We batch-collect events and sort so connection events precede disconnect.
-
-// HCI event codes
+// HCI event codes (used in debug trace)
 #define HCI_EVT_DISCONNECT_COMPLETE 0x05
 #define HCI_EVT_CMD_COMPLETE        0x0E
-#define HCI_EVT_LE_META             0x3E
-#define HCI_LE_SUBEVENT_CONN_COMPLETE           0x01
-#define HCI_LE_SUBEVENT_ENHANCED_CONN_COMPLETE  0x0A
-
-// Event priority: lower number = higher priority (processed first)
-#define HCI_PRIO_CONNECTION  1  // LE Connection Complete
-#define HCI_PRIO_DEFAULT     5  // Most events
-#define HCI_PRIO_DISCONNECT  9  // Disconnect Complete (process last)
-
-// Get event priority for sorting (connection events before disconnect)
-static int hci_event_get_priority(struct net_buf *buf) {
-    if (buf == NULL || buf->len < 4) {
-        return HCI_PRIO_DEFAULT;
-    }
-
-    const uint8_t *data = buf->data;
-    // H4 packet: [type][evt_code][len][params...]
-    if (data[0] != H4_EVT) {
-        return HCI_PRIO_DEFAULT;  // Not an event
-    }
-
-    uint8_t evt_code = data[1];
-
-    // LE Meta Event - check subevent
-    if (evt_code == HCI_EVT_LE_META && buf->len >= 4) {
-        uint8_t subevent = data[3];
-        if (subevent == HCI_LE_SUBEVENT_CONN_COMPLETE ||
-            subevent == HCI_LE_SUBEVENT_ENHANCED_CONN_COMPLETE) {
-            return HCI_PRIO_CONNECTION;  // High priority
-        }
-    }
-
-    // Disconnect Complete
-    if (evt_code == HCI_EVT_DISCONNECT_COMPLETE) {
-        return HCI_PRIO_DISCONNECT;  // Low priority
-    }
-
-    return HCI_PRIO_DEFAULT;
-}
-
-// Get connection handle from HCI event (for grouping related events)
-static uint16_t hci_event_get_conn_handle(struct net_buf *buf) {
-    if (buf == NULL || buf->len < 6) {
-        return 0xFFFF;  // Invalid handle
-    }
-
-    const uint8_t *data = buf->data;
-    if (data[0] != H4_EVT) {
-        return 0xFFFF;
-    }
-
-    uint8_t evt_code = data[1];
-
-    // LE Connection Complete: [type=04][evt=3E][len][subevent=01][status][handle_lo][handle_hi]...
-    if (evt_code == HCI_EVT_LE_META && buf->len >= 7) {
-        uint8_t subevent = data[3];
-        if (subevent == HCI_LE_SUBEVENT_CONN_COMPLETE ||
-            subevent == HCI_LE_SUBEVENT_ENHANCED_CONN_COMPLETE) {
-            // Handle is at offset 5-6 (after subevent and status)
-            return (data[5] | (data[6] << 8)) & 0x0FFF;
-        }
-    }
-
-    // Disconnect Complete: [type=04][evt=05][len=4][status][handle_lo][handle_hi][reason]
-    if (evt_code == HCI_EVT_DISCONNECT_COMPLETE && buf->len >= 6) {
-        // Handle is at offset 4-5 (after status)
-        return (data[4] | (data[5] << 8)) & 0x0FFF;
-    }
-
-    return 0xFFFF;
-}
-
-// Sort batch of HCI events by priority (simple insertion sort, batch is small)
-// Events with same connection handle are grouped, with connection events first
-static void hci_event_sort_batch(struct net_buf **batch, int count) {
-    if (count <= 1) {
-        return;
-    }
-
-    // Simple insertion sort - batch is typically 2-4 events
-    for (int i = 1; i < count; i++) {
-        struct net_buf *key = batch[i];
-        int key_prio = hci_event_get_priority(key);
-        uint16_t key_handle = hci_event_get_conn_handle(key);
-
-        int j = i - 1;
-        while (j >= 0) {
-            int j_prio = hci_event_get_priority(batch[j]);
-            uint16_t j_handle = hci_event_get_conn_handle(batch[j]);
-
-            // Sort by: (1) connection handle, (2) priority within same handle
-            bool should_swap = false;
-            if (key_handle == j_handle && key_handle != 0xFFFF) {
-                // Same connection: sort by priority
-                should_swap = (key_prio < j_prio);
-            } else if (key_prio < j_prio) {
-                // Different connections: connection events first overall
-                should_swap = (key_prio == HCI_PRIO_CONNECTION && j_prio == HCI_PRIO_DISCONNECT);
-            }
-
-            if (should_swap) {
-                batch[j + 1] = batch[j];
-                j--;
-            } else {
-                break;
-            }
-        }
-        batch[j + 1] = key;
-    }
-}
-#endif // defined(STM32WB)
 
 // Reset H:4 parser state
 static void h4_parser_reset(void) {
@@ -491,62 +374,26 @@ static void run_zephyr_hci_task(mp_sched_node_t *node) {
         return;
     }
 
-    // Process any queued RX buffers (from interrupt context)
-    #if defined(STM32WB)
-    // STM32WB55 IPCC Fix: Batch collect and sort events to ensure CONNECTION_COMPLETE
-    // is processed before DISCONNECT_COMPLETE when both arrive in same IPCC transaction.
-    #define HCI_EVENT_BATCH_SIZE 16
-    struct net_buf *batch[HCI_EVENT_BATCH_SIZE];
-    int batch_count = 0;
-
-    struct net_buf *buf;
-    while (batch_count < HCI_EVENT_BATCH_SIZE && (buf = rx_queue_get()) != NULL) {
-        batch[batch_count++] = buf;
-    }
-
-    if (batch_count > 1) {
-        hci_event_sort_batch(batch, batch_count);
-    }
-
-    for (int i = 0; i < batch_count; i++) {
-        buf = batch[i];
-        int ret = recv_cb(hci_dev, buf);
-        if (ret < 0) {
-            error_printf("recv_cb failed: %d\n", ret);
-            net_buf_unref(buf);
-        }
-    }
-
-    // Phase 4: Process work queue to trigger rx_work (connection callbacks etc)
-    // Only the outermost call (depth==0) should process work to prevent re-entrancy.
-    // Nested calls via k_sem_take→hci_uart_wfi→run_zephyr_hci_task skip work processing.
-    extern volatile int mp_bluetooth_zephyr_hci_processing_depth;
-    if (batch_count > 0 && mp_bluetooth_zephyr_hci_processing_depth == 0) {
-        mp_bluetooth_zephyr_hci_processing_depth++;
-        mp_bluetooth_zephyr_work_process();
-        mp_bluetooth_zephyr_hci_processing_depth--;
-    }
-    #else
-    // UART transport: events arrive one at a time, no reordering needed.
+    // Process queued RX buffers one at a time with work between each.
+    // This ensures rx_work from CONNECTION_COMPLETE runs before
+    // DISCONNECT_COMPLETE is delivered, matching full Zephyr's interleaving.
     {
         struct net_buf *buf;
-        int count = 0;
         while ((buf = rx_queue_get()) != NULL) {
             int ret = mp_bluetooth_zephyr_h4_get_recv_cb()(mp_bluetooth_zephyr_h4_get_dev(), buf);
             if (ret < 0) {
                 error_printf("recv_cb failed: %d\n", ret);
                 net_buf_unref(buf);
             }
-            count++;
-        }
 
-        if (count > 0 && mp_bluetooth_zephyr_hci_processing_depth == 0) {
-            mp_bluetooth_zephyr_hci_processing_depth++;
-            mp_bluetooth_zephyr_work_process();
-            mp_bluetooth_zephyr_hci_processing_depth--;
+            // Process work after each event for proper interleaving.
+            if (mp_bluetooth_zephyr_hci_processing_depth == 0) {
+                mp_bluetooth_zephyr_hci_processing_depth++;
+                mp_bluetooth_zephyr_work_process();
+                mp_bluetooth_zephyr_hci_processing_depth--;
+            }
         }
     }
-    #endif
 
     // Check buffer availability before reading from IPCC.
     // If no buffers available, process work queue to free some.
@@ -598,50 +445,19 @@ void mp_bluetooth_zephyr_hci_uart_wfi(void) {
     // for proper HCI event processing. It must be called BEFORE processing buffers.
     run_zephyr_hci_task(NULL);
 
-    // Process any remaining queued RX buffers that arrived after port_run_task completed
-    #if defined(STM32WB)
-    {
-        struct net_buf *wfi_batch[HCI_EVENT_BATCH_SIZE];
-        int wfi_batch_count = 0;
-        struct net_buf *buf;
-        while (wfi_batch_count < HCI_EVENT_BATCH_SIZE && (buf = rx_queue_get()) != NULL) {
-            wfi_batch[wfi_batch_count++] = buf;
-        }
-
-        if (wfi_batch_count > 0) {
-            mp_bluetooth_zephyr_poll();
-        }
-
-        if (wfi_batch_count > 1) {
-            hci_event_sort_batch(wfi_batch, wfi_batch_count);
-        }
-
-        for (int i = 0; i < wfi_batch_count; i++) {
-            mp_bluetooth_zephyr_h4_get_recv_cb()(mp_bluetooth_zephyr_h4_get_dev(), wfi_batch[i]);
-        }
-
-        if (wfi_batch_count > 0 && mp_bluetooth_zephyr_hci_processing_depth == 0) {
-            mp_bluetooth_zephyr_hci_processing_depth++;
-            mp_bluetooth_zephyr_work_process();
-            mp_bluetooth_zephyr_hci_processing_depth--;
-        }
-    }
-    #else
+    // Process any remaining queued RX buffers one at a time with work between each.
     {
         struct net_buf *buf;
-        int count = 0;
         while ((buf = rx_queue_get()) != NULL) {
             mp_bluetooth_zephyr_h4_get_recv_cb()(mp_bluetooth_zephyr_h4_get_dev(), buf);
-            count++;
-        }
 
-        if (count > 0 && mp_bluetooth_zephyr_hci_processing_depth == 0) {
-            mp_bluetooth_zephyr_hci_processing_depth++;
-            mp_bluetooth_zephyr_work_process();
-            mp_bluetooth_zephyr_hci_processing_depth--;
+            if (mp_bluetooth_zephyr_hci_processing_depth == 0) {
+                mp_bluetooth_zephyr_hci_processing_depth++;
+                mp_bluetooth_zephyr_work_process();
+                mp_bluetooth_zephyr_hci_processing_depth--;
+            }
         }
     }
-    #endif
 
     #if defined(STM32WB)
     // Give IPCC hardware minimal time to complete any ongoing transfers
