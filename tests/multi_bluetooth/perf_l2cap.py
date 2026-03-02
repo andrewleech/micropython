@@ -65,6 +65,8 @@ def send_data(ble, conn_handle, cid):
             buf[j] = random.randint(0, 255)
         if not ble.l2cap_send(conn_handle, cid, buf):
             wait_for_event(_IRQ_L2CAP_SEND_READY, TIMEOUT_MS)
+        if (i + 1) % 5 == 0:
+            print("sent {}/{}".format(i + 1, _NUM_PAYLOADS))
 
 
 def recv_data(ble, conn_handle, cid):
@@ -73,6 +75,7 @@ def recv_data(ble, conn_handle, cid):
     recv_correct = 0
     expected_bytes = _PAYLOAD_LEN * _NUM_PAYLOADS
     ticks_first_byte = 0
+    recv_milestone = 1
     while recv_bytes < expected_bytes:
         wait_for_event(_IRQ_L2CAP_RECV, TIMEOUT_MS)
         if not ticks_first_byte:
@@ -85,6 +88,9 @@ def recv_data(ble, conn_handle, cid):
             for i in range(n):
                 if buf[i] == random.randint(0, 255):
                     recv_correct += 1
+            while recv_bytes >= recv_milestone * expected_bytes // 4 and recv_milestone <= 4:
+                print("recv {}%".format(recv_milestone * 25))
+                recv_milestone += 1
     ticks_end = time.ticks_ms()
     return recv_bytes, recv_correct, time.ticks_diff(ticks_end, ticks_first_byte)
 
@@ -120,8 +126,8 @@ def instance0():
 def instance1():
     multitest.next()
     try:
-        # Connect to peripheral and then disconnect.
-        ble.gap_connect(*BDADDR)
+        # Connect to peripheral with minimum connection interval for max throughput.
+        ble.gap_connect(BDADDR[0], BDADDR[1], 2000, 7500, 7500)
         conn_handle = wait_for_event(_IRQ_PERIPHERAL_CONNECT, TIMEOUT_MS)
 
         ble.l2cap_connect(conn_handle, _L2CAP_PSM, _L2CAP_MTU)
