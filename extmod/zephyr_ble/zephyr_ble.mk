@@ -107,13 +107,16 @@ $(BUILD)/$(ZEPHYR_LIB_DIR)/lib/net_buf/buf_simple.o: CFLAGS += -Wno-attributes
 $(BUILD)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/%.o: CFLAGS += -Wno-error -Wno-format -Wno-lto-type-mismatch
 $(BUILD)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/common/%.o: CFLAGS += -Wno-lto-type-mismatch
 
-# gatt.c has "initializer element is not constant" error with ARRAY_SIZE
-# This is a GCC limitation: sizeof(external_array) not recognized as compile-time constant
-# Workaround: Use -std=gnu11 (C11 may be more lenient) or disable error for this specific case
-# Note: -fpermissive is C++ only, so we use -Wno-error to downgrade the error to a warning
-$(BUILD)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/gatt.o: ../../$(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/gatt.c
+# gatt_wrapper.c includes gatt.c which has "initializer element is not constant"
+# error with ARRAY_SIZE (GCC limitation: sizeof(external_array) not constant).
+# conn_wrapper.c includes conn.c which needs the same Zephyr host warning flags.
+# Both wrappers need the host-level warning suppressions since they compile
+# Zephyr host code as part of their translation unit.
+$(BUILD)/$(ZEPHYR_BLE_EXTMOD_DIR)/gatt_wrapper.o: $(ZEPHYR_BLE_EXTMOD_DIR)/gatt_wrapper.c
 	$(ECHO) "CC $<"
-	$(Q)$(CC) $(filter-out -Werror,$(CFLAGS)) -Wno-error=pedantic -c -MD -MF $(@:.o=.d) -o $@ $<
+	$(Q)$(CC) $(filter-out -Werror,$(CFLAGS)) -Wno-error=pedantic -Wno-format -Wno-lto-type-mismatch -c -MD -MF $(@:.o=.d) -o $@ $<
+
+$(BUILD)/$(ZEPHYR_BLE_EXTMOD_DIR)/conn_wrapper.o: CFLAGS += -Wno-error -Wno-format -Wno-lto-type-mismatch
 
 
 
@@ -128,6 +131,9 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/common/, \
 $(BUILD)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/common/rpa.o: CFLAGS += -Wno-error=implicit-function-declaration
 
 # Zephyr BLE host core sources (Phase 1: Core + SMP/Keys/ECC/Crypto)
+# Note: gatt.c and conn.c are compiled via wrappers in extmod/zephyr_ble/
+# that expose static internals (subscriptions[], acl_conns[]) for reset
+# functions, avoiding Zephyr submodule patches.
 SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/, \
 	hci_core.c \
 	hci_common.c \
@@ -135,16 +141,20 @@ SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/host/, \
 	addr.c \
 	buf.c \
 	uuid.c \
-	conn.c \
 	l2cap.c \
 	att.c \
-	gatt.c \
 	adv.c \
 	scan.c \
 	data.c \
 	keys.c \
 	smp.c \
 	)
+
+# Wrappers that #include gatt.c / conn.c and add reset accessors.
+# Must be in SRC_THIRDPARTY_C (not SRC_EXTMOD_C) to avoid qstr preprocessing
+# which fails on Zephyr macro redefinitions under -Werror.
+SRC_THIRDPARTY_C += $(ZEPHYR_BLE_EXTMOD_DIR)/gatt_wrapper.c
+SRC_THIRDPARTY_C += $(ZEPHYR_BLE_EXTMOD_DIR)/conn_wrapper.c
 
 # TODO Phase 1.5: Add PSA Crypto or TinyCrypt support
 # These files require PSA Crypto API headers which are not yet available

@@ -23,6 +23,12 @@ target_sources(micropy_extmod_zephyr_ble INTERFACE
     ${ZEPHYR_BLE_EXTMOD_DIR}/hci_driver_stub.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/net_buf_pool_registry.c
 
+    # Wrappers that #include gatt.c / conn.c and add reset accessors
+    # for static internals (subscriptions[], acl_conns[]).
+    # These REPLACE the direct gatt.c / conn.c source entries below.
+    ${ZEPHYR_BLE_EXTMOD_DIR}/gatt_wrapper.c
+    ${ZEPHYR_BLE_EXTMOD_DIR}/conn_wrapper.c
+
     # HAL abstraction layer
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_timer.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_work.c
@@ -54,16 +60,16 @@ target_sources(micropy_extmod_zephyr_ble INTERFACE
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/common/rpa.c
 
     # Zephyr BLE host core sources (Phase 1: Core + SMP/Keys/ECC/Crypto)
+    # Note: gatt.c and conn.c are compiled via wrappers above that expose
+    # static internals (subscriptions[], acl_conns[]) for reset functions.
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/hci_core.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/hci_common.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/id.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/addr.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/buf.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/uuid.c
-    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/conn.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/l2cap.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/att.c
-    ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/gatt.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/adv.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/scan.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/data.c
@@ -104,6 +110,19 @@ set_source_files_properties(
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/buf.c
     ${ZEPHYR_LIB_DIR}/subsys/bluetooth/host/smp.c    # BT_L2CAP_FIXED_CHANNEL_DEFINE uses STRUCT_SECTION_ITERABLE
     PROPERTIES COMPILE_FLAGS "-fno-data-sections"
+)
+
+# conn_wrapper.c includes conn.c which defines acl_tx_pool via NET_BUF_POOL_DEFINE
+# (uses STRUCT_SECTION_ITERABLE) — needs -fno-data-sections like other pool sources.
+# gatt_wrapper.c includes gatt.c which has ARRAY_SIZE initializer issues — needs
+# -Wno-error=pedantic to downgrade "initializer element is not constant" from error.
+set_source_files_properties(
+    ${ZEPHYR_BLE_EXTMOD_DIR}/conn_wrapper.c
+    PROPERTIES COMPILE_FLAGS "-fno-data-sections"
+)
+set_source_files_properties(
+    ${ZEPHYR_BLE_EXTMOD_DIR}/gatt_wrapper.c
+    PROPERTIES COMPILE_FLAGS "-Wno-error=pedantic"
 )
 
 # Debug output for Zephyr BLE (disabled by default)

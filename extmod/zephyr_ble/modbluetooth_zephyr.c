@@ -910,24 +910,31 @@ int mp_bluetooth_init(void) {
         // bt_enable() tries to allocate buffers from corrupted pools.
         mp_net_buf_pool_state_reset();
 
-        // Clear any stale bond keys from previous session. If bt_disable()
-        // failed (e.g. CYW43 SPI hang), bt_keys_reset() in bt_disable was
-        // never reached and stale keys persist. These cause the host to attempt
-        // re-encryption with dead keys on the next connection, breaking Z2Z.
+        // Clear stale state from previous session. If bt_disable() failed
+        // (e.g. CYW43 SPI hang, IPCC timeout), these cleanup calls in
+        // bt_disable were never reached and stale state persists.
         #if defined(CONFIG_BT_SMP)
         extern void bt_keys_reset(void);
         bt_keys_reset();
         #endif
 
-        // Clear stale GATT client subscriptions from previous session. After
-        // soft reset, bt_gatt_subscribe_params on the GC heap are freed but
-        // Zephyr's static subscriptions[] array still references them. On the
-        // next disconnect, remove_subscriptions() calls params->notify()
-        // through the stale pointer → HardFault. This is a raw memset that
-        // doesn't call any callbacks (unlike bt_gatt_clear_subscriptions).
+        // Reset GATT client subscriptions — stale entries point to freed GC
+        // heap memory and would cause HardFault via params->notify() on the
+        // next disconnect. Safe before bt_enable() (no active connections).
         #if defined(CONFIG_BT_GATT_CLIENT)
         extern void bt_gatt_reset_subscriptions(void);
         bt_gatt_reset_subscriptions();
+        #endif
+
+        #if defined(CONFIG_BT_CONN) && ZEPHYR_BLE_DEBUG
+        // Verify no stale connections survived previous deinit.
+        {
+            int stale_count = 0;
+            bt_conn_foreach(BT_CONN_TYPE_LE, mp_bt_zephyr_count_conn_cb, &stale_count);
+            if (stale_count > 0) {
+                DEBUG_printf("WARNING: %d stale connection(s) at init — deinit cleanup incomplete\n", stale_count);
+            }
+        }
         #endif
 
         // Enter init phase - work will be processed synchronously in this loop
@@ -1109,8 +1116,10 @@ static void mp_bt_zephyr_disconnect_all_wait(void) {
     DEBUG_printf("mp_bluetooth_deinit: force-destroying %d stale connection(s)\n", count);
     bt_conn_cleanup_all();
     // Drain work queue to execute deferred_work handlers and release conn refs.
-    for (int i = 0; i < 10; i++) {
-        mp_bluetooth_zephyr_hci_uart_wfi();
+    // Use mp_bluetooth_zephyr_work_process() directly rather than hci_uart_wfi()
+    // because port_run_task has active-state guards that may block during deinit.
+    for (int i = 0; i < 20; i++) {
+        mp_bluetooth_zephyr_work_process();
         mp_hal_delay_ms(1);
     }
 }
@@ -1295,13 +1304,13 @@ int mp_bluetooth_deinit(void) {
     extern bool mp_bluetooth_zephyr_work_drain(void);
     mp_bluetooth_zephyr_work_drain();
 
-    // Force-reset connection pool to free any slots with residual refcount.
-    // In cooperative (non-threaded) environments, deferred_work may not have
-    // executed during bt_disable() or work_drain(), leaving connection pool
-    // slots with refcount > 0. These stale slots cause EINVAL on the next
-    // bt_conn_le_create() to the same peer address.
+    // Force-reset connection pool refcounts as a safety net.
+    // If bt_disable() or work_drain didn't fully clean up, stale refcounts
+    // prevent pool slots from being reused, causing EINVAL on gap_connect.
+    #if defined(CONFIG_BT_CONN)
     extern void bt_conn_pool_reset(void);
     bt_conn_pool_reset();
+    #endif
 
     // Stop work thread
     DEBUG_printf("mp_bluetooth_deinit: stopping work thread\n");
