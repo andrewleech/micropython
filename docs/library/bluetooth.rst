@@ -733,6 +733,19 @@ Pairing and bonding
 
     On successful pairing, the ``_IRQ_ENCRYPTION_UPDATE`` event will be raised.
 
+.. method:: BLE.gap_unpair([addr_type, addr, /])
+
+    Remove bond information from persistent storage. If *addr_type* and *addr*
+    are provided, removes the bond for that specific peer. If called with no
+    arguments, removes all bonds. The address can be obtained from the
+    ``_IRQ_CENTRAL_CONNECT`` or ``_IRQ_PERIPHERAL_CONNECT`` events.
+
+    When removing a specific peer, raises ``OSError(ENOENT)`` if no matching
+    bond exists.
+
+    **Note:** The peer should be disconnected before calling ``gap_unpair``.
+    Behaviour when the peer is still connected is backend-dependent.
+
 .. method:: BLE.gap_passkey(conn_handle, action, passkey, /)
 
     Respond to a ``_IRQ_PASSKEY_ACTION`` event for the specified *conn_handle*
