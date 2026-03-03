@@ -9,10 +9,12 @@ function(usermod_gather_sources SOURCES_VARNAME INCLUDE_DIRECTORIES_VARNAME INCL
             return()
         endif()
 
-        # Gather library sources
+        # Gather library sources, then clear them from the target to prevent
+        # double compilation when the port also links this INTERFACE library.
         get_target_property(lib_sources ${LIB} INTERFACE_SOURCES)
         if (lib_sources)
             list(APPEND ${SOURCES_VARNAME} ${lib_sources})
+            set_target_properties(${LIB} PROPERTIES INTERFACE_SOURCES "")
         endif()
 
         # Gather library includes

@@ -225,6 +225,7 @@ idf_component_register(
         ${MICROPY_SOURCE_PORT}
         ${MICROPY_SOURCE_BOARD}
         ${MICROPY_SOURCE_TINYUSB}
+        ${MICROPY_SOURCE_USERMOD}
     INCLUDE_DIRS
         ${MICROPY_INC_CORE}
         ${MICROPY_INC_USERMOD}
