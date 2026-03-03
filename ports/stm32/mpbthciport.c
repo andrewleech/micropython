@@ -251,6 +251,18 @@ int mp_bluetooth_hci_uart_readchar(void) {
     }
 }
 
+int mp_bluetooth_hci_uart_readpacket(mp_bluetooth_hci_uart_readchar_t handler) {
+    // Read all available bytes from UART and feed to the H:4 parser callback.
+    // Returns total bytes read, or -1 if no data available.
+    int total = 0;
+    while (uart_rx_any(&mp_bluetooth_hci_uart_obj)) {
+        uint8_t chr = uart_rx_char(&mp_bluetooth_hci_uart_obj);
+        handler(chr);
+        total++;
+    }
+    return (total > 0) ? total : -1;
+}
+
 #endif // defined(STM32WB)
 
 // Default (weak) implementation of the HCI controller interface.
