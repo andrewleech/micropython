@@ -30,10 +30,13 @@
 #include "py/runtime.h"
 #include "py/mphal.h"
 
-#if defined(MICROPY_PY_NETWORK_CYW43) && defined(MICROPY_HW_PIN_EXT_COUNT) && defined(CYW43_GPIO) && CYW43_GPIO == 1
+#if (defined(MICROPY_PY_NETWORK_CYW43) || defined(MICROPY_PY_BLUETOOTH_CYW43)) && defined(MICROPY_HW_PIN_EXT_COUNT) && defined(CYW43_GPIO) && CYW43_GPIO == 1
 
 #include "modmachine.h"
 #include "machine_pin.h"
+
+#if defined(MICROPY_PY_NETWORK_CYW43)
+// WiFi enabled - full implementation with cyw43_state
 #include "lib/cyw43-driver/src/cyw43.h"
 
 void machine_pin_ext_init(void) {
@@ -83,4 +86,32 @@ void machine_pin_ext_config(machine_pin_obj_t *self, int mode, int value) {
     }
 }
 
-#endif // defined(MICROPY_PY_NETWORK_CYW43) && defined(MICROPY_HW_PIN_EXT_COUNT) && defined(CYW43_GPIO) && CYW43_GPIO == 1
+#else
+// WiFi disabled, BT enabled - stub implementations
+// CYW43 GPIO pins (like LED) won't work without the WiFi driver's cyw43_state
+
+void machine_pin_ext_init(void) {
+}
+
+void machine_pin_ext_set(machine_pin_obj_t *self, bool value) {
+    // Stub: GPIO not available without WiFi driver
+    (void)self;
+    (void)value;
+}
+
+bool machine_pin_ext_get(machine_pin_obj_t *self) {
+    // Stub: GPIO not available without WiFi driver
+    (void)self;
+    return false;
+}
+
+void machine_pin_ext_config(machine_pin_obj_t *self, int mode, int value) {
+    // Stub: GPIO not available without WiFi driver
+    (void)self;
+    (void)mode;
+    (void)value;
+}
+
+#endif // MICROPY_PY_NETWORK_CYW43
+
+#endif // (MICROPY_PY_NETWORK_CYW43 || MICROPY_PY_BLUETOOTH_CYW43) && MICROPY_HW_PIN_EXT_COUNT && CYW43_GPIO
