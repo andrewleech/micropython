@@ -21,9 +21,22 @@ SD_LOWER = $(shell echo $(SD) | tr '[:upper:]' '[:lower:]')
 
 include $(BOARD_DIR)/mpconfigboard.mk
 
+# Board variant support (e.g., BOARD_VARIANT=zephyr_ble)
+ifdef BOARD_VARIANT
+include $(BOARD_DIR)/mpconfigvariant_$(BOARD_VARIANT).mk
+# Ensure SoftDevice and variant are mutually exclusive
+ifneq ($(SD),)
+$(error Cannot use both BOARD_VARIANT and SD - Zephyr BLE and SoftDevice are mutually exclusive)
+endif
+endif
+
 ifeq ($(SD), )
+ifdef BOARD_VARIANT
+	BUILD ?= build-$(BOARD)-$(BOARD_VARIANT)
+else
 	# If the build directory is not given, make it reflect the board name.
 	BUILD ?= build-$(BOARD)
+endif
 	include ../../py/mkenv.mk
 else
 	# If the build directory is not given, make it reflect the board name.
@@ -63,6 +76,14 @@ FROZEN_MANIFEST ?= modules/manifest.py
 # include py core make definitions
 include ../../py/py.mk
 include ../../extmod/extmod.mk
+
+ifeq ($(MICROPY_BLUETOOTH_ZEPHYR),1)
+# Include the shared Zephyr BLE build system
+include ../../extmod/zephyr_ble/zephyr_ble.mk
+# nRF port uses -Werror; suppress warnings in Zephyr BLE extmod sources
+$(BUILD)/extmod/zephyr_ble/%.o: CFLAGS += -Wno-error
+$(BUILD)/$(ZEPHYR_LIB_DIR)/%.o: CFLAGS += -Wno-error
+endif
 
 GIT_SUBMODULES += lib/nrfx lib/tinyusb
 
@@ -195,6 +216,10 @@ SRC_SHARED_C += $(addprefix shared/,\
 	timeutils/timeutils.c \
 	)
 
+ifeq ($(MICROPY_BLUETOOTH_ZEPHYR),1)
+SRC_SHARED_C += shared/runtime/softtimer.c
+endif
+
 ifeq ($(MICROPY_FATFS), 1)
 SRC_LIB_C += $(addprefix lib/,\
         oofatfs/ff.c \
@@ -238,6 +263,10 @@ SRC_C += \
 	drivers/bluetooth/ble_drv.c \
 	drivers/bluetooth/ble_uart.c \
 	$(wildcard $(BOARD_DIR)/*.c) \
+
+ifeq ($(MICROPY_BLUETOOTH_ZEPHYR),1)
+SRC_C += mpzephyrport_nrf.c
+endif
 
 ifeq ($(MCU_SUB_VARIANT), nrf52840)
 # Add support for USB using TinyUSB.
@@ -307,6 +336,13 @@ OBJ += $(addprefix $(BUILD)/, $(SYSTEM_C_SRC:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_LIB_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_SHARED_C:.c=.o))
 OBJ += $(GEN_PINS_SRC:.c=.o)
+
+# When BLE controller is active, it owns RTC0 and TIMER0 peripherals.
+# Rename the nrfx ISR handlers to avoid multiple definition with BLE ISR stubs.
+ifeq ($(MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER),1)
+$(BUILD)/lib/nrfx/drivers/src/nrfx_rtc.o: CFLAGS += -DRTC0_IRQHandler=RTC0_IRQHandler_nrfx
+$(BUILD)/lib/nrfx/drivers/src/nrfx_timer.o: CFLAGS += -DTIMER0_IRQHandler=TIMER0_IRQHandler_nrfx
+endif
 
 $(BUILD)/$(OOFATFS_DIR)/ff.o: COPT += -Os
 $(filter $(PY_BUILD)/../extmod/vfs_fat_%.o, $(PY_O)): COPT += -Os
