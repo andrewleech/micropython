@@ -53,7 +53,12 @@
 // for tinyusb
 // #define NRFX_IRQ_IS_ENABLED 1
 #define NRFX_POWER_ENABLED 1
+#if MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
+// Below BLE controller priorities (0-2).
+#define NRFX_POWER_DEFAULT_CONFIG_IRQ_PRIORITY 4
+#else
 #define NRFX_POWER_DEFAULT_CONFIG_IRQ_PRIORITY 2
+#endif
 #define NRFX_SYSTICK_ENABLED 1
 #endif
 
