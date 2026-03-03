@@ -60,5 +60,5 @@ static mp_obj_t machine_reset_cause(void) {
 MP_DEFINE_CONST_FUN_OBJ_0(machine_reset_cause_obj, machine_reset_cause);
 
 static void mp_machine_idle(void) {
-    k_yield();
+    k_msleep(1);
 }
