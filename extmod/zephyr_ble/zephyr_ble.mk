@@ -197,10 +197,9 @@ ifeq ($(MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER),1)
 CFLAGS_EXTMOD += -DMICROPY_BLUETOOTH_ZEPHYR_CONTROLLER=1
 
 # Controller HCI interface
-SRC_THIRDPARTY_C += $(addprefix $(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/hci/, \
-	hci_driver.c \
-	hci.c \
-	)
+# hci_driver.c compiled via wrapper (adds poll_rx accessing file-scope variables)
+SRC_THIRDPARTY_C += $(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/hci/hci.c
+SRC_THIRDPARTY_C += $(ZEPHYR_BLE_EXTMOD_DIR)/hci_driver_wrapper.c
 
 # Nordic vendor HCI (reads FICR device address for stable BLE identity)
 SRC_THIRDPARTY_C += $(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/ll_sw/nordic/hci/hci_vendor.c
@@ -299,6 +298,12 @@ CFLAGS_CONTROLLER_COMPAT = -DNRF_CCM_EVENT_END=NRF_CCM_EVENT_ENDCRYPT
 
 $(BUILD)/$(ZEPHYR_LIB_DIR)/subsys/bluetooth/controller/%.o: CFLAGS += -Wno-error -Wno-format -Wno-unused-variable \
 	-Wno-lto-type-mismatch \
+	-include zephyr/bluetooth/hci_vs.h -include zephyr/bluetooth/buf.h \
+	-include zephyr_ble_irq.h $(CFLAGS_CONTROLLER_COMPAT)
+
+# hci_driver_wrapper.c includes hci_driver.c — needs full controller CFLAGS
+$(BUILD)/$(ZEPHYR_BLE_EXTMOD_DIR)/hci_driver_wrapper.o: CFLAGS += -Wno-error -Wno-format \
+	-Wno-unused-variable -Wno-lto-type-mismatch \
 	-include zephyr/bluetooth/hci_vs.h -include zephyr/bluetooth/buf.h \
 	-include zephyr_ble_irq.h $(CFLAGS_CONTROLLER_COMPAT)
 
