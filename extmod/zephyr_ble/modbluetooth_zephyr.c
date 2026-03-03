@@ -98,21 +98,17 @@ static int call_depth = 0;
 #define BLE_HCI_SCAN_WINDOW_MAX 0xffff
 
 // Map subscribe params to MicroPython notification/indication IRQ event.
-// With BT_GATT_SUBSCRIBE_HAS_RECEIVED_OPCODE, uses the actual ATT opcode.
-// Without it, infers from the CCCD subscription value.
-// BT_GATT_NOTIFY_TYPE_NOTIFY_MULT (multi-handle notification) maps to NOTIFY
-// since MicroPython has no separate IRQ for it.
-#if defined(BT_GATT_SUBSCRIBE_HAS_RECEIVED_OPCODE)
-#define GATTC_NOTIFY_EVENT_TYPE(params) \
-    (((params)->received_opcode == BT_GATT_NOTIFY_TYPE_INDICATE) \
-        ? MP_BLUETOOTH_IRQ_GATTC_INDICATE \
-        : MP_BLUETOOTH_IRQ_GATTC_NOTIFY)
-#else
+// Infers type from the CCCD subscription value (BT_GATT_CCC_NOTIFY or
+// BT_GATT_CCC_INDICATE) set when the subscription was registered.
+// This works because we subscribe to only one type per characteristic:
+// auto-subscriptions prefer NOTIFY, explicit subscriptions use the
+// user-requested type. A characteristic with both notify and indicate
+// enabled would be classified based on the subscription type, not the
+// actual ATT opcode — acceptable since dual-mode is rarely used.
 #define GATTC_NOTIFY_EVENT_TYPE(params) \
     (((params)->value & BT_GATT_CCC_INDICATE) \
         ? MP_BLUETOOTH_IRQ_GATTC_INDICATE \
         : MP_BLUETOOTH_IRQ_GATTC_NOTIFY)
-#endif
 
 #define ERRNO_BLUETOOTH_NOT_ACTIVE MP_ENODEV
 
@@ -2743,11 +2739,8 @@ static bool gattc_register_auto_subscription_type(struct bt_conn *conn, uint16_t
 // matching NimBLE's behavior. Called during characteristic discovery for
 // characteristics with NOTIFY or INDICATE properties.
 //
-// When BT_GATT_SUBSCRIBE_HAS_RECEIVED_OPCODE is defined, the stack sets
-// params->received_opcode before invoking the callback, so notification
-// type is detected from the actual ATT opcode regardless of subscription.
-// Without it, we subscribe to only ONE type (prefer NOTIFY if supported)
-// so params->value unambiguously indicates the event type.
+// We subscribe to only ONE type per handle (prefer NOTIFY if supported)
+// so params->value unambiguously indicates the event type in callbacks.
 static void gattc_register_auto_subscription(struct bt_conn *conn, uint16_t conn_handle, uint16_t value_handle, uint8_t properties) {
     mp_bluetooth_zephyr_root_pointers_t *rp = MP_STATE_PORT(bluetooth_zephyr_root_pointers);
     if (!rp) {
@@ -2766,9 +2759,8 @@ static void gattc_register_auto_subscription(struct bt_conn *conn, uint16_t conn
         return;
     }
 
-    // Subscribe to one type. With BT_GATT_SUBSCRIBE_HAS_RECEIVED_OPCODE the
-    // stack provides the actual opcode, but subscribing to one type is still
-    // correct behavior. Prefer NOTIFY if supported (more common, lighter weight).
+    // Subscribe to one type per handle. Prefer NOTIFY if supported (more
+    // common, lighter weight). params->value then indicates the event type.
     uint16_t sub_value;
     if (properties & BT_GATT_CHRC_NOTIFY) {
         sub_value = BT_GATT_CCC_NOTIFY;
