@@ -363,6 +363,10 @@ extern const struct device __device_dts_ord_0;
 #ifndef CONFIG_ARMV8_M_MAINLINE
 #define CONFIG_ARMV8_M_MAINLINE 1
 #endif
+// ARMv8-M Mainline is a superset of ARMv7-M Mainline
+#ifndef CONFIG_ARMV7_M_ARMV8_M_MAINLINE
+#define CONFIG_ARMV7_M_ARMV8_M_MAINLINE 1
+#endif
 #endif
 
 // Cortex-M55 (ARMv8.1-M Mainline)
@@ -372,6 +376,10 @@ extern const struct device __device_dts_ord_0;
 #endif
 #ifndef CONFIG_ARMV8_1_M_MAINLINE
 #define CONFIG_ARMV8_1_M_MAINLINE 1
+#endif
+// ARMv8.1-M Mainline is a superset of ARMv7-M Mainline
+#ifndef CONFIG_ARMV7_M_ARMV8_M_MAINLINE
+#define CONFIG_ARMV7_M_ARMV8_M_MAINLINE 1
 #endif
 #endif
 

@@ -42,8 +42,8 @@ int bt_rand(void *buf, size_t len) {
     extern int lll_csrand_get(void *buf, size_t len);
     return lll_csrand_get(buf, len);
 
-    #elif defined(__ARM_ARCH_6M__)
-    // RP2040/RP2350: Use ROSC hardware RNG
+    #elif PICO_RP2040 || PICO_RP2350
+    // RP2040 (Cortex-M0+) / RP2350 (Cortex-M33): Use ROSC hardware RNG
     extern uint8_t rosc_random_u8(size_t cycles);
     uint8_t *p = (uint8_t *)buf;
     for (size_t i = 0; i < len; i++) {

@@ -47,28 +47,30 @@
 // So DT_DEP_ORD(mp_zephyr_bt_hci_node) → mp_zephyr_bt_hci_node_ORD → 0
 #define mp_zephyr_bt_hci_node_ORD 0
 
-// ARM NVIC devicetree node stub
-// The NVIC (Nested Vector Interrupt Controller) configuration is needed by ARM Cortex-M code
-// Define the node and its properties based on the target architecture
+// ARM NVIC devicetree node stubs
+// nvic.h selects the NVIC compatible based on architecture config:
+//   CONFIG_ARMV8_1_M_MAINLINE        → arm_v8_1m_nvic  (Cortex-M55/M85)
+//   CONFIG_ARMV8_M_BASELINE/MAINLINE → arm_v8m_nvic    (Cortex-M23/M33/M35P)
+//   CONFIG_ARMV7_M_ARMV8_M_MAINLINE  → arm_v7m_nvic    (Cortex-M3/M4/M7)
+//   CONFIG_ARMV6_M_ARMV8_M_BASELINE  → arm_v6m_nvic    (Cortex-M0/M0+)
+// All four node IDs must be defined since the selection is compile-time.
 
-// Node identifier for ARM NVIC instance 0
-// The value doesn't matter, but it must be a valid C identifier suffix
-#define DT_N_INST_0_arm_v7m_nvic DT_N_INST_0_arm_v7m_nvic
+#define DT_N_INST_0_arm_v6m_nvic  DT_N_INST_0_arm_v6m_nvic
+#define DT_N_INST_0_arm_v7m_nvic  DT_N_INST_0_arm_v7m_nvic
+#define DT_N_INST_0_arm_v8m_nvic  DT_N_INST_0_arm_v8m_nvic
+#define DT_N_INST_0_arm_v8_1m_nvic DT_N_INST_0_arm_v8_1m_nvic
 
-// NVIC properties - these are architecture-specific
-// For Cortex-M4 (STM32WB55): 4 priority bits (16 priority levels)
-// For Cortex-M0: 2 priority bits (4 priority levels)
-// For Cortex-M3: 3 or 4 priority bits depending on vendor
-
-#if defined(CONFIG_CPU_CORTEX_M4) || defined(CONFIG_CPU_CORTEX_M7) || defined(CONFIG_CPU_CORTEX_M33)
-#define DT_N_INST_0_arm_v7m_nvic_P_arm_num_irq_priority_bits 4
-#elif defined(CONFIG_CPU_CORTEX_M3)
-#define DT_N_INST_0_arm_v7m_nvic_P_arm_num_irq_priority_bits 4
-#elif defined(CONFIG_CPU_CORTEX_M0) || defined(CONFIG_CPU_CORTEX_M23)
-#define DT_N_INST_0_arm_v7m_nvic_P_arm_num_irq_priority_bits 2
+// NVIC priority bits — architecture/vendor dependent
+// Cortex-M0/M0+/M23: 2 bits, Cortex-M3/M4/M7/M33/M55: typically 4 bits
+#if defined(CONFIG_CPU_CORTEX_M0) || defined(CONFIG_CPU_CORTEX_M23)
+#define _ZEPHYR_BLE_NVIC_PRIO_BITS 2
 #else
-// Default to 4 for unknown Cortex-M variants
-#define DT_N_INST_0_arm_v7m_nvic_P_arm_num_irq_priority_bits 4
+#define _ZEPHYR_BLE_NVIC_PRIO_BITS 4
 #endif
+
+#define DT_N_INST_0_arm_v6m_nvic_P_arm_num_irq_priority_bits  _ZEPHYR_BLE_NVIC_PRIO_BITS
+#define DT_N_INST_0_arm_v7m_nvic_P_arm_num_irq_priority_bits  _ZEPHYR_BLE_NVIC_PRIO_BITS
+#define DT_N_INST_0_arm_v8m_nvic_P_arm_num_irq_priority_bits  _ZEPHYR_BLE_NVIC_PRIO_BITS
+#define DT_N_INST_0_arm_v8_1m_nvic_P_arm_num_irq_priority_bits _ZEPHYR_BLE_NVIC_PRIO_BITS
 
 #endif /* ZEPHYR_INCLUDE_DEVICETREE_GENERATED_H_ */

@@ -1054,7 +1054,6 @@ int mp_bluetooth_init(void) {
     return 0;
 }
 
-#if defined(__ZEPHYR__) || MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER || defined(STM32WB)
 // Callback for bt_conn_foreach to disconnect and count LE connections.
 static void mp_bt_zephyr_disconnect_count_cb(struct bt_conn *conn, void *data) {
     int *count = (int *)data;
@@ -1119,7 +1118,6 @@ static void mp_bt_zephyr_disconnect_all_wait(void) {
         mp_hal_delay_ms(1);
     }
 }
-#endif
 
 int mp_bluetooth_deinit(void) {
     DEBUG_printf("mp_bluetooth_deinit %d\n", mp_bluetooth_zephyr_ble_state);
@@ -1174,12 +1172,10 @@ int mp_bluetooth_deinit(void) {
     }
     #endif
 
-    #if defined(__ZEPHYR__) || MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER || defined(STM32WB)
     // Explicitly disconnect all connections and wait for the connection pool
     // slots to be freed. This ensures connections are cleanly disconnected
     // before bt_disable() runs.
     mp_bt_zephyr_disconnect_all_wait();
-    #endif
 
     // Release bt_conn refs held by our stored connection list.
     // The disconnect callbacks should have already released most of these,

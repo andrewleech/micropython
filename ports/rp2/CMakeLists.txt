@@ -424,13 +424,7 @@ if(MICROPY_BLUETOOTH_ZEPHYR)
         message(FATAL_ERROR " zephyr not initialized.\n Run 'make BOARD=${MICROPY_BOARD} submodules'")
     endif()
 
-    # Add minimal Zephyr port (generic, platform-independent)
-    # Uses same pattern as NimBLE - mpbthciport.c (added above) provides shared infrastructure
     # CYW43 controller functions provided by pico-sdk via WEAK overrides
-    list(APPEND MICROPY_SOURCE_PORT
-        mpzephyrport.c           # Generic Zephyr polling (platform-independent)
-    )
-
     if (MICROPY_PY_NETWORK_CYW43)
         list(APPEND MICROPY_SOURCE_PORT mpzephyrport_rp2.c)  # Full CYW43 HCI transport
     else()
