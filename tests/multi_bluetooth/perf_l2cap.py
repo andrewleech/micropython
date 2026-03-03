@@ -8,6 +8,7 @@ if not hasattr(bluetooth.BLE, "l2cap_connect"):
     raise SystemExit
 
 TIMEOUT_MS = 1000
+_DISCONNECT_TIMEOUT_MS = 5000
 
 _IRQ_CENTRAL_CONNECT = const(1)
 _IRQ_CENTRAL_DISCONNECT = const(2)
@@ -114,10 +115,10 @@ def instance0():
 
         send_data(ble, conn_handle, cid)
 
-        wait_for_event(_IRQ_L2CAP_DISCONNECT, TIMEOUT_MS)
+        wait_for_event(_IRQ_L2CAP_DISCONNECT, _DISCONNECT_TIMEOUT_MS)
 
         # Wait for the central to disconnect.
-        wait_for_event(_IRQ_CENTRAL_DISCONNECT, TIMEOUT_MS)
+        wait_for_event(_IRQ_CENTRAL_DISCONNECT, _DISCONNECT_TIMEOUT_MS)
     finally:
         ble.active(0)
 
@@ -139,7 +140,7 @@ def instance1():
 
         # Disconnect channel.
         ble.l2cap_disconnect(conn_handle, cid)
-        wait_for_event(_IRQ_L2CAP_DISCONNECT, TIMEOUT_MS)
+        wait_for_event(_IRQ_L2CAP_DISCONNECT, _DISCONNECT_TIMEOUT_MS)
 
         multitest.output_metric(
             "Received {}/{} bytes in {} ms. {} B/s".format(
@@ -149,7 +150,7 @@ def instance1():
 
         # Disconnect from peripheral.
         ble.gap_disconnect(conn_handle)
-        wait_for_event(_IRQ_PERIPHERAL_DISCONNECT, TIMEOUT_MS)
+        wait_for_event(_IRQ_PERIPHERAL_DISCONNECT, _DISCONNECT_TIMEOUT_MS)
     finally:
         ble.active(0)
 
