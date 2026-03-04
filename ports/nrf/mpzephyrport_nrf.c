@@ -46,6 +46,7 @@
 #include "extmod/modbluetooth.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_poll.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_port.h"
+#include "extmod/zephyr_ble/hal/zephyr_ble_work.h"
 
 #include "extmod/zephyr_ble/hal/zephyr_ble_hal.h"
 #include "zephyr/device.h"
@@ -132,8 +133,21 @@ static void mp_bluetooth_zephyr_controller_poll_rx(void) {
     #endif
 
     extern const struct device __device_dts_ord_0;
-    extern void hci_driver_poll_rx(const struct device *dev);
-    hci_driver_poll_rx(&__device_dts_ord_0);
+    extern bool hci_driver_poll_rx(const struct device *dev);
+
+    // Process one HCI event at a time with work processing between each.
+    // This matches full Zephyr's threading model where the work queue thread
+    // runs between HCI events, ensuring CONNECTION_COMPLETE's rx_work
+    // (le_enh_conn_complete) executes before DISCONNECT_COMPLETE arrives.
+    while (hci_driver_poll_rx(&__device_dts_ord_0)) {
+        mp_bluetooth_zephyr_work_process();
+
+        #if MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
+        // Re-run mayflies — processing work may have triggered controller activity.
+        mayfly_run(TICKER_USER_ID_ULL_HIGH);
+        mayfly_run(TICKER_USER_ID_ULL_LOW);
+        #endif
+    }
 }
 
 // Strong override: process Zephyr work queues and reschedule timer.
