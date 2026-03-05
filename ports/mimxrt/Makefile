@@ -55,7 +55,7 @@ include $(TOP)/extmod/extmod.mk
 MCUX_SDK_DIR = lib/nxp_driver/sdk
 MCU_DIR = $(MCUX_SDK_DIR)/devices/$(MCU_SERIES)
 
-# Select linker scripts based on MCU_SERIES
+# Select linker scripts based on MCU_SERIES (can be overridden in mpconfigboard.mk)
 LD_FILES ?= boards/$(MCU_SERIES).ld boards/common.ld
 
 # Parameter configurations for generation
@@ -78,6 +78,7 @@ INC += -I$(TOP)/lib/oofatfs
 INC += -I$(TOP)/lib/tinyusb/hw
 INC += -I$(TOP)/lib/tinyusb/hw/bsp/teensy_40
 INC += -I$(TOP)/lib/tinyusb/src
+INC += -I./tinyusb_port
 INC += -I$(TOP)/shared/tinyusb
 INC += -I.
 INC += -Ihal
@@ -106,6 +107,17 @@ SRC_TINYUSB_C += \
 	lib/tinyusb/src/device/usbd_control.c \
 	lib/tinyusb/src/portable/chipidea/ci_hs/dcd_ci_hs.c \
 	lib/tinyusb/src/tusb.c
+
+ifeq ($(MICROPY_HW_USB_HOST),1)
+SRC_TINYUSB_C += \
+	lib/tinyusb/src/class/cdc/cdc_host.c \
+	lib/tinyusb/src/class/msc/msc_host.c \
+	lib/tinyusb/src/class/hid/hid_host.c \
+	lib/tinyusb/src/host/hub.c \
+	lib/tinyusb/src/host/usbh.c \
+	lib/tinyusb/src/portable/ehci/ehci.c \
+	lib/tinyusb/src/portable/chipidea/ci_hs/hcd_ci_hs.c
+endif
 
 # All settings for Ethernet support are controller by the value of MICROPY_PY_LWIP
 ifeq ($(MICROPY_PY_LWIP),1)
@@ -295,6 +307,13 @@ SHARED_SRC_C += \
 	shared/tinyusb/mp_usbd.c \
 	shared/tinyusb/mp_usbd_cdc.c \
 	shared/tinyusb/mp_usbd_descriptor.c \
+	shared/tinyusb/mp_usbd_runtime.c \
+
+ifeq ($(MICROPY_HW_USB_HOST),1)
+SHARED_SRC_C += shared/tinyusb/mp_usbh.c
+SRC_EXTMOD_C += extmod/machine_usb_host.c
+SRC_C += tinyusb_port/tusb_port.c
+endif
 
 # Set flash driver name, base address and internal flash flag, based on the flash type.
 ifeq ($(MICROPY_HW_FLASH_TYPE),$(filter $(MICROPY_HW_FLASH_TYPE),qspi_nor_flash))
@@ -497,6 +516,11 @@ ifdef MICROPY_HW_FLASH_QE_ARG
 	CFLAGS += -DMICROPY_HW_FLASH_QE_ARG=$(MICROPY_HW_FLASH_QE_ARG)
 endif
 
+ifeq ($(MICROPY_HW_USB_HOST),1)
+CFLAGS += -DMICROPY_HW_USB_HOST=1
+LDFLAGS += --wrap=hcd_event_handler
+endif
+
 CFLAGS += $(CFLAGS_EXTRA)
 
 MPY_CROSS_FLAGS += -march=armv7m
@@ -551,6 +575,9 @@ OBJ += $(GEN_PINS_SRC:.c=.o)
 
 # Workaround for bug in older gcc, warning on "static usbd_device_t _usbd_dev = { 0 };"
 $(BUILD)/lib/tinyusb/src/device/usbd.o: CFLAGS += -Wno-missing-braces
+
+# Suppress unused variable warning in TinyUSB host drivers
+$(BUILD)/lib/tinyusb/src/class/cdc/cdc_host.o: CFLAGS += -Wno-unused-variable
 
 # =============================================================================
 # Build targets

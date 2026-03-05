@@ -1,0 +1,14 @@
+--- instance0 ---
+Host active
+CDC device found
+is_connected: True
+any (before recv): 0
+Received from device: b'hello'
+Bytes written: 5
+Host finished
+--- instance1 ---
+CDC device configured
+CDC device enumerated
+CDC write returned: 5 bytes
+Received from host: b'world'
+Device finished

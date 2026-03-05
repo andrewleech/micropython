@@ -1,0 +1,9 @@
+--- instance0 ---
+Host active
+CDC is_connected: True
+HID is_connected: True
+Both CDC and HID found
+Host finished
+--- instance1 ---
+CDC+HID device configured
+Device finished
