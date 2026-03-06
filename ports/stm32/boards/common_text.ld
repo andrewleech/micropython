@@ -9,6 +9,7 @@
 /*  *(.glue_7)   */    /* glue arm to thumb code */
 /*  *(.glue_7t)  */    /* glue thumb to arm code */
 
+
     . = ALIGN(4);
     _etext = .;        /* define a global symbol at end of code */
 } >FLASH_COMMON

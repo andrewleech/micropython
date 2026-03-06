@@ -97,6 +97,7 @@
 #if MICROPY_PY_THREAD
 static pyb_thread_t pyb_thread_main;
 #endif
+static void stm32_main_loop(void *arg);
 
 #if defined(MICROPY_HW_UART_REPL)
 #ifndef MICROPY_HW_UART_REPL_RXBUF
@@ -410,13 +411,13 @@ void stm32_main(uint32_t reset_mode) {
     LL_MEM_EnableClockLowPower(LL_MEM_AXISRAM1 | LL_MEM_AXISRAM2 | LL_MEM_AXISRAM3
         | LL_MEM_AXISRAM4 | LL_MEM_AXISRAM5 | LL_MEM_AXISRAM6 | LL_MEM_AHBSRAM1 | LL_MEM_AHBSRAM2
         | LL_MEM_BKPSRAM | LL_MEM_FLEXRAM | LL_MEM_CACHEAXIRAM | LL_MEM_VENCRAM | LL_MEM_BOOTROM);
+    LL_AHB5_GRP1_EnableClockLowPower(LL_AHB5_GRP1_PERIPH_XSPI2 | LL_AHB5_GRP1_PERIPH_XSPIM);
     LL_APB4_GRP1_EnableClock(LL_APB4_GRP1_PERIPH_RTC | LL_APB4_GRP1_PERIPH_RTCAPB);
     LL_APB4_GRP1_EnableClockLowPower(LL_APB4_GRP1_PERIPH_RTC | LL_APB4_GRP1_PERIPH_RTCAPB);
 
     // Enable some AHB peripherals during sleep.
     LL_AHB1_GRP1_EnableClockLowPower(LL_AHB1_GRP1_PERIPH_ALL); // GPDMA1, ADC12
     LL_AHB4_GRP1_EnableClockLowPower(LL_AHB4_GRP1_PERIPH_ALL); // GPIOA-Q, PWR, CRC
-    LL_AHB5_GRP1_EnableClockLowPower(LL_AHB5_GRP1_PERIPH_ALL); // DMA2D, ETH, FMC, GFXMMU, GPU2D, HPDMA, XSPI, JPEG, MCE, CACHEAXI, NPU, OTG, PSSI, SDMMC
 
     // Enable some APB peripherals during sleep.
     LL_APB1_GRP1_EnableClockLowPower(LL_APB1_GRP1_PERIPH_ALL); // I2C, I3C, LPTIM, SPI, TIM, UART, WWDG
@@ -558,14 +559,16 @@ void stm32_main(uint32_t reset_mode) {
 
     MICROPY_BOARD_BEFORE_SOFT_RESET_LOOP(&state);
 
+    stm32_main_loop(&state);
+}
+
+// Main MicroPython soft-reset loop.
+static void stm32_main_loop(void *arg) {
+    boardctrl_state_t *state = (boardctrl_state_t *)arg;
+
 soft_reset:
 
-    MICROPY_BOARD_TOP_SOFT_RESET_LOOP(&state);
-
-    // Python threading init
-    #if MICROPY_PY_THREAD
-    mp_thread_init();
-    #endif
+    MICROPY_BOARD_TOP_SOFT_RESET_LOOP(state);
 
     // Stack limit init.
     mp_cstack_init_with_top(&_estack, (char *)&_estack - (char *)&_sstack);
@@ -624,7 +627,7 @@ soft_reset:
     // Create it if needed, mount in on /flash, and set it as current dir.
     bool mounted_flash = false;
     #if MICROPY_HW_FLASH_MOUNT_AT_BOOT
-    mounted_flash = init_flash_fs(state.reset_mode);
+    mounted_flash = init_flash_fs(state->reset_mode);
     #endif
 
     bool mounted_sdcard = false;
@@ -664,7 +667,7 @@ soft_reset:
     #endif
 
     // Run boot.py (or whatever else a board configures at this stage).
-    if (MICROPY_BOARD_RUN_BOOT_PY(&state) == BOARDCTRL_GOTO_SOFT_RESET_EXIT) {
+    if (MICROPY_BOARD_RUN_BOOT_PY(state) == BOARDCTRL_GOTO_SOFT_RESET_EXIT) {
         goto soft_reset_exit;
     }
 
@@ -706,7 +709,7 @@ soft_reset:
     // At this point everything is fully configured and initialised.
 
     // Run main.py (or whatever else a board configures at this stage).
-    if (MICROPY_BOARD_RUN_MAIN_PY(&state) == BOARDCTRL_GOTO_SOFT_RESET_EXIT) {
+    if (MICROPY_BOARD_RUN_MAIN_PY(state) == BOARDCTRL_GOTO_SOFT_RESET_EXIT) {
         goto soft_reset_exit;
     }
 
@@ -730,16 +733,16 @@ soft_reset_exit:
 
     // soft reset
 
-    MICROPY_BOARD_START_SOFT_RESET(&state);
+    MICROPY_BOARD_START_SOFT_RESET(state);
 
     #if MICROPY_HW_ENABLE_STORAGE
-    if (state.log_soft_reset) {
+    if (state->log_soft_reset) {
         mp_printf(&mp_plat_print, "MPY: sync filesystems\n");
     }
     storage_flush();
     #endif
 
-    if (state.log_soft_reset) {
+    if (state->log_soft_reset) {
         mp_printf(&mp_plat_print, "MPY: soft reboot\n");
     }
 
@@ -791,7 +794,7 @@ soft_reset_exit:
     mp_usbd_deinit();
     #endif
 
-    MICROPY_BOARD_END_SOFT_RESET(&state);
+    MICROPY_BOARD_END_SOFT_RESET(state);
 
     gc_sweep_all();
     mp_deinit();
