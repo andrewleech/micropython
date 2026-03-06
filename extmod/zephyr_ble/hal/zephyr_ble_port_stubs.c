@@ -34,8 +34,18 @@
 // --- HCI RX Task Stubs ---
 
 __attribute__((weak))
+void mp_bluetooth_zephyr_hci_rx_task_start(void) {
+    // No-op: port uses polling mode
+}
+
+__attribute__((weak))
 void mp_bluetooth_zephyr_hci_rx_task_stop(void) {
     // No-op
+}
+
+__attribute__((weak))
+bool mp_bluetooth_zephyr_hci_rx_task_active(void) {
+    return false;
 }
 
 __attribute__((weak))

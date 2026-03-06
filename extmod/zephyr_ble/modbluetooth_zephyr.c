@@ -55,6 +55,11 @@
 #include "extmod/zephyr_ble/net_buf_pool_registry.h"
 #endif
 
+#if MICROPY_PY_BLUETOOTH_USE_ZEPHYR_FREERTOS
+#include "FreeRTOS.h"
+#include "task.h"
+#endif
+
 // Access Zephyr's internal bt_dev for force-reset on deinit failure
 // Include path has lib/zephyr/subsys/bluetooth, so use host/ prefix
 #include "host/hci_core.h"
@@ -1012,6 +1017,15 @@ int mp_bluetooth_init(void) {
         // Native Zephyr port uses settings_load() above instead.
         mp_bluetooth_zephyr_load_keys();
         #endif
+
+        #ifndef __ZEPHYR__
+        // Start HCI RX task for continuous HCI polling in background
+        // The task is stopped first in mp_bluetooth_deinit() to prevent race conditions
+        #if MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
+        mp_bluetooth_zephyr_hci_rx_task_start();
+        DEBUG_printf("HCI RX task started\n");
+        #endif
+        #endif // !__ZEPHYR__
 
     } else {
         DEBUG_printf("BLE already ACTIVE (state=%d)\n", mp_bluetooth_zephyr_ble_state);

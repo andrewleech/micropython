@@ -28,6 +28,11 @@
 #define MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_KERNEL_H
 
 #include "zephyr_ble_work.h"
+
+#if MICROPY_PY_THREAD
+#include "FreeRTOS.h"
+#include "task.h"
+#endif
 #include "py/mphal.h"
 
 // Zephyr kernel miscellaneous abstractions for MicroPython
@@ -69,8 +74,13 @@ static inline k_tid_t k_current_get(void) {
         return (k_tid_t)&k_sys_work_q.thread;
     }
 
-    // Cooperative polling: always return work queue thread
+    #if MICROPY_PY_THREAD
+    // Outside work context, return actual FreeRTOS task handle
+    return (k_tid_t)xTaskGetCurrentTaskHandle();
+    #else
+    // Non-FreeRTOS builds: return work queue thread (polling mode)
     return (k_tid_t)&k_sys_work_q.thread;
+    #endif
 }
 
 // Check if in ISR context.
