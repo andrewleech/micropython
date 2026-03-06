@@ -32,11 +32,30 @@
 #include "zephyr_ble_work.h"
 
 // Zephyr k_mutex abstraction layer for MicroPython
-// No-op implementation — single-threaded cooperative execution provides mutual exclusion.
+//
+// When MICROPY_PY_THREAD is enabled (FreeRTOS available):
+//   Uses FreeRTOS mutex with priority inheritance
+//
+// When MICROPY_PY_THREAD is disabled (no RTOS):
+//   No-op implementation - single-threaded execution provides mutual exclusion
 
+#if MICROPY_PY_THREAD
+// FreeRTOS-backed mutex with static allocation
+#include "FreeRTOS.h"
+#include "semphr.h"
+
+struct k_mutex {
+    SemaphoreHandle_t handle;       // FreeRTOS mutex handle
+    StaticSemaphore_t storage;      // Static storage for mutex
+};
+
+#else
+// No-op mutex (fallback for single-threaded execution)
 struct k_mutex {
     volatile uint8_t locked;        // Lock count for debugging
 };
+
+#endif // MICROPY_PY_THREAD
 
 // --- Mutex API ---
 
