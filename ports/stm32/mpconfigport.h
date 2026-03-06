@@ -96,6 +96,15 @@
 #define MICROPY_PY_THREAD           (0)
 #endif
 
+#if MICROPY_PY_THREAD
+// FreeRTOS threading backend configuration
+#define MICROPY_PY_THREAD_GIL (1)
+#define MICROPY_MPTHREADPORT_H "extmod/freertos/mpthreadport.h"
+// FreeRTOS-aware delay (declared here to avoid include order issues)
+void mp_freertos_delay_ms(unsigned int ms);
+#define mp_hal_delay_ms mp_freertos_delay_ms
+#endif
+
 // extended modules
 #define MICROPY_PY_OS_INCLUDEFILE   "ports/stm32/modos.c"
 #define MICROPY_PY_OS_DUPTERM       (3)
@@ -252,9 +261,28 @@ extern const struct _mp_obj_type_t network_lan_type;
 
 typedef long mp_off_t;
 
-#if MICROPY_BLUETOOTH_ZEPHYR
+#if MICROPY_PY_THREAD
+#include "FreeRTOS.h"
+#include "task.h"
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+        MP_THREAD_GIL_EXIT(); \
+        taskYIELD(); \
+        MP_THREAD_GIL_ENTER(); \
+    } while (0);
+
+#define MICROPY_THREAD_YIELD() taskYIELD()
+#elif MICROPY_BLUETOOTH_ZEPHYR
 // Zephyr BLE cooperative polling requires processing pending callbacks
 // in event wait loops so soft timer-driven BLE work items execute.
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        mp_handle_pending(MP_HANDLE_PENDING_CALLBACKS_AND_EXCEPTIONS); \
+        __WFI(); \
+    } while (0);
+#else
 #define MICROPY_EVENT_POLL_HOOK \
     do { \
         mp_handle_pending(MP_HANDLE_PENDING_CALLBACKS_AND_EXCEPTIONS); \
