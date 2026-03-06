@@ -231,6 +231,15 @@ extern const struct _mp_obj_type_t network_lan_type;
 
 typedef long mp_off_t;
 
+#define MICROPY_EVENT_POLL_HOOK \
+    do { \
+        extern void mp_handle_pending(bool); \
+        mp_handle_pending(true); \
+        __WFI(); \
+    } while (0);
+
+#define MICROPY_THREAD_YIELD()
+
 // Configuration for shared/runtime/softtimer.c.
 #define MICROPY_SOFT_TIMER_TICKS_MS uwTick
 
@@ -260,7 +269,7 @@ typedef long mp_off_t;
 #endif
 
 #ifndef MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
-#define MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS (MICROPY_BLUETOOTH_NIMBLE)
+#define MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS (MICROPY_BLUETOOTH_NIMBLE || MICROPY_BLUETOOTH_ZEPHYR)
 #endif
 
 // We need an implementation of the log2 function which is not a macro

@@ -45,8 +45,11 @@
 #if MICROPY_BLUETOOTH_NIMBLE
 // For mp_bluetooth_nimble_hci_uart_wfi
 #include "nimble/nimble_npl.h"
+#elif MICROPY_BLUETOOTH_ZEPHYR
+// For mp_bluetooth_zephyr_hci_uart_wfi
+extern void mp_bluetooth_zephyr_hci_uart_wfi(void);
 #else
-#error "STM32WB must use NimBLE."
+#error "STM32WB must use NimBLE or Zephyr BLE."
 #endif
 
 #if !MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS
@@ -59,6 +62,15 @@
 
 // Define to 1 to print traces of HCI packets
 #define HCI_TRACE (0)
+
+// Define to 1 to trace ACL flow control (for debugging GATTC issues)
+#define ACL_FLOW_DEBUG (0)
+
+#if ACL_FLOW_DEBUG
+#define ACL_DEBUG_printf(...) mp_printf(&mp_plat_print, "RFCORE: " __VA_ARGS__)
+#else
+#define ACL_DEBUG_printf(...) (void)0
+#endif
 
 #define IPCC_CH_BLE         (LL_IPCC_CHANNEL_1) // BLE HCI command and response
 #define IPCC_CH_SYS         (LL_IPCC_CHANNEL_2) // system HCI command and response
@@ -312,6 +324,7 @@ static size_t tl_parse_hci_msg(const uint8_t *buf, parse_hci_info_t *parse) {
             info = "HCI_ACL";
 
             len = 5 + buf[3] + (buf[4] << 8);
+            ACL_DEBUG_printf("HCI_ACL_RX: len=%d handle=%02x%02x\n", (int)len, buf[2], buf[1]);
             if (parse != NULL) {
                 parse->cb_fun(parse->cb_env, buf, len);
             }
@@ -322,6 +335,7 @@ static size_t tl_parse_hci_msg(const uint8_t *buf, parse_hci_info_t *parse) {
 
             // Acknowledgment of a pending ACL request, allow another one to be sent.
             if (buf[1] == HCI_EVENT_NUMBER_OF_COMPLETED_PACKETS) {
+                ACL_DEBUG_printf("NUM_COMPLETED_PACKETS: pending=%d->0\n", hci_acl_cmd_pending);
                 hci_acl_cmd_pending = false;
             }
 
@@ -388,18 +402,18 @@ static size_t tl_parse_hci_msg(const uint8_t *buf, parse_hci_info_t *parse) {
     }
 
     #if HCI_TRACE
-    printf("[% 8d] <%s(%02x", mp_hal_ticks_ms(), info, buf[0]);
+    mp_printf(&mp_plat_print, "[% 8d] <%s(%02x", mp_hal_ticks_ms(), info, buf[0]);
     for (int i = 1; i < len; ++i) {
-        printf(":%02x", buf[i]);
+        mp_printf(&mp_plat_print, ":%02x", buf[i]);
     }
-    printf(")");
+    mp_printf(&mp_plat_print, ")");
     if (parse && parse->was_hci_reset_evt) {
-        printf(" (reset)");
+        mp_printf(&mp_plat_print, " (reset)");
     }
     if (applied_set_event_event_mask2_fix) {
-        printf(" (mask2 fix %d)", applied_set_event_event_mask2_fix);
+        mp_printf(&mp_plat_print, " (mask2 fix %d)", applied_set_event_event_mask2_fix);
     }
-    printf("\n");
+    mp_printf(&mp_plat_print, "\n");
 
     #else
     (void)info;
@@ -445,7 +459,9 @@ static size_t tl_check_msg(volatile tl_list_node_t *head, unsigned int ch, parse
     size_t len = 0;
     if (LL_C2_IPCC_IsActiveFlag_CHx(IPCC, ch)) {
         // Process new data.
+        ACL_DEBUG_printf("tl_check_msg: IPCC ch=%d has data\n", ch);
         len = tl_process_msg(head, ch, parse);
+        ACL_DEBUG_printf("tl_check_msg: processed len=%d\n", (int)len);
 
         // Clear receive channel (allows RF core to send more data to us).
         LL_C1_IPCC_ClearFlag_CHx(IPCC, ch);
@@ -469,11 +485,11 @@ static void tl_hci_cmd(uint8_t *cmd, unsigned int ch, uint8_t hdr, uint16_t opco
     memcpy(&cmd[12], buf, len);
 
     #if HCI_TRACE
-    printf("[% 8d] >HCI(", mp_hal_ticks_ms());
+    mp_printf(&mp_plat_print, "[% 8d] >HCI(", mp_hal_ticks_ms());
     for (int i = 0; i < len + 4; ++i) {
-        printf(":%02x", cmd[i + 8]);
+        mp_printf(&mp_plat_print, ":%02x", cmd[i + 8]);
     }
-    printf(")\n");
+    mp_printf(&mp_plat_print, ")\n");
     #endif
 
     // Indicate that this channel is ready.
@@ -504,6 +520,7 @@ static ssize_t tl_sys_hci_cmd_resp(uint16_t opcode, const uint8_t *buf, size_t l
 }
 
 static int tl_ble_wait_resp(void) {
+    DEBUG_printf("tl_ble_wait_resp: waiting for response\n");
     uint32_t t0 = mp_hal_ticks_ms();
     while (!LL_C2_IPCC_IsActiveFlag_CHx(IPCC, IPCC_CH_BLE)) {
         if (mp_hal_ticks_ms() - t0 > BLE_ACK_TIMEOUT_MS) {
@@ -512,17 +529,21 @@ static int tl_ble_wait_resp(void) {
         }
     }
 
+    DEBUG_printf("tl_ble_wait_resp: response received, processing\n");
     // C2 set IPCC flag -- process the data, clear the flag, and re-enable IRQs.
     tl_check_msg(&ipcc_mem_ble_evt_queue, IPCC_CH_BLE, NULL);
+    DEBUG_printf("tl_ble_wait_resp: done\n");
     return 0;
 }
 
 // Synchronously send a BLE command.
 static void tl_ble_hci_cmd_resp(uint16_t opcode, const uint8_t *buf, size_t len) {
+    DEBUG_printf("tl_ble_hci_cmd_resp: opcode=0x%04x, len=%u\n", opcode, (unsigned)len);
     // Poll for completion rather than wait for IRQ->scheduler.
     LL_C1_IPCC_DisableReceiveChannel(IPCC, IPCC_CH_BLE);
     tl_hci_cmd(ipcc_membuf_ble_cmd_buf, IPCC_CH_BLE, HCI_KIND_BT_CMD, opcode, buf, len);
     tl_ble_wait_resp();
+    DEBUG_printf("tl_ble_hci_cmd_resp: complete\n");
 }
 
 /******************************************************************************/
@@ -601,8 +622,132 @@ static const struct {
     0, // HwVersion
 };
 
+void rfcore_ipcc_reset(void) {
+    DEBUG_printf("rfcore_ipcc_reset\n");
+
+    // Clear CPU1's IPCC channel flags and disable CPU1's channels.
+    // Only touch CPU1 (C1) registers — writing to C2 registers from CPU1
+    // disables CPU2's interrupt masks, preventing it from receiving commands.
+    LL_C1_IPCC_ClearFlag_CHx(IPCC,
+        LL_IPCC_CHANNEL_1 | LL_IPCC_CHANNEL_2 | LL_IPCC_CHANNEL_3 |
+        LL_IPCC_CHANNEL_4 | LL_IPCC_CHANNEL_5 | LL_IPCC_CHANNEL_6);
+
+    // Disable all CPU1 transmit and receive channel interrupts.
+    LL_C1_IPCC_DisableTransmitChannel(IPCC,
+        LL_IPCC_CHANNEL_1 | LL_IPCC_CHANNEL_2 | LL_IPCC_CHANNEL_3 |
+        LL_IPCC_CHANNEL_4 | LL_IPCC_CHANNEL_5 | LL_IPCC_CHANNEL_6);
+    LL_C1_IPCC_DisableReceiveChannel(IPCC,
+        LL_IPCC_CHANNEL_1 | LL_IPCC_CHANNEL_2 | LL_IPCC_CHANNEL_3 |
+        LL_IPCC_CHANNEL_4 | LL_IPCC_CHANNEL_5 | LL_IPCC_CHANNEL_6);
+}
+
+// SHCI event codes from STM32_WPAN middleware / BTstack.
+// CPU2 sends SHCI_SUB_EVT_CODE_READY on the system channel after boot or
+// reinit to signal it's ready to accept commands.
+#define SHCI_EVTCODE                0xFF
+#define SHCI_SUB_EVT_CODE_READY     0x9200
+#define SHCI_WIRELESS_FW_RUNNING    0x00
+
+// Wait for CPU2 to signal readiness on the IPCC system channel.
+//
+// After power-on (rfcore_init → C2BOOT) or after a full reinit, CPU2 sends
+// an SHCI_SUB_EVT_CODE_READY event as a TL_EvtPacket on the system queue:
+//   body[0] = 0x12 (HCI_KIND_VENDOR_EVENT)
+//   body[1] = 0xFF (SHCI_EVTCODE)
+//   body[2] = plen (0x03)
+//   body[3..4] = subevtcode LE (0x00 0x92 = SHCI_SUB_EVT_CODE_READY)
+//   body[5] = 0x00 (WIRELESS_FW_RUNNING)
+//
+// This function polls for that event with a timeout. On success it consumes
+// the event (and any other queued system events) via tl_check_msg.
+//
+// BTstack implements this as an interrupt-driven state machine
+// (CPU2_STATE_WAIT_FOR_STARTED → CPU2_STATE_W2_INIT_BLE). ST middleware uses
+// an RTOS callback via shci_init(). Both validate the READY subevent code.
+// We use polling which matches rfcore.c's existing architecture.
+//
+// Returns true if READY was detected, false on timeout.
+bool rfcore_ble_wait_ready(uint32_t timeout_ms) {
+    DEBUG_printf("rfcore_ble_wait_ready: waiting up to %lu ms\n",
+        (unsigned long)timeout_ms);
+    uint32_t t0 = mp_hal_ticks_ms();
+
+    while (mp_hal_ticks_ms() - t0 < timeout_ms) {
+        // Check if CPU2 has placed anything on the system channel.
+        if (LL_C2_IPCC_IsActiveFlag_CHx(IPCC, IPCC_CH_SYS)) {
+            // Walk the sys_queue to look for the READY event before consuming.
+            // The queue is a circular doubly-linked list with ipcc_mem_sys_queue
+            // as the sentinel. Nodes are in shared SRAM2, body[] starts after
+            // the 8-byte tl_list_node_t header (next + prev pointers).
+            volatile tl_list_node_t *cur = ipcc_mem_sys_queue.next;
+            bool found_ready = false;
+            while (cur != &ipcc_mem_sys_queue) {
+                uint8_t *body = (uint8_t *)cur->body;
+                // Check for SHCI READY: type=0x12, evtcode=0xFF, subevt=0x9200 LE
+                if (body[0] == HCI_KIND_VENDOR_EVENT
+                    && body[1] == SHCI_EVTCODE
+                    && body[2] >= 3) {
+                    uint16_t subevtcode = body[3] | ((uint16_t)body[4] << 8);
+                    if (subevtcode == SHCI_SUB_EVT_CODE_READY) {
+                        DEBUG_printf("rfcore_ble_wait_ready: READY event "
+                            "received (rsp=%d, %s)\n", body[5],
+                            body[5] == SHCI_WIRELESS_FW_RUNNING
+                                ? "wireless_fw" : "rss_fw");
+                        found_ready = true;
+                        break;
+                    }
+                }
+                cur = cur->next;
+            }
+
+            // Consume all queued system events (including READY).
+            tl_check_msg(&ipcc_mem_sys_queue, IPCC_CH_SYS, NULL);
+
+            if (found_ready) {
+                return true;
+            }
+            // C2 sent something on sys channel but it wasn't READY.
+            // Keep polling in case READY comes next.
+        }
+        mp_hal_delay_ms(1);
+    }
+
+    DEBUG_printf("rfcore_ble_wait_ready: timeout\n");
+    return false;
+}
+
 void rfcore_ble_init(void) {
     DEBUG_printf("rfcore_ble_init\n");
+
+    // Re-enable IPCC channels needed for BLE communication.
+    // On first boot, ipcc_init() already set these up. On subsequent
+    // init cycles (after rfcore_ipcc_reset() in transport teardown),
+    // CPU1's channels were disabled and need to be restored.
+    LL_C1_IPCC_EnableIT_RXO(IPCC);
+    LL_C1_IPCC_EnableReceiveChannel(IPCC, IPCC_CH_BLE);
+
+    #if MICROPY_HW_RFCORE_WAIT_READY
+    // Wait for CPU2 to confirm it's ready before sending commands.
+    // On first boot after rfcore_init(), CPU2 may still be starting up.
+    // On subsequent BLE cycles, the READY event from the previous boot is
+    // typically already in the sys_queue and is consumed immediately.
+    //
+    // This is modelled on BTstack's CPU2_STATE_WAIT_FOR_STARTED check and
+    // ST middleware's shci_init() → SHCI_SUB_EVT_CODE_READY path. Without
+    // this, rfcore_ble_reset() can race ahead of CPU2 boot — the BLE_INIT
+    // vendor command either times out or gets a corrupt response.
+    if (!rfcore_ble_wait_ready(5000)) {
+        // CPU2 didn't respond — try full reinit (reboot CPU2)
+        DEBUG_printf("rfcore_ble_init: CPU2 not ready, reinitialising\n");
+        LL_RCC_HSI_Disable();
+        mp_hal_delay_ms(100);
+        LL_RCC_HSI_Enable();
+        rfcore_init();
+        if (!rfcore_ble_wait_ready(5000)) {
+            DEBUG_printf("rfcore_ble_init: CPU2 still not ready after reinit\n");
+        }
+    }
+    #endif
 
     // Configure and reset the BLE controller.
     if (!rfcore_ble_reset()) {
@@ -624,15 +769,20 @@ bool rfcore_ble_reset(void) {
     DEBUG_printf("rfcore_ble_reset\n");
 
     // Clear any outstanding messages from ipcc_init.
+    DEBUG_printf("rfcore_ble_reset: clearing messages\n");
     tl_check_msg(&ipcc_mem_sys_queue, IPCC_CH_SYS, NULL);
 
     // Configure and reset the BLE controller.
+    DEBUG_printf("rfcore_ble_reset: sending BLE_INIT\n");
     int ret = tl_sys_hci_cmd_resp(HCI_OPCODE(OGF_VENDOR, OCF_BLE_INIT), (const uint8_t *)&ble_init_params, sizeof(ble_init_params), 500);
+    DEBUG_printf("rfcore_ble_reset: BLE_INIT returned %d\n", ret);
 
     if (ret == -MP_ETIMEDOUT) {
         return false;
     }
+    DEBUG_printf("rfcore_ble_reset: sending HCI_RESET\n");
     tl_ble_hci_cmd_resp(HCI_OPCODE(0x03, 0x0003), NULL, 0);
+    DEBUG_printf("rfcore_ble_reset: HCI_RESET completed\n");
     return true;
 }
 
@@ -640,11 +790,11 @@ void rfcore_ble_hci_cmd(size_t len, const uint8_t *src) {
     DEBUG_printf("rfcore_ble_hci_cmd\n");
 
     #if HCI_TRACE
-    printf("[% 8d] >HCI_CMD(%02x", mp_hal_ticks_ms(), src[0]);
+    mp_printf(&mp_plat_print, "[% 8d] >HCI_CMD(%02x", mp_hal_ticks_ms(), src[0]);
     for (int i = 1; i < len; ++i) {
-        printf(":%02x", src[i]);
+        mp_printf(&mp_plat_print, ":%02x", src[i]);
     }
-    printf(")\n");
+    mp_printf(&mp_plat_print, ")\n");
     #endif
 
     tl_list_node_t *n;
@@ -658,15 +808,25 @@ void rfcore_ble_hci_cmd(size_t len, const uint8_t *src) {
 
         // Give the previous ACL command up to 100ms to complete.
         mp_uint_t timeout_start_ticks_ms = mp_hal_ticks_ms();
+        #if ACL_FLOW_DEBUG
+        if (hci_acl_cmd_pending) {
+            ACL_DEBUG_printf("ACL_SEND: waiting for pending=%d\n", hci_acl_cmd_pending);
+        }
+        #endif
         while (hci_acl_cmd_pending) {
             if (mp_hal_ticks_ms() - timeout_start_ticks_ms > 100) {
+                ACL_DEBUG_printf("ACL_SEND: TIMEOUT! pending still=%d after 100ms\n", hci_acl_cmd_pending);
                 break;
             }
+            // Pump HCI messages while waiting for ACL completion
             #if MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_NIMBLE
             mp_bluetooth_nimble_hci_uart_wfi();
+            #elif MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR
+            mp_bluetooth_zephyr_hci_uart_wfi();
             #endif
         }
 
+        ACL_DEBUG_printf("ACL_SEND: setting pending=1 (was %d)\n", hci_acl_cmd_pending);
         // Prevent sending another command until this one returns with HCI_EVENT_COMMAND_{COMPLETE,STATUS}.
         hci_acl_cmd_pending = true;
     } else {

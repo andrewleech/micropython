@@ -116,7 +116,9 @@ int mp_bluetooth_hci_uart_init(uint32_t port, uint32_t baudrate) {
 
 int mp_bluetooth_hci_uart_deinit(void) {
     DEBUG_printf("mp_bluetooth_hci_uart_deinit (stm32 rfcore)\n");
-    rfcore_ble_reset();
+    // Do NOT call rfcore_ble_reset() here. Sending BLE_INIT / HCI_Reset to
+    // CPU2 causes it to corrupt all of SRAM1. The controller is reset during
+    // init via rfcore_ble_reset() in mp_bluetooth_hci_uart_init().
     return 0;
 }
 
@@ -133,8 +135,16 @@ int mp_bluetooth_hci_uart_write(const uint8_t *buf, size_t len) {
 }
 
 // Callback to forward data from rfcore to the bluetooth hci handler.
+// IMPORTANT: This is called from IPCC interrupt context - minimize work here
 static void mp_bluetooth_hci_uart_msg_cb(void *env, const uint8_t *buf, size_t len) {
     mp_bluetooth_hci_uart_readchar_t handler = (mp_bluetooth_hci_uart_readchar_t)env;
+
+    if (handler == NULL) {
+        return;
+    }
+
+    // Forward each byte to the H:4 parser
+    // The parser will queue completed packets for processing in scheduler context
     for (size_t i = 0; i < len; ++i) {
         handler(buf[i]);
     }
