@@ -138,13 +138,299 @@ static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len);
 #include "extmod/zephyr_ble/hal/zephyr_ble_poll.h"
 #include "extmod/zephyr_ble/hal/zephyr_ble_port.h"
 
+#if MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
+#include "FreeRTOS.h"
+#include "task.h"
+
+#define HCI_RX_TASK_STACK_SIZE 2048  // 8KB (in words) - adequate for Zephyr BLE callbacks
+// Lower priority than main thread - HCI RX can wait for main to process
+#define HCI_RX_TASK_PRIORITY (tskIDLE_PRIORITY + 1)
+
+static TaskHandle_t hci_rx_task_handle = NULL;
+static volatile bool hci_rx_task_running = false;      // Signal task to stop
+static volatile bool hci_rx_task_started = false;      // Task has started and is ready
+static volatile bool hci_rx_task_exited = false;       // Task has exited
+static volatile bool hci_rx_task_shutdown_requested = false;  // Shutdown in progress
+static StaticTask_t hci_rx_task_tcb;
+static StackType_t hci_rx_task_stack[HCI_RX_TASK_STACK_SIZE];
+
+// Separate buffer for HCI RX task to avoid race with polling code
+// IMPORTANT: Must be 4-byte aligned for CYW43 SPI DMA transfers
+static uint8_t __attribute__((aligned(4))) hci_rx_task_buffer[CYW43_HCI_HEADER_SIZE + HCI_MAX_PACKET_SIZE];
+
+// Simple HCI packet queue for thread-safe handoff from HCI RX task to main task
+// Using a ring buffer with fixed-size slots
+#define HCI_RX_QUEUE_SIZE 16
+#define HCI_RX_SLOT_SIZE (CYW43_HCI_HEADER_SIZE + 256)  // Most HCI packets are small
+static uint8_t hci_rx_queue[HCI_RX_QUEUE_SIZE][HCI_RX_SLOT_SIZE] __attribute__((aligned(4)));
+static uint16_t hci_rx_queue_len[HCI_RX_QUEUE_SIZE];  // Length of each packet
+static volatile uint8_t hci_rx_queue_head = 0;  // Write index (HCI RX task)
+static volatile uint8_t hci_rx_queue_tail = 0;  // Read index (main task)
+static volatile uint32_t hci_rx_queue_dropped = 0;  // Packets dropped due to full queue
+
+// Debug counters for HCI RX task (volatile for cross-thread access)
+static volatile uint32_t hci_rx_task_polls = 0;
+static volatile uint32_t hci_rx_task_packets = 0;
+
+// Queue a packet from HCI RX task for processing by main task
+// Returns true if queued, false if queue full
+static bool hci_rx_queue_packet(uint8_t *data, uint32_t len) {
+    uint8_t next_head = (hci_rx_queue_head + 1) % HCI_RX_QUEUE_SIZE;
+
+    // Check if queue is full
+    if (next_head == hci_rx_queue_tail) {
+        hci_rx_queue_dropped++;
+        return false;
+    }
+
+    // Truncate if packet too large for slot
+    if (len > HCI_RX_SLOT_SIZE) {
+        len = HCI_RX_SLOT_SIZE;
+    }
+
+    // Copy packet to queue
+    memcpy(hci_rx_queue[hci_rx_queue_head], data, len);
+    hci_rx_queue_len[hci_rx_queue_head] = len;
+
+    // Memory barrier to ensure data is written before index update
+    __asm volatile ("dmb" ::: "memory");
+
+    hci_rx_queue_head = next_head;
+    return true;
+}
+
+// Process all queued HCI packets - called from main task context.
+// Interleaves work processing after each packet to ensure CONNECTION_COMPLETE's
+// rx_work runs before DISCONNECT_COMPLETE is delivered.
+void mp_bluetooth_zephyr_process_hci_queue(void) {
+    extern void mp_bluetooth_zephyr_work_process(void);
+
+    while (hci_rx_queue_tail != hci_rx_queue_head) {
+        // Check buffer availability before processing.
+        // If no buffers free, process work to release some.
+        if (!mp_bluetooth_zephyr_buffers_available()) {
+            mp_bluetooth_zephyr_work_process();
+
+            // Check again - if still no buffers, stop processing and let
+            // the next poll cycle handle the remaining queue.
+            if (!mp_bluetooth_zephyr_buffers_available()) {
+                return;
+            }
+        }
+
+        uint8_t *pkt = hci_rx_queue[hci_rx_queue_tail];
+        uint32_t len = hci_rx_queue_len[hci_rx_queue_tail];
+
+        // Process this packet in main task context where it's safe.
+        process_hci_rx_packet(pkt, len);
+
+        // Move to next slot.
+        hci_rx_queue_tail = (hci_rx_queue_tail + 1) % HCI_RX_QUEUE_SIZE;
+
+        // Process work after each event for proper interleaving.
+        mp_bluetooth_zephyr_work_process();
+    }
+}
+
+// HCI RX task - runs continuously, polls CYW43 for incoming HCI data
+// NOTE: This runs on core0, don't use debug_printf (printf race condition)
+static void hci_rx_task_func(void *arg) {
+    (void)arg;
+    debug_printf_hci_task("HCI RX task started\n");
+
+    extern int cyw43_bluetooth_hci_read(uint8_t *buf, uint32_t max_size, uint32_t *len);
+
+    // Signal that we've started and are ready
+    hci_rx_task_started = true;
+
+    while (hci_rx_task_running) {
+        // Check for shutdown notification (non-blocking)
+        // This allows immediate wakeup instead of waiting for vTaskDelay timeout
+        uint32_t notification = ulTaskNotifyTake(pdTRUE, 0);
+        if (notification && hci_rx_task_shutdown_requested) {
+            debug_printf_hci_task("HCI RX task shutdown requested\n");
+            break;
+        }
+
+        // Take local copy of recv_cb for consistency (avoid TOCTOU race)
+        bt_hci_recv_t cb = recv_cb;
+        if (cb != NULL) {
+            // Poll for HCI data
+            uint32_t len = 0;
+            hci_rx_task_polls++;  // Track poll count
+
+            // cyw43_bluetooth_hci_read() internally acquires CYW43_THREAD_ENTER via cyw43_ensure_bt_up()
+            int ret = cyw43_bluetooth_hci_read(hci_rx_task_buffer, sizeof(hci_rx_task_buffer), &len);
+
+            if (ret == 0 && len > CYW43_HCI_HEADER_SIZE) {
+                hci_rx_task_packets++;  // Track received packets
+                // Queue for main task processing instead of calling recv_cb directly
+                hci_rx_queue_packet(hci_rx_task_buffer, len);
+            }
+        }
+
+        // Yield to other tasks - 10ms poll interval
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    debug_printf_hci_task("HCI RX task exiting\n");
+
+    // Signal exit before deleting (avoids undefined eTaskGetState behavior)
+    hci_rx_task_exited = true;
+    vTaskDelete(NULL);
+}
+
+// Start HCI RX task - called during BLE initialization
+void mp_bluetooth_zephyr_hci_rx_task_start(void) {
+    if (hci_rx_task_handle != NULL) {
+        debug_printf("HCI RX task already running\n");
+        return;
+    }
+
+    debug_printf("Starting HCI RX task\n");
+    hci_rx_task_running = true;
+    hci_rx_task_started = false;
+    hci_rx_task_exited = false;
+
+    // Reset debug counters and queue state
+    hci_rx_task_polls = 0;
+    hci_rx_task_packets = 0;
+    hci_rx_evt_cmd_complete = 0;
+    hci_rx_evt_cmd_status = 0;
+    hci_rx_evt_le_meta = 0;
+    hci_rx_evt_le_adv_report = 0;
+    hci_rx_evt_le_conn_complete = 0;
+    hci_rx_evt_le_enh_conn_complete = 0;
+    hci_rx_evt_disconnect_complete = 0;
+    hci_rx_evt_other = 0;
+    hci_rx_acl = 0;
+    hci_rx_queue_head = 0;
+    hci_rx_queue_tail = 0;
+    hci_rx_queue_dropped = 0;
+
+    // On SMP builds, pin HCI RX task to core0 to avoid potential
+    // SPI/CYW43 driver issues with cross-core access.
+    // Core0 is where CYW43 is initialized and GPIO IRQs are handled.
+    #if configNUMBER_OF_CORES > 1
+    hci_rx_task_handle = xTaskCreateStaticAffinitySet(
+        hci_rx_task_func,
+        "hci_rx",
+        HCI_RX_TASK_STACK_SIZE,
+        NULL,
+        HCI_RX_TASK_PRIORITY,
+        hci_rx_task_stack,
+        &hci_rx_task_tcb,
+        (1 << 0)  // Pin to core0
+        );
+    #else
+    hci_rx_task_handle = xTaskCreateStatic(
+        hci_rx_task_func,
+        "hci_rx",
+        HCI_RX_TASK_STACK_SIZE,
+        NULL,
+        HCI_RX_TASK_PRIORITY,
+        hci_rx_task_stack,
+        &hci_rx_task_tcb
+        );
+    #endif
+
+    if (hci_rx_task_handle == NULL) {
+        error_printf("Failed to create HCI RX task\n");
+        hci_rx_task_running = false;
+    }
+}
+
+// Stop HCI RX task - called during BLE deinitialization
+// Uses task notification for immediate wakeup to avoid 10ms delay
+void mp_bluetooth_zephyr_hci_rx_task_stop(void) {
+    if (hci_rx_task_handle == NULL) {
+        return;
+    }
+
+    debug_printf("Stopping HCI RX task: polls=%lu packets=%lu started=%d dropped=%lu\n",
+        (unsigned long)hci_rx_task_polls, (unsigned long)hci_rx_task_packets,
+        (int)hci_rx_task_started, (unsigned long)hci_rx_queue_dropped);
+    debug_printf("  HCI events: cmd_complete=%lu cmd_status=%lu le_meta=%lu (adv=%lu) other=%lu acl=%lu\n",
+        (unsigned long)hci_rx_evt_cmd_complete, (unsigned long)hci_rx_evt_cmd_status,
+        (unsigned long)hci_rx_evt_le_meta, (unsigned long)hci_rx_evt_le_adv_report,
+        (unsigned long)hci_rx_evt_other, (unsigned long)hci_rx_acl);
+    // Issue #16 debug: connection-related events
+    debug_printf("  Connection events: conn_complete=%lu enh_conn=%lu disconnect=%lu\n",
+        (unsigned long)hci_rx_evt_le_conn_complete, (unsigned long)hci_rx_evt_le_enh_conn_complete,
+        (unsigned long)hci_rx_evt_disconnect_complete);
+
+    // Phase 1: Signal shutdown intent (but keep recv_cb set for polling fallback)
+    // After task stops, bt_disable() and other HCI operations will use polling mode
+    // which needs recv_cb to be valid. recv_cb will be cleared in port_deinit().
+    hci_rx_task_shutdown_requested = true;
+
+    // Phase 2: Signal task to stop and ensure visibility
+    hci_rx_task_running = false;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+
+    // Phase 3: Notify task to wake immediately (don't wait for vTaskDelay timeout)
+    xTaskNotifyGive(hci_rx_task_handle);
+
+    // Phase 4: Wait for clean exit with shorter timeout (task wakes immediately)
+    TickType_t start = xTaskGetTickCount();
+    const TickType_t max_wait = pdMS_TO_TICKS(200);  // 200ms timeout (was 1s)
+
+    while (!hci_rx_task_exited) {
+        if ((xTaskGetTickCount() - start) > max_wait) {
+            error_printf("HCI RX task exit timeout!\n");
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+
+    // Phase 5: Reset state for next init cycle
+    hci_rx_task_handle = NULL;
+    hci_rx_task_shutdown_requested = false;
+
+    // Drain any stale packets from queue (they won't be processed anyway)
+    hci_rx_queue_head = hci_rx_queue_tail;
+
+    debug_printf("HCI RX task stopped\n");
+}
+
+// Check if HCI RX task is active and ready
+bool mp_bluetooth_zephyr_hci_rx_task_active(void) {
+    // Only return true once task has fully started and is processing HCI data
+    return hci_rx_task_handle != NULL && hci_rx_task_running && hci_rx_task_started;
+}
+
+// Get HCI RX task debug counters
+void mp_bluetooth_zephyr_hci_rx_task_debug(uint32_t *polls, uint32_t *packets) {
+    if (polls) {
+        *polls = hci_rx_task_polls;
+    }
+    if (packets) {
+        *packets = hci_rx_task_packets;
+    }
+}
+
+// Get HCI RX queue dropped counter
+uint32_t mp_bluetooth_zephyr_hci_rx_queue_dropped(void) {
+    return hci_rx_queue_dropped;
+}
+
+// Strong override: drain HCI packets queued by the FreeRTOS HCI RX task.
+// Called from mp_bluetooth_zephyr_poll() during normal polling.
+void mp_bluetooth_zephyr_hci_uart_process(void) {
+    mp_bluetooth_zephyr_process_hci_queue();
+}
+
+#else // !MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
+
 void mp_bluetooth_zephyr_process_hci_queue(void) {
     // No queue in polling mode - HCI packets processed directly
 }
 
+#endif // MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
 // ============================================================================
 
 // Process a single HCI packet from the given buffer
+// Used by both FreeRTOS HCI queue processing and polling fallback
 static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len) {
     if (recv_cb == NULL || len <= CYW43_HCI_HEADER_SIZE) {
         return;
@@ -336,7 +622,20 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     // Process Zephyr BLE work queues and semaphores
     bool did_work = mp_bluetooth_zephyr_poll();
 
-    // Read directly from CYW43 via shared SPI bus.
+    // Process any queued HCI packets from the HCI RX task
+    // This must be done in main task context for thread safety with Zephyr
+    #if MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
+    mp_bluetooth_zephyr_process_hci_queue();
+
+    // Skip direct HCI reading if dedicated HCI RX task is active
+    // The task handles HCI reception and queuing
+    if (mp_bluetooth_zephyr_hci_rx_task_active()) {
+        return;
+    }
+    #endif
+
+    // Fallback: Read directly from CYW43 via shared SPI bus.
+    // This path is only used when HCI RX task is not active.
     // Read and process HCI packets one at a time with work between each.
     extern int cyw43_bluetooth_hci_read(uint8_t *buf, uint32_t max_size, uint32_t *len);
     extern bool mp_bluetooth_zephyr_work_process(void);
@@ -442,6 +741,13 @@ static int hci_cyw43_close(const struct device *dev) {
     debug_printf("hci_cyw43_close: poll_uart calls=%lu hci_reads=%lu cyw43_calls=%lu\n",
         (unsigned long)poll_uart_count, (unsigned long)poll_uart_hci_reads,
         (unsigned long)poll_uart_cyw43_calls);
+
+    // Print HCI RX stats before closing
+    #if MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
+    debug_printf("  HCI RX task: polls=%lu packets=%lu\n",
+        (unsigned long)hci_rx_task_polls, (unsigned long)hci_rx_task_packets);
+    mp_bluetooth_zephyr_hci_rx_task_stop();
+    #endif
 
     recv_cb = NULL;
     mp_bluetooth_zephyr_poll_stop_timer();
@@ -612,6 +918,13 @@ void mp_bluetooth_zephyr_port_deinit(void) {
     poll_uart_skipped_no_cb = 0;
     poll_uart_skipped_task = 0;
     poll_uart_cyw43_calls = 0;
+
+    #if MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
+    // Reset HCI RX task flags so next init starts fresh
+    hci_rx_task_started = false;
+    hci_rx_task_exited = false;
+    hci_rx_task_shutdown_requested = false;
+    #endif
 }
 
 void mp_bluetooth_zephyr_poll_uart(void) {
@@ -643,6 +956,17 @@ void mp_bluetooth_zephyr_poll_uart(void) {
 
     // Process any packets queued by HCI RX task first
     // This is critical for timely command credit return
+    #if MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
+    mp_bluetooth_zephyr_process_hci_queue();
+
+    // If HCI RX task is running, it handles all packet reading from CYW43.
+    // We only process the queue here to avoid race condition.
+    if (hci_rx_task_running) {
+        poll_uart_in_progress = false;
+        return;
+    }
+    #endif
+
     poll_uart_cyw43_calls++;
 
     // Read HCI packets one at a time with work between each.
