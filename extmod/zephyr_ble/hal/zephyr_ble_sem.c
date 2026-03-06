@@ -41,7 +41,7 @@
 // blocking inside poll→work_process→k_sem_take→hci_uart_wfi→poll recursion)
 // don't exceed the test runner's 10-second timeout. With depth-2 nesting,
 // 1000ms per level = 2 seconds total.
-#define ZEPHYR_BLE_SEM_POLL_TIMEOUT_MS 1000
+#define ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS 1000
 
 #if ZEPHYR_BLE_DEBUG
 #define DEBUG_SEM_printf(...) mp_printf(&mp_plat_print, "SEM: " __VA_ARGS__)
@@ -49,8 +49,157 @@
 #define DEBUG_SEM_printf(...) do {} while (0)
 #endif
 
-// mp_bluetooth_zephyr_hci_uart_wfi is declared in zephyr_ble_poll.h
-// and has a weak default in zephyr_ble_poll.c that calls port_run_task().
+// ============================================================================
+// FreeRTOS-based implementation (when MICROPY_PY_THREAD is enabled)
+// ============================================================================
+#if MICROPY_PY_THREAD
+
+#include "FreeRTOS.h"
+#include "semphr.h"
+#include "task.h"
+
+void k_sem_init(struct k_sem *sem, unsigned int initial_count, unsigned int limit) {
+    DEBUG_SEM_printf("k_sem_init(%p, count=%u, limit=%u)\n", sem, initial_count, limit);
+
+    sem->limit = limit;
+    sem->handle = xSemaphoreCreateCountingStatic(limit, initial_count, &sem->storage);
+
+    if (sem->handle == NULL) {
+        DEBUG_SEM_printf("  --> FAILED to create semaphore!\n");
+    }
+}
+
+int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
+    DEBUG_SEM_printf("k_sem_take(%p, timeout=%u)\n", sem, timeout.ticks);
+
+    if (sem->handle == NULL) {
+        DEBUG_SEM_printf("  --> semaphore not initialized!\n");
+        return -EINVAL;
+    }
+
+    // K_NO_WAIT: Non-blocking attempt
+    if (timeout.ticks == 0) {
+        if (xSemaphoreTake(sem->handle, 0) == pdTRUE) {
+            DEBUG_SEM_printf("  --> acquired (no wait)\n");
+            return 0;
+        }
+        DEBUG_SEM_printf("  --> busy\n");
+        return -EBUSY;
+    }
+
+    // Fallback: poll with short timeouts for HCI processing
+    // This is used before HCI RX task is started (during bt_enable setup)
+    uint32_t start_ms = mp_hal_ticks_ms();
+    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS : timeout.ticks;
+    if (timeout_ms > ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS) {
+        timeout_ms = ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS;
+    }
+
+    DEBUG_SEM_printf("  --> polling mode\n");
+
+    // Set wait loop flag to allow work processing (prevents recursion deadlock)
+    // This allows mp_bluetooth_zephyr_work_process() to run even if already processing
+    mp_bluetooth_zephyr_in_wait_loop = true;
+
+    int poll_count = 0;
+    while (1) {
+        // Try to take with short timeout (10ms)
+        if (xSemaphoreTake(sem->handle, pdMS_TO_TICKS(10)) == pdTRUE) {
+            DEBUG_SEM_printf("  --> acquired after %d polls\n", poll_count);
+            mp_bluetooth_zephyr_in_wait_loop = false;
+            return 0;
+        }
+
+        poll_count++;
+        DEBUG_SEM_printf("SEM_POLL: count=%d\n", poll_count);
+
+        // Process HCI data that might signal this semaphore
+        DEBUG_SEM_printf("SEM_POLL: calling hci_uart_wfi\n");
+        mp_bluetooth_zephyr_hci_uart_wfi();
+
+        // Check for pending MicroPython exception (e.g. KeyboardInterrupt from Ctrl-C).
+        // Return -EAGAIN so Zephyr callers treat this as a timeout and clean up normally.
+        // The exception remains in mp_pending_exception and is raised once control
+        // returns to the Python VM.
+        if (MP_STATE_THREAD(mp_pending_exception) != MP_OBJ_NULL) {
+            DEBUG_SEM_printf("  --> interrupted by pending exception\n");
+            mp_bluetooth_zephyr_in_wait_loop = false;
+            return -EAGAIN;
+        }
+
+        // Process work items that might signal this semaphore
+        // This is critical during init - bt_enable() submits work that must execute
+        extern void mp_bluetooth_zephyr_work_process(void);
+        DEBUG_SEM_printf("SEM_POLL: calling work_process\n");
+        mp_bluetooth_zephyr_work_process();
+
+        // Check for timeout
+        uint32_t elapsed = mp_hal_ticks_ms() - start_ms;
+        if (elapsed >= timeout_ms) {
+            DEBUG_SEM_printf("  --> timeout after %u ms\n", elapsed);
+            // Print which semaphore timed out
+            mp_printf(&mp_plat_print, "k_sem_take TIMEOUT: sem=%p count=%u polls=%d\n",
+                sem, (unsigned)uxSemaphoreGetCount(sem->handle), poll_count);
+            mp_bluetooth_zephyr_in_wait_loop = false;
+            return -EAGAIN;
+        }
+    }
+}
+
+void k_sem_give(struct k_sem *sem) {
+    DEBUG_SEM_printf("k_sem_give(%p)\n", sem);
+
+    if (sem->handle == NULL) {
+        DEBUG_SEM_printf("  --> semaphore not initialized!\n");
+        return;
+    }
+
+    if (k_sem_in_isr()) {
+        // Give from ISR context
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        xSemaphoreGiveFromISR(sem->handle, &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+        DEBUG_SEM_printf("  --> gave from ISR\n");
+    } else {
+        // Give from task context
+        xSemaphoreGive(sem->handle);
+        DEBUG_SEM_printf("  --> gave from task\n");
+    }
+}
+
+unsigned int k_sem_count_get(struct k_sem *sem) {
+    if (sem->handle == NULL) {
+        return 0;
+    }
+    return (unsigned int)uxSemaphoreGetCount(sem->handle);
+}
+
+void k_sem_reset(struct k_sem *sem) {
+    DEBUG_SEM_printf("k_sem_reset(%p)\n", sem);
+
+    if (sem->handle == NULL) {
+        return;
+    }
+
+    // Drain all available counts with iteration limit
+    // Limit prevents infinite loop if another task continuously gives
+    unsigned int max_iterations = sem->limit + 1;
+    unsigned int iterations = 0;
+    while (xSemaphoreTake(sem->handle, 0) == pdTRUE && iterations < max_iterations) {
+        iterations++;
+    }
+}
+
+// ============================================================================
+// Polling-based implementation (fallback when no RTOS)
+// ============================================================================
+#else // !MICROPY_PY_THREAD
+
+// Weak default implementation for non-threaded builds
+__attribute__((weak))
+void mp_bluetooth_zephyr_hci_uart_wfi(void) {
+    // No-op if not implemented yet
+}
 
 void k_sem_init(struct k_sem *sem, unsigned int initial_count, unsigned int limit) {
     DEBUG_SEM_printf("k_sem_init(%p, count=%u, limit=%u)\n", sem, initial_count, limit);
@@ -61,17 +210,11 @@ void k_sem_init(struct k_sem *sem, unsigned int initial_count, unsigned int limi
 int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
     DEBUG_SEM_printf("k_sem_take(%p, timeout=%u, caller=%p)\n", sem, timeout.ticks, __builtin_return_address(0));
 
-    // Fast path: semaphore available (protected against concurrent k_sem_give
-    // from HCI RX processing context)
-    {
-        MICROPY_PY_BLUETOOTH_ENTER
-        if (sem->count > 0) {
-            sem->count--;
-            MICROPY_PY_BLUETOOTH_EXIT
-            DEBUG_SEM_printf("  --> fast path, count now %u\n", sem->count);
-            return 0;
-        }
-        MICROPY_PY_BLUETOOTH_EXIT
+    // Fast path: semaphore available
+    if (sem->count > 0) {
+        sem->count--;
+        DEBUG_SEM_printf("  --> fast path, count now %u\n", sem->count);
+        return 0;
     }
 
     // K_NO_WAIT: Don't block
@@ -93,9 +236,9 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
     // K_FOREVER: Block indefinitely (capped to prevent infinite hang)
     // Regular timeout: Block for specified time
     uint32_t t0 = mp_hal_ticks_ms();
-    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? ZEPHYR_BLE_SEM_POLL_TIMEOUT_MS : timeout.ticks;
-    if (timeout_ms > ZEPHYR_BLE_SEM_POLL_TIMEOUT_MS) {
-        timeout_ms = ZEPHYR_BLE_SEM_POLL_TIMEOUT_MS;
+    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS : timeout.ticks;
+    if (timeout_ms > ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS) {
+        timeout_ms = ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS;
     }
 
     DEBUG_SEM_printf("  --> waiting (timeout=%u ms, caller=%p)\n", timeout_ms, __builtin_return_address(0));
@@ -135,9 +278,7 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
     mp_bluetooth_zephyr_in_wait_loop = false;
 
     // Semaphore became available
-    MICROPY_PY_BLUETOOTH_ENTER
     sem->count--;
-    MICROPY_PY_BLUETOOTH_EXIT
     DEBUG_SEM_printf("  --> acquired after %u ms, count now %u\n",
         mp_hal_ticks_ms() - t0, sem->count);
     return 0;
@@ -146,13 +287,10 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
 void k_sem_give(struct k_sem *sem) {
     DEBUG_SEM_printf("k_sem_give(%p)\n", sem);
 
-    MICROPY_PY_BLUETOOTH_ENTER
     if (sem->count < sem->limit) {
         sem->count++;
-        MICROPY_PY_BLUETOOTH_EXIT
         DEBUG_SEM_printf("  --> count now %u\n", sem->count);
     } else {
-        MICROPY_PY_BLUETOOTH_EXIT
         DEBUG_SEM_printf("  --> at limit, not incrementing\n");
     }
 }
@@ -160,3 +298,10 @@ void k_sem_give(struct k_sem *sem) {
 unsigned int k_sem_count_get(struct k_sem *sem) {
     return sem->count;
 }
+
+void k_sem_reset(struct k_sem *sem) {
+    DEBUG_SEM_printf("k_sem_reset(%p)\n", sem);
+    sem->count = 0;
+}
+
+#endif // MICROPY_PY_THREAD
