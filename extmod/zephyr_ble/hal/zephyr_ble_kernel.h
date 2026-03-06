@@ -28,6 +28,11 @@
 #define MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_HAL_ZEPHYR_BLE_KERNEL_H
 
 #include "zephyr_ble_work.h"
+
+#if MICROPY_PY_THREAD
+#include "FreeRTOS.h"
+#include "task.h"
+#endif
 #include "py/mphal.h"
 
 // Zephyr kernel miscellaneous abstractions for MicroPython
@@ -61,10 +66,21 @@ typedef void *k_tid_t;
 // and use the synchronous command sending path (process_pending_cmd).
 static inline k_tid_t k_current_get(void) {
     extern struct k_work_q k_sys_work_q;
-    // Cooperative polling: all code runs in the main thread which acts as
-    // the system work queue thread. Returning this pointer makes Zephyr's
-    // hci_core.c detect work-queue context for synchronous HCI commands.
+    extern bool mp_bluetooth_zephyr_in_sys_work_q_context(void);
+
+    // When executing system work queue items, return the work queue thread
+    // This makes k_current_get() == &k_sys_work_q.thread return true
+    if (mp_bluetooth_zephyr_in_sys_work_q_context()) {
+        return (k_tid_t)&k_sys_work_q.thread;
+    }
+
+    #if MICROPY_PY_THREAD
+    // Outside work context, return actual FreeRTOS task handle
+    return (k_tid_t)xTaskGetCurrentTaskHandle();
+    #else
+    // Non-FreeRTOS builds: return work queue thread (polling mode)
     return (k_tid_t)&k_sys_work_q.thread;
+    #endif
 }
 
 // Check if in ISR context.
