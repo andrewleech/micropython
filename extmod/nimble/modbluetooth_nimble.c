@@ -1111,6 +1111,45 @@ int mp_bluetooth_gap_pair(uint16_t conn_handle) {
     return ble_hs_err_to_errno(ble_gap_security_initiate(conn_handle));
 }
 
+int mp_bluetooth_gap_unpair(uint8_t addr_type, const uint8_t *addr) {
+    DEBUG_printf("mp_bluetooth_gap_unpair: addr=%p\n", addr);
+
+    // Cannot use ble_gap_unpair(), ble_store_util_delete_peer(), or
+    // ble_store_clear() directly:
+    //
+    // All of these ultimately call ble_store_util_delete_all() which loops
+    // calling store_delete_cb until it returns non-zero. Our callback invokes
+    // the Python _IRQ_SET_SECRET handler which returns True (success)
+    // unconditionally — NimBLE has no internal store to deplete, so the loop
+    // never terminates if a Python IRQ handler is registered.
+    //
+    // Instead, notify the Python handler directly to delete bond data,
+    // bypassing ble_store_util_delete_all's broken loop.
+
+    if (addr == NULL) {
+        // Use a zeroed address (BLE_ADDR_ANY) to signal "delete all" to the
+        // Python handler.
+        ble_addr_t any = {0};
+        mp_bluetooth_gap_on_set_secret(BLE_STORE_OBJ_TYPE_OUR_SEC, (const uint8_t *)&any, sizeof(ble_addr_t), NULL, 0);
+        mp_bluetooth_gap_on_set_secret(BLE_STORE_OBJ_TYPE_PEER_SEC, (const uint8_t *)&any, sizeof(ble_addr_t), NULL, 0);
+        return 0;
+    }
+
+    ble_addr_t ble_addr;
+    ble_addr.type = addr_type;
+    memcpy(ble_addr.val, addr, 6);
+
+    // Remove from controller resolving list (best-effort, ignore errors).
+    ble_hs_pvcy_remove_entry(addr_type, addr);
+
+    // Notify Python handler to delete persistent bond data.
+    // Track whether either secret type had a matching bond.
+    bool deleted = false;
+    deleted |= mp_bluetooth_gap_on_set_secret(BLE_STORE_OBJ_TYPE_OUR_SEC, (const uint8_t *)&ble_addr, sizeof(ble_addr_t), NULL, 0);
+    deleted |= mp_bluetooth_gap_on_set_secret(BLE_STORE_OBJ_TYPE_PEER_SEC, (const uint8_t *)&ble_addr, sizeof(ble_addr_t), NULL, 0);
+    return deleted ? 0 : MP_ENOENT;
+}
+
 int mp_bluetooth_gap_passkey(uint16_t conn_handle, uint8_t action, mp_int_t passkey) {
     struct ble_sm_io io = {0};
 

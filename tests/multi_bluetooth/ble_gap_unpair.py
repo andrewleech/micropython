@@ -1,14 +1,16 @@
-# Test BLE GAP connect/disconnect with pairing, and read an encrypted characteristic
-# TODO: add gap_passkey testing
+# Test BLE gap_unpair: clear-all (no args) and per-address bond removal.
+#
+# Both instances call gap_unpair() with no args at startup to clear all bonds,
+# then pair with bonding, disconnect, and unpair the specific peer by address.
 
 from micropython import const
 import time, machine, bluetooth
 
-if not hasattr(bluetooth.BLE, "gap_pair"):
+if not hasattr(bluetooth.BLE, "gap_unpair"):
     print("SKIP")
     raise SystemExit
 
-TIMEOUT_MS = 4000
+TIMEOUT_MS = 5000
 
 _IRQ_CENTRAL_CONNECT = const(1)
 _IRQ_CENTRAL_DISCONNECT = const(2)
@@ -19,6 +21,7 @@ _IRQ_GATTC_CHARACTERISTIC_RESULT = const(11)
 _IRQ_GATTC_CHARACTERISTIC_DONE = const(12)
 _IRQ_GATTC_READ_RESULT = const(15)
 _IRQ_ENCRYPTION_UPDATE = const(28)
+_IRQ_SET_SECRET = const(30)
 
 _FLAG_READ = const(0x0002)
 _FLAG_READ_ENCRYPTED = const(0x0200)
@@ -34,14 +37,15 @@ waiting_events = {}
 def irq(event, data):
     if event == _IRQ_CENTRAL_CONNECT:
         print("_IRQ_CENTRAL_CONNECT")
-        waiting_events[event] = data[0]
+        waiting_events[event] = (data[0], data[1], bytes(data[2]))
     elif event == _IRQ_CENTRAL_DISCONNECT:
         print("_IRQ_CENTRAL_DISCONNECT")
     elif event == _IRQ_GATTS_READ_REQUEST:
-        print("_IRQ_GATTS_READ_REQUEST")
+        # Don't print here - print after wait_for_event for consistent ordering.
+        pass
     elif event == _IRQ_PERIPHERAL_CONNECT:
         print("_IRQ_PERIPHERAL_CONNECT")
-        waiting_events[event] = data[0]
+        waiting_events[event] = (data[0], data[1], bytes(data[2]))
     elif event == _IRQ_PERIPHERAL_DISCONNECT:
         print("_IRQ_PERIPHERAL_DISCONNECT")
     elif event == _IRQ_GATTC_CHARACTERISTIC_RESULT:
@@ -56,6 +60,8 @@ def irq(event, data):
         print("_IRQ_GATTC_READ_RESULT", bytes(data[-1]))
     elif event == _IRQ_ENCRYPTION_UPDATE:
         print("_IRQ_ENCRYPTION_UPDATE", data[1], data[2], data[3])
+    elif event == _IRQ_SET_SECRET:
+        return True
 
     if event not in waiting_events:
         waiting_events[event] = None
@@ -75,21 +81,22 @@ def instance0():
     multitest.globals(BDADDR=ble.config("mac"))
     ((char_handle,),) = ble.gatts_register_services((SERVICE,))
     ble.gatts_write(char_handle, "encrypted")
+
     print("gap_advertise")
     ble.gap_advertise(20_000, b"\x02\x01\x06\x04\xffMPY")
     multitest.next()
     try:
-        # Wait for central to connect.
-        wait_for_event(_IRQ_CENTRAL_CONNECT, TIMEOUT_MS)
-
-        # Wait for pairing event.
+        # Wait for central to connect and pair.
+        conn_handle, addr_type, addr = wait_for_event(_IRQ_CENTRAL_CONNECT, TIMEOUT_MS)
         wait_for_event(_IRQ_ENCRYPTION_UPDATE, TIMEOUT_MS)
-
-        # Wait for GATTS read request.
         wait_for_event(_IRQ_GATTS_READ_REQUEST, TIMEOUT_MS)
-
-        # Wait for central to disconnect.
+        print("_IRQ_GATTS_READ_REQUEST")
         wait_for_event(_IRQ_CENTRAL_DISCONNECT, TIMEOUT_MS)
+
+        # Unpair the central by address (tests per-address removal).
+        print("gap_unpair_addr")
+        ble.gap_unpair(addr_type, addr)
+        print("gap_unpair_addr done")
     finally:
         ble.active(0)
 
@@ -98,37 +105,36 @@ def instance0():
 def instance1():
     multitest.next()
     try:
-        # Connect to peripheral.
+        # Connect, pair, read encrypted char, disconnect.
         print("gap_connect")
         ble.gap_connect(*BDADDR)
-        conn_handle = wait_for_event(_IRQ_PERIPHERAL_CONNECT, TIMEOUT_MS)
+        conn_handle, addr_type, addr = wait_for_event(_IRQ_PERIPHERAL_CONNECT, TIMEOUT_MS)
 
-        # Discover characteristics (before pairing, doesn't need to be encrypted).
         ble.gattc_discover_characteristics(conn_handle, 1, 65535)
         value_handle = wait_for_event(_IRQ_GATTC_CHARACTERISTIC_RESULT, TIMEOUT_MS)
         wait_for_event(_IRQ_GATTC_CHARACTERISTIC_DONE, TIMEOUT_MS)
 
-        # Pair with the peripheral.
         print("gap_pair")
         ble.gap_pair(conn_handle)
-
-        # Wait for the pairing event.
         wait_for_event(_IRQ_ENCRYPTION_UPDATE, TIMEOUT_MS)
 
-        # Read the peripheral's characteristic, should be encrypted.
         print("gattc_read")
         ble.gattc_read(conn_handle, value_handle)
         wait_for_event(_IRQ_GATTC_READ_RESULT, TIMEOUT_MS)
 
-        # Disconnect from the peripheral.
         print("gap_disconnect:", ble.gap_disconnect(conn_handle))
         wait_for_event(_IRQ_PERIPHERAL_DISCONNECT, TIMEOUT_MS)
+
+        # Unpair the peripheral by address (tests per-address removal on central).
+        print("gap_unpair_addr")
+        ble.gap_unpair(addr_type, addr)
+        print("gap_unpair_addr done")
     finally:
         ble.active(0)
 
 
 ble = bluetooth.BLE()
-ble.config(mitm=True, le_secure=True, bond=False)
+ble.config(mitm=True, le_secure=True, bond=True)
 ble.active(1)
-ble.gap_unpair()  # Clear stale bonds/CCC from persistent storage
+ble.gap_unpair()  # Clear all bonds at start (tests no-arg form).
 ble.irq(irq)
