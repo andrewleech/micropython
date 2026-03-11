@@ -289,7 +289,7 @@ extern const struct device __device_dts_ord_0;
 #endif
 
 // Detect Cortex-M sub-architecture
-#if defined(__ARM_ARCH_6M__) ||defined(__ARM_ARCH_7M__) || \
+#if defined(__ARM_ARCH_6M__) || defined(__ARM_ARCH_7M__) || \
     defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_8M_BASE__) || \
     defined(__ARM_ARCH_8M_MAIN__) || defined(__ARM_ARCH_8_1M_MAIN__)
 #ifndef CONFIG_CPU_CORTEX_M
@@ -481,6 +481,11 @@ extern const struct device __device_dts_ord_0;
 // --- L2CAP Dynamic Channels (COC - Connection-Oriented Channels) ---
 #if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 #define CONFIG_BT_L2CAP_DYNAMIC_CHANNEL 1  // Enable COC (requires SMP - already enabled)
+// Enable seg_recv API: per-PDU receive callback with manual credit control.
+// This replaces the recv+alloc_buf path and avoids the Zephyr 3.4+ issue where
+// initial RX credits are hardcoded to 1 (forcing a credit round-trip per SDU).
+// See: https://github.com/zephyrproject-rtos/zephyr/issues/69975
+#define CONFIG_BT_L2CAP_SEG_RECV 1
 #endif
 
 // --- Security Manager Protocol (SMP) - Pairing/Bonding ---
@@ -509,19 +514,18 @@ extern const struct device __device_dts_ord_0;
 // --- Buffer Configuration ---
 // ACL buffers
 #define CONFIG_BT_BUF_ACL_TX_COUNT 8
-// ACL TX buffer size must accommodate largest SMP packet without fragmentation:
-// - SMP Public Key (SC pairing): 4 (L2CAP hdr) + 1 (SMP code) + 64 (X+Y coords) = 69 bytes
-// Use 73 bytes (69 + 4 margin). This prevents TX packet count mismatch assert
-// (hci_core.c:669) that occurs when the Public Key is fragmented across multiple ACL packets.
-// Memory impact: 73 × 8 buffers = 584 bytes (was 27 × 8 = 216 bytes, delta +368 bytes)
-#define CONFIG_BT_BUF_ACL_TX_SIZE 73
+// ACL TX buffer size: 255 = 251 (DLE max payload) + 4 (L2CAP header).
+// Supports BLE Data Length Extension (DLE) for full 251-byte LL payloads,
+// which allows MPS=251 on L2CAP COC channels and reduces PDUs per SDU from ~8 to ~3.
+// Also covers the largest SMP packet (SC Public Key: 69 bytes) without fragmentation.
+// Memory: 255 × 8 = 2040 bytes (was 73 × 8 = 584 bytes, delta +1456 bytes).
+#define CONFIG_BT_BUF_ACL_TX_SIZE 255
 #define CONFIG_BT_BUF_ACL_RX_COUNT 16  // Increased from 8 to 16 for scanning
-// ACL RX buffer size must accommodate largest expected L2CAP packet:
-// - SMP Public Key (SC pairing): 4 (L2CAP hdr) + 1 (SMP code) + 64 (X+Y coords) = 69 bytes
-// Use 72 bytes for alignment + small margin.
-// Note: Legacy pairing works with this size. SC pairing currently crashes with TX
-// packet count mismatch assert (hci_core.c:669) - needs deeper investigation.
-#define CONFIG_BT_BUF_ACL_RX_SIZE 72
+// ACL RX buffer size: 255 = 251 (DLE max payload) + 4 (L2CAP header).
+// BT_L2CAP_RX_MTU = CONFIG_BT_BUF_ACL_RX_SIZE - BT_L2CAP_HDR_SIZE(4) = 251.
+// With DLE enabled, the peer uses MPS=251, so each PDU fits in one ACL buffer.
+// Memory: 255 × 16 = 4080 bytes (was 72 × 16 = 1152 bytes, delta +2928 bytes).
+#define CONFIG_BT_BUF_ACL_RX_SIZE 255
 #define CONFIG_BT_BUF_ACL_RX_COUNT_EXTRA CONFIG_BT_MAX_CONN
 
 // Event buffers - Increased for scanning workload and connectable advertising
@@ -559,7 +563,7 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_WHITELIST CONFIG_BT_FILTER_ACCEPT_LIST
 #define CONFIG_BT_REMOTE_VERSION 1
 #define CONFIG_BT_PHY_UPDATE 0
-#define CONFIG_BT_DATA_LEN_UPDATE 0
+#define CONFIG_BT_DATA_LEN_UPDATE 1
 
 // --- Crypto ---
 #define CONFIG_BT_HOST_CRYPTO 1
@@ -690,7 +694,7 @@ extern const struct device __device_dts_ord_0;
 #endif
 
 #ifndef BT_ASSERT_MSG
-#define BT_ASSERT_MSG(cond, msg, ...) __ASSERT(cond, msg, ##__VA_ARGS__)
+#define BT_ASSERT_MSG(cond, msg, ...) __ASSERT(cond, msg,##__VA_ARGS__)
 #endif
 
 // --- Additional CONFIG values used by BLE sources ---
@@ -722,7 +726,7 @@ extern const struct device __device_dts_ord_0;
 // CONFIG_BT_BONDABLE_PER_CONNECTION — not enabled (must not be defined;
 // Zephyr uses #if defined() checks so defining as 0 incorrectly enables it).
 #define CONFIG_BT_AUTO_PHY_UPDATE 0
-#define CONFIG_BT_AUTO_DATA_LEN_UPDATE 0
+#define CONFIG_BT_AUTO_DATA_LEN_UPDATE 1
 #define CONFIG_BT_CONN_DISABLE_SECURITY 0
 #define CONFIG_BT_CONN_CHECK_NULL_BEFORE_CREATE 0
 #define CONFIG_BT_CONN_PARAM_ANY 0
@@ -856,8 +860,8 @@ static inline uint16_t __bswap_16(uint16_t x) {
 
 static inline uint32_t __bswap_32(uint32_t x) {
     return ((x << 24) & 0xFF000000) |
-           ((x << 8)  & 0x00FF0000) |
-           ((x >> 8)  & 0x0000FF00) |
+           ((x << 8) & 0x00FF0000) |
+           ((x >> 8) & 0x0000FF00) |
            ((x >> 24) & 0x000000FF);
 }
 
