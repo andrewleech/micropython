@@ -396,8 +396,7 @@ static void mp_machine_set_freq(size_t n_args, const mp_obj_t *args) {
 static void mp_machine_idle(void) {
     // Process scheduled callbacks without raising exceptions
     // This handles BLE polling, soft timers, and other background tasks
-    extern void mp_handle_pending(bool);
-    mp_handle_pending(false);
+    mp_handle_pending(MP_HANDLE_PENDING_CALLBACKS_AND_CLEAR_EXCEPTIONS);
 
     __WFI();
 }
