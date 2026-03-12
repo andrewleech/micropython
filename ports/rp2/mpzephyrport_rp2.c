@@ -104,33 +104,26 @@ static uint8_t __attribute__((aligned(4))) hci_rx_buffer[CYW43_HCI_HEADER_SIZE +
 // HCI Packet Processing (common to FreeRTOS and polling paths)
 // ============================================================================
 
-// HCI event type counters (for GDB / k_panic inspection only).
-// Compiled out in non-debug builds to avoid per-packet overhead.
-#if ZEPHYR_BLE_DEBUG
-static uint32_t hci_rx_evt_cmd_complete = 0;
-static uint32_t hci_rx_evt_cmd_status = 0;
-static uint32_t hci_rx_evt_le_meta = 0;
-static uint32_t hci_rx_evt_le_adv_report = 0;
-static uint32_t hci_rx_evt_le_conn_complete = 0;
-static uint32_t hci_rx_evt_le_enh_conn_complete = 0;
-static uint32_t hci_rx_evt_disconnect_complete = 0;
-static uint32_t hci_rx_evt_other = 0;
-static uint32_t hci_rx_acl = 0;
-#define HCI_RX_EVT_INC(counter) ((counter)++)
-#else
-#define HCI_RX_EVT_INC(counter) ((void)0)
-#endif
+// HCI event type counters (for debugging what packets are received)
+static volatile uint32_t hci_rx_evt_cmd_complete = 0;  // 0x0E
+static volatile uint32_t hci_rx_evt_cmd_status = 0;    // 0x0F
+static volatile uint32_t hci_rx_evt_le_meta = 0;       // 0x3E (LE events including ADV_REPORT)
+static volatile uint32_t hci_rx_evt_le_adv_report = 0; // 0x3E subevent 0x02 (advertising reports)
+static volatile uint32_t hci_rx_evt_le_conn_complete = 0; // 0x3E subevent 0x01 (LE Connection Complete)
+static volatile uint32_t hci_rx_evt_le_enh_conn_complete = 0; // 0x3E subevent 0x0A (LE Enhanced Connection Complete)
+static volatile uint32_t hci_rx_evt_disconnect_complete = 0;  // 0x05 (Disconnection Complete)
+static volatile uint32_t hci_rx_evt_other = 0;         // Other event codes
+static volatile uint32_t hci_rx_acl = 0;               // ACL data packets
 
-// Rejection/error counters -- non-static for k_panic debug output.
-// Always compiled in since they track error conditions, not per-packet events.
-uint32_t hci_rx_rejected_len = 0;
-uint32_t hci_rx_rejected_param_len = 0;
-uint32_t hci_rx_rejected_oversize = 0;
-uint32_t hci_rx_rejected_event = 0;
-uint32_t hci_rx_rejected_acl = 0;
-uint32_t hci_rx_rejected_type = 0;
-uint32_t hci_rx_buf_failed = 0;
-uint32_t hci_rx_total_processed = 0;
+// Rejection counters (for debugging validation) - non-static for k_panic debug output
+volatile uint32_t hci_rx_rejected_len = 0;       // Invalid length
+volatile uint32_t hci_rx_rejected_param_len = 0; // param_len mismatch
+volatile uint32_t hci_rx_rejected_oversize = 0;  // Oversized packet
+volatile uint32_t hci_rx_rejected_event = 0;     // Unknown event code
+volatile uint32_t hci_rx_rejected_acl = 0;       // Invalid ACL
+volatile uint32_t hci_rx_rejected_type = 0;      // Unknown packet type
+volatile uint32_t hci_rx_buf_failed = 0;         // Buffer alloc failed
+volatile uint32_t hci_rx_total_processed = 0;    // Total packets processed
 
 // Process a single HCI packet from the given buffer
 // Used by both FreeRTOS HCI queue processing and polling fallback
@@ -210,35 +203,39 @@ static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len) {
                 bool valid_event = false;
                 bool is_cmd_event = false;
                 if (evt_code == 0x0E) {
-                    HCI_RX_EVT_INC(hci_rx_evt_cmd_complete);
+                    hci_rx_evt_cmd_complete++;
                     valid_event = true;
                     is_cmd_event = true;
                 } else if (evt_code == 0x0F) {
-                    HCI_RX_EVT_INC(hci_rx_evt_cmd_status);
+                    hci_rx_evt_cmd_status++;
                     valid_event = true;
                     is_cmd_event = true;
                 } else if (evt_code == 0x3E) {
-                    HCI_RX_EVT_INC(hci_rx_evt_le_meta);
+                    hci_rx_evt_le_meta++;
                     valid_event = true;
                     // Check LE subevent code (at pkt_data[2] after evt_code and length)
                     if (pkt_len >= 3) {
                         uint8_t subevent = pkt_data[2];
                         if (subevent == 0x02) {
-                            HCI_RX_EVT_INC(hci_rx_evt_le_adv_report);
+                            hci_rx_evt_le_adv_report++;
                         } else if (subevent == 0x01) {
-                            HCI_RX_EVT_INC(hci_rx_evt_le_conn_complete);
+                            // LE Connection Complete
+                            hci_rx_evt_le_conn_complete++;
                         } else if (subevent == 0x0A) {
-                            HCI_RX_EVT_INC(hci_rx_evt_le_enh_conn_complete);
+                            // LE Enhanced Connection Complete
+                            hci_rx_evt_le_enh_conn_complete++;
                         }
                     }
                 } else if (evt_code == 0x05) {
-                    HCI_RX_EVT_INC(hci_rx_evt_disconnect_complete);
-                    HCI_RX_EVT_INC(hci_rx_evt_other);
+                    // Disconnection Complete
+                    hci_rx_evt_disconnect_complete++;
+                    hci_rx_evt_other++;
                     valid_event = true;
                 } else if (evt_code == 0x08 ||
                            evt_code == 0x13 || evt_code == 0x1A ||
                            evt_code == 0x04 || evt_code == 0x03) {
-                    HCI_RX_EVT_INC(hci_rx_evt_other);
+                    // Other valid events
+                    hci_rx_evt_other++;
                     valid_event = true;
                 }
                 // Skip unknown event codes - likely garbage
@@ -271,12 +268,12 @@ static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len) {
                 hci_rx_rejected_acl++;
                 return;  // Length mismatch
             }
-            // Check fits in buffer
-            if (pkt_len > CONFIG_BT_BUF_ACL_RX_SIZE + 4) {  // data + 4-byte ACL header
+            // Check fits in buffer (CONFIG_BT_BUF_ACL_RX_SIZE = 27)
+            if (pkt_len > 27 + 4) {  // 27 data + 4 header
                 hci_rx_rejected_acl++;
                 return;  // Oversized
             }
-            HCI_RX_EVT_INC(hci_rx_acl);
+            hci_rx_acl++;
             buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_FOREVER);
             break;
         }
@@ -314,8 +311,18 @@ static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len) {
 
 // HCI packet reception handler - called from shared sched_node via soft timer.
 // Strong override of weak default in zephyr_ble_poll.c.
+static volatile bool run_task_in_progress;
+
 void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     (void)node;
+
+    // Guard against re-entrancy.  flush_recv_notify calls invoke_irq_handler
+    // which runs Python code via mp_call_function_2.  Between bytecodes of
+    // the Python IRQ handler, mp_handle_pending() can re-schedule and run
+    // this function if the soft timer fires during the handler.
+    if (run_task_in_progress) {
+        return;
+    }
 
     // Early exit if BLE is not active (recv_cb is set by hci_cyw43_open)
     // This prevents processing stale Zephyr state after soft reset.
@@ -323,6 +330,8 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     if (recv_cb == NULL || mp_bluetooth_zephyr_shutting_down) {
         return;
     }
+
+    run_task_in_progress = true;
 
     // Process Zephyr BLE work queues and semaphores
     mp_bluetooth_zephyr_poll();
@@ -352,11 +361,15 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
         mp_bluetooth_zephyr_work_process();
     }
 
-    // Flush deferred L2CAP recv notifications after all HCI processing is done.
-    // seg_recv_cb defers the Python IRQ notification to avoid re-entrancy issues;
-    // it must be flushed here after work_process completes.
+    // Flush deferred L2CAP recv notification now that all HCI data is
+    // processed.  Keep run_task_in_progress=true during the flush so that
+    // the Python IRQ handler (invoked via on_l2cap_recv → mp_call_function_2)
+    // cannot trigger a nested port_run_task via mp_handle_pending() between
+    // bytecodes.  Missed HCI data will be picked up in the next timer cycle.
     extern void mp_bluetooth_zephyr_l2cap_flush_recv_notify(void);
     mp_bluetooth_zephyr_l2cap_flush_recv_notify();
+
+    run_task_in_progress = false;
 
     // Reschedule soft timer for continuous HCI polling.
     mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
@@ -365,13 +378,13 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
 // Zephyr HCI driver implementation
 
 // Forward declarations for poll_uart stats (defined later in file)
-extern uint32_t poll_uart_count;
-extern uint32_t poll_uart_hci_reads;
-extern uint32_t poll_uart_cyw43_calls;
-extern uint32_t poll_uart_skipped_recursion;
-extern uint32_t poll_uart_skipped_no_cb;
-extern uint32_t hci_tx_count;
-extern uint32_t hci_tx_cmd_count;
+extern volatile uint32_t poll_uart_count;
+extern volatile uint32_t poll_uart_hci_reads;
+extern volatile uint32_t poll_uart_cyw43_calls;
+extern volatile uint32_t poll_uart_skipped_recursion;
+extern volatile uint32_t poll_uart_skipped_no_cb;
+extern volatile uint32_t hci_tx_count;
+extern volatile uint32_t hci_tx_cmd_count;
 
 static int hci_cyw43_open(const struct device *dev, bt_hci_recv_t recv) {
     debug_printf("hci_cyw43_open called, dev=%p recv=%p\n", dev, recv);
@@ -441,8 +454,8 @@ static int hci_cyw43_send(const struct device *dev, struct net_buf *buf) {
     debug_printf("hci_cyw43_send: type=%u len=%u data[0]=0x%02x\n", buf_type, buf->len, buf->len > 0 ? buf->data[0] : 0xFF);
 
     // Debug: increment TX counter
-    extern uint32_t hci_tx_count;
-    extern uint32_t hci_tx_cmd_count;
+    extern volatile uint32_t hci_tx_count;
+    extern volatile uint32_t hci_tx_cmd_count;
     hci_tx_count++;
 
     // Map Zephyr buffer type to H:4 packet type
@@ -462,10 +475,9 @@ static int hci_cyw43_send(const struct device *dev, struct net_buf *buf) {
     }
 
     // CYW43 requires 4-byte header: [0,0,0,pkt_type] + packet_data
-    // Stack-allocate to avoid GC heap pressure on every HCI TX.
-    // Max size: CYW43_HCI_HEADER_SIZE(4) + CONFIG_BT_BUF_ACL_TX_SIZE(255) = 259.
+    // Allocate temporary buffer for CYW43 packet format
     size_t cyw43_pkt_size = CYW43_HCI_HEADER_SIZE + buf->len;
-    uint8_t __attribute__((aligned(4))) cyw43_pkt[CYW43_HCI_HEADER_SIZE + CONFIG_BT_BUF_ACL_TX_SIZE];
+    uint8_t *cyw43_pkt = m_new(uint8_t, cyw43_pkt_size);
 
     // Build CYW43 packet: 4-byte header + HCI data
     memset(cyw43_pkt, 0, CYW43_HCI_HEADER_SIZE);
@@ -476,6 +488,7 @@ static int hci_cyw43_send(const struct device *dev, struct net_buf *buf) {
     extern int cyw43_bluetooth_hci_write(uint8_t *buf, size_t len);
     int ret = cyw43_bluetooth_hci_write(cyw43_pkt, cyw43_pkt_size);
 
+    m_del(uint8_t, cyw43_pkt, cyw43_pkt_size);
     net_buf_unref(buf);
 
     if (ret != 0) {
@@ -539,11 +552,11 @@ int bt_hci_transport_teardown(const struct device *dev) {
 // This reads any pending HCI data from the CYW43 chip and passes it to Zephyr
 static volatile bool poll_uart_in_progress = false;
 
-// Debug counters for poll_uart calls (non-static for k_panic debug output)
-uint32_t poll_uart_count = 0;
-uint32_t poll_uart_hci_reads = 0;
-uint32_t hci_tx_count = 0;
-uint32_t hci_tx_cmd_count = 0;
+// Debug counter for poll_uart calls (non-static for k_panic debug output)
+volatile uint32_t poll_uart_count = 0;
+volatile uint32_t poll_uart_hci_reads = 0;  // Successful HCI reads
+volatile uint32_t hci_tx_count = 0;  // HCI commands/ACL data sent
+volatile uint32_t hci_tx_cmd_count = 0;  // HCI commands only
 
 uint32_t mp_bluetooth_zephyr_poll_uart_count(void) {
     return poll_uart_count;
@@ -554,10 +567,10 @@ uint32_t mp_bluetooth_zephyr_poll_uart_hci_reads(void) {
 }
 
 // Debug: track poll_uart entry reasons
-uint32_t poll_uart_skipped_recursion = 0;
-uint32_t poll_uart_skipped_no_cb = 0;
-uint32_t poll_uart_skipped_task = 0;
-uint32_t poll_uart_cyw43_calls = 0;
+volatile uint32_t poll_uart_skipped_recursion = 0;
+volatile uint32_t poll_uart_skipped_no_cb = 0;
+volatile uint32_t poll_uart_skipped_task = 0;
+volatile uint32_t poll_uart_cyw43_calls = 0;
 
 // Deinitialize Zephyr port - called during ble.active(False)
 void mp_bluetooth_zephyr_port_deinit(void) {
