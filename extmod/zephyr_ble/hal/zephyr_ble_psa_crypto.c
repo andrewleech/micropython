@@ -45,7 +45,7 @@ psa_status_t psa_destroy_key(psa_key_id_t key) {
 
 // Stub: Import a key
 psa_status_t psa_import_key(const void *attributes, const uint8_t *data,
-                             size_t data_length, psa_key_id_t *key) {
+    size_t data_length, psa_key_id_t *key) {
     (void)attributes;
     (void)data;
     (void)data_length;
@@ -80,9 +80,9 @@ psa_status_t psa_generate_random(uint8_t *output, size_t output_size) {
 
 // Stub: Encrypt data using cipher
 psa_status_t psa_cipher_encrypt(psa_key_id_t key, uint32_t alg,
-                                 const uint8_t *input, size_t input_length,
-                                 uint8_t *output, size_t output_size,
-                                 size_t *output_length) {
+    const uint8_t *input, size_t input_length,
+    uint8_t *output, size_t output_size,
+    size_t *output_length) {
     (void)key;
     (void)alg;
     (void)input;
@@ -96,9 +96,9 @@ psa_status_t psa_cipher_encrypt(psa_key_id_t key, uint32_t alg,
 
 // Stub: Perform raw key agreement (for ECDH in SMP secure connections)
 psa_status_t psa_raw_key_agreement(uint32_t alg, psa_key_id_t private_key,
-                                    const uint8_t *peer_key, size_t peer_key_length,
-                                    uint8_t *output, size_t output_size,
-                                    size_t *output_length) {
+    const uint8_t *peer_key, size_t peer_key_length,
+    uint8_t *output, size_t output_size,
+    size_t *output_length) {
     (void)alg;
     (void)private_key;
     (void)peer_key;

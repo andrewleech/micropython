@@ -111,7 +111,7 @@ NORETURN void k_panic(void) {
     }
     mp_printf(&mp_plat_print, "ncmd_sem: %p count=%u\n", &bt_dev.ncmd_sem, ncmd_count);
     mp_printf(&mp_plat_print, "HCI RX task: polls=%lu packets=%lu queue_dropped=%lu\n",
-           (unsigned long)rx_task_polls, (unsigned long)rx_task_packets, (unsigned long)queue_dropped);
+        (unsigned long)rx_task_polls, (unsigned long)rx_task_packets, (unsigned long)queue_dropped);
 
     #if defined(__ZEPHYR_BLE_RP2_PORT__)
     // RP2-specific debug counters from mpzephyrport_rp2.c
@@ -133,19 +133,19 @@ NORETURN void k_panic(void) {
     extern volatile uint32_t hci_rx_buf_failed;
 
     mp_printf(&mp_plat_print, "poll_uart: calls=%lu cyw43=%lu hci_reads=%lu\n",
-           (unsigned long)poll_uart_count, (unsigned long)poll_uart_cyw43_calls,
-           (unsigned long)poll_uart_hci_reads);
+        (unsigned long)poll_uart_count, (unsigned long)poll_uart_cyw43_calls,
+        (unsigned long)poll_uart_hci_reads);
     mp_printf(&mp_plat_print, "poll_uart skipped: recursion=%lu no_cb=%lu\n",
-           (unsigned long)poll_uart_skipped_recursion, (unsigned long)poll_uart_skipped_no_cb);
+        (unsigned long)poll_uart_skipped_recursion, (unsigned long)poll_uart_skipped_no_cb);
     mp_printf(&mp_plat_print, "HCI: tx=%lu tx_cmd=%lu bt_process=%lu\n",
-           (unsigned long)hci_tx_count, (unsigned long)hci_tx_cmd_count,
-           (unsigned long)cyw43_bt_hci_process_count);
+        (unsigned long)hci_tx_count, (unsigned long)hci_tx_cmd_count,
+        (unsigned long)cyw43_bt_hci_process_count);
     mp_printf(&mp_plat_print, "HCI RX: total=%lu rejected: len=%lu param=%lu size=%lu evt=%lu acl=%lu type=%lu buf=%lu\n",
-           (unsigned long)hci_rx_total_processed,
-           (unsigned long)hci_rx_rejected_len, (unsigned long)hci_rx_rejected_param_len,
-           (unsigned long)hci_rx_rejected_oversize, (unsigned long)hci_rx_rejected_event,
-           (unsigned long)hci_rx_rejected_acl, (unsigned long)hci_rx_rejected_type,
-           (unsigned long)hci_rx_buf_failed);
+        (unsigned long)hci_rx_total_processed,
+        (unsigned long)hci_rx_rejected_len, (unsigned long)hci_rx_rejected_param_len,
+        (unsigned long)hci_rx_rejected_oversize, (unsigned long)hci_rx_rejected_event,
+        (unsigned long)hci_rx_rejected_acl, (unsigned long)hci_rx_rejected_type,
+        (unsigned long)hci_rx_buf_failed);
     #endif
 
     mp_printf(&mp_plat_print, "==========================\n");

@@ -589,7 +589,7 @@ static void ble_work_process_all(void) {
             MICROPY_PY_BLUETOOTH_EXIT
 
             // Execute work handler outside critical section
-            work_items_processed++;
+                work_items_processed++;
             ble_work_debug_step = 20;  // About to execute work handler
 
             if (work->handler) {

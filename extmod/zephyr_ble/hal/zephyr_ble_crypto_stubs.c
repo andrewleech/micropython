@@ -50,7 +50,7 @@ int bt_rand(void *buf, size_t len) {
     #elif PICO_RP2040 || PICO_RP2350
     // RP2040/RP2350: Use pico-sdk hardware RNG (pico/rand.h)
     uint8_t *p = (uint8_t *)buf;
-    for (size_t i = 0; i < len; ) {
+    for (size_t i = 0; i < len;) {
         uint32_t r = get_rand_32();
         size_t chunk = len - i;
         if (chunk > 4) {
@@ -70,9 +70,15 @@ int bt_rand(void *buf, size_t len) {
             // Get new 32-bit random value every 4 bytes
             uint32_t r = rng_get();
             p[i] = r & 0xFF;
-            if (i + 1 < len) p[i + 1] = (r >> 8) & 0xFF;
-            if (i + 2 < len) p[i + 2] = (r >> 16) & 0xFF;
-            if (i + 3 < len) p[i + 3] = (r >> 24) & 0xFF;
+            if (i + 1 < len) {
+                p[i + 1] = (r >> 8) & 0xFF;
+            }
+            if (i + 2 < len) {
+                p[i + 2] = (r >> 16) & 0xFF;
+            }
+            if (i + 3 < len) {
+                p[i + 3] = (r >> 24) & 0xFF;
+            }
         }
     }
     return 0;
@@ -92,7 +98,7 @@ int bt_rand(void *buf, size_t len) {
 // When controller is enabled, ecb.c provides the real ecb_encrypt via hardware ECB.
 #if !MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
 int ecb_encrypt(const uint8_t *key, const uint8_t *clear_text,
-                uint8_t *cipher_text, uint8_t length) {
+    uint8_t *cipher_text, uint8_t length) {
     (void)key;
     (void)clear_text;
     (void)cipher_text;

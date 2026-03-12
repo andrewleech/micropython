@@ -563,6 +563,10 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_WHITELIST CONFIG_BT_FILTER_ACCEPT_LIST
 #define CONFIG_BT_REMOTE_VERSION 1
 #define CONFIG_BT_PHY_UPDATE 0
+// DLE (Data Length Extension) host support.  Keep enabled so the host can
+// handle remote-initiated DLE.  Auto-negotiation is disabled separately below
+// because the CYW43 controller disconnects with 0x16 "Instant Passed" when
+// either side initiates DLE.
 #define CONFIG_BT_DATA_LEN_UPDATE 1
 
 // --- Crypto ---
@@ -726,7 +730,11 @@ extern const struct device __device_dts_ord_0;
 // CONFIG_BT_BONDABLE_PER_CONNECTION — not enabled (must not be defined;
 // Zephyr uses #if defined() checks so defining as 0 incorrectly enables it).
 #define CONFIG_BT_AUTO_PHY_UPDATE 0
-#define CONFIG_BT_AUTO_DATA_LEN_UPDATE 1
+// Auto DLE disabled globally.  CYW43 controller disconnects with 0x16
+// "Instant Passed" when DLE is negotiated, even if initiated by the remote.
+// On-core controllers (nRF) handle DLE fine but auto-negotiation must be
+// off to avoid triggering the CYW43 failure when connecting Z2Z.
+#define CONFIG_BT_AUTO_DATA_LEN_UPDATE 0
 #define CONFIG_BT_CONN_DISABLE_SECURITY 0
 #define CONFIG_BT_CONN_CHECK_NULL_BEFORE_CREATE 0
 #define CONFIG_BT_CONN_PARAM_ANY 0

@@ -214,7 +214,7 @@ void k_mem_slab_free(struct k_mem_slab *slab, void *mem);
 
 #define K_MEM_SLAB_DEFINE(name, slab_block_size, slab_num_blocks, slab_align) \
     static uint8_t __aligned(slab_align) \
-        name##_buffer[slab_num_blocks * slab_block_size]; \
+    name##_buffer[slab_num_blocks * slab_block_size]; \
     struct k_mem_slab name = { \
         .block_size = slab_block_size, \
         .num_blocks = slab_num_blocks, \
@@ -227,7 +227,7 @@ void k_mem_slab_free(struct k_mem_slab *slab, void *mem);
 // Lazy initialization: free_list starts as buffer pointer, init on first alloc
 #define K_MEM_SLAB_DEFINE_STATIC(name, slab_block_size, slab_num_blocks, slab_align) \
     static uint8_t __aligned(slab_align) \
-        name##_buffer[slab_num_blocks * slab_block_size]; \
+    name##_buffer[slab_num_blocks * slab_block_size]; \
     static struct k_mem_slab name = { \
         .block_size = slab_block_size, \
         .num_blocks = slab_num_blocks, \
