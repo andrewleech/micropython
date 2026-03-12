@@ -311,8 +311,18 @@ static void process_hci_rx_packet(uint8_t *rx_buf, uint32_t len) {
 
 // HCI packet reception handler - called from shared sched_node via soft timer.
 // Strong override of weak default in zephyr_ble_poll.c.
+static volatile bool run_task_in_progress;
+
 void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     (void)node;
+
+    // Guard against re-entrancy.  flush_recv_notify calls invoke_irq_handler
+    // which runs Python code via mp_call_function_2.  Between bytecodes of
+    // the Python IRQ handler, mp_handle_pending() can re-schedule and run
+    // this function if the soft timer fires during the handler.
+    if (run_task_in_progress) {
+        return;
+    }
 
     // Early exit if BLE is not active (recv_cb is set by hci_cyw43_open)
     // This prevents processing stale Zephyr state after soft reset.
@@ -320,6 +330,8 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     if (recv_cb == NULL || mp_bluetooth_zephyr_shutting_down) {
         return;
     }
+
+    run_task_in_progress = true;
 
     // Process Zephyr BLE work queues and semaphores
     mp_bluetooth_zephyr_poll();
@@ -348,6 +360,16 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
         process_hci_rx_packet(hci_rx_buffer, len);
         mp_bluetooth_zephyr_work_process();
     }
+
+    // Flush deferred L2CAP recv notification now that all HCI data is
+    // processed.  Keep run_task_in_progress=true during the flush so that
+    // the Python IRQ handler (invoked via on_l2cap_recv → mp_call_function_2)
+    // cannot trigger a nested port_run_task via mp_handle_pending() between
+    // bytecodes.  Missed HCI data will be picked up in the next timer cycle.
+    extern void mp_bluetooth_zephyr_l2cap_flush_recv_notify(void);
+    mp_bluetooth_zephyr_l2cap_flush_recv_notify();
+
+    run_task_in_progress = false;
 
     // Reschedule soft timer for continuous HCI polling.
     mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
