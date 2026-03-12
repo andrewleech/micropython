@@ -18,41 +18,40 @@
  * Caller should interleave work processing between calls to match
  * full Zephyr's threading model.
  */
-bool hci_driver_poll_rx(const struct device *dev)
-{
-	const struct hci_driver_data *data = dev->data;
+bool hci_driver_poll_rx(const struct device *dev) {
+    const struct hci_driver_data *data = dev->data;
 
-	/* Process controller RX — moves PDUs from LL into recv_fifo
-	 * and sends completed-event notifications directly via bt_recv.
-	 */
-#if !defined(CONFIG_BT_CTLR_RX_PRIO_STACK_SIZE)
-	if (k_sem_count_get(&sem_recv) > 0) {
-		k_sem_take(&sem_recv, K_NO_WAIT);
-		node_rx_recv(dev);
-	}
-#endif /* !CONFIG_BT_CTLR_RX_PRIO_STACK_SIZE */
+    /* Process controller RX — moves PDUs from LL into recv_fifo
+     * and sends completed-event notifications directly via bt_recv.
+     */
+    #if !defined(CONFIG_BT_CTLR_RX_PRIO_STACK_SIZE)
+    if (k_sem_count_get(&sem_recv) > 0) {
+        k_sem_take(&sem_recv, K_NO_WAIT);
+        node_rx_recv(dev);
+    }
+    #endif /* !CONFIG_BT_CTLR_RX_PRIO_STACK_SIZE */
 
-	/* Process ONE recv_fifo node */
-	struct node_rx_pdu *node_rx = k_fifo_get(&recv_fifo, K_NO_WAIT);
+    /* Process ONE recv_fifo node */
+    struct node_rx_pdu *node_rx = k_fifo_get(&recv_fifo, K_NO_WAIT);
 
-	if (node_rx == NULL) {
-		return false;
-	}
+    if (node_rx == NULL) {
+        return false;
+    }
 
-	struct net_buf *buf = process_node(node_rx);
+    struct net_buf *buf = process_node(node_rx);
 
-	while (buf) {
-		struct net_buf *frag = net_buf_ref(buf);
+    while (buf) {
+        struct net_buf *frag = net_buf_ref(buf);
 
-		buf = net_buf_frag_del(NULL, buf);
+        buf = net_buf_frag_del(NULL, buf);
 
-		if (frag->len > 1) {
-			data->recv(dev, frag);
-		} else {
-			net_buf_unref(frag);
-		}
-	}
+        if (frag->len > 1) {
+            data->recv(dev, frag);
+        } else {
+            net_buf_unref(frag);
+        }
+    }
 
-	/* Return true if more nodes pending */
-	return !k_fifo_is_empty(&recv_fifo);
+    /* Return true if more nodes pending */
+    return !k_fifo_is_empty(&recv_fifo);
 }
