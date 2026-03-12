@@ -40,7 +40,7 @@ static volatile int debug_enabled = 0;  // Disable debug to prevent NLR crashes
 #define DEBUG_FIFO(fmt, ...) \
     do { \
         if (debug_enabled) { \
-            mp_printf(&mp_plat_print, "[FIFO] " fmt "\n", ##__VA_ARGS__); \
+            mp_printf(&mp_plat_print, "[FIFO] " fmt "\n",##__VA_ARGS__); \
         } \
     } while (0)
 
@@ -278,7 +278,7 @@ void *k_lifo_get(struct k_lifo *lifo, k_timeout_t timeout) {
     while (true) {
         // Check if item available
         MICROPY_PY_BLUETOOTH_ENTER
-        head = lifo->_queue.data_q.head;
+            head = lifo->_queue.data_q.head;
         if (head != NULL) {
             // Remove from head
             sys_snode_t *node = (sys_snode_t *)head;

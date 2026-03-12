@@ -105,7 +105,7 @@ typedef uint32_t k_ticks_t;
         .pending = false, \
         .next = NULL, \
         .prev = NULL \
-    }
+}
 
 // Work status flags (used with k_work_delayable_busy_get)
 #define K_WORK_QUEUED    BIT(0)

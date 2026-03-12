@@ -111,9 +111,9 @@ void mp_bluetooth_zephyr_load_keys(void) {
 
     for (uint8_t idx = 0; idx < CONFIG_BT_MAX_PAIRED; idx++) {
         if (!mp_bluetooth_gap_on_get_secret(
-                MP_BLUETOOTH_ZEPHYR_SECRET_KEYS, idx,
-                NULL, 0,  // NULL key = enumerate by index
-                &value, &value_len)) {
+            MP_BLUETOOTH_ZEPHYR_SECRET_KEYS, idx,
+            NULL, 0,      // NULL key = enumerate by index
+            &value, &value_len)) {
             break;  // No more entries
         }
 

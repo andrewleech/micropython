@@ -17,7 +17,7 @@ void bt_monitor_send(uint8_t opcode, const void *data, size_t len) {
 }
 
 void bt_monitor_new_index(uint8_t type, uint8_t bus, const void *addr,
-                           size_t addr_len, const char *name) {
+    size_t addr_len, const char *name) {
     (void)type;
     (void)bus;
     (void)addr;

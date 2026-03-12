@@ -137,11 +137,11 @@ void mp_net_buf_pool_state_reset(void) {
         // Reset the pool spinlock
         pool->lock.unused = 0;
 
-#if defined(CONFIG_NET_BUF_POOL_USAGE)
+        #if defined(CONFIG_NET_BUF_POOL_USAGE)
         // Reset usage tracking counters
         atomic_set(&pool->avail_count, pool->buf_count);
         pool->max_used = 0;
-#endif
+        #endif
     }
 }
 

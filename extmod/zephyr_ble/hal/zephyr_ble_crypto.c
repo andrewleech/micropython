@@ -41,7 +41,7 @@ extern void sys_mem_swap(void *buf, size_t length);
 // Uses TinyCrypt implementation
 // Returns 0 on success, negative error code on failure
 int bt_crypto_aes_cmac(const uint8_t *key, const uint8_t *in, size_t len,
-                       uint8_t *out) {
+    uint8_t *out) {
     struct tc_cmac_struct state;
     struct tc_aes_key_sched_struct sched;
 
@@ -86,7 +86,7 @@ int bt_crypto_aes_cmac(const uint8_t *key, const uint8_t *in, size_t len,
 //       X is 128-bit key (16 bytes)
 //       Z is 8-bit value (1 byte)
 int bt_crypto_f4(const uint8_t *u, const uint8_t *v, const uint8_t *x,
-                 uint8_t z, uint8_t *res) {
+    uint8_t z, uint8_t *res) {
     uint8_t xs[16];
     uint8_t m[65];  // U (32) + V (32) + Z (1) = 65 bytes
     int err;
@@ -121,8 +121,8 @@ int bt_crypto_f4(const uint8_t *u, const uint8_t *v, const uint8_t *x,
 //       N1, N2 are nonces (128 bits / 16 bytes each)
 //       A1, A2 are bt_addr_le_t structures (type + 6 bytes addr)
 int bt_crypto_f5(const uint8_t *w, const uint8_t *n1, const uint8_t *n2,
-                 const bt_addr_le_t *a1, const bt_addr_le_t *a2,
-                 uint8_t *mackey, uint8_t *ltk) {
+    const bt_addr_le_t *a1, const bt_addr_le_t *a2,
+    uint8_t *mackey, uint8_t *ltk) {
     // Salt for f5 (defined in spec)
     static const uint8_t salt[16] = {
         0x6c, 0x88, 0x83, 0x91, 0xaa, 0xf5, 0xa5, 0x38,
@@ -187,9 +187,9 @@ int bt_crypto_f5(const uint8_t *w, const uint8_t *n1, const uint8_t *n2,
 // Core Spec 4.2 Vol 3 Part H 2.2.8
 // f6(W, N1, N2, R, IOcap, A1, A2) = AES-CMAC_W(N1 || N2 || R || IOcap || A1 || A2)
 int bt_crypto_f6(const uint8_t *w, const uint8_t *n1, const uint8_t *n2,
-                 const uint8_t *r, const uint8_t *io_cap,
-                 const bt_addr_le_t *a1, const bt_addr_le_t *a2,
-                 uint8_t *res) {
+    const uint8_t *r, const uint8_t *io_cap,
+    const bt_addr_le_t *a1, const bt_addr_le_t *a2,
+    uint8_t *res) {
     // Message: N1 (16) || N2 (16) || R (16) || IOcap (3) || A1 (7) || A2 (7) = 65 bytes
     uint8_t m[65];
     uint8_t ws[16];
@@ -224,7 +224,7 @@ int bt_crypto_f6(const uint8_t *w, const uint8_t *n1, const uint8_t *n2,
 // g2(U, V, X, Y) = AES-CMAC_X(U || V || Y) mod 2^32
 // Returns a 6-digit passkey value (0-999999)
 int bt_crypto_g2(const uint8_t u[32], const uint8_t v[32],
-                 const uint8_t x[16], const uint8_t y[16], uint32_t *passkey) {
+    const uint8_t x[16], const uint8_t y[16], uint32_t *passkey) {
     uint8_t m[80];  // U (32) + V (32) + Y (16) = 80 bytes
     uint8_t xs[16];
     uint8_t cmac[16];
@@ -440,7 +440,7 @@ int bt_crypto_init(void) {
 // e(key, plaintext) -> returns ciphertext
 // Implements AES-128-ECB encryption using TinyCrypt
 int bt_encrypt_le(const uint8_t key[16], const uint8_t plaintext[16],
-                  uint8_t enc_data[16]) {
+    uint8_t enc_data[16]) {
     struct tc_aes_key_sched_struct sched;
     uint8_t tmp[16];
     int ret;

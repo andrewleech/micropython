@@ -122,5 +122,3 @@ void bt_iso_disconnected(struct bt_conn *conn) {
     (void)conn;
     // No-op: ISO not implemented
 }
-
-

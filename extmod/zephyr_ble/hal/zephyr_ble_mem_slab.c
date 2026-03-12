@@ -36,7 +36,7 @@ static volatile int debug_enabled = 0;
 #define DEBUG_SLAB(fmt, ...) \
     do { \
         if (debug_enabled) { \
-            mp_printf(&mp_plat_print, "[SLAB] " fmt "\n", ##__VA_ARGS__); \
+            mp_printf(&mp_plat_print, "[SLAB] " fmt "\n",##__VA_ARGS__); \
         } \
     } while (0)
 
@@ -49,7 +49,7 @@ void mp_bluetooth_zephyr_mem_slab_enable_debug(void) {
 // Initialize a memory slab (called by K_MEM_SLAB_DEFINE_STATIC macro)
 void k_mem_slab_init(struct k_mem_slab *slab, void *buffer, size_t block_size, uint32_t num_blocks) {
     DEBUG_SLAB("k_mem_slab_init(%p, buffer=%p, block_size=%u, num_blocks=%u)",
-               slab, buffer, (unsigned)block_size, (unsigned)num_blocks);
+        slab, buffer, (unsigned)block_size, (unsigned)num_blocks);
 
     slab->block_size = block_size;
     slab->num_blocks = num_blocks;
@@ -89,11 +89,11 @@ int k_mem_slab_alloc(struct k_mem_slab *slab, void **mem, k_timeout_t timeout) {
             block += slab->block_size;
         }
         DEBUG_SLAB("k_mem_slab_alloc(%p): lazy init, block_size=%u, num_blocks=%u",
-                   slab, (unsigned)slab->block_size, (unsigned)slab->num_blocks);
+            slab, (unsigned)slab->block_size, (unsigned)slab->num_blocks);
     }
 
     DEBUG_SLAB("k_mem_slab_alloc(%p, block_size=%u, used=%u/%u)",
-               slab, (unsigned)slab->block_size, (unsigned)slab->num_used, (unsigned)slab->num_blocks);
+        slab, (unsigned)slab->block_size, (unsigned)slab->num_used, (unsigned)slab->num_blocks);
 
     if (slab->free_list == NULL) {
         MICROPY_PY_BLUETOOTH_EXIT
@@ -112,7 +112,7 @@ int k_mem_slab_alloc(struct k_mem_slab *slab, void **mem, k_timeout_t timeout) {
 
     *mem = block;
     DEBUG_SLAB("  -> allocated %p, free_list=%p, used=%u/%u",
-               block, slab->free_list, (unsigned)slab->num_used, (unsigned)slab->num_blocks);
+        block, slab->free_list, (unsigned)slab->num_used, (unsigned)slab->num_blocks);
     return 0;
 }
 
@@ -135,5 +135,5 @@ void k_mem_slab_free(struct k_mem_slab *slab, void *mem) {
     MICROPY_PY_BLUETOOTH_EXIT
 
     DEBUG_SLAB("  -> freed, free_list=%p, used=%u/%u",
-               slab->free_list, (unsigned)slab->num_used, (unsigned)slab->num_blocks);
+        slab->free_list, (unsigned)slab->num_used, (unsigned)slab->num_blocks);
 }
