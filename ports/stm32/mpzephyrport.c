@@ -238,6 +238,12 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
             }
         }
     }
+
+    // Flush deferred L2CAP recv notifications after all HCI processing is done.
+    // seg_recv_cb defers the Python IRQ notification to avoid re-entrancy issues;
+    // it must be flushed here after work_process completes.
+    extern void mp_bluetooth_zephyr_l2cap_flush_recv_notify(void);
+    mp_bluetooth_zephyr_l2cap_flush_recv_notify();
 }
 
 // Called by k_sem_take() to process HCI packets while waiting

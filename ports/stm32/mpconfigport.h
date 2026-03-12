@@ -257,8 +257,7 @@ typedef long mp_off_t;
 // in event wait loops so soft timer-driven BLE work items execute.
 #define MICROPY_EVENT_POLL_HOOK \
     do { \
-        extern void mp_handle_pending(bool); \
-        mp_handle_pending(true); \
+        mp_handle_pending(MP_HANDLE_PENDING_CALLBACKS_AND_EXCEPTIONS); \
         __WFI(); \
     } while (0);
 #endif
