@@ -262,6 +262,7 @@ MP_NOINLINE static mp_obj_t *build_slice_stack_allocated(byte op, mp_obj_t *sp, 
 //  MP_VM_RETURN_NORMAL, sp valid, return value in *sp
 //  MP_VM_RETURN_YIELD, ip, sp valid, yielded value in *sp
 //  MP_VM_RETURN_EXCEPTION, exception in state[0]
+//  MP_VM_RETURN_SWITCH_VM, ip, sp valid, caller re-invokes via other VM copy
 #if MICROPY_VM_IS_STATIC
 static
 #endif
@@ -1393,6 +1394,21 @@ pending_exception_check:
                 // occur every few instructions.
                 MICROPY_VM_HOOK_LOOP
 
+                #if MICROPY_PY_SYS_SETTRACE_DUAL_VM && MICROPY_PY_SYS_SETTRACE
+                // Tracing VM: check if settrace(None) was called.  On the
+                // tracing VM's hot path; acceptable since tracing already
+                // has per-instruction overhead via TRACE_TICK.
+                if (MP_STATE_THREAD(prof_trace_callback) == MP_OBJ_NULL) {
+                    MP_STATE_VM(vm_switch_pending) = false;
+                    nlr_pop();
+                    code_state->ip = ip;
+                    code_state->sp = sp;
+                    code_state->exc_sp_idx = MP_CODE_STATE_EXC_SP_IDX_FROM_PTR(exc_stack, exc_sp);
+                    FRAME_LEAVE();
+                    return MP_VM_RETURN_SWITCH_VM;
+                }
+                #endif
+
                 // Check for pending exceptions or scheduled tasks to run.
                 // Note: it's safe to just call mp_handle_pending(true), but
                 // we can inline the check for the common case where there is
@@ -1415,6 +1431,24 @@ pending_exception_check:
                     || MP_STATE_VM(vm_abort)
                 #endif
                 ) {
+                    #if MICROPY_PY_SYS_SETTRACE_DUAL_VM && !MICROPY_PY_SYS_SETTRACE
+                    // Standard VM: check if settrace() was called.  Only
+                    // reached when the slow path triggers (settrace() bumps
+                    // sched_state), giving zero overhead on the hot path.
+                    // With GIL threading the calling thread holds the GIL
+                    // and reaches here before any other thread.
+                    // Pending exceptions/scheduler callbacks are deferred to
+                    // the tracing VM's next branch point (immediate re-entry).
+                    if (MP_STATE_THREAD(prof_trace_callback) != MP_OBJ_NULL) {
+                        MP_STATE_VM(vm_switch_pending) = false;
+                        nlr_pop();
+                        code_state->ip = ip;
+                        code_state->sp = sp;
+                        code_state->exc_sp_idx = MP_CODE_STATE_EXC_SP_IDX_FROM_PTR(exc_stack, exc_sp);
+                        FRAME_LEAVE();
+                        return MP_VM_RETURN_SWITCH_VM;
+                    }
+                    #endif
                     MARK_EXC_IP_SELECTIVE();
                     mp_handle_pending(true);
                 }

@@ -151,6 +151,9 @@ void mp_sched_unlock(void) {
             #if MICROPY_SCHEDULER_STATIC_NODES
             MP_STATE_VM(sched_head) != NULL ||
             #endif
+            #if MICROPY_PY_SYS_SETTRACE_DUAL_VM
+            MP_STATE_VM(vm_switch_pending) ||
+            #endif
             mp_sched_num_pending()) {
             MP_STATE_VM(sched_state) = MP_SCHED_PENDING;
         } else {

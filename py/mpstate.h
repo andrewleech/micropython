@@ -251,6 +251,10 @@ typedef struct _mp_state_vm_t {
     uint8_t sched_idx;
     #endif
 
+    #if MICROPY_PY_SYS_SETTRACE_DUAL_VM
+    bool vm_switch_pending;
+    #endif
+
     #if MICROPY_ENABLE_VM_ABORT
     bool vm_abort;
     nlr_buf_t *nlr_abort;

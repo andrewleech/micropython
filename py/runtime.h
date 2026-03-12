@@ -41,6 +41,7 @@ typedef enum {
     MP_VM_RETURN_NORMAL,
     MP_VM_RETURN_YIELD,
     MP_VM_RETURN_EXCEPTION,
+    MP_VM_RETURN_SWITCH_VM,
 } mp_vm_return_kind_t;
 
 typedef enum {
