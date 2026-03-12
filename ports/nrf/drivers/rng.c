@@ -40,7 +40,7 @@
 
 static inline uint32_t generate_hw_random(void) {
     uint32_t retval = 0;
-    uint8_t * p_retval = (uint8_t *)&retval;
+    uint8_t *p_retval = (uint8_t *)&retval;
 
     nrf_rng_event_clear(NRF_RNG, NRF_RNG_EVENT_VALRDY);
     nrf_rng_task_trigger(NRF_RNG, NRF_RNG_TASK_START);
@@ -61,7 +61,7 @@ static inline uint32_t generate_hw_random(void) {
 
 uint32_t rng_generate_random_word(void) {
 
-#if MICROPY_BLUETOOTH_ZEPHYR
+    #if MICROPY_BLUETOOTH_ZEPHYR
     // When Zephyr BLE controller is active, it owns the RNG peripheral.
     // Route through the BLE stack's entropy function.
     extern bool mp_bluetooth_is_active(void);
@@ -71,9 +71,9 @@ uint32_t rng_generate_random_word(void) {
         bt_rand(&retval, sizeof(retval));
         return retval;
     }
-#endif
+    #endif
 
-#if BLUETOOTH_SD
+    #if BLUETOOTH_SD
     if (BLUETOOTH_STACK_ENABLED() == 1) {
         uint32_t retval = 0;
         uint32_t status;
@@ -83,7 +83,7 @@ uint32_t rng_generate_random_word(void) {
 
         return retval;
     }
-#endif
+    #endif
 
     return generate_hw_random();
 }
