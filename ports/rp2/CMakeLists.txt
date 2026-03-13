@@ -492,15 +492,17 @@ if (MICROPY_PY_NETWORK_CYW43)
     # panics with "Out of memory" during BT firmware download.
     # The compile definitions are set on cyw43_driver which is an INTERFACE
     # library, so they propagate to all targets that link it.
-    target_compile_definitions(cyw43_driver INTERFACE
-        cyw43_malloc=m_tracked_calloc_wrapper
-        cyw43_free=m_tracked_free
-    )
-    # Force-include header with function declarations for the above.
-    # Use generator expression to only apply to C files, not assembly.
-    target_compile_options(cyw43_driver INTERFACE
-        $<$<COMPILE_LANGUAGE:C>:-include${MICROPY_PORT_DIR}/cyw43_mp_malloc.h>
-    )
+    if(TARGET cyw43_driver)
+        target_compile_definitions(cyw43_driver INTERFACE
+            cyw43_malloc=m_tracked_calloc_wrapper
+            cyw43_free=m_tracked_free
+        )
+        # Force-include header with function declarations for the above.
+        # Use generator expression to only apply to C files, not assembly.
+        target_compile_options(cyw43_driver INTERFACE
+            $<$<COMPILE_LANGUAGE:C>:-include${MICROPY_PORT_DIR}/cyw43_mp_malloc.h>
+        )
+    endif()
 
     # Link CYW43 WiFi driver (for both BTstack and Zephyr BLE)
     target_link_libraries(${MICROPY_TARGET}

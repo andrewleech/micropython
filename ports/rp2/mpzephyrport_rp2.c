@@ -349,8 +349,8 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
         mp_bluetooth_zephyr_work_process();
     }
 
-    // Reschedule soft timer for continuous HCI polling (10ms interval).
-    mp_bluetooth_zephyr_port_poll_in_ms(10);
+    // Reschedule soft timer for continuous HCI polling.
+    mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
 }
 
 // Zephyr HCI driver implementation
@@ -651,7 +651,7 @@ void mp_bluetooth_hci_poll(void) {
     if (mp_bluetooth_is_active()) {
         mp_bluetooth_zephyr_poll_uart();
         mp_bluetooth_zephyr_poll();
-        mp_bluetooth_hci_poll_in_ms(10);
+        mp_bluetooth_hci_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
     }
 }
 

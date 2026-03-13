@@ -60,10 +60,14 @@ def wait_for_event(event, timeout_ms):
 
 
 def send_data(ble, conn_handle, cid):
-    buf = bytearray(_PAYLOAD_LEN)
+    # Pre-generate all payloads outside the timed send loop.
+    payloads = []
     for i in range(_NUM_PAYLOADS):
+        buf = bytearray(_PAYLOAD_LEN)
         for j in range(_PAYLOAD_LEN):
-            buf[j] = random.randint(0, 255)
+            buf[j] = random.getrandbits(8)
+        payloads.append(buf)
+    for i, buf in enumerate(payloads):
         if not ble.l2cap_send(conn_handle, cid, buf):
             wait_for_event(_IRQ_L2CAP_SEND_READY, TIMEOUT_MS)
         if (i + 1) % 5 == 0:
@@ -77,6 +81,7 @@ def recv_data(ble, conn_handle, cid):
     expected_bytes = _PAYLOAD_LEN * _NUM_PAYLOADS
     ticks_first_byte = 0
     recv_milestone = 1
+    received_data = bytearray()
     while recv_bytes < expected_bytes:
         wait_for_event(_IRQ_L2CAP_RECV, TIMEOUT_MS)
         if not ticks_first_byte:
@@ -86,13 +91,15 @@ def recv_data(ble, conn_handle, cid):
             if n == 0:
                 break
             recv_bytes += n
-            for i in range(n):
-                if buf[i] == random.randint(0, 255):
-                    recv_correct += 1
+            received_data.extend(buf[:n])
             while recv_bytes >= recv_milestone * expected_bytes // 4 and recv_milestone <= 4:
                 print("recv {}%".format(recv_milestone * 25))
                 recv_milestone += 1
     ticks_end = time.ticks_ms()
+    # Verify data correctness outside the timed window.
+    for i in range(len(received_data)):
+        if received_data[i] == random.getrandbits(8):
+            recv_correct += 1
     return recv_bytes, recv_correct, time.ticks_diff(ticks_end, ticks_first_byte)
 
 

@@ -32,6 +32,14 @@
 
 #include <stdbool.h>
 
+// Default background poll interval for periodic HCI/timer processing.
+// IRQ-driven ports (RP2 HOST_WAKE, nRF radio ISR, STM32 IPCC) use poll_now()
+// for immediate processing; this interval is only a fallback for Zephyr timer
+// housekeeping. Matches NimBLE's 128ms convention across all MicroPython ports.
+#ifndef ZEPHYR_BLE_POLL_INTERVAL_MS
+#define ZEPHYR_BLE_POLL_INTERVAL_MS 128
+#endif
+
 // Process all pending timers, work queues, and HCI UART
 void mp_bluetooth_zephyr_poll(void);
 

@@ -129,7 +129,7 @@ __attribute__((weak))
 void mp_bluetooth_hci_poll(void) {
     if (mp_bluetooth_is_active()) {
         mp_bluetooth_zephyr_port_run_task(NULL);
-        mp_bluetooth_zephyr_port_poll_in_ms(10);
+        mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
     }
 }
 
