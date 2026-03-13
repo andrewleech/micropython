@@ -726,11 +726,12 @@ extern const struct device __device_dts_ord_0;
 // CONFIG_BT_BONDABLE_PER_CONNECTION — not enabled (must not be defined;
 // Zephyr uses #if defined() checks so defining as 0 incorrectly enables it).
 #define CONFIG_BT_AUTO_PHY_UPDATE 0
-// Auto DLE disabled by default.  CYW43 controller disconnects with 0x16
-// "Instant Passed" when DLE is negotiated, even if initiated by the remote.
-// Ports with capable controllers (nRF, STM32WB) override this to 1 via CFLAGS.
+// Auto DLE enabled by default.  At bt_enable() the host sends
+// LE_Write_Default_Data_Length(max) and per-connection LE_Set_Data_Length(max)
+// (the latter via BT_HCI_QUIRK_NO_AUTO_DLE).  Ports where DLE is known to
+// cause issues can override to 0 via CFLAGS.
 #ifndef CONFIG_BT_AUTO_DATA_LEN_UPDATE
-#define CONFIG_BT_AUTO_DATA_LEN_UPDATE 0
+#define CONFIG_BT_AUTO_DATA_LEN_UPDATE 1
 #endif
 #define CONFIG_BT_CONN_DISABLE_SECURITY 0
 #define CONFIG_BT_CONN_CHECK_NULL_BEFORE_CREATE 0
@@ -828,7 +829,12 @@ int lll_csrand_get(void *buf, size_t len);  // Controller crypto stub
 #ifndef BT_DT_HCI_BUS_GET
 #define BT_DT_HCI_BUS_GET(node) BT_HCI_BUS_UART
 #define BT_DT_HCI_NAME_GET(node) "mp_bt_hci"
-#define BT_DT_HCI_QUIRKS_GET(node) 0
+// Tell the host that our controllers do not auto-negotiate DLE.  The host must
+// send LE_Write_Default_Data_Length (at bt_enable) and LE_Set_Data_Length
+// (per-connection) to use DLE.  This matches Nordic's upstream devicetree
+// default for zephyr,bt-hci-ll-sw-split (bt-hci-quirks: ["no-auto-dle"]).
+// See lib/zephyr/dts/bindings/bluetooth/zephyr,bt-hci-ll-sw-split.yaml.
+#define BT_DT_HCI_QUIRKS_GET(node) BT_HCI_QUIRK_NO_AUTO_DLE
 #endif
 
 // =============================================================================
