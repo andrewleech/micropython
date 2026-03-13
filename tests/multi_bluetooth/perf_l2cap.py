@@ -79,9 +79,9 @@ def recv_data(ble, conn_handle, cid):
     recv_bytes = 0
     recv_correct = 0
     expected_bytes = _PAYLOAD_LEN * _NUM_PAYLOADS
+    received_data = bytearray(expected_bytes)
     ticks_first_byte = 0
     recv_milestone = 1
-    received_data = bytearray()
     while recv_bytes < expected_bytes:
         wait_for_event(_IRQ_L2CAP_RECV, TIMEOUT_MS)
         if not ticks_first_byte:
@@ -90,8 +90,8 @@ def recv_data(ble, conn_handle, cid):
             n = ble.l2cap_recvinto(conn_handle, cid, buf)
             if n == 0:
                 break
+            received_data[recv_bytes : recv_bytes + n] = buf[:n]
             recv_bytes += n
-            received_data.extend(buf[:n])
             while recv_bytes >= recv_milestone * expected_bytes // 4 and recv_milestone <= 4:
                 print("recv {}%".format(recv_milestone * 25))
                 recv_milestone += 1

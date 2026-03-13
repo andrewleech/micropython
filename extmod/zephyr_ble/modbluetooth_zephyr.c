@@ -172,9 +172,11 @@ typedef struct _mp_bt_zephyr_conn_t {
 
 #if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 
-// L2CAP RX accumulation buffer size (must hold total expected data per direction)
-// The ble_l2cap.py test sends 3640 bytes total, so 4096 gives margin
-#define L2CAP_RX_BUF_SIZE 4096
+// L2CAP RX accumulation buffer size.  A deep buffer provides enough initial
+// credits for the sender to pipeline many SDUs without per-SDU credit
+// round-trips.  16KB gives 65 initial credits at MPS=251, enough for ~21 SDUs
+// of 512 bytes without any credit returns during transfer.
+#define L2CAP_RX_BUF_SIZE (16 * 1024)
 
 // L2CAP Connection-Oriented Channel structure
 typedef struct _mp_bluetooth_zephyr_l2cap_channel_t {
@@ -185,13 +187,11 @@ typedef struct _mp_bluetooth_zephyr_l2cap_channel_t {
     size_t rx_write_pos;               // FIFO write position (advances on seg_recv)
     size_t rx_read_pos;                // FIFO read position (advances on recvinto)
     size_t rx_sdu_start;               // Start of current in-progress SDU in rx_buf
-    uint16_t rx_credits_pending;       // Credits earned from complete SDUs (PDU count)
-    uint16_t rx_credits_returned;      // Credits already returned to sender
+    size_t rx_last_credit_pos;         // rx_read_pos at last credit return (for proportional credits)
     bool rx_notify_pending;            // True when seg_recv_cb completed an SDU (deferred IRQ)
     uint16_t rx_notify_conn_handle;    // Connection handle for deferred notification
     uint16_t rx_notify_cid;            // CID for deferred notification
     uint8_t tx_in_flight;             // Number of SDUs submitted but not yet sent
-    uint16_t rx_credits_per_sdu;      // Credits needed to receive one full SDU
     uint16_t rx_initial_credits;       // Credits given at accept/connect (pipeline depth)
 } mp_bluetooth_zephyr_l2cap_channel_t;
 
@@ -3801,15 +3801,9 @@ static int l2cap_create_channel(uint16_t mtu, mp_bluetooth_zephyr_l2cap_channel_
     // tests/bsim/bluetooth/host/l2cap/credits_seg_recv/src/main.c
     chan->le_chan.rx.mps = BT_L2CAP_RX_MTU;
 
-    // Pre-calculate credits per SDU and initial credit window.
-    // Credits per SDU: ceil((mtu + SDU_HDR_SIZE) / mps).
-    // Initial credits: fill the rx_buf pipeline so the peer can send multiple
-    // SDUs back-to-back without per-SDU credit round-trips.  This is critical
-    // for Z2Z throughput where both sides use cooperative polling and each
-    // credit round-trip costs 2+ connection intervals (~100ms at 50ms CI).
-    uint16_t mps = BT_L2CAP_RX_MTU;
-    chan->rx_credits_per_sdu = (mtu + BT_L2CAP_SDU_HDR_SIZE + mps - 1) / mps;
-    chan->rx_initial_credits = L2CAP_RX_BUF_SIZE / mps;
+    // Initial credit window: fill the rx_buf pipeline so the peer can send
+    // multiple SDUs back-to-back without per-SDU credit round-trips.
+    chan->rx_initial_credits = L2CAP_RX_BUF_SIZE / BT_L2CAP_RX_MTU;
 
     rp->l2cap_chan = chan;
     *out = chan;
@@ -3870,8 +3864,7 @@ static void l2cap_connected_cb(struct bt_l2cap_chan *chan) {
     l2cap_chan_connected->rx_write_pos = 0;
     l2cap_chan_connected->rx_read_pos = 0;
     l2cap_chan_connected->rx_sdu_start = 0;
-    l2cap_chan_connected->rx_credits_pending = 0;
-    l2cap_chan_connected->rx_credits_returned = 0;
+    l2cap_chan_connected->rx_last_credit_pos = 0;
 }
 
 static void l2cap_disconnected_cb(struct bt_l2cap_chan *chan) {
@@ -3965,11 +3958,6 @@ static void l2cap_seg_recv_cb(struct bt_l2cap_chan *chan, size_t sdu_len,
     // On last PDU of this SDU: advance sdu_start for the next SDU and notify Python.
     if ((size_t)seg_offset + copy_len >= sdu_len) {
         l2cap_chan->rx_sdu_start = l2cap_chan->rx_write_pos;
-        // Track PDU count for credit replenishment.  Each PDU uses 1 credit.
-        // ceil(sdu_len / mps) gives the exact number of PDUs for this SDU.
-        uint16_t mps = BT_L2CAP_RX_MTU;
-        uint16_t pdus = (sdu_len + mps - 1) / mps;
-        l2cap_chan->rx_credits_pending += pdus;
         // Defer the Python notification until after work_process completes.
         // If we call mp_bluetooth_on_l2cap_recv() here, the Python IRQ handler
         // runs synchronously via invoke_irq_handler → mp_call_function_2.
@@ -4347,17 +4335,15 @@ int mp_bluetooth_l2cap_recvinto(uint16_t conn_handle, uint16_t cid,
             *len = to_copy;
             chan->rx_read_pos += to_copy;
 
-            // Return credits for complete SDUs that have been read.
-            // rx_credits_pending is incremented by seg_recv_cb when each SDU
-            // completes, with the exact PDU count for that SDU.  This avoids
-            // the fractional-MPS credit loss from byte-based calculation.
-            uint16_t credits_to_give = chan->rx_credits_pending - chan->rx_credits_returned;
-            if (credits_to_give > 0 && chan->rx_read_pos == chan->rx_sdu_start) {
-                // Only give credits when we've consumed all complete SDU data.
-                // This ensures buffer space is actually freed before telling
-                // the sender it can send more.
-                chan->rx_credits_returned = chan->rx_credits_pending;
-                int cr_err = bt_l2cap_chan_give_credits(&chan->le_chan.chan, credits_to_give);
+            // Return credits proportional to buffer space freed since last
+            // return.  Each MPS-worth of buffer consumed earns one credit.
+            // This returns credits per-SDU (or even mid-SDU for large reads)
+            // instead of waiting for all data to drain.
+            uint16_t mps = BT_L2CAP_RX_MTU;
+            uint16_t freed_credits = (chan->rx_read_pos - chan->rx_last_credit_pos) / mps;
+            if (freed_credits > 0) {
+                chan->rx_last_credit_pos += freed_credits * mps;
+                int cr_err = bt_l2cap_chan_give_credits(&chan->le_chan.chan, freed_credits);
                 (void)cr_err;
                 // Flush the credit PDU immediately.  Critical for Z2Z
                 // throughput where both sides use cooperative polling.
@@ -4371,6 +4357,7 @@ int mp_bluetooth_l2cap_recvinto(uint16_t conn_handle, uint16_t cid,
                 chan->rx_read_pos = 0;
                 chan->rx_write_pos = 0;
                 chan->rx_sdu_start = 0;
+                chan->rx_last_credit_pos = 0;
             }
         }
     } else {
