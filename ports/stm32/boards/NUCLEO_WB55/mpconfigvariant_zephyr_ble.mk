@@ -13,5 +13,8 @@ MICROPY_HW_ENABLE_ISR_UART_FLASH_FUNCS_IN_RAM = 0
 # Use bump allocator for GATT structures (STM32 Zephyr builds don't link libc)
 CFLAGS += -DMICROPY_BLUETOOTH_ZEPHYR_GATT_POOL=1
 
+# Enable auto DLE — STM32WB controller handles DLE fine
+CFLAGS += -DCONFIG_BT_AUTO_DATA_LEN_UPDATE=1
+
 # Force linker to keep HCI device symbols (prevent --gc-sections from removing them)
 LDFLAGS += -Wl,--undefined=__device_dts_ord_0 -Wl,--undefined=mp_bluetooth_zephyr_hci_dev
