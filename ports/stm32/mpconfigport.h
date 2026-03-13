@@ -262,7 +262,7 @@ typedef long mp_off_t;
     } while (0);
 #endif
 
-#define MICROPY_THREAD_YIELD()
+// MICROPY_THREAD_YIELD defined in mphalport.h (upstream).
 
 // Configuration for shared/runtime/softtimer.c.
 #define MICROPY_SOFT_TIMER_TICKS_MS uwTick

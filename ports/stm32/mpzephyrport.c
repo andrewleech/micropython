@@ -307,7 +307,7 @@ static int hci_stm32_open(const struct device *dev, bt_hci_recv_t recv) {
 
     // Start the soft timer to begin periodic work queue processing
     // This starts the timer which will fire and process work queues + HCI packets
-    mp_bluetooth_zephyr_port_poll_in_ms(128);  // Start timer with 128ms delay
+    mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
 
     return 0;
 }
@@ -498,7 +498,7 @@ void mp_bluetooth_hci_poll(void) {
     mp_bluetooth_zephyr_port_run_task(NULL);
 
     // Schedule next poll if stack is active
-    mp_bluetooth_zephyr_port_poll_in_ms(128);
+    mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
 }
 
 // Initialize Zephyr port (called early in initialization)
