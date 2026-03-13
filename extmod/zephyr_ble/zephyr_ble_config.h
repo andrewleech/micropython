@@ -730,11 +730,12 @@ extern const struct device __device_dts_ord_0;
 // CONFIG_BT_BONDABLE_PER_CONNECTION — not enabled (must not be defined;
 // Zephyr uses #if defined() checks so defining as 0 incorrectly enables it).
 #define CONFIG_BT_AUTO_PHY_UPDATE 0
-// Auto DLE disabled globally.  CYW43 controller disconnects with 0x16
+// Auto DLE disabled by default.  CYW43 controller disconnects with 0x16
 // "Instant Passed" when DLE is negotiated, even if initiated by the remote.
-// On-core controllers (nRF) handle DLE fine but auto-negotiation must be
-// off to avoid triggering the CYW43 failure when connecting Z2Z.
+// Ports with capable controllers (nRF, STM32WB) override this to 1 via CFLAGS.
+#ifndef CONFIG_BT_AUTO_DATA_LEN_UPDATE
 #define CONFIG_BT_AUTO_DATA_LEN_UPDATE 0
+#endif
 #define CONFIG_BT_CONN_DISABLE_SECURITY 0
 #define CONFIG_BT_CONN_CHECK_NULL_BEFORE_CREATE 0
 #define CONFIG_BT_CONN_PARAM_ANY 0

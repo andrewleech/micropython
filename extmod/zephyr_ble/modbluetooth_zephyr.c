@@ -505,7 +505,6 @@ static void mp_bt_zephyr_connected(struct bt_conn *conn, uint8_t err) {
         : MP_BLUETOOTH_IRQ_CENTRAL_DISCONNECT;
 
     if (err) {
-        uint8_t addr[6] __attribute__((unused)) = {0};
         DEBUG_printf("Connection failed (err %u role %d)\n", err, info.role);
         // For outgoing connections, clean up stored conn reference.
         // Defensive NULL check: mp_bt_zephyr_next_conn could be NULL if
@@ -634,65 +633,7 @@ static void mp_bt_zephyr_disconnected(struct bt_conn *conn, uint8_t reason) {
 }
 
 static void mp_bt_zephyr_security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err) {
-    // Decode security level and error for debugging
-    const char *level_str __attribute__((unused));
-    switch (level) {
-        case BT_SECURITY_L0:
-            level_str = "L0 (no sec)";
-            break;
-        case BT_SECURITY_L1:
-            level_str = "L1 (no auth no enc)";
-            break;
-        case BT_SECURITY_L2:
-            level_str = "L2 (enc, no auth)";
-            break;
-        case BT_SECURITY_L3:
-            level_str = "L3 (enc + auth)";
-            break;
-        case BT_SECURITY_L4:
-            level_str = "L4 (SC + auth)";
-            break;
-        default:
-            level_str = "UNKNOWN";
-            break;
-    }
-
-    const char *err_str __attribute__((unused));
-    switch (err) {
-        case BT_SECURITY_ERR_SUCCESS:
-            err_str = "SUCCESS";
-            break;
-        case BT_SECURITY_ERR_AUTH_FAIL:
-            err_str = "AUTH_FAIL";
-            break;
-        case BT_SECURITY_ERR_PIN_OR_KEY_MISSING:
-            err_str = "PIN_OR_KEY_MISSING";
-            break;
-        case BT_SECURITY_ERR_OOB_NOT_AVAILABLE:
-            err_str = "OOB_NOT_AVAILABLE";
-            break;
-        case BT_SECURITY_ERR_AUTH_REQUIREMENT:
-            err_str = "AUTH_REQUIREMENT";
-            break;
-        case BT_SECURITY_ERR_PAIR_NOT_SUPPORTED:
-            err_str = "PAIR_NOT_SUPPORTED";
-            break;
-        case BT_SECURITY_ERR_PAIR_NOT_ALLOWED:
-            err_str = "PAIR_NOT_ALLOWED";
-            break;
-        case BT_SECURITY_ERR_INVALID_PARAM:
-            err_str = "INVALID_PARAM";
-            break;
-        case BT_SECURITY_ERR_UNSPECIFIED:
-            err_str = "UNSPECIFIED";
-            break;
-        default:
-            err_str = "UNKNOWN";
-            break;
-    }
-
-    DEBUG_printf(">>> mp_bt_zephyr_security_changed: level=%d (%s) err=%d (%s)\n",
-        level, level_str, err, err_str);
+    DEBUG_printf(">>> mp_bt_zephyr_security_changed: level=%d err=%d\n", level, err);
 
     // Safety check: only process if BLE is fully active
     if (mp_bluetooth_zephyr_ble_state != MP_BLUETOOTH_ZEPHYR_BLE_STATE_ACTIVE
@@ -1097,8 +1038,7 @@ static void mp_bt_zephyr_disconnect_count_cb(struct bt_conn *conn, void *data) {
     } else {
         DEBUG_printf("mp_bluetooth_deinit: conn %p (get_info failed: %d)\n", conn, info_err);
     }
-    int err __attribute__((unused)) = bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
-    DEBUG_printf("mp_bluetooth_deinit: bt_conn_disconnect returned %d\n", err);
+    (void)bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
 }
 
 // Callback for bt_conn_foreach to count remaining LE connections.
@@ -2876,13 +2816,15 @@ static uint8_t gattc_descriptor_discover_cb(struct bt_conn *conn,
 static uint8_t gattc_read_cb(struct bt_conn *conn, uint8_t err,
     struct bt_gatt_read_params *params, const void *data, uint16_t length) {
 
+    #if ZEPHYR_BLE_DEBUG
     struct bt_conn_info conn_info;
-    int state __attribute__((unused)) = -1;
+    int state = -1;
     if (conn && bt_conn_get_info(conn, &conn_info) == 0) {
         state = conn_info.state;
     }
     DEBUG_printf("gattc_read_cb: err=%d data=%p length=%d conn=%p conn_state=%d\n",
         err, data, length, conn, state);
+    #endif
 
     if (!mp_bluetooth_is_active()) {
         return BT_GATT_ITER_STOP;
@@ -3381,8 +3323,7 @@ static void zephyr_pairing_confirm_cb(struct bt_conn *conn) {
     // This matches NimBLE behavior where Just Works is auto-accepted internally
     // and applications don't need to handle the passkey action event.
     // Applications that need to reject Just Works pairing can set a different IO capability.
-    int err __attribute__((unused)) = bt_conn_auth_pairing_confirm(conn);
-    DEBUG_printf("  bt_conn_auth_pairing_confirm: %d\n", err);
+    (void)bt_conn_auth_pairing_confirm(conn);
 }
 
 static void zephyr_auth_cancel_cb(struct bt_conn *conn) {
@@ -3934,7 +3875,6 @@ static void l2cap_connected_cb(struct bt_l2cap_chan *chan) {
 }
 
 static void l2cap_disconnected_cb(struct bt_l2cap_chan *chan) {
-    struct bt_l2cap_le_chan *le_dc __attribute__((unused)) = BT_L2CAP_LE_CHAN(chan);
     DEBUG_printf("l2cap_disconnected_cb\n");
 
     // This callback is called twice:
@@ -4172,10 +4112,12 @@ static int l2cap_server_accept_cb(struct bt_conn *conn, struct bt_l2cap_server *
     // before accept returns are included in the CONN_RSP initial_credits field.
     // A deep pipeline allows the peer to send multiple SDUs back-to-back
     // without waiting for per-SDU credit replenishment round-trips.
-    int gc_ret __attribute__((unused)) = bt_l2cap_chan_give_credits(&l2cap_chan->le_chan.chan, l2cap_chan->rx_initial_credits);
-    DEBUG_printf("l2cap_accept: give_credits ret=%d credits=%d mps=%d initial=%d\n",
-        gc_ret, (int)l2cap_chan->le_chan.rx.credits, (int)l2cap_chan->le_chan.rx.mps,
-        l2cap_chan->rx_initial_credits);
+    int gc_ret = bt_l2cap_chan_give_credits(&l2cap_chan->le_chan.chan, l2cap_chan->rx_initial_credits);
+    if (gc_ret < 0) {
+        DEBUG_printf("l2cap_accept: give_credits failed %d\n", gc_ret);
+        result = gc_ret;
+        goto done;
+    }
 
     // Return our channel to Zephyr
     *chan = &l2cap_chan->le_chan.chan;
@@ -4266,10 +4208,12 @@ int mp_bluetooth_l2cap_connect(uint16_t conn_handle, uint16_t psm, uint16_t mtu)
 
     // Give credits for the full RX pipeline before connecting.  Credits given
     // before the channel transitions to CONNECTING are sent in the CONN_REQ.
-    int gc_ret2 __attribute__((unused)) = bt_l2cap_chan_give_credits(&chan->le_chan.chan, chan->rx_initial_credits);
-    DEBUG_printf("l2cap_connect: give_credits ret=%d credits=%d mps=%d initial=%d\n",
-        gc_ret2, (int)chan->le_chan.rx.credits, (int)chan->le_chan.rx.mps,
-        chan->rx_initial_credits);
+    int gc_ret = bt_l2cap_chan_give_credits(&chan->le_chan.chan, chan->rx_initial_credits);
+    if (gc_ret < 0) {
+        DEBUG_printf("l2cap_connect: give_credits failed %d\n", gc_ret);
+        l2cap_destroy_channel();
+        return bt_err_to_errno(gc_ret);
+    }
 
     // Initiate connection
     ret = bt_l2cap_chan_connect(conn, &chan->le_chan.chan, psm);
