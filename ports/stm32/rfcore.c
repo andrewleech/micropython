@@ -108,7 +108,10 @@ extern void mp_bluetooth_zephyr_hci_uart_wfi(void);
 // AN5289
 #define MAGIC_IPCC_MEM_INCORRECT 0x3DE96F61
 
-volatile bool hci_acl_cmd_pending = false;
+// ACL flow control uses IPCC channel flag directly (see rfcore_ble_hci_cmd).
+// The IPCC flag clears when M0+ consumes the shared buffer, which is much faster
+// than waiting for NUM_COMPLETED_PACKETS (full radio round-trip). Debug
+// instrumentation confirmed IPCC clear is always complete before the next send.
 
 typedef struct _tl_list_node_t {
     volatile struct _tl_list_node_t *next;
@@ -333,11 +336,11 @@ static size_t tl_parse_hci_msg(const uint8_t *buf, parse_hci_info_t *parse) {
         case HCI_KIND_BT_EVENT: {
             info = "HCI_EVT";
 
-            // Acknowledgment of a pending ACL request, allow another one to be sent.
+            #if ACL_FLOW_DEBUG
             if (buf[1] == HCI_EVENT_NUMBER_OF_COMPLETED_PACKETS) {
-                ACL_DEBUG_printf("NUM_COMPLETED_PACKETS: pending=%d->0\n", hci_acl_cmd_pending);
-                hci_acl_cmd_pending = false;
+                ACL_DEBUG_printf("NUM_COMPLETED_PACKETS\n");
             }
+            #endif
 
             len = 3 + buf[2];
             if (parse != NULL) {
@@ -806,29 +809,24 @@ void rfcore_ble_hci_cmd(size_t len, const uint8_t *src) {
         n = (tl_list_node_t *)&ipcc_membuf_ble_hci_acl_data_buf[0];
         ch = IPCC_CH_HCI_ACL;
 
-        // Give the previous ACL command up to 100ms to complete.
+        // Wait for M0+ to consume the previous ACL buffer (IPCC flag clear).
+        // The IPCC flag clears when M0+ copies from shared SRAM2B to internal
+        // storage, which is faster than NUM_COMPLETED_PACKETS (radio round-trip).
         mp_uint_t timeout_start_ticks_ms = mp_hal_ticks_ms();
-        #if ACL_FLOW_DEBUG
-        if (hci_acl_cmd_pending) {
-            ACL_DEBUG_printf("ACL_SEND: waiting for pending=%d\n", hci_acl_cmd_pending);
-        }
-        #endif
-        while (hci_acl_cmd_pending) {
+        ACL_DEBUG_printf("ACL_SEND: waiting for IPCC clear\n");
+        while (LL_C1_IPCC_IsActiveFlag_CHx(IPCC, IPCC_CH_HCI_ACL)) {
             if (mp_hal_ticks_ms() - timeout_start_ticks_ms > 100) {
-                ACL_DEBUG_printf("ACL_SEND: TIMEOUT! pending still=%d after 100ms\n", hci_acl_cmd_pending);
+                ACL_DEBUG_printf("ACL_SEND: IPCC TIMEOUT after 100ms\n");
                 break;
             }
-            // Pump HCI messages while waiting for ACL completion
+            // Pump HCI messages while waiting for IPCC completion
             #if MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_NIMBLE
             mp_bluetooth_nimble_hci_uart_wfi();
             #elif MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR
             mp_bluetooth_zephyr_hci_uart_wfi();
             #endif
         }
-
-        ACL_DEBUG_printf("ACL_SEND: setting pending=1 (was %d)\n", hci_acl_cmd_pending);
-        // Prevent sending another command until this one returns with HCI_EVENT_COMMAND_{COMPLETE,STATUS}.
-        hci_acl_cmd_pending = true;
+        ACL_DEBUG_printf("ACL_SEND: buffer ready\n");
     } else {
         printf("** UNEXPECTED HCI HDR: 0x%02x **\n", src[0]);
         return;
