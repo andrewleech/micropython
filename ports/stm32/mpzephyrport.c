@@ -183,7 +183,7 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     }
 
     // Process Zephyr BLE work queues and semaphores
-    mp_bluetooth_zephyr_poll();
+    bool did_work = mp_bluetooth_zephyr_poll();
 
     if (mp_bluetooth_zephyr_h4_get_recv_cb() == NULL) {
         return;
@@ -204,7 +204,7 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
             // Process work after each event for proper interleaving.
             if (mp_bluetooth_zephyr_hci_processing_depth == 0) {
                 mp_bluetooth_zephyr_hci_processing_depth++;
-                mp_bluetooth_zephyr_work_process();
+                did_work |= mp_bluetooth_zephyr_work_process();
                 mp_bluetooth_zephyr_hci_processing_depth--;
             }
         }
@@ -214,7 +214,7 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     // If no buffers available, process work queue to free some.
     // This prevents silent packet drops when buffer pool is exhausted (Issue #12).
     if (!mp_bluetooth_zephyr_buffers_available()) {
-        mp_bluetooth_zephyr_work_process();
+        did_work |= mp_bluetooth_zephyr_work_process();
         if (!mp_bluetooth_zephyr_buffers_available()) {
             // Still no buffers - skip reading, will retry on next poll
             mp_bluetooth_zephyr_port_poll_in_ms(10);
@@ -230,7 +230,7 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
         // Keep reading while packets are available
         // Re-check buffer availability after each packet to prevent exhaustion
         if (!mp_bluetooth_zephyr_buffers_available()) {
-            mp_bluetooth_zephyr_work_process();
+            did_work |= mp_bluetooth_zephyr_work_process();
             if (!mp_bluetooth_zephyr_buffers_available()) {
                 // No buffers - stop reading, will retry on next poll
                 mp_bluetooth_zephyr_port_poll_in_ms(10);
@@ -244,6 +244,15 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     // it must be flushed here after work_process completes.
     extern void mp_bluetooth_zephyr_l2cap_flush_recv_notify(void);
     mp_bluetooth_zephyr_l2cap_flush_recv_notify();
+
+    // Fast reschedule when work was processed (handlers may have enqueued more
+    // work, e.g. tx_processor re-submitting tx_work for the next PDU fragment).
+    // Fall back to 128ms idle poll otherwise.
+    if (did_work) {
+        mp_bluetooth_zephyr_port_poll_now();
+    } else {
+        mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
+    }
 }
 
 // Called by k_sem_take() to process HCI packets while waiting
@@ -485,20 +494,16 @@ int bt_hci_transport_teardown(const struct device *dev) {
     return mp_bluetooth_hci_uart_deinit();
 }
 
-// Main polling function (called by mpbthciport.c via mp_bluetooth_hci_poll)
+// Main polling function (called by mpbthciport.c via mp_bluetooth_hci_poll).
+// Delegates to port_run_task which handles its own rescheduling.
 void mp_bluetooth_hci_poll(void) {
     if (!mp_bluetooth_is_active()) {
         DEBUG_HCI_printf("mp_bluetooth_hci_poll: NOT ACTIVE, skipping\n");
         return;
     }
 
-    // Call mp_bluetooth_zephyr_port_run_task directly to process HCI events
-    // This includes: mp_bluetooth_zephyr_poll(), RX queue processing,
-    // work queue processing, and reading HCI packets from transport
+    // port_run_task handles rescheduling (fast or 128ms) based on work processed
     mp_bluetooth_zephyr_port_run_task(NULL);
-
-    // Schedule next poll if stack is active
-    mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
 }
 
 // Initialize Zephyr port (called early in initialization)
