@@ -22,8 +22,5 @@ CFLAGS += -DMICROPY_VFS_LFS2=1
 # GATT pool allocator — required because nRF port uses -nostdlib (no libc malloc)
 CFLAGS += -DMICROPY_BLUETOOTH_ZEPHYR_GATT_POOL=1
 
-# Enable auto DLE — on-core controller handles DLE fine
-CFLAGS += -DCONFIG_BT_AUTO_DATA_LEN_UPDATE=1
-
 # Zephyr BLE iterable sections — reuse PCA10056 linker script
 LD_FILES += boards/PCA10056/zephyr_ble_sections.ld

@@ -60,7 +60,7 @@ void mp_bluetooth_zephyr_port_poll_now(void) {
     mp_sched_schedule_node(&mp_zephyr_hci_sched_node, mp_bluetooth_zephyr_port_run_task);
 }
 
-// Weak default task: just runs the shared poll function.
+// Weak default task: runs the shared poll function and reschedules.
 // Ports override this to add HCI transport reading, event sorting, etc.
 // Must guard against post-deinit execution since the scheduler node may
 // still be enqueued after poll_cleanup() stops the soft timer.
@@ -70,7 +70,15 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     if (!mp_bluetooth_is_active()) {
         return;
     }
-    mp_bluetooth_zephyr_poll();
+    bool did_work = mp_bluetooth_zephyr_poll();
+    // Fast reschedule when work was processed (handlers may have enqueued more
+    // work, e.g. tx_processor re-submitting tx_work for the next PDU fragment).
+    // Fall back to 128ms idle poll otherwise.
+    if (did_work) {
+        mp_bluetooth_zephyr_port_poll_now();
+    } else {
+        mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
+    }
 }
 
 // Initialise the shared soft timer for periodic HCI polling.
@@ -123,13 +131,12 @@ void mp_bluetooth_zephyr_port_deinit(void) {
 // Ports override these when they need transport-specific behaviour
 // (e.g. STM32 IPCC event sorting, CYW43 SPI reads).
 
-// Weak default: delegates to port_run_task and reschedules via Zephyr timer.
-// The mpbthciport timer triggers the first call, then this reschedules itself.
+// Weak default: delegates to port_run_task for processing and rescheduling.
+// Ports that override port_run_task handle their own reschedule logic.
 __attribute__((weak))
 void mp_bluetooth_hci_poll(void) {
     if (mp_bluetooth_is_active()) {
         mp_bluetooth_zephyr_port_run_task(NULL);
-        mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
     }
 }
 
@@ -143,7 +150,7 @@ void mp_bluetooth_zephyr_hci_uart_wfi(void) {
 // --- Polling Functions ---
 
 
-void mp_bluetooth_zephyr_poll(void) {
+bool mp_bluetooth_zephyr_poll(void) {
     // Process HCI UART first (if implemented)
     // This receives incoming HCI packets from controller and queues rx_work
     // MUST be done before work processing so callbacks fire in the same poll cycle
@@ -155,9 +162,8 @@ void mp_bluetooth_zephyr_poll(void) {
 
     // Process work queues (k_work)
     // This executes pending work handlers including rx_work from HCI events
-    mp_bluetooth_zephyr_work_process();
-
-    // Note: Rescheduling is handled by port's mp_bluetooth_zephyr_port_poll_in_ms()
+    // Returns true if any work was processed, used by callers for fast reschedule
+    return mp_bluetooth_zephyr_work_process();
 }
 
 // Check if Zephyr BT buffer pools have free buffers available.

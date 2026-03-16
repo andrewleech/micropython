@@ -40,8 +40,9 @@
 #define ZEPHYR_BLE_POLL_INTERVAL_MS 128
 #endif
 
-// Process all pending timers, work queues, and HCI UART
-void mp_bluetooth_zephyr_poll(void);
+// Process all pending timers, work queues, and HCI UART.
+// Returns true if any work items were executed.
+bool mp_bluetooth_zephyr_poll(void);
 
 // Initialize polling subsystem
 void mp_bluetooth_zephyr_poll_init(void);

@@ -166,11 +166,15 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     run_task_in_progress = true;
     run_task_count++;
     mp_bluetooth_zephyr_controller_poll_rx();
-    mp_bluetooth_zephyr_poll();
+    bool did_work = mp_bluetooth_zephyr_poll();
     extern void mp_bluetooth_zephyr_l2cap_flush_recv_notify(void);
     mp_bluetooth_zephyr_l2cap_flush_recv_notify();
     run_task_in_progress = false;
-    mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
+    if (did_work) {
+        mp_bluetooth_zephyr_port_poll_now();
+    } else {
+        mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
+    }
 }
 
 // Called by k_sem_take() to process HCI while waiting for a semaphore.

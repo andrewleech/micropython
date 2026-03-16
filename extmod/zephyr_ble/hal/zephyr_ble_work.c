@@ -348,8 +348,9 @@ static int work_process_depth = 0;
 static int work_process_call_count = 0;
 static int work_items_processed = 0;
 
-// Called by mp_bluetooth_hci_poll() to process all pending work (regular work queues only)
-void mp_bluetooth_zephyr_work_process(void) {
+// Called by mp_bluetooth_hci_poll() to process all pending work (regular work queues only).
+// Returns true if any work items were executed.
+bool mp_bluetooth_zephyr_work_process(void) {
     work_process_call_count++;
     DEBUG_WORK_printf("work_process: entered, count=%d\n", work_process_call_count);
 
@@ -359,7 +360,7 @@ void mp_bluetooth_zephyr_work_process(void) {
     // because k_sem_take() is waiting for an HCI response that will arrive via work queue.
     // Without this exception, the recursion prevention creates a deadlock.
     if (regular_work_processor_running && !mp_bluetooth_zephyr_in_wait_loop) {
-        return;
+        return false;
     }
 
     // Limit recursion depth to bound blocking from stale post-disconnect work.
@@ -368,11 +369,12 @@ void mp_bluetooth_zephyr_work_process(void) {
     // Depth 2+: Stale handler → k_sem_take → ... → work_process — blocked to prevent
     //   cascading timeouts where each level adds ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS.
     if (work_process_depth >= 2) {
-        return;
+        return false;
     }
 
     work_process_depth++;
     regular_work_processor_running = true;
+    bool did_work = false;
 
     // Process all work queues EXCEPT k_init_work_q (similar to NimBLE's eventq_run_all)
     for (struct k_work_q *q = global_work_q; q != NULL; q = q->nextq) {
@@ -397,6 +399,7 @@ void mp_bluetooth_zephyr_work_process(void) {
 
             // Execute work handler
             work_items_processed++;
+            did_work = true;
             if (work->handler) {
                 // Set context flag if processing system work queue
                 bool is_sys_wq = (q == &k_sys_work_q);
@@ -426,6 +429,7 @@ void mp_bluetooth_zephyr_work_process(void) {
 
     regular_work_processor_running = false;
     work_process_depth--;
+    return did_work;
 }
 
 
