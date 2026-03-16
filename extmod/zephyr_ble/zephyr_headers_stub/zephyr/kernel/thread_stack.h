@@ -28,9 +28,6 @@ typedef struct z_thread_stack_element k_thread_stack_t;
 #define K_KERNEL_STACK_DEFINE(sym, size) \
     k_thread_stack_t __attribute__((unused)) sym[size]
 
-// Thread stack array definition - no-op in MicroPython
-#define K_KERNEL_STACK_ARRAY_DEFINE(sym, nmemb, size) \
-    k_thread_stack_t __attribute__((unused)) sym[nmemb][size]
 
 // Thread stack member definition - for use in structures
 #define K_KERNEL_STACK_MEMBER(sym, size) \

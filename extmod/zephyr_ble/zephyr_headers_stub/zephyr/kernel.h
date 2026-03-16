@@ -93,6 +93,7 @@ static inline void *k_fifo_peek_head(struct k_fifo *fifo) {
 // Implemented in zephyr_ble_fifo.c
 void k_queue_prepend(struct k_queue *queue, void *data);
 
+
 // Heap allocation stubs (map to NULL - net_buf uses pool allocation)
 static inline void *k_heap_alloc(void *heap, size_t bytes, k_timeout_t timeout) {
     (void)heap;
@@ -114,28 +115,26 @@ static inline void k_heap_free(void *heap, void *mem) {
     (void)mem;
 }
 
-// User context check (always false in cooperative scheduler)
-static inline bool k_is_user_context(void) {
-    return false;
-}
-
-// Timepoint type for timeout tracking (minimal stub)
+// Timepoint type for timeout tracking
 typedef struct {
     uint64_t tick;
 } k_timepoint_t;
 
-// Timepoint calculation stub
 static inline k_timepoint_t sys_timepoint_calc(k_timeout_t timeout) {
     k_timepoint_t tp;
     tp.tick = timeout.ticks;
     return tp;
 }
 
-// Timepoint timeout stub (convert back to timeout)
 static inline k_timeout_t sys_timepoint_timeout(k_timepoint_t timepoint) {
     k_timeout_t timeout;
     timeout.ticks = (uint32_t)timepoint.tick;
     return timeout;
+}
+
+// User context check (always false — no userspace in cooperative scheduler)
+static inline bool k_is_user_context(void) {
+    return false;
 }
 
 // Poll signal stub (minimal - not used in MicroPython)

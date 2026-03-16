@@ -142,15 +142,6 @@ void mp_bluetooth_zephyr_hci_uart_wfi(void) {
 
 // --- Polling Functions ---
 
-void mp_bluetooth_zephyr_poll_init(void) {
-    // Currently nothing to initialize
-    // Timers and work queues are initialized on first use
-}
-
-void mp_bluetooth_zephyr_poll_deinit(void) {
-    // Currently nothing to deinitialize
-    // In the future, this might clean up global state
-}
 
 void mp_bluetooth_zephyr_poll(void) {
     // Process HCI UART first (if implemented)

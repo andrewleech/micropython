@@ -38,7 +38,6 @@ target_sources(micropy_extmod_zephyr_ble INTERFACE
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_kernel.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_poll.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_settings.c
-    ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_psa_crypto.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_util.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_crypto.c
     ${ZEPHYR_BLE_EXTMOD_DIR}/hal/zephyr_ble_crypto_stubs.c
