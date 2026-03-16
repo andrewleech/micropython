@@ -37,14 +37,32 @@
 #else
 
 // Zephyr k_timer abstraction layer for MicroPython
-// Uses polling-based timer mechanism (cooperative scheduling)
+//
+// When MICROPY_PY_THREAD is enabled (FreeRTOS available):
+//   Uses FreeRTOS software timers for proper timing
+//
+// When MICROPY_PY_THREAD is disabled (no RTOS):
+//   Uses polling-based timer mechanism
 
 // Forward declaration
 struct k_timer;
 
 typedef void (*k_timer_expiry_t)(struct k_timer *timer);
 
-// Polling-based timer
+#if MICROPY_PY_THREAD
+// FreeRTOS-backed timer with static allocation
+#include "FreeRTOS.h"
+#include "timers.h"
+
+struct k_timer {
+    TimerHandle_t handle;           // FreeRTOS timer handle
+    StaticTimer_t storage;          // Static storage for timer
+    k_timer_expiry_t expiry_fn;     // Expiry callback
+    void *user_data;                // User data
+};
+
+#else
+// Polling-based timer (fallback for no RTOS)
 struct k_timer {
     bool active;
     uint32_t expiry_ticks;
@@ -52,6 +70,8 @@ struct k_timer {
     void *user_data;
     struct k_timer *next;           // Linked list for polling
 };
+
+#endif // MICROPY_PY_THREAD
 
 // Forward declare k_timeout_t (defined in zephyr_ble_work.h)
 typedef struct {

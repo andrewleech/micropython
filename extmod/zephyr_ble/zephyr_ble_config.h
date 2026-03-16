@@ -54,9 +54,23 @@
 #define MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER (0)
 #endif
 
-// FreeRTOS BLE processing (HCI RX task, work thread) is not yet supported.
-// Uses cooperative polling model on all ports.
+// Use FreeRTOS tasks for BLE processing (HCI RX task, work thread)
+// When enabled (default when MICROPY_PY_THREAD is available):
+//   - Dedicated HCI RX task polls CYW43 at 10ms interval
+//   - Work thread processes Zephyr work queue items
+//   - Better latency and responsiveness
+// When disabled:
+//   - Uses cooperative polling model (like STM32WB55)
+//   - Soft timer triggers HCI polling at 10ms interval
+//   - Work processed in scheduler callback and wait loops
+//   - Lower complexity, works without threading support
+#ifndef MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
+#if MICROPY_PY_THREAD
+#define MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS 1
+#else
 #define MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS 0
+#endif
+#endif
 
 // Zephyr BLE Configuration
 // Maps Zephyr Kconfig options to static defines for MicroPython

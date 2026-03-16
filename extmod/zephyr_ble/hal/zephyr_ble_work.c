@@ -33,6 +33,38 @@
 
 #include <stddef.h>
 
+// BLE work thread uses MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS, not MICROPY_PY_THREAD.
+// This allows disabling the work thread even when FreeRTOS is available.
+#if MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
+#include "FreeRTOS.h"
+#include "task.h"
+#include "semphr.h"
+#include "timers.h"
+#include "extmod/freertos/mp_freertos_service.h"
+
+// BLE Work Queue Thread Configuration
+#define BLE_WORK_THREAD_STACK_SIZE (8192 / sizeof(StackType_t))  // 8KB stack
+#define BLE_WORK_THREAD_PRIORITY   (configMAX_PRIORITIES - 2)    // High priority
+
+// Static allocation for work queue thread
+static StaticTask_t ble_work_thread_tcb;
+static StackType_t ble_work_thread_stack[BLE_WORK_THREAD_STACK_SIZE];
+static TaskHandle_t ble_work_thread_handle = NULL;
+
+// Binary semaphore to signal work available
+static StaticSemaphore_t ble_work_sem_storage;
+static SemaphoreHandle_t ble_work_sem = NULL;
+
+// Flag to signal thread shutdown
+static volatile bool ble_work_thread_running = false;
+
+// Forward declaration
+static void ble_work_thread_func(void *param);
+#endif
+
+// Debug counter for tracking execution (avoids printf blocking issues)
+// Declared outside MICROPY_PY_THREAD to be accessible from init_phase_exit
+volatile int ble_work_debug_step = 0;
 
 // Flag to indicate we're in the bt_enable() init phase
 // During this phase, mp_bluetooth_zephyr_init_work_get() will get work from k_sys_work_q
@@ -152,6 +184,21 @@ static int k_work_submit_internal(struct k_work_q *queue, struct k_work *work) {
 
     MICROPY_PY_BLUETOOTH_EXIT
 
+#if MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
+    // Signal the work queue thread (ISR-safe)
+    if (ble_work_sem != NULL) {
+        if (mp_freertos_service_in_isr()) {
+            // ISR context - use ISR-safe API
+            BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+            xSemaphoreGiveFromISR(ble_work_sem, &xHigherPriorityTaskWoken);
+            portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+        } else {
+            // Task context - use normal API
+            xSemaphoreGive(ble_work_sem);
+        }
+    }
+#endif
+
     return 1;
 }
 
@@ -220,6 +267,11 @@ int k_work_cancel(struct k_work *work) {
     return 1;
 }
 
+int k_work_cancel_sync(struct k_work *work, void *sync) {
+    // sync parameter is for synchronization with other threads, not needed in MicroPython
+    (void)sync;
+    return k_work_cancel(work);
+}
 
 bool k_work_is_pending(const struct k_work *work) {
     return work->pending;
@@ -279,13 +331,19 @@ int k_work_schedule(struct k_work_delayable *dwork, k_timeout_t delay) {
     return k_work_schedule_for_queue(&k_sys_work_q, dwork, delay);
 }
 
+int k_work_reschedule_for_queue(struct k_work_q *queue, struct k_work_delayable *dwork, k_timeout_t delay) {
+    DEBUG_WORK_printf("k_work_reschedule_for_queue(%p, %p, %u)\n", queue, dwork, delay.ticks);
+
+    // Reschedule is the same as schedule in our implementation
+    return k_work_schedule_for_queue(queue, dwork, delay);
+}
 
 int k_work_reschedule(struct k_work_delayable *dwork, k_timeout_t delay) {
     if (!k_sys_work_q.head && !k_sys_work_q.nextq) {
         k_work_queue_init(&k_sys_work_q);
         k_sys_work_q.name = "SYS WQ";
     }
-    return k_work_schedule_for_queue(&k_sys_work_q, dwork, delay);
+    return k_work_reschedule_for_queue(&k_sys_work_q, dwork, delay);
 }
 
 int k_work_cancel_delayable(struct k_work_delayable *dwork) {
@@ -305,6 +363,17 @@ int k_work_cancel_delayable_sync(struct k_work_delayable *dwork, void *sync) {
 }
 
 k_ticks_t k_work_delayable_remaining_get(const struct k_work_delayable *dwork) {
+    // Note: Uses MICROPY_PY_THREAD because k_timer struct members differ
+    // based on whether FreeRTOS primitives are available
+#if MICROPY_PY_THREAD
+    // FreeRTOS: Check if timer is active using FreeRTOS API
+    if (dwork->timer.handle == NULL || !xTimerIsTimerActive(dwork->timer.handle)) {
+        return 0;
+    }
+    // FreeRTOS doesn't easily expose remaining time, return 1 if active
+    return 1;
+#else
+    // Polling: Use the active flag and expiry_ticks
     if (!dwork->timer.active) {
         return 0;
     }
@@ -314,10 +383,20 @@ k_ticks_t k_work_delayable_remaining_get(const struct k_work_delayable *dwork) {
         return dwork->timer.expiry_ticks - now;
     }
     return 0;
+#endif
 }
 
 bool k_work_delayable_is_pending(const struct k_work_delayable *dwork) {
+    // Note: Uses MICROPY_PY_THREAD because k_timer struct members differ
+    // based on whether FreeRTOS primitives are available
+#if MICROPY_PY_THREAD
+    // FreeRTOS: Check work pending flag and timer active state
+    bool timer_active = (dwork->timer.handle != NULL) && xTimerIsTimerActive(dwork->timer.handle);
+    return dwork->work.pending || timer_active;
+#else
+    // Polling: Use the active flag
     return dwork->work.pending || dwork->timer.active;
+#endif
 }
 
 int k_work_delayable_busy_get(const struct k_work_delayable *dwork) {
@@ -353,6 +432,18 @@ static int work_items_processed = 0;
 bool mp_bluetooth_zephyr_work_process(void) {
     work_process_call_count++;
     DEBUG_WORK_printf("work_process: entered, count=%d\n", work_process_call_count);
+
+#if MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
+    // On FreeRTOS, the dedicated work thread handles work processing.
+    // Skip polling-based processing when thread is active to avoid redundant work.
+    // Check ble_work_sem as the authoritative indicator - it's cleared first during shutdown,
+    // ensuring no race where both thread and polling process work simultaneously.
+    if (ble_work_sem != NULL) {
+        DEBUG_WORK_printf("work_process: skipping (work thread active)\n");
+        return;
+    }
+    DEBUG_WORK_printf("work_process: thread not active, processing...\n");
+#endif
 
     // ARCHITECTURAL FIX for Issue #6 recursion deadlock:
     // Prevent recursion UNLESS we're explicitly in a wait loop.
@@ -432,6 +523,48 @@ bool mp_bluetooth_zephyr_work_process(void) {
     return did_work;
 }
 
+// Called by mp_bluetooth_init() wait loop to process initialization work synchronously
+void mp_bluetooth_zephyr_work_process_init(void) {
+    // Prevent recursion (though unlikely since init work should be synchronous)
+    if (init_work_processor_running) {
+        DEBUG_WORK_printf("init_work_process: already running, skipping\n");
+        return;
+    }
+
+    init_work_processor_running = true;
+
+    // Process ONLY the initialization work queue
+    struct k_work_q *q = &k_init_work_q;
+
+    while (q->head != NULL) {
+        // Dequeue work item
+        struct k_work *work = q->head;
+        q->head = work->next;
+
+        if (q->head) {
+            q->head->prev = NULL;
+        }
+
+        work->next = NULL;
+        work->prev = NULL;
+        work->pending = false;
+
+        // Execute work handler
+        DEBUG_WORK_printf("init_work_execute(%p, handler=%p)\n", work, work->handler);
+        if (work->handler) {
+            work->handler(work);
+        }
+        DEBUG_WORK_printf("init_work_execute(%p) done\n", work);
+
+        // Check if work was re-enqueued during execution
+        if (work->pending) {
+            DEBUG_WORK_printf("  --> init work re-enqueued, stopping queue processing\n");
+            break;
+        }
+    }
+
+    init_work_processor_running = false;
+}
 
 // --- Init Work Helper Functions ---
 
@@ -446,6 +579,21 @@ void mp_bluetooth_zephyr_init_phase_enter(void) {
 void mp_bluetooth_zephyr_init_phase_exit(void) {
     DEBUG_WORK_printf("Exiting init phase\n");
     in_bt_enable_init = false;
+
+#if MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
+    // Signal work thread to process any pending work left over from init.
+    // During init, the synchronous HCI path is used (k_current_get() == &k_sys_work_q.thread),
+    // which calls process_pending_cmd() directly. However, bt_tx_irq_raise() still submits
+    // tx_work via k_work_submit(). This tx_work is marked pending but never processed
+    // because ble_work_process_all() returns early during init phase.
+    // After init, new k_work_submit() calls return 0 (work already pending) without
+    // signaling the semaphore, causing the work thread to stay blocked.
+    // Signaling here ensures pending work is processed.
+    if (ble_work_sem != NULL) {
+        xSemaphoreGive(ble_work_sem);
+        DEBUG_WORK_printf("Signaled work thread to process pending work\n");
+    }
+#endif
 }
 
 // Check if in init phase
@@ -492,14 +640,188 @@ struct k_work *mp_bluetooth_zephyr_init_work_get(void) {
     return work;
 }
 
+// Debug function to report work processing statistics
+void mp_bluetooth_zephyr_work_debug_stats(void) {
+    mp_printf(&mp_plat_print, "WORK STATS: process() called %d times, %d items processed\n",
+        work_process_call_count, work_items_processed);
+}
 
+// ============================================================================
+// FreeRTOS Work Queue Thread (Phase 3)
+// Only compiled when MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS is enabled.
+// Otherwise, work is processed via cooperative polling.
+// ============================================================================
+#if MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
 
-// Stub implementations — work processed via cooperative polling, no dedicated work thread.
+// Process all pending work in all queues (except during init phase)
+// Called by the work queue thread
+static void ble_work_process_all(void) {
+    ble_work_debug_step = 10;  // Entered ble_work_process_all
+
+    // During init phase, main loop handles all work processing
+    // to ensure proper sequencing of bt_enable() initialization
+    if (mp_bluetooth_zephyr_in_init_phase()) {
+        ble_work_debug_step = 11;  // Skip due to init phase
+        return;
+    }
+    ble_work_debug_step = 12;  // Processing work
+
+    for (struct k_work_q *q = global_work_q; q != NULL; q = q->nextq) {
+        // Skip initialization work queue (processed separately)
+        if (q == &k_init_work_q) {
+            continue;
+        }
+
+        // Process all work items in this queue
+        // Note: Must check q->head inside critical section to avoid race
+        for (;;) {
+            // Dequeue work item atomically
+            MICROPY_PY_BLUETOOTH_ENTER
+            struct k_work *work = q->head;
+            if (work == NULL) {
+                MICROPY_PY_BLUETOOTH_EXIT
+                break;  // Queue empty
+            }
+            q->head = work->next;
+            if (q->head) {
+                q->head->prev = NULL;
+            }
+            work->next = NULL;
+            work->prev = NULL;
+            work->pending = false;
+            MICROPY_PY_BLUETOOTH_EXIT
+
+            // Execute work handler outside critical section
+                work_items_processed++;
+            ble_work_debug_step = 20;  // About to execute work handler
+
+            if (work->handler) {
+                // Set context flag if processing system work queue
+                bool is_sys_wq = (q == &k_sys_work_q);
+                if (is_sys_wq) {
+                    in_sys_work_q_context = true;
+                }
+                ble_work_debug_step = 21;  // Calling handler
+                work->handler(work);
+                ble_work_debug_step = 22;  // Handler returned
+                if (is_sys_wq) {
+                    in_sys_work_q_context = false;
+                }
+            }
+
+            ble_work_debug_step = 23;  // Work done
+        }
+    }
+}
+#endif // MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
+
+// BLE Work Queue Thread Function
+// Blocks on semaphore waiting for work, processes work when signaled
+static void ble_work_thread_func(void *param) {
+    (void)param;
+
+    ble_work_debug_step = 1;  // Work thread started
+
+    while (ble_work_thread_running) {
+        // Block waiting for work (with timeout to check shutdown flag)
+        if (xSemaphoreTake(ble_work_sem, pdMS_TO_TICKS(100)) == pdTRUE) {
+            ble_work_debug_step = 2;  // Got semaphore
+            // Process all pending work
+            ble_work_process_all();
+            ble_work_debug_step = 3;  // Returned from ble_work_process_all
+        }
+        // Timeout: loop back to check ble_work_thread_running flag
+    }
+
+    DEBUG_WORK_printf("work_thread: exiting\n");
+    vTaskDelete(NULL);
+}
+
+// Start the BLE work queue thread
+// Called from mp_bluetooth_init() after basic initialization
 void mp_bluetooth_zephyr_work_thread_start(void) {
+    // DISABLED: Work thread causes GIL issues with SYNC_EVENTS_WITH_INTERLOCK
+    // Instead, work is processed via polling in mp_bluetooth_zephyr_poll()
+    return;
+
+    if (ble_work_thread_handle != NULL) {
+        DEBUG_WORK_printf("work_thread: already running\n");
+        return;
+    }
+
+    DEBUG_WORK_printf("work_thread: starting...\n");
+
+    // Create binary semaphore for work signaling
+    ble_work_sem = xSemaphoreCreateBinaryStatic(&ble_work_sem_storage);
+
+    // Create the work queue thread
+    ble_work_thread_running = true;
+    ble_work_thread_handle = xTaskCreateStatic(
+        ble_work_thread_func,
+        "BLE_WORK",
+        BLE_WORK_THREAD_STACK_SIZE,
+        NULL,
+        BLE_WORK_THREAD_PRIORITY,
+        ble_work_thread_stack,
+        &ble_work_thread_tcb
+    );
+
+    DEBUG_WORK_printf("work_thread: started, handle=%p\n", ble_work_thread_handle);
+}
+
+// Stop the BLE work queue thread
+// Called from mp_bluetooth_deinit() before shutdown
+void mp_bluetooth_zephyr_work_thread_stop(void) {
+    if (ble_work_thread_handle == NULL) {
+        return;
+    }
+
+    DEBUG_WORK_printf("work_thread: stopping...\n");
+
+    // Signal thread to exit - this also prevents polling from processing work
+    ble_work_thread_running = false;
+
+    // Save handle before clearing (for waiting)
+    TaskHandle_t thread_to_wait = ble_work_thread_handle;
+    SemaphoreHandle_t sem_to_signal = ble_work_sem;
+
+    // Clear handles first to prevent new work from signaling
+    ble_work_thread_handle = NULL;
+    ble_work_sem = NULL;
+
+    // Wake the thread so it can check the flag and exit
+    if (sem_to_signal != NULL) {
+        xSemaphoreGive(sem_to_signal);
+    }
+
+    // Wait for thread to actually exit with timeout
+    // The thread calls vTaskDelete(NULL) which transitions to deleted state
+    // We poll the task state to confirm deletion
+    if (thread_to_wait != NULL) {
+        for (int i = 0; i < 50; i++) {  // 50 * 10ms = 500ms max wait
+            eTaskState state = eTaskGetState(thread_to_wait);
+            if (state == eDeleted || state == eInvalid) {
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
+
+    DEBUG_WORK_printf("work_thread: stopped\n");
+}
+
+#else // !MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
+
+// Stub implementations for polling-based builds (no dedicated work thread)
+void mp_bluetooth_zephyr_work_thread_start(void) {
+    // No-op: work processed via cooperative polling
 }
 
 void mp_bluetooth_zephyr_work_thread_stop(void) {
+    // No-op
 }
+
+#endif // MICROPY_BLUETOOTH_ZEPHYR_USE_FREERTOS
 
 // Discard all pending work items without executing their handlers.
 // Called before bt_disable() to clear stale post-disconnect work items that
