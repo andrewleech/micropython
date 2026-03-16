@@ -45,47 +45,6 @@
 // Forward declaration - actual struct is in zephyr/net_buf.h
 struct net_buf_pool;
 
-// Maximum number of net_buf pools
-// Zephyr BLE typically uses 7-9 pools depending on configuration
-#define MAX_NET_BUF_POOLS 16
-
-// Pool registry
-static struct net_buf_pool *registered_pools[MAX_NET_BUF_POOLS];
-static uint8_t num_pools = 0;
-
-// Register a net_buf pool and return its ID
-// Called by Zephyr BLE during initialization
-// Returns pool ID (>= 0) on success, -1 on failure
-int mp_net_buf_pool_register(struct net_buf_pool *pool) {
-    if (!pool) {
-        return -1;
-    }
-    if (num_pools >= MAX_NET_BUF_POOLS) {
-        return -1;  // Registry full
-    }
-
-    registered_pools[num_pools] = pool;
-    return num_pools++;
-}
-
-// Get number of registered pools
-int mp_net_buf_pool_count(void) {
-    return num_pools;
-}
-
-// Get pool by ID
-// Returns NULL if ID is invalid
-struct net_buf_pool *mp_net_buf_pool_get(int id) {
-    if (id < 0 || id >= num_pools) {
-        return NULL;
-    }
-    return registered_pools[id];
-}
-
-// Reset registration (for testing)
-void mp_net_buf_pool_reset(void) {
-    num_pools = 0;
-}
 
 // REMOVED: These conflicting definitions are no longer needed.
 //

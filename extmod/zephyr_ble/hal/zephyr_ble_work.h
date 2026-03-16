@@ -113,10 +113,6 @@ typedef uint32_t k_ticks_t;
 #define K_WORK_RUNNING   BIT(2)
 #define K_WORK_CANCELING BIT(3)
 
-// Timeout conversion helper
-static inline uint32_t k_timeout_to_ms(k_timeout_t timeout) {
-    return timeout.ticks;
-}
 
 // Work queue configuration
 struct k_work_queue_config {
@@ -147,7 +143,6 @@ int k_work_submit_to_queue(struct k_work_q *queue, struct k_work *work);
 
 // Cancel work
 int k_work_cancel(struct k_work *work);
-int k_work_cancel_sync(struct k_work *work, void *sync);
 
 // Check if work is pending
 bool k_work_is_pending(const struct k_work *work);
@@ -163,7 +158,6 @@ int k_work_schedule_for_queue(struct k_work_q *queue, struct k_work_delayable *d
 
 // Reschedule delayable work
 int k_work_reschedule(struct k_work_delayable *dwork, k_timeout_t delay);
-int k_work_reschedule_for_queue(struct k_work_q *queue, struct k_work_delayable *dwork, k_timeout_t delay);
 
 // Cancel delayable work
 int k_work_cancel_delayable(struct k_work_delayable *dwork);
@@ -219,9 +213,6 @@ extern volatile int mp_bluetooth_zephyr_hci_processing_depth;
 // Called by MicroPython scheduler to process all pending work (regular work queues only)
 void mp_bluetooth_zephyr_work_process(void);
 
-// Called by mp_bluetooth_init() wait loop to process initialization work synchronously
-// This processes only the init work queue and has a separate recursion guard
-void mp_bluetooth_zephyr_work_process_init(void);
 
 // Init phase control - used to process work synchronously during bt_enable()
 void mp_bluetooth_zephyr_init_phase_enter(void);  // Call before bt_enable()
@@ -237,8 +228,6 @@ bool mp_bluetooth_zephyr_init_work_pending(void);
 // Caller must execute work->handler(work) in main loop context to allow yielding
 struct k_work *mp_bluetooth_zephyr_init_work_get(void);
 
-// Debug function to report work processing statistics
-void mp_bluetooth_zephyr_work_debug_stats(void);
 
 // BLE Work Queue Thread Control (Phase 3)
 // These start/stop the dedicated FreeRTOS thread for processing work queues

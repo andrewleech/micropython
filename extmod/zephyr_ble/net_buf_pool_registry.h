@@ -30,21 +30,6 @@
 // Forward declaration
 struct net_buf_pool;
 
-// Register a net_buf pool, returns pool ID or -1 on error
-int mp_net_buf_pool_register(struct net_buf_pool *pool);
-
-// Get number of registered pools
-int mp_net_buf_pool_count(void);
-
-// Get pool by ID (returns NULL if invalid)
-struct net_buf_pool *mp_net_buf_pool_get(int id);
-
-// Update linker symbols after registration complete
-void mp_net_buf_pool_update_end(void);
-
-// Reset registration (for testing)
-void mp_net_buf_pool_reset(void);
-
 // Reset all net_buf pool runtime state for soft reset support.
 // This must be called before bt_enable() when reinitializing BLE after
 // a soft reset, to restore pools to their initial state.

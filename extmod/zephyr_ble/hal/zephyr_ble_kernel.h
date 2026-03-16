@@ -46,36 +46,9 @@ static inline void k_yield(void) {
     // No-op in MicroPython scheduler
 }
 
-// Busy wait for short delays (microseconds)
-static inline void k_busy_wait(uint32_t usec_to_wait) {
-    mp_hal_delay_us(usec_to_wait);
-}
 
 // --- Uptime and Timing ---
 
-// Get system uptime in milliseconds
-static inline int64_t k_uptime_get(void) {
-    return (int64_t)mp_hal_ticks_ms();
-}
-
-// Get system uptime in 32-bit milliseconds (wraps at ~49 days)
-static inline uint32_t k_uptime_get_32(void) {
-    return mp_hal_ticks_ms();
-}
-
-// Convert uptime to ticks (1:1 mapping in MicroPython, both are milliseconds)
-static inline int64_t k_uptime_ticks(void) {
-    return (int64_t)mp_hal_ticks_ms();
-}
-
-// Get current cycle count (if available, otherwise return uptime in ms)
-static inline uint32_t k_cycle_get_32(void) {
-    #ifdef mp_hal_ticks_cpu
-    return mp_hal_ticks_cpu();
-    #else
-    return mp_hal_ticks_ms();
-    #endif
-}
 
 // --- Thread Info (No-op in MicroPython) ---
 
@@ -105,10 +78,6 @@ static inline bool k_is_in_isr(void) {
     return false;
 }
 
-// Check if pre-emptible (always returns false, no preemption in scheduler)
-static inline bool k_is_preempt_thread(void) {
-    return false;
-}
 
 // --- System State ---
 
@@ -117,10 +86,6 @@ static inline bool k_is_preempt_thread(void) {
 #define KERNEL_VERSION_MINOR 7
 #define KERNEL_VERSION_PATCHLEVEL 0
 
-// System state (always running in MicroPython)
-static inline bool k_is_pre_kernel(void) {
-    return false;
-}
 
 // --- Fatal Error Handlers ---
 

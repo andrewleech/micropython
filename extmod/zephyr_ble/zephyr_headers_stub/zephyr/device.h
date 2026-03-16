@@ -58,8 +58,6 @@ static inline bool device_is_ready(const struct device *dev) {
 #define __subsystem
 #endif
 
-// Device initialization flags
-#define DEVICE_FLAG_INIT_DEFERRED 0
 
 // DEVICE_DT_GET macro - gets device pointer from devicetree node
 // In real Zephyr, this expands to &__device_dts_ord_<ordinal> based on node_id.
