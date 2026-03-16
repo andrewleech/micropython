@@ -40,11 +40,6 @@ static volatile int debug_enabled = 0;
         } \
     } while (0)
 
-// Enable debug output
-void mp_bluetooth_zephyr_mem_slab_enable_debug(void) {
-    debug_enabled = 1;
-    mp_printf(&mp_plat_print, "[SLAB] Debug output enabled\n");
-}
 
 // Initialize a memory slab (called by K_MEM_SLAB_DEFINE_STATIC macro)
 void k_mem_slab_init(struct k_mem_slab *slab, void *buffer, size_t block_size, uint32_t num_blocks) {

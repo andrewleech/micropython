@@ -111,8 +111,6 @@ extern const struct device __device_dts_ord_0;
 #define SYS_INIT(func, level, priority) \
     static inline int __sys_init_##func(void) { return 0; }
 #endif
-#define SYS_INIT_NAMED(name, func, level, priority) \
-    static inline int __sys_init_named_##name(void) { return 0; }
 
 // Init levels (not used, but referenced in SYS_INIT calls)
 #define POST_KERNEL 0
@@ -167,8 +165,6 @@ extern const struct device __device_dts_ord_0;
 #define IF_ENABLED(_flag, _code) \
     COND_CODE_1(_flag, _code, ())
 
-// Handle undefined config values (should expand to nothing)
-#define __IF_ENABLED_CONFIG_BT_SETTINGS_DELAYED_STORE(code) /* empty */
 
 // Net buf configuration (must be before net_buf.h is included)
 #define CONFIG_NET_BUF_ALIGNMENT 0

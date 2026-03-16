@@ -54,18 +54,6 @@ static inline sys_snode_t *item_to_snode(void *item) {
 
 // --- k_queue API Implementation (underlying FIFO implementation) ---
 
-// Enable debug output (called after boot to avoid interfering with initialization)
-void mp_bluetooth_zephyr_fifo_enable_debug(void) {
-    debug_enabled = 1;
-    mp_printf(&mp_plat_print, "[FIFO] Debug output enabled\n");
-}
-
-void k_queue_init(struct k_queue *queue) {
-    DEBUG_FIFO("k_queue_init(%p)", queue);
-    queue->data_q.head = NULL;
-    queue->data_q.tail = NULL;
-    queue->lock.unused = 0;  // Initialize spinlock for completeness
-}
 
 void k_queue_append(struct k_queue *queue, void *data) {
     sys_snode_t *node = item_to_snode(data);

@@ -153,7 +153,3 @@ unsigned int k_sem_count_get(struct k_sem *sem) {
     return sem->count;
 }
 
-void k_sem_reset(struct k_sem *sem) {
-    DEBUG_SEM_printf("k_sem_reset(%p)\n", sem);
-    sem->count = 0;
-}
