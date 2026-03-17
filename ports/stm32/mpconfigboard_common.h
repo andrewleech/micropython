@@ -271,6 +271,10 @@
 #ifndef MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
 #define MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE    (1) // Support machine.USBDevice
 #endif
+
+#ifndef MICROPY_HW_USB_CDC_STREAM
+#define MICROPY_HW_USB_CDC_STREAM (1)
+#endif
 #endif
 
 // Configure maximum number of CDC VCP interfaces, and whether MSC/HID are supported

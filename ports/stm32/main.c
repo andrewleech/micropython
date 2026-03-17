@@ -91,6 +91,7 @@
 #if MICROPY_HW_TINYUSB_STACK
 #include "usbd_conf.h"
 #include "shared/tinyusb/mp_usbd.h"
+#include "shared/tinyusb/mp_usbd_cdc.h"
 #endif
 
 #if MICROPY_PY_THREAD
@@ -687,6 +688,9 @@ soft_reset:
 
     #if MICROPY_HW_TINYUSB_STACK && MICROPY_HW_ENABLE_USBDEV
     mp_usbd_init();
+    #if MICROPY_HW_USB_CDC_STREAM
+    MP_STATE_VM(dupterm_objs[1]) = MP_OBJ_FROM_PTR(&machine_usbd_cdc_obj);
+    #endif
     #endif
 
     #if MICROPY_HW_HAS_MMA7660
