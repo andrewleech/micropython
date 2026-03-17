@@ -28,6 +28,9 @@
 #include "extmod/modmachine.h"
 #include "usb.h"
 #include "uart.h"
+#if MICROPY_HW_USB_CDC_STREAM
+#include "shared/tinyusb/mp_usbd_cdc.h"
+#endif
 
 bool mp_os_dupterm_is_builtin_stream(mp_const_obj_t stream) {
     const mp_obj_type_t *type = mp_obj_get_type(stream);
@@ -37,6 +40,9 @@ bool mp_os_dupterm_is_builtin_stream(mp_const_obj_t stream) {
            #endif
            #if MICROPY_HW_STM_USB_STACK
            || type == &pyb_usb_vcp_type
+           #endif
+           #if MICROPY_HW_USB_CDC_STREAM
+           || type == &machine_usbd_cdc_type
            #endif
     ;
 }

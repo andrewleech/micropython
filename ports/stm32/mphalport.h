@@ -44,7 +44,9 @@ static inline int mp_hal_status_to_neg_errno(HAL_StatusTypeDef status) {
     return -mp_hal_status_to_errno_table[status];
 }
 
+#if MICROPY_HW_TINYUSB_STACK && !MICROPY_HW_USB_CDC_STREAM
 extern ringbuf_t stdin_ringbuf;
+#endif
 
 MP_NORETURN void mp_hal_raise(HAL_StatusTypeDef status);
 void mp_hal_set_interrupt_char(int c); // -1 to disable
