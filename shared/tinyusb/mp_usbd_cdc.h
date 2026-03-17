@@ -39,8 +39,21 @@
 #define MICROPY_HW_USB_CDC_DTR_RTS_BOOTLOADER (0)
 #endif
 
+#ifndef MICROPY_HW_USB_CDC_STREAM
+#define MICROPY_HW_USB_CDC_STREAM (0)
+#endif
+
 uintptr_t mp_usbd_cdc_poll_interfaces(uintptr_t poll_flags);
 void MICROPY_WRAP_TUD_CDC_RX_CB(tud_cdc_rx_cb)(uint8_t itf);
 mp_uint_t mp_usbd_cdc_tx_strn(const char *str, mp_uint_t len);
+
+#if MICROPY_HW_USB_CDC_STREAM
+typedef struct {
+    mp_obj_base_t base;
+} machine_usbd_cdc_obj_t;
+
+extern const mp_obj_type_t machine_usbd_cdc_type;
+extern const machine_usbd_cdc_obj_t machine_usbd_cdc_obj;
+#endif
 
 #endif // MICROPY_INCLUDED_SHARED_TINYUSB_MP_USBD_CDC_H
