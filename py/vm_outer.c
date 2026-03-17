@@ -41,11 +41,22 @@ static mp_vm_return_kind_t mp_execute_bytecode_standard(mp_code_state_t *code_st
 static mp_vm_return_kind_t mp_execute_bytecode_tracing(mp_code_state_t *code_state, volatile mp_obj_t inject_exc);
 
 mp_vm_return_kind_t MICROPY_WRAP_MP_EXECUTE_BYTECODE(mp_execute_bytecode)(mp_code_state_t * code_state, volatile mp_obj_t inject_exc) {
-    // Select the VM based on whether there is a tracing function installed or not.
-    if (MP_STATE_THREAD(prof_trace_callback) == MP_OBJ_NULL) {
-        return mp_execute_bytecode_standard(code_state, inject_exc);
-    } else {
-        return mp_execute_bytecode_tracing(code_state, inject_exc);
+    for (;;) {
+        mp_vm_return_kind_t ret;
+        // Select the VM based on whether there is a tracing function installed or not.
+        // Also use the tracing VM when a trace callback is executing, to avoid
+        // the standard VM's assert(!mp_prof_is_executing) in FRAME_ENTER.
+        if (MP_STATE_THREAD(prof_trace_callback) == MP_OBJ_NULL
+            && !MP_STATE_THREAD(prof_callback_is_executing)) {
+            ret = mp_execute_bytecode_standard(code_state, inject_exc);
+        } else {
+            ret = mp_execute_bytecode_tracing(code_state, inject_exc);
+        }
+        if (ret != MP_VM_RETURN_SWITCH_VM) {
+            return ret;
+        }
+        // On VM switch, clear inject_exc so re-entry doesn't re-inject.
+        inject_exc = MP_OBJ_NULL;
     }
 }
 

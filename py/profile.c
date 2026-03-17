@@ -179,6 +179,9 @@ static mp_obj_t mp_prof_callback_invoke(mp_obj_t callback, prof_callback_args_t 
 }
 
 mp_obj_t mp_prof_settrace(mp_obj_t callback) {
+    #if MICROPY_PY_SYS_SETTRACE_DUAL_VM
+    bool was_tracing = prof_trace_cb != MP_OBJ_NULL;
+    #endif
     if (mp_obj_is_callable(callback)) {
         #if MICROPY_PY_SYS_SETTRACE_DUAL_VM
         if (prof_trace_cb == MP_OBJ_NULL) {
@@ -193,6 +196,25 @@ mp_obj_t mp_prof_settrace(mp_obj_t callback) {
     } else {
         prof_trace_cb = MP_OBJ_NULL;
     }
+    #if MICROPY_PY_SYS_SETTRACE_DUAL_VM && MICROPY_ENABLE_SCHEDULER
+    // Signal the standard VM to switch to the tracing VM at the next
+    // branch point.  Only needed when enabling tracing from the disabled
+    // state; the reverse direction (tracing->standard) is handled by
+    // the tracing VM's hot-path check at pending_exception_check.
+    //
+    // Unlike mp_sched_exception's sched_state bump (which is a
+    // non-threaded optimisation), this bump is required for correctness:
+    // it causes the standard VM to enter the slow-path block where the
+    // VM switch check lives.  The vm_switch_pending flag is consumed by
+    // mp_sched_unlock() in scheduler.c, which keeps sched_state at
+    // PENDING until the standard VM actually performs the switch.
+    if (!was_tracing && prof_trace_cb != MP_OBJ_NULL) {
+        MP_STATE_VM(vm_switch_pending) = true;
+        if (MP_STATE_VM(sched_state) == MP_SCHED_IDLE) {
+            MP_STATE_VM(sched_state) = MP_SCHED_PENDING;
+        }
+    }
+    #endif
     return mp_const_none;
 }
 

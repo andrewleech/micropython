@@ -172,6 +172,7 @@ emitter_tests_to_skip = {
         "misc/sys_settrace_features.py",
         "misc/sys_settrace_generator.py",
         "misc/sys_settrace_loop.py",
+        "misc/sys_settrace_midfunction.py",
         # These are bytecode-specific tests.
         "stress/bytecode_limit.py",
     ),
