@@ -34,15 +34,11 @@
 // infinite hang if HCI transport is broken or during deinit.
 #define ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS 5000
 
-// Debug flag (disabled for FreeRTOS - mp_printf not thread-safe in work thread)
-static volatile int debug_enabled = 0;  // Disable debug to prevent NLR crashes
-
-#define DEBUG_FIFO(fmt, ...) \
-    do { \
-        if (debug_enabled) { \
-            mp_printf(&mp_plat_print, "[FIFO] " fmt "\n",##__VA_ARGS__); \
-        } \
-    } while (0)
+#if ZEPHYR_BLE_DEBUG
+#define DEBUG_FIFO(fmt, ...) mp_printf(&mp_plat_print, "[FIFO] " fmt "\n", ##__VA_ARGS__)
+#else
+#define DEBUG_FIFO(fmt, ...) do {} while (0)
+#endif
 
 // sys_snode_t is defined in <zephyr/sys/slist.h>
 // Items placed in the FIFO must have sys_snode_t as their first field
@@ -219,99 +215,7 @@ void k_lifo_put(struct k_lifo *lifo, void *data) {
 }
 
 void *k_lifo_get(struct k_lifo *lifo, k_timeout_t timeout) {
-    // Access sys_slist_t data_q in the k_queue structure
-    // kernel.h defines: struct k_queue { sys_slist_t data_q; struct k_spinlock lock; }
-    // sys_slist_t is: struct { sys_snode_t *head; sys_snode_t *tail; }
-
-    void *item = NULL;
-
+    // LIFO inserts at head (prepend), dequeue from head is same as FIFO/queue.
     DEBUG_FIFO("k_lifo_get(%p, timeout=%u)", lifo, (unsigned)timeout.ticks);
-
-    // Fast path: check if item available
-    MICROPY_PY_BLUETOOTH_ENTER
-    void *head = lifo->_queue.data_q.head;
-    if (head != NULL) {
-        // Remove from head
-        sys_snode_t *node = (sys_snode_t *)head;
-        lifo->_queue.data_q.head = node->next;
-
-        if (lifo->_queue.data_q.head == NULL) {
-            // List is now empty
-            lifo->_queue.data_q.tail = NULL;
-        }
-
-        node->next = NULL;
-        item = head;
-        MICROPY_PY_BLUETOOTH_EXIT
-        DEBUG_FIFO("  -> fast path: got %p", item);
-        return item;
-    }
-    MICROPY_PY_BLUETOOTH_EXIT
-
-    // K_NO_WAIT: Don't block
-    if (timeout.ticks == 0) {
-        DEBUG_FIFO("  -> K_NO_WAIT: return NULL");
-        return NULL;
-    }
-
-    // K_FOREVER or timeout: Busy-wait pattern
-    DEBUG_FIFO("  -> busy-wait mode (timeout=%u)", (unsigned)timeout.ticks);
-    uint32_t t0 = mp_hal_ticks_ms();
-    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS : timeout.ticks;
-    if (timeout_ms > ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS) {
-        timeout_ms = ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS;
-    }
-
-    int loop_count = 0;
-    while (true) {
-        // Check if item available
-        MICROPY_PY_BLUETOOTH_ENTER
-            head = lifo->_queue.data_q.head;
-        if (head != NULL) {
-            // Remove from head
-            sys_snode_t *node = (sys_snode_t *)head;
-            lifo->_queue.data_q.head = node->next;
-
-            if (lifo->_queue.data_q.head == NULL) {
-                lifo->_queue.data_q.tail = NULL;
-            }
-
-            node->next = NULL;
-            item = head;
-            MICROPY_PY_BLUETOOTH_EXIT
-            DEBUG_FIFO("  -> busy-wait: got %p (after %d loops)", item, loop_count);
-            return item;
-        }
-        MICROPY_PY_BLUETOOTH_EXIT
-
-        // Check for pending MicroPython exception (e.g. KeyboardInterrupt from Ctrl-C).
-        // Return NULL so Zephyr callers treat this as a timeout and clean up normally.
-        // The exception remains in mp_pending_exception and is raised once control
-        // returns to the Python VM.
-        if (MP_STATE_THREAD(mp_pending_exception) != MP_OBJ_NULL) {
-            DEBUG_FIFO("  -> interrupted by pending exception");
-            return NULL;
-        }
-
-        // Check timeout
-        uint32_t elapsed = mp_hal_ticks_ms() - t0;
-        if (elapsed >= timeout_ms) {
-            DEBUG_FIFO("  -> timeout after %u ms", elapsed);
-            return NULL;
-        }
-
-        // Process pending work to allow items to be added
-        mp_bluetooth_zephyr_work_process();
-
-        // Process MicroPython scheduled callbacks without raising exceptions.
-        // Uses CALLBACKS_ONLY to avoid nlr_raise which would unwind past
-        // Zephyr's C frames without cleanup.
-        mp_handle_pending(MP_HANDLE_PENDING_CALLBACKS_ONLY);
-        MICROPY_INTERNAL_WFE(100);
-
-        loop_count++;
-        if (loop_count % 100 == 0) {
-            DEBUG_FIFO("  -> still waiting (loop %d)", loop_count);
-        }
-    }
+    return k_queue_get(&lifo->_queue, timeout);
 }

@@ -49,11 +49,8 @@
 #define DEBUG_SEM_printf(...) do {} while (0)
 #endif
 
-// Weak default implementation for non-threaded builds
-__attribute__((weak))
-void mp_bluetooth_zephyr_hci_uart_wfi(void) {
-    // No-op if not implemented yet
-}
+// mp_bluetooth_zephyr_hci_uart_wfi is declared in zephyr_ble_poll.h
+// and has a weak default in zephyr_ble_poll.c that calls port_run_task().
 
 void k_sem_init(struct k_sem *sem, unsigned int initial_count, unsigned int limit) {
     DEBUG_SEM_printf("k_sem_init(%p, count=%u, limit=%u)\n", sem, initial_count, limit);
@@ -64,11 +61,17 @@ void k_sem_init(struct k_sem *sem, unsigned int initial_count, unsigned int limi
 int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
     DEBUG_SEM_printf("k_sem_take(%p, timeout=%u, caller=%p)\n", sem, timeout.ticks, __builtin_return_address(0));
 
-    // Fast path: semaphore available
-    if (sem->count > 0) {
-        sem->count--;
-        DEBUG_SEM_printf("  --> fast path, count now %u\n", sem->count);
-        return 0;
+    // Fast path: semaphore available (protected against concurrent k_sem_give
+    // from HCI RX processing context)
+    {
+        MICROPY_PY_BLUETOOTH_ENTER
+        if (sem->count > 0) {
+            sem->count--;
+            MICROPY_PY_BLUETOOTH_EXIT
+            DEBUG_SEM_printf("  --> fast path, count now %u\n", sem->count);
+            return 0;
+        }
+        MICROPY_PY_BLUETOOTH_EXIT
     }
 
     // K_NO_WAIT: Don't block
@@ -132,7 +135,9 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
     mp_bluetooth_zephyr_in_wait_loop = false;
 
     // Semaphore became available
+    MICROPY_PY_BLUETOOTH_ENTER
     sem->count--;
+    MICROPY_PY_BLUETOOTH_EXIT
     DEBUG_SEM_printf("  --> acquired after %u ms, count now %u\n",
         mp_hal_ticks_ms() - t0, sem->count);
     return 0;
@@ -141,10 +146,13 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
 void k_sem_give(struct k_sem *sem) {
     DEBUG_SEM_printf("k_sem_give(%p)\n", sem);
 
+    MICROPY_PY_BLUETOOTH_ENTER
     if (sem->count < sem->limit) {
         sem->count++;
+        MICROPY_PY_BLUETOOTH_EXIT
         DEBUG_SEM_printf("  --> count now %u\n", sem->count);
     } else {
+        MICROPY_PY_BLUETOOTH_EXIT
         DEBUG_SEM_printf("  --> at limit, not incrementing\n");
     }
 }
@@ -152,4 +160,3 @@ void k_sem_give(struct k_sem *sem) {
 unsigned int k_sem_count_get(struct k_sem *sem) {
     return sem->count;
 }
-

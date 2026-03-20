@@ -69,6 +69,14 @@ static struct k_work_q *global_work_q = NULL;
 // Must be non-static to be accessible from Zephyr BLE host code
 struct k_work_q k_sys_work_q = {0};
 
+// Ensure system work queue is initialized (lazy, idempotent).
+static void ensure_sys_work_q_init(void) {
+    if (!k_sys_work_q.head && !k_sys_work_q.nextq) {
+        k_work_queue_init(&k_sys_work_q);
+        k_sys_work_q.name = "SYS WQ";
+    }
+}
+
 // Initialization work queue (for bt_dev.init work only)
 // Processed synchronously from mp_bluetooth_init() wait loop
 static struct k_work_q k_init_work_q = {0};
@@ -164,10 +172,7 @@ int k_work_submit(struct k_work *work) {
         return -22;  // EINVAL
     }
     DEBUG_WORK_printf("  handler=%p, pending=%d\n", work->handler, work->pending);
-    if (!k_sys_work_q.head && !k_sys_work_q.nextq) {
-        k_work_queue_init(&k_sys_work_q);
-        k_sys_work_q.name = "SYS WQ";
-    }
+    ensure_sys_work_q_init();
     int ret = k_work_submit_internal(&k_sys_work_q, work);
 
     // ARCHITECTURAL FIX: Trigger work processing immediately after submission
@@ -272,19 +277,12 @@ int k_work_schedule_for_queue(struct k_work_q *queue, struct k_work_delayable *d
 }
 
 int k_work_schedule(struct k_work_delayable *dwork, k_timeout_t delay) {
-    if (!k_sys_work_q.head && !k_sys_work_q.nextq) {
-        k_work_queue_init(&k_sys_work_q);
-        k_sys_work_q.name = "SYS WQ";
-    }
+    ensure_sys_work_q_init();
     return k_work_schedule_for_queue(&k_sys_work_q, dwork, delay);
 }
 
-
 int k_work_reschedule(struct k_work_delayable *dwork, k_timeout_t delay) {
-    if (!k_sys_work_q.head && !k_sys_work_q.nextq) {
-        k_work_queue_init(&k_sys_work_q);
-        k_sys_work_q.name = "SYS WQ";
-    }
+    ensure_sys_work_q_init();
     return k_work_schedule_for_queue(&k_sys_work_q, dwork, delay);
 }
 

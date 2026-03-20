@@ -45,16 +45,10 @@
 // MICROPY_PY_BLUETOOTH_ENTER - Enter critical section, return atomic_state
 // MICROPY_PY_BLUETOOTH_EXIT  - Exit critical section, restore atomic_state
 
-// Provide default no-op implementations if port doesn't define them
-// This allows compilation to succeed, but is not safe for multi-core or IRQ contexts
-// Ports should define these in mpconfigport.h for proper critical section handling
-#ifndef MICROPY_PY_BLUETOOTH_ENTER
-#define MICROPY_PY_BLUETOOTH_ENTER uint32_t atomic_state = 0; (void)atomic_state;
-#endif
-
-#ifndef MICROPY_PY_BLUETOOTH_EXIT
-#define MICROPY_PY_BLUETOOTH_EXIT (void)atomic_state;
-#endif
+// MICROPY_PY_BLUETOOTH_ENTER/EXIT must be defined by the port in mpconfigport.h.
+// If not defined, modbluetooth.h provides defaults using MICROPY_BEGIN_ATOMIC_SECTION.
+// Do NOT define fallbacks here -- a conflicting no-op fallback would silently
+// disable critical section protection.
 
 // --- Spinlock API ---
 
