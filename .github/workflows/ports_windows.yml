@@ -28,10 +28,10 @@ jobs:
         visualstudio: ['2019', '2022']
         include:
         - visualstudio: '2019'
-          vs_version: '[16, 17)'
           # The v142 toolset (VS 2019 compiler) is pre-installed on
-          # windows-2022 as a component of VS 2022.  Use it directly
-          # instead of installing VS 2019 via Chocolatey.
+          # windows-2022 as a component of VS 2022.  Use VS 2022's
+          # MSBuild and select the v142 toolset via PlatformToolset.
+          vs_version: '[17, 18)'
           platform_toolset: v142
         - visualstudio: '2022'
           vs_version: '[17, 18)'
