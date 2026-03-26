@@ -55,15 +55,17 @@
 #define MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS (0)
 #endif
 
-// A port can optionally enable support for L2CAP "Connection Oriented Channels".
+// Enable support for L2CAP "Connection Oriented Channels".
+// All BLE stacks support this -- enabled by default.
 #ifndef MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
-#define MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS (0)
+#define MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS (1)
 #endif
 
-// A port can optionally enable support for pairing and bonding.
+// Enable support for pairing and bonding.
 // Requires MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS.
+// All BLE stacks support this -- enabled by default.
 #ifndef MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
-#define MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING (0)
+#define MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING (1)
 #endif
 
 // Optionally enable support for the `hci_cmd` function allowing

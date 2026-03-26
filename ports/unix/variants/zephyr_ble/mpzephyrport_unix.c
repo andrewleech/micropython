@@ -254,8 +254,10 @@ static int hci_unix_send(const struct device *dev, struct net_buf *buf) {
 
     // Build H:4 packet: [type_byte | buf->data].
     // Stack-allocate to avoid heap pressure on every TX.
+    // Max: 1 (H:4) + CONFIG_BT_BUF_ACL_TX_SIZE (255) + 4 (ACL header) = 260 bytes.
+    // HCI commands are max 258 bytes (3 header + 255 params), also within bounds.
     size_t total_len = 1 + buf->len;
-    uint8_t h4_pkt[1 + CONFIG_BT_BUF_ACL_TX_SIZE + 4]; // generous
+    uint8_t h4_pkt[1 + CONFIG_BT_BUF_ACL_TX_SIZE + 4];
     if (total_len > sizeof(h4_pkt)) {
         error_printf("TX packet too large: %zu\n", total_len);
         net_buf_unref(buf);

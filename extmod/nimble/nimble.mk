@@ -26,9 +26,8 @@ GIT_SUBMODULES += lib/mynewt-nimble
 # UART is also polled by the RX IRQ.
 CFLAGS_EXTMOD += -DMICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS=1
 
-# Without the ringbuffer, and with the full implementation, we can also
-# enable pairing and bonding. This requires both synchronous events and
-# some customisation of the key store.
+# Pairing/bonding and L2CAP channels are enabled by default in modbluetooth.h.
+# Explicit -D flags kept for clarity in build logs.
 CFLAGS_EXTMOD += -DMICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING=1
 
 NIMBLE_LIB_DIR = lib/mynewt-nimble

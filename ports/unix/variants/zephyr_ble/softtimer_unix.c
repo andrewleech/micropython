@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2025 MicroPython Contributors
+ * Copyright (c) 2026 Andrew Leech
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,49 +24,34 @@
  * THE SOFTWARE.
  */
 
-// Pthread-based soft timer backend for the Unix port.
-// Implements the soft_timer_get_ms() / soft_timer_schedule_at_ms() / soft_timer_init()
-// interface required by shared/runtime/softtimer.c when MICROPY_SOFT_TIMER_TICKS_MS
-// is not defined.
+// Soft timer backend for Unix port using pthread + condition variable.
 //
-// A background pthread sleeps until the next scheduled expiry, then calls
-// soft_timer_handler() which runs timer callbacks. The PENDSV enter/exit
-// functions use a recursive pthread mutex for thread safety.
+// The shared softtimer.c framework calls:
+//   soft_timer_get_ms() -- return current ms tick
+//   soft_timer_schedule_at_ms(ticks_ms) -- wake timer thread at given time
+//
+// soft_timer_handler() runs in the timer thread context (PendSV-equivalent).
+// MICROPY_PY_PENDSV_ENTER/EXIT protect the timer heap via recursive mutex
+// shared between the timer thread and the main thread.
 
 #include <pthread.h>
 #include <time.h>
 #include <stdbool.h>
-#include <stdint.h>
 #include <errno.h>
+#include <signal.h>
 
 #include "py/runtime.h"
 #include "shared/runtime/softtimer.h"
 
-// Recursive mutex for PendSV-equivalent critical sections.
-// Must be recursive because soft timer C callbacks may call soft_timer_insert()
-// which calls PENDSV_ENTER (same mutex).
-static pthread_mutex_t pendsv_mutex;
-static bool pendsv_mutex_inited = false;
+static pthread_t main_thread;
+static pthread_t timer_thread;
+static pthread_mutex_t timer_mutex;  // recursive, shared with PENDSV macros
+static pthread_cond_t timer_cond;
+static volatile bool timer_running;
+static volatile uint32_t timer_target_ms;
+static volatile bool timer_scheduled;
 
-// Timer thread state.
-static pthread_t timer_thread_id;
-static pthread_mutex_t timer_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t timer_cond = PTHREAD_COND_INITIALIZER;
-static volatile uint32_t timer_target_ms = 0;
-static volatile bool timer_scheduled = false;
-static volatile bool timer_thread_running = false;
-
-void mp_unix_pendsv_enter(void) {
-    if (pendsv_mutex_inited) {
-        pthread_mutex_lock(&pendsv_mutex);
-    }
-}
-
-void mp_unix_pendsv_exit(void) {
-    if (pendsv_mutex_inited) {
-        pthread_mutex_unlock(&pendsv_mutex);
-    }
-}
+// --- Port API for softtimer.c ---
 
 uint32_t soft_timer_get_ms(void) {
     struct timespec ts;
@@ -82,84 +67,113 @@ void soft_timer_schedule_at_ms(uint32_t ticks_ms) {
     pthread_mutex_unlock(&timer_mutex);
 }
 
-static void *soft_timer_thread(void *arg) {
+// --- Timer Thread ---
+
+static void *timer_thread_func(void *arg) {
     (void)arg;
-
-    while (timer_thread_running) {
-        pthread_mutex_lock(&timer_mutex);
-
-        // Wait until a timer is scheduled.
-        while (!timer_scheduled && timer_thread_running) {
+    pthread_mutex_lock(&timer_mutex);
+    while (timer_running) {
+        if (!timer_scheduled) {
+            // No timer pending -- wait indefinitely for signal.
             pthread_cond_wait(&timer_cond, &timer_mutex);
+            continue;
         }
 
-        if (!timer_thread_running) {
-            pthread_mutex_unlock(&timer_mutex);
-            break;
-        }
-
-        // Compute absolute time for condvar wait.
-        uint32_t target = timer_target_ms;
-        timer_scheduled = false;
-        pthread_mutex_unlock(&timer_mutex);
-
-        // Wait until the target time or until re-scheduled.
+        // Calculate delay until target time.
         uint32_t now = soft_timer_get_ms();
-        int32_t delay = (int32_t)(target - now);
+        int32_t delay = (int32_t)(timer_target_ms - now);
 
         if (delay > 0) {
             struct timespec ts;
             clock_gettime(CLOCK_REALTIME, &ts);
             ts.tv_sec += delay / 1000;
-            ts.tv_nsec += (delay % 1000) * 1000000L;
+            ts.tv_nsec += (long)(delay % 1000) * 1000000L;
             if (ts.tv_nsec >= 1000000000L) {
                 ts.tv_sec++;
                 ts.tv_nsec -= 1000000000L;
             }
-
-            pthread_mutex_lock(&timer_mutex);
-            // If re-scheduled while we were computing, loop back.
-            if (timer_scheduled) {
-                pthread_mutex_unlock(&timer_mutex);
-                continue;
-            }
             int ret = pthread_cond_timedwait(&timer_cond, &timer_mutex, &ts);
-            bool was_rescheduled = timer_scheduled;
-            pthread_mutex_unlock(&timer_mutex);
-
-            // If signalled (re-scheduled), loop back to pick up new target.
-            if (ret != ETIMEDOUT && was_rescheduled) {
+            if (ret == 0) {
+                // Signaled -- re-evaluate (target may have changed).
                 continue;
             }
+            // ETIMEDOUT -- fall through to fire handler.
         }
 
-        // Timer expired -- call handler under PendSV lock.
-        mp_unix_pendsv_enter();
+        // Timer expired -- fire handler.
+        timer_scheduled = false;
+        // soft_timer_handler modifies the heap, protected by this mutex
+        // (same mutex as PENDSV_ENTER/EXIT).
         soft_timer_handler();
-        mp_unix_pendsv_exit();
     }
-
+    pthread_mutex_unlock(&timer_mutex);
     return NULL;
 }
 
-// Called early at process startup via constructor attribute, and also
-// explicitly from port_init. The idempotent checks prevent double init.
-__attribute__((constructor))
-void soft_timer_init(void) {
-    // Initialise recursive mutex.
-    if (!pendsv_mutex_inited) {
-        pthread_mutexattr_t attr;
-        pthread_mutexattr_init(&attr);
-        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-        pthread_mutex_init(&pendsv_mutex, &attr);
-        pthread_mutexattr_destroy(&attr);
-        pendsv_mutex_inited = true;
-    }
+// --- Init/Deinit ---
 
-    // Start the timer thread.
-    if (!timer_thread_running) {
-        timer_thread_running = true;
-        timer_scheduled = false;
-        pthread_create(&timer_thread_id, NULL, soft_timer_thread, NULL);
+// Empty signal handler -- the signal's only purpose is to interrupt blocking
+// syscalls (select, poll, etc.) with EINTR so the main thread re-checks
+// pending scheduled callbacks.
+static void sigusr1_handler(int sig) {
+    (void)sig;
+}
+
+void soft_timer_init(void) {
+    main_thread = pthread_self();
+
+    // Install SIGUSR1 handler to interrupt blocking syscalls.
+    struct sigaction sa;
+    sa.sa_handler = sigusr1_handler;
+    sa.sa_flags = 0; // No SA_RESTART -- we want EINTR.
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGUSR1, &sa, NULL);
+
+    // Initialize recursive mutex (PENDSV_ENTER may be called from callbacks
+    // that already hold this mutex via the timer thread).
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&timer_mutex, &attr);
+    pthread_mutexattr_destroy(&attr);
+
+    pthread_cond_init(&timer_cond, NULL);
+    timer_running = true;
+    timer_scheduled = false;
+    pthread_create(&timer_thread, NULL, timer_thread_func, NULL);
+}
+
+// Called during interpreter shutdown to stop the timer thread.
+void soft_timer_deinit_port(void) {
+    if (!timer_running) {
+        return;
+    }
+    pthread_mutex_lock(&timer_mutex);
+    timer_running = false;
+    pthread_cond_signal(&timer_cond);
+    pthread_mutex_unlock(&timer_mutex);
+    pthread_join(timer_thread, NULL);
+    pthread_mutex_destroy(&timer_mutex);
+    pthread_cond_destroy(&timer_cond);
+}
+
+// --- PENDSV mutex (called from MICROPY_PY_PENDSV_ENTER/EXIT macros) ---
+
+void mp_unix_pendsv_enter(void) {
+    pthread_mutex_lock(&timer_mutex);
+}
+
+void mp_unix_pendsv_exit(void) {
+    pthread_mutex_unlock(&timer_mutex);
+}
+
+// --- Main thread wake (called from MICROPY_SCHED_HOOK_SCHEDULED) ---
+
+void mp_unix_wake_main_thread(void) {
+    // Send SIGUSR1 to the main thread to interrupt any blocking syscall
+    // (e.g. select() in time.sleep()) so it processes scheduled callbacks.
+    // No-op if called from the main thread itself.
+    if (!pthread_equal(pthread_self(), main_thread)) {
+        pthread_kill(main_thread, SIGUSR1);
     }
 }

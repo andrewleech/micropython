@@ -40,10 +40,9 @@ GIT_SUBMODULES += lib/zephyr
 # Zephyr BLE uses synchronous events like NimBLE
 CFLAGS_EXTMOD += -DMICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS=1
 
-# Enable pairing and bonding with synchronous events
+# Pairing/bonding and L2CAP channels are enabled by default in modbluetooth.h.
+# Explicit -D flags kept for clarity in build logs.
 CFLAGS_EXTMOD += -DMICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING=1
-
-# Enable L2CAP dynamic channels (COC)
 CFLAGS_EXTMOD += -DMICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS=1
 
 # Note: No force-include needed - the stub toolchain/gcc.h includes autoconf.h

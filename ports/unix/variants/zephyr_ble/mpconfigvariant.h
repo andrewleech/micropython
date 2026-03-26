@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2025 MicroPython Contributors
+ * Copyright (c) 2026 Andrew Leech
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,25 +32,36 @@
 // Enable extra Unix features.
 #include "../mpconfigvariant_common.h"
 
-// Soft timer (pthread-based)
+// Soft timer support (pthread-based backend).
 #define MICROPY_PY_MACHINE_TIMER (1)
 #define MICROPY_SCHEDULER_STATIC_NODES (1)
 
-// Register machine.Timer in the machine module.
-#define MICROPY_PY_MACHINE_EXTRA_GLOBALS \
-    { MP_ROM_QSTR(MP_QSTR_Timer), MP_ROM_PTR(&machine_timer_type) },
-
-// PendSV-equivalent recursive mutex for soft timer thread safety.
+// PendSV-equivalent mutex for soft timer thread safety.
+// soft_timer_handler() runs in the timer thread; PENDSV_ENTER/EXIT
+// protect the timer heap from concurrent access by the main thread.
+// Must be recursive: soft timer C callbacks may call soft_timer_insert().
 extern void mp_unix_pendsv_enter(void);
 extern void mp_unix_pendsv_exit(void);
 #define MICROPY_PY_PENDSV_ENTER mp_unix_pendsv_enter();
 #define MICROPY_PY_PENDSV_EXIT mp_unix_pendsv_exit();
 
-// BLE runs in the scheduler on Unix (cooperative, single-threaded), so
-// critical sections are no-ops. Defined here because zephyr_ble_atomic.h
-// needs them at py/mpconfig.h include time, before modbluetooth.h.
-#define MICROPY_PY_BLUETOOTH_ENTER uint32_t atomic_state = 0;
+// BLE critical sections are no-ops on Unix. All BLE processing runs in
+// the main thread via sched_node callbacks -- there's no concurrent
+// access from ISR or other threads. The soft timer thread only touches
+// the timer heap (protected by PENDSV mutex), never BLE state directly.
+#define MICROPY_PY_BLUETOOTH_ENTER uint32_t atomic_state = 0; (void)atomic_state;
 #define MICROPY_PY_BLUETOOTH_EXIT (void)atomic_state;
+
+// Register machine.Timer.
+extern const struct _mp_obj_type_t machine_timer_type;
+#define MICROPY_PY_MACHINE_EXTRA_GLOBALS \
+    { MP_ROM_QSTR(MP_QSTR_Timer), MP_ROM_PTR(&machine_timer_type) },
+
+// When a callback is scheduled from the timer thread, wake the main thread
+// so that blocking calls (e.g. time.sleep -> select) return via EINTR and
+// process the pending callback promptly.
+extern void mp_unix_wake_main_thread(void);
+#define MICROPY_SCHED_HOOK_SCHEDULED mp_unix_wake_main_thread();
 
 // Zephyr BLE -- most BLE defines are provided by zephyr_ble.mk via CFLAGS_EXTMOD.
 // Only define what the makefile does not provide.
