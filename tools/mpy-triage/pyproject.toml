@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mpy-triage"
+version = "0.1.0"
+description = "CLI tool for detecting duplicate/related MicroPython issues and PRs"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+dependencies = [
+    "sqlite-vec>=0.1.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.4.0",
+]
+
+[project.scripts]
+mpy-triage = "mpy_triage.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 99
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
