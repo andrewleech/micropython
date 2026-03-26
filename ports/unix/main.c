@@ -57,6 +57,11 @@
 #include "stack_size.h"
 #include "shared/runtime/pyexec.h"
 
+#if MICROPY_PY_MACHINE_TIMER
+#include "shared/runtime/softtimer.h"
+void soft_timer_deinit_port(void);
+#endif
+
 // Command line options, with their defaults
 bool mp_compile_only = false;
 static uint emit_opt = MP_EMIT_OPT_NONE;
@@ -495,6 +500,10 @@ MP_NOINLINE int main_(int argc, char **argv) {
 
     mp_init();
 
+    #if MICROPY_PY_MACHINE_TIMER
+    soft_timer_init();
+    #endif
+
     #if MICROPY_EMIT_NATIVE
     // Set default emitter options
     MP_STATE_VM(default_emit_opt) = emit_opt;
@@ -728,6 +737,10 @@ MP_NOINLINE int main_(int argc, char **argv) {
     #if MICROPY_PY_BLUETOOTH
     int mp_bluetooth_deinit(void);
     mp_bluetooth_deinit();
+    #endif
+
+    #if MICROPY_PY_MACHINE_TIMER
+    soft_timer_deinit_port();
     #endif
 
     #if MICROPY_PY_THREAD
