@@ -31,6 +31,10 @@
 
 #include "shared/runtime/gchelper.h"
 
+#if MICROPY_PY_MACHINE_TIMER
+#include "shared/runtime/softtimer.h"
+#endif
+
 #if MICROPY_ENABLE_GC
 
 void gc_collect(void) {
@@ -38,6 +42,9 @@ void gc_collect(void) {
     gc_helper_collect_regs_and_stack();
     #if MICROPY_PY_THREAD
     mp_thread_gc_others();
+    #endif
+    #if MICROPY_PY_MACHINE_TIMER
+    soft_timer_gc_mark_all();
     #endif
     gc_collect_end();
 }
