@@ -1,0 +1,2 @@
+[console_scripts]
+mpy-triage = mpy_triage.cli:main
