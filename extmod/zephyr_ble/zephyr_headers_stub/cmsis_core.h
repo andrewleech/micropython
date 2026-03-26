@@ -51,6 +51,42 @@
 // Include nrf.h which chains to core_cm4.h -> cmsis_gcc.h for all intrinsics
 #include "nrf.h"
 
+#elif defined(__ZEPHYR_BLE_UNIX_PORT__)
+// Unix: No hardware IRQ control needed. Provide no-op stubs.
+// All BLE processing is single-threaded; arch_irq_lock/unlock are in the port glue.
+
+static inline void __enable_irq(void) {
+}
+
+static inline void __disable_irq(void) {
+}
+
+static inline void __ISB(void) {
+}
+
+static inline void __DSB(void) {
+}
+
+static inline uint32_t __get_PRIMASK(void) {
+    return 0;
+}
+
+static inline void __set_PRIMASK(uint32_t priMask) {
+    (void)priMask;
+}
+
+static inline uint32_t __get_BASEPRI(void) {
+    return 0;
+}
+
+static inline void __set_BASEPRI(uint32_t basePri) {
+    (void)basePri;
+}
+
+static inline void __set_BASEPRI_MAX(uint32_t basePri) {
+    (void)basePri;
+}
+
 #else
 // Fallback: Provide minimal stub implementations of required CMSIS intrinsics
 // This ensures compilation succeeds even if proper CMSIS headers aren't available

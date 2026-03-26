@@ -982,7 +982,12 @@ int lll_csrand_get(void *buf, size_t len);  // Controller crypto stub
 // Required for HCI parameter encoding in scan.c and other Zephyr BLE host code
 #include <stdint.h>
 
-// Byte swap functions
+// Byte swap functions.
+// On Linux/Unix, glibc provides __bswap_16/__bswap_32 via <byteswap.h>
+// (transitively included by system headers). Only define on bare-metal.
+#if defined(__linux__) || defined(__APPLE__) || defined(__unix__)
+#include <byteswap.h>
+#else
 static inline uint16_t __bswap_16(uint16_t x) {
     return (uint16_t)((x << 8) | (x >> 8));
 }
@@ -993,10 +998,23 @@ static inline uint32_t __bswap_32(uint32_t x) {
            ((x >> 8) & 0x0000FF00) |
            ((x >> 24) & 0x000000FF);
 }
+#endif
 
-// ARM Cortex-M is little-endian, so CPU-to-LE is a no-op
+// Endian conversion macros.
+// When building with the real Zephyr lib (BINDINGS_ONLY=0), the real
+// byteorder.h provides these. Only define fallbacks for builds that
+// don't include it, and skip entirely on Unix to avoid redefinition
+// conflicts from the real header's transitive include chain.
+#if !defined(__linux__) && !defined(__APPLE__) && !defined(__unix__)
+#ifndef __LITTLE_ENDIAN__
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 #define __LITTLE_ENDIAN__
+#elif defined(__ARM_ARCH) || defined(__arm__) || defined(__aarch64__)
+#define __LITTLE_ENDIAN__
+#endif
+#endif
 
+#ifndef sys_cpu_to_le16
 #ifdef __LITTLE_ENDIAN__
 #define sys_cpu_to_le16(x) (x)
 #define sys_cpu_to_le32(x) (x)
@@ -1016,5 +1034,7 @@ static inline uint32_t __bswap_32(uint32_t x) {
 #define sys_be16_to_cpu(x) (x)
 #define sys_be32_to_cpu(x) (x)
 #endif
+#endif
+#endif // !__linux__ && !__APPLE__ && !__unix__
 
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_ZEPHYR_BLE_CONFIG_H

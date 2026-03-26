@@ -29,6 +29,11 @@
 #include "pico/rand.h"
 #endif
 
+// Linux getrandom() for Unix port
+#if defined(__linux__)
+#include <sys/random.h>
+#endif
+
 // =============================================================================
 // Platform-Specific Hardware RNG (used by all crypto functions)
 // =============================================================================
@@ -82,6 +87,14 @@ int bt_rand(void *buf, size_t len) {
                 p[i + 3] = (r >> 24) & 0xFF;
             }
         }
+    }
+    return 0;
+
+    #elif defined(__linux__)
+    // Linux: Use getrandom() syscall for cryptographically secure random bytes
+    ssize_t ret = getrandom(buf, len, 0);
+    if (ret < 0 || (size_t)ret != len) {
+        return -5; // -EIO
     }
     return 0;
 
