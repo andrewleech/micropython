@@ -1,5 +1,0 @@
-sqlite-vec>=0.1.6
-
-[dev]
-pytest>=7.0.0
-ruff>=0.4.0
