@@ -32,7 +32,7 @@
 
 // Maximum time to poll before returning NULL. Caps K_FOREVER to prevent
 // infinite hang if HCI transport is broken or during deinit.
-#define ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS 5000
+#define ZEPHYR_BLE_FIFO_POLL_TIMEOUT_MS 5000
 
 #if ZEPHYR_BLE_DEBUG
 #define DEBUG_FIFO(fmt, ...) mp_printf(&mp_plat_print, "[FIFO] " fmt "\n", ##__VA_ARGS__)
@@ -131,9 +131,9 @@ void *k_queue_get(struct k_queue *queue, k_timeout_t timeout) {
     // (similar to k_sem_take implementation)
     DEBUG_FIFO("  -> busy-wait mode (timeout=%u)", (unsigned)timeout.ticks);
     uint32_t t0 = mp_hal_ticks_ms();
-    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS : timeout.ticks;
-    if (timeout_ms > ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS) {
-        timeout_ms = ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS;
+    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? ZEPHYR_BLE_FIFO_POLL_TIMEOUT_MS : timeout.ticks;
+    if (timeout_ms > ZEPHYR_BLE_FIFO_POLL_TIMEOUT_MS) {
+        timeout_ms = ZEPHYR_BLE_FIFO_POLL_TIMEOUT_MS;
     }
 
     int loop_count = 0;

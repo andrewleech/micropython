@@ -68,6 +68,7 @@ uint8_t u8_to_dec(char *buf, uint8_t buflen, uint8_t value) {
 // strtoul() stub required by Zephyr BLE stack (keys.c, gatt.c)
 // Even though CONFIG_BT_SETTINGS=0, the code still references this function
 // This should never be called with our configuration, but provide a stub to avoid linker errors
+__attribute__((weak))
 unsigned long strtoul(const char *nptr, char **endptr, int base) {
     // Simple implementation: convert hex/decimal string to unsigned long
     unsigned long result = 0;

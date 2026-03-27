@@ -61,15 +61,9 @@ typedef void *k_tid_t;
 // and use the synchronous command sending path (process_pending_cmd).
 static inline k_tid_t k_current_get(void) {
     extern struct k_work_q k_sys_work_q;
-    extern bool mp_bluetooth_zephyr_in_sys_work_q_context(void);
-
-    // When executing system work queue items, return the work queue thread
-    // This makes k_current_get() == &k_sys_work_q.thread return true
-    if (mp_bluetooth_zephyr_in_sys_work_q_context()) {
-        return (k_tid_t)&k_sys_work_q.thread;
-    }
-
-    // Cooperative polling: always return work queue thread
+    // Cooperative polling: all code runs in the main thread which acts as
+    // the system work queue thread. Returning this pointer makes Zephyr's
+    // hci_core.c detect work-queue context for synchronous HCI commands.
     return (k_tid_t)&k_sys_work_q.thread;
 }
 

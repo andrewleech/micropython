@@ -407,6 +407,7 @@ void bt_pub_key_hci_disrupted(void) {
     DEBUG_printf("bt_pub_key_hci_disrupted\n");
     // Invalidate current keypair (forces regeneration on next pairing)
     ecc_key_valid = false;
+    memset(ecc_priv_key, 0, sizeof(ecc_priv_key));
 }
 
 // Zephyr BLE random number generator

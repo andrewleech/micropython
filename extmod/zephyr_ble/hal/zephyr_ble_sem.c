@@ -41,7 +41,7 @@
 // blocking inside poll→work_process→k_sem_take→hci_uart_wfi→poll recursion)
 // don't exceed the test runner's 10-second timeout. With depth-2 nesting,
 // 1000ms per level = 2 seconds total.
-#define ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS 1000
+#define ZEPHYR_BLE_SEM_POLL_TIMEOUT_MS 1000
 
 #if ZEPHYR_BLE_DEBUG
 #define DEBUG_SEM_printf(...) mp_printf(&mp_plat_print, "SEM: " __VA_ARGS__)
@@ -93,9 +93,9 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
     // K_FOREVER: Block indefinitely (capped to prevent infinite hang)
     // Regular timeout: Block for specified time
     uint32_t t0 = mp_hal_ticks_ms();
-    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS : timeout.ticks;
-    if (timeout_ms > ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS) {
-        timeout_ms = ZEPHYR_BLE_POLL_MAX_TIMEOUT_MS;
+    uint32_t timeout_ms = (timeout.ticks == 0xFFFFFFFF) ? ZEPHYR_BLE_SEM_POLL_TIMEOUT_MS : timeout.ticks;
+    if (timeout_ms > ZEPHYR_BLE_SEM_POLL_TIMEOUT_MS) {
+        timeout_ms = ZEPHYR_BLE_SEM_POLL_TIMEOUT_MS;
     }
 
     DEBUG_SEM_printf("  --> waiting (timeout=%u ms, caller=%p)\n", timeout_ms, __builtin_return_address(0));

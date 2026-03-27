@@ -9,7 +9,23 @@
  * This file REPLACES gatt.c in the build — do not compile both.
  */
 
+// Redirect malloc/free to scoped allocator when GATT pool is enabled.
+// Zephyr's gatt.c calls malloc() for attribute storage; these redirects
+// ensure it hits our bump allocator instead of polluting the global symbol.
+#if MICROPY_BLUETOOTH_ZEPHYR_GATT_POOL
+#include <stddef.h>
+extern void *zephyr_ble_gatt_malloc(size_t size);
+extern void zephyr_ble_gatt_free(void *ptr);
+#define malloc zephyr_ble_gatt_malloc
+#define free zephyr_ble_gatt_free
+#endif
+
 #include "lib/zephyr/subsys/bluetooth/host/gatt.c"
+
+#if MICROPY_BLUETOOTH_ZEPHYR_GATT_POOL
+#undef malloc
+#undef free
+#endif
 
 #if defined(CONFIG_BT_GATT_CLIENT)
 // Reset all GATT client subscriptions by zeroing the static array.

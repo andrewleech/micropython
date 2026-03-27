@@ -22,6 +22,8 @@
 #include STM32_HAL_H
 #endif
 
+#include <errno.h>
+
 // pico-sdk hardware RNG for RP2040/RP2350
 #if PICO_RP2040 || PICO_RP2350
 #include "pico/rand.h"
@@ -36,7 +38,7 @@
 // Uses platform hardware RNG or controller entropy when available
 int bt_rand(void *buf, size_t len) {
     if (!buf) {
-        return -22; // -EINVAL
+        return -EINVAL;
     }
 
     #if MICROPY_BLUETOOTH_ZEPHYR_CONTROLLER
@@ -85,7 +87,7 @@ int bt_rand(void *buf, size_t len) {
 
     #else
     // Platform must provide hardware RNG implementation
-    return -38; // -ENOSYS
+    return -ENOSYS;
     #endif
 }
 
@@ -104,7 +106,7 @@ int ecb_encrypt(const uint8_t *key, const uint8_t *clear_text,
     (void)cipher_text;
     (void)length;
     // Return error - RPA not implemented yet
-    return -1;
+    return -EIO;
 }
 #endif
 
@@ -115,6 +117,6 @@ int lll_csrand_get(void *buf, size_t len) {
     (void)buf;
     (void)len;
     // Return error - controller crypto not available
-    return -1;
+    return -ENOSYS;
 }
 #endif

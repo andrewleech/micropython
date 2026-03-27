@@ -56,7 +56,10 @@ static struct {
 } gatt_alloc_table[MAX_GATT_ALLOCS];
 static int gatt_alloc_count = 0;
 
-void *malloc(size_t size) {
+// Scoped names to avoid polluting the global malloc/free symbols.
+// Callers (Zephyr's gatt.c via gatt_wrapper.c) redirect via preprocessor
+// #define malloc zephyr_ble_gatt_malloc before including gatt.c.
+void *zephyr_ble_gatt_malloc(size_t size) {
     // Align to 4 bytes
     size = (size + 3) & ~3;
 
@@ -79,7 +82,7 @@ void *malloc(size_t size) {
     return ptr;
 }
 
-void free(void *ptr) {
+void zephyr_ble_gatt_free(void *ptr) {
     // In this bump allocator, individual frees don't reclaim memory.
     // Memory is only reclaimed on pool reset (BLE deinit).
     // We just mark the entry as freed for debugging.
@@ -93,6 +96,20 @@ void free(void *ptr) {
             return;
         }
     }
+}
+
+// Weak global aliases for -nostdlib builds (STM32) where no libc malloc/free
+// exists. Code outside the Zephyr BLE TU (e.g. modbluetooth_zephyr.c) calls
+// free() directly for GATT cleanup. On ports with libc, these weak symbols
+// are overridden by the real malloc/free.
+__attribute__((weak))
+void *malloc(size_t size) {
+    return zephyr_ble_gatt_malloc(size);
+}
+
+__attribute__((weak))
+void free(void *ptr) {
+    zephyr_ble_gatt_free(ptr);
 }
 
 // Called during BLE deinit to reset the pool for next init cycle

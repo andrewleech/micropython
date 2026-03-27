@@ -307,7 +307,9 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
     #endif // MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 } mp_bluetooth_zephyr_root_pointers_t;
 
-static int mp_bluetooth_zephyr_ble_state;
+// Volatile: read from callbacks that may execute between main-thread state
+// transitions. See CLAUDE.local.md "Thread safety in callbacks" for details.
+static volatile int mp_bluetooth_zephyr_ble_state;
 
 // Set during BLE deinit Phase 3 to make k_sem_take(K_FOREVER) fail immediately.
 // Prevents stale work handlers from blocking on dead-connection semaphores
@@ -3876,12 +3878,14 @@ static void l2cap_connected_cb(struct bt_l2cap_chan *chan) {
 }
 
 static void l2cap_disconnected_cb(struct bt_l2cap_chan *chan) {
+    #if ZEPHYR_BLE_DEBUG
     struct bt_l2cap_le_chan *le_dbg = BT_L2CAP_LE_CHAN(chan);
     DEBUG_printf("disconnected_cb: tx_credits=%ld rx_credits_pending=%d\n",
         atomic_get(&le_dbg->tx.credits),
         MP_STATE_PORT(bluetooth_zephyr_root_pointers) &&
         MP_STATE_PORT(bluetooth_zephyr_root_pointers)->l2cap_chan ?
         MP_STATE_PORT(bluetooth_zephyr_root_pointers)->l2cap_chan->rx_credits_pending : -1);
+    #endif
 
     // This callback is called twice:
     // 1. From L2CAP-level disconnect (Disconnect Response processing)
