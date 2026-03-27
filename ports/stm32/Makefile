@@ -494,6 +494,15 @@ SRC_C += mpbtstackport.c
 MICROPY_BLUETOOTH_BTSTACK_H4 ?= 1
 endif
 
+ifeq ($(MICROPY_BLUETOOTH_ZEPHYR),1)
+SRC_C += mpzephyrport.c
+# Define STM32 port flag for Zephyr BLE CMSIS header selection
+CFLAGS += -D__ZEPHYR_BLE_STM32_PORT__
+# Enable L2CAP channels (must be passed as CFLAGS for Zephyr sources)
+CFLAGS += -DMICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS=1
+include $(TOP)/extmod/zephyr_ble/zephyr_ble.mk
+endif
+
 endif # MICROPY_PY_BLUETOOTH
 
 # Add stm32-specific implementation of libmetal (and optionally OpenAMP's rproc).
@@ -521,6 +530,13 @@ OBJ += $(addprefix $(BUILD)/, $(TINYUSB_SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_CXX:.cpp=.o))
 OBJ += $(GEN_PINS_SRC:.c=.o)
+
+# Zephyr BLE third-party sources are added to SRC_THIRDPARTY_C by zephyr_ble.mk
+# after extmod.mk has already processed SRC_THIRDPARTY_C into PY_O.
+# Add them explicitly here since they won't be in PY_O.
+ifeq ($(MICROPY_BLUETOOTH_ZEPHYR),1)
+OBJ += $(addprefix $(BUILD)/, $(SRC_THIRDPARTY_C:.c=.o))
+endif
 
 # This file contains performance critical functions so turn up the optimisation
 # level.  It doesn't add much to the code size and improves performance a bit.

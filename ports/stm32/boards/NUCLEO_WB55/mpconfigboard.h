@@ -62,6 +62,9 @@
 #define MICROPY_HW_USB_CDC_RX_DATA_SIZE (512)
 #define MICROPY_HW_USB_CDC_TX_DATA_SIZE (512)
 
+// Clock config
+#define MICROPY_HW_CLK_HSE_VALUE (32000000)
+
 // Bluetooth config
 #define MICROPY_HW_BLE_UART_ID       (0)
 #define MICROPY_HW_BLE_UART_BAUDRATE (115200)

@@ -272,7 +272,7 @@ static mp_obj_t machine_info(size_t n_args, const mp_obj_t *args) {
         #endif
     }
 
-    #if MICROPY_PY_THREAD
+    #if MICROPY_PY_THREAD && !defined(MICROPY_MPTHREADPORT_H)
     pyb_thread_dump(print);
     #endif
 
@@ -392,7 +392,12 @@ static void mp_machine_set_freq(size_t n_args, const mp_obj_t *args) {
 // idle()
 // This executies a wfi machine instruction which reduces power consumption
 // of the MCU until an interrupt occurs, at which point execution continues.
+// Process any pending scheduler callbacks (e.g. BLE events) before sleeping.
 static void mp_machine_idle(void) {
+    // Process scheduled callbacks without raising exceptions
+    // This handles BLE polling, soft timers, and other background tasks
+    mp_handle_pending(MP_HANDLE_PENDING_CALLBACKS_AND_CLEAR_EXCEPTIONS);
+
     __WFI();
 }
 
