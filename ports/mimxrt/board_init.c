@@ -46,6 +46,12 @@ const uint8_t dcd_data[] = { 0x00 };
 void usb_phy0_init(uint8_t d_cal, uint8_t txcal45dp, uint8_t txcal45dn);
 
 void board_init(void) {
+    // Configure MPU regions for flash and SDRAM cacheability.
+    #if MICROPY_HW_SDRAM_AVAIL
+    extern void BOARD_ConfigMPU(void);
+    BOARD_ConfigMPU();
+    #endif
+
     // Clean and enable cache
     SCB_CleanDCache();
     SCB_EnableDCache();

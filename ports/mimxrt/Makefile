@@ -177,7 +177,9 @@ INC_HAL_IMX += \
 
 ifeq ($(MICROPY_HW_SDRAM_AVAIL),1)
 SRC_HAL_IMX_C += $(MCUX_SDK_DIR)/drivers/semc/fsl_semc.c
+SRC_HAL_IMX_C += $(MCU_DIR)/project_template/board.c
 INC_HAL_IMX += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/semc
+INC_HAL_IMX += -I$(TOP)/$(MCU_DIR)/project_template
 endif
 
 ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES), MIMXRT1021 MIMXRT1052 MIMXRT1062 MIMXRT1064 MIMXRT1176))
@@ -432,6 +434,10 @@ CFLAGS += \
 	-Werror \
 	-Wfloat-conversion \
 	-Wno-error=unused-parameter
+
+ifeq ($(MICROPY_HW_SDRAM_AVAIL),1)
+CFLAGS += -DUSE_SDRAM
+endif
 
 # Configure respective board flash type
 # Add hal/flexspi_nor_flash.h or hal/flexspi_hyper_flash.h respectively
