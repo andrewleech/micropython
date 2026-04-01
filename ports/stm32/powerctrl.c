@@ -617,6 +617,31 @@ set_clk:
 #define LPR_THRESHOLD (2000000)
 #define VOS2_THRESHOLD (16000000)
 
+// Timeout for hardware flag spin-waits during clock reconfiguration.
+// Must be long enough for PLL lock (~1ms) and voltage regulator settling
+// (~50us), with margin for low-frequency operation.
+#define POWERCTRL_TIMEOUT_MS (500)
+
+#if defined(STM32WB)
+// Minimum SYSCLK below which CPU2 (wireless coprocessor) cannot operate.
+// CPU2 requires HCLK2 >= 32MHz when awake; no C2HPRE prescaler value can
+// achieve this from a SYSCLK below 32MHz.
+#define CPU2_MIN_SYSCLK (32000000)
+#endif
+
+// Bounded spin-wait on a hardware register flag. Returns true if the
+// expected value appears within the timeout, false otherwise.
+static inline bool powerctrl_wait_flag(
+    volatile uint32_t *reg, uint32_t mask, uint32_t expected, uint32_t timeout_ms) {
+    uint32_t t0 = HAL_GetTick();
+    while ((*reg & mask) != expected) {
+        if ((HAL_GetTick() - t0) > timeout_ms) {
+            return false;
+        }
+    }
+    return true;
+}
+
 enum {
     SYSCLK_MODE_NONE,
     SYSCLK_MODE_MSI,
@@ -646,6 +671,34 @@ int powerctrl_set_sysclk(uint32_t sysclk, uint32_t ahb, uint32_t apb1, uint32_t 
         }
     }
 
+    #if defined(STM32WB)
+    // On STM32WB, CPU1 and CPU2 share SYSCLK. The RCC semaphore must be
+    // held while modifying clock registers to prevent contention with CPU2.
+    // SystemClock_Config() (64MHz path) and powerctrl_low_power_prep_wb55()
+    // (stop mode) already do this; the MSI path was missing it.
+    bool hsem_held = false;
+    if (sysclk_mode != SYSCLK_MODE_NONE) {
+        uint32_t t0 = HAL_GetTick();
+        while (LL_HSEM_1StepLock(HSEM, CFG_HW_RCC_SEMID)) {
+            if ((HAL_GetTick() - t0) > POWERCTRL_TIMEOUT_MS) {
+                return -MP_ETIMEDOUT;
+            }
+        }
+        hsem_held = true;
+
+        // If reducing SYSCLK below CPU2's minimum operating frequency,
+        // verify CPU2 is in deep sleep or standby first. No C2HPRE
+        // prescaler value can compensate — at 4MHz SYSCLK the best
+        // achievable HCLK2 is 4MHz, but CPU2 needs >= 32MHz when awake.
+        if (sysclk < CPU2_MIN_SYSCLK && sysclk < sysclk_cur) {
+            if (!LL_PWR_IsActiveFlag_C2DS() && !LL_PWR_IsActiveFlag_C2SB()) {
+                LL_HSEM_ReleaseLock(HSEM, CFG_HW_RCC_SEMID, 0);
+                return -MP_EPERM;
+            }
+        }
+    }
+    #endif
+
     // Exit LPR if SYSCLK will increase beyond threshold.
     if (LL_PWR_IsEnabledLowPowerRunMode()) {
         if (sysclk > LPR_THRESHOLD) {
@@ -656,7 +709,13 @@ int powerctrl_set_sysclk(uint32_t sysclk, uint32_t ahb, uint32_t apb1, uint32_t 
 
             // Exit LPR and wait for the regulator to be ready.
             LL_PWR_ExitLowPowerRunMode();
-            while (!LL_PWR_IsActiveFlag_REGLPF()) {
+            if (!powerctrl_wait_flag(&PWR->SR2, PWR_SR2_REGLPF, PWR_SR2_REGLPF, POWERCTRL_TIMEOUT_MS)) {
+                #if defined(STM32WB)
+                if (hsem_held) {
+                    LL_HSEM_ReleaseLock(HSEM, CFG_HW_RCC_SEMID, 0);
+                }
+                #endif
+                return -MP_ETIMEDOUT;
             }
         }
     }
@@ -664,32 +723,53 @@ int powerctrl_set_sysclk(uint32_t sysclk, uint32_t ahb, uint32_t apb1, uint32_t 
     // Select VOS1 if SYSCLK will increase beyond threshold.
     if (sysclk > VOS2_THRESHOLD) {
         LL_PWR_SetRegulVoltageScaling(LL_PWR_REGU_VOLTAGE_SCALE1);
-        while (LL_PWR_IsActiveFlag_VOS()) {
+        if (!powerctrl_wait_flag(&PWR->SR2, PWR_SR2_VOSF, 0, POWERCTRL_TIMEOUT_MS)) {
+            #if defined(STM32WB)
+            if (hsem_held) {
+                LL_HSEM_ReleaseLock(HSEM, CFG_HW_RCC_SEMID, 0);
+            }
+            #endif
+            return -MP_ETIMEDOUT;
         }
     }
 
     if (sysclk_mode == SYSCLK_MODE_HSE_64M) {
+        // SystemClock_Config() acquires its own HSEM lock internally.
+        // Release ours first to avoid double-acquire deadlock.
+        #if defined(STM32WB)
+        if (hsem_held) {
+            LL_HSEM_ReleaseLock(HSEM, CFG_HW_RCC_SEMID, 0);
+            hsem_held = false;
+        }
+        #endif
         SystemClock_Config();
     } else if (sysclk_mode == SYSCLK_MODE_MSI) {
         // Set flash latency to maximum to ensure the latency is large enough for
         // both the current SYSCLK and the SYSCLK that will be selected below.
         LL_FLASH_SetLatency(FLASH_LATENCY_MAX);
-        while (LL_FLASH_GetLatency() != FLASH_LATENCY_MAX) {
+        if (!powerctrl_wait_flag(&FLASH->ACR, FLASH_ACR_LATENCY_Msk,
+                FLASH_LATENCY_MAX, POWERCTRL_TIMEOUT_MS)) {
+            goto timeout_release;
         }
 
         // Before changing the MSIRANGE value, if MSI is on then it must also be ready.
-        while ((RCC->CR & (RCC_CR_MSIRDY | RCC_CR_MSION)) == RCC_CR_MSION) {
+        if (!powerctrl_wait_flag(&RCC->CR, RCC_CR_MSIRDY | RCC_CR_MSION,
+                RCC_CR_MSIRDY | RCC_CR_MSION, POWERCTRL_TIMEOUT_MS)) {
+            goto timeout_release;
         }
         LL_RCC_MSI_SetRange(msirange << RCC_CR_MSIRANGE_Pos);
 
         // Clock SYSCLK from MSI.
         LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_MSI);
-        while (LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_MSI) {
+        if (!powerctrl_wait_flag(&RCC->CFGR, RCC_CFGR_SWS_Msk,
+                LL_RCC_SYS_CLKSOURCE_STATUS_MSI, POWERCTRL_TIMEOUT_MS)) {
+            goto timeout_release;
         }
 
         // Disable PLL to decrease power consumption.
         LL_RCC_PLL_Disable();
-        while (LL_RCC_PLL_IsReady() != 0) {
+        if (!powerctrl_wait_flag(&RCC->CR, RCC_CR_PLLRDY, 0, POWERCTRL_TIMEOUT_MS)) {
+            goto timeout_release;
         }
         LL_RCC_PLL_DisableDomain_SYS();
 
@@ -711,6 +791,13 @@ int powerctrl_set_sysclk(uint32_t sysclk, uint32_t ahb, uint32_t apb1, uint32_t 
         powerctrl_config_systick();
     }
 
+    #if defined(STM32WB)
+    if (hsem_held) {
+        LL_HSEM_ReleaseLock(HSEM, CFG_HW_RCC_SEMID, 0);
+        hsem_held = false;
+    }
+    #endif
+
     // Return straight away if the clocks are already at the desired frequency.
     if (ahb == HAL_RCC_GetHCLKFreq()
         && apb1 == HAL_RCC_GetPCLK1Freq()
@@ -727,6 +814,14 @@ int powerctrl_set_sysclk(uint32_t sysclk, uint32_t ahb, uint32_t apb1, uint32_t 
     RCC->CFGR = cfgr;
 
     return 0;
+
+    #if defined(STM32WB)
+timeout_release:
+    if (hsem_held) {
+        LL_HSEM_ReleaseLock(HSEM, CFG_HW_RCC_SEMID, 0);
+    }
+    return -MP_ETIMEDOUT;
+    #endif
 }
 
 #if defined(STM32WB)
