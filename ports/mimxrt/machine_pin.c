@@ -170,6 +170,13 @@ void GPIO6_Combined_0_15_IRQHandler(void) {
 void GPIO6_Combined_16_31_IRQHandler(void) {
     call_handler(gpiobases[6], 6, 16);
 }
+
+#if MICROPY_HW_NUM_PIN_IRQS > (6 * 32)
+void GPIO13_Combined_0_31_IRQHandler(void) {
+    call_handler(gpiobases[13], 13, 0);
+    call_handler(gpiobases[13], 13, 16);
+}
+#endif
 #endif
 
 // Deinit all pin IRQ handlers.
