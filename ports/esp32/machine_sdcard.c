@@ -35,7 +35,7 @@
 
 #if SOC_SDMMC_HOST_SUPPORTED
 #include "driver/sdmmc_host.h"
-#if SOC_SDMMC_IO_POWER_EXTERNAL && defined(MICROPY_HW_SDMMC_LDO_CHAN_ID)
+#if SOC_SDMMC_IO_POWER_EXTERNAL
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
 #endif
 #endif
@@ -214,6 +214,9 @@ static mp_obj_t machine_sdcard_make_new(const mp_obj_type_t *type, size_t n_args
         ARG_cmd,
         ARG_data,
         #endif
+        #if SOC_SDMMC_IO_POWER_EXTERNAL
+        ARG_ldo,
+        #endif
         ARG_freq,
     };
     #if SOC_SDMMC_HOST_SUPPORTED
@@ -235,6 +238,13 @@ static mp_obj_t machine_sdcard_make_new(const mp_obj_type_t *type, size_t n_args
         #if SOC_SDMMC_USE_GPIO_MATRIX
         { MP_QSTR_cmd,      MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_data,     MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        #endif
+        #if SOC_SDMMC_IO_POWER_EXTERNAL
+        #ifdef MICROPY_HW_SDMMC_LDO_CHAN_ID
+        { MP_QSTR_ldo,      MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = MP_OBJ_NEW_SMALL_INT(MICROPY_HW_SDMMC_LDO_CHAN_ID)} },
+        #else
+        { MP_QSTR_ldo,      MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        #endif
         #endif
         // freq is valid for both SPI and SDMMC interfaces
         { MP_QSTR_freq,     MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 20000000} },
@@ -316,13 +326,15 @@ static mp_obj_t machine_sdcard_make_new(const mp_obj_type_t *type, size_t n_args
         self->host = _temp_host;
     }
     #endif
-    #if SOC_SDMMC_IO_POWER_EXTERNAL && defined(MICROPY_HW_SDMMC_LDO_CHAN_ID)
-    sd_pwr_ctrl_ldo_config_t ldo_config = {
-        .ldo_chan_id = MICROPY_HW_SDMMC_LDO_CHAN_ID,
-    };
-    sd_pwr_ctrl_handle_t pwr_ctrl_handle = NULL;
-    check_esp_err(sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &pwr_ctrl_handle));
-    self->host.pwr_ctrl_handle = pwr_ctrl_handle;
+    #if SOC_SDMMC_IO_POWER_EXTERNAL
+    if (arg_vals[ARG_ldo].u_obj != mp_const_none) {
+        sd_pwr_ctrl_ldo_config_t ldo_config = {
+            .ldo_chan_id = mp_obj_get_int(arg_vals[ARG_ldo].u_obj),
+        };
+        sd_pwr_ctrl_handle_t pwr_ctrl_handle = NULL;
+        check_esp_err(sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &pwr_ctrl_handle));
+        self->host.pwr_ctrl_handle = pwr_ctrl_handle;
+    }
     #endif
 
     DEBUG_printf("  Calling host.init()");
@@ -445,7 +457,7 @@ static mp_obj_t sd_deinit(mp_obj_t self_in) {
             // SD card used a (dedicated) SPI bus, so free that SPI bus.
             spi_bus_free(self->host.slot);
         }
-        #if SOC_SDMMC_IO_POWER_EXTERNAL && defined(MICROPY_HW_SDMMC_LDO_CHAN_ID)
+        #if SOC_SDMMC_IO_POWER_EXTERNAL
         if (self->host.pwr_ctrl_handle) {
             check_esp_err(sd_pwr_ctrl_del_on_chip_ldo(self->host.pwr_ctrl_handle));
         }
