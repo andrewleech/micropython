@@ -110,13 +110,13 @@ class SerialTransport(Transport):
     @staticmethod
     def _is_pty_device(device):
         """Detect if device is a PTY (pseudo-terminal), e.g. used by QEMU."""
-        if device.startswith("/dev/pts/"):
-            try:
+        try:
+            if device.startswith("/dev/pts/"):
                 st = os.stat(device)
                 if stat.S_ISCHR(st.st_mode) and os.major(st.st_rdev) == 136:
                     return True
-            except (OSError, AttributeError):
-                pass
+        except (OSError, AttributeError):
+            pass
         return False
 
     def close(self):
@@ -175,14 +175,42 @@ class SerialTransport(Transport):
                 time.sleep(0.01)
         return data
 
-    def enter_raw_repl(self, soft_reset=True, timeout_overall=10):
-        self.serial.write(b"\r\x03")  # ctrl-C: interrupt any running program
+    def _wait_for_friendly_prompt(self, timeout_overall=3):
+        # Actively poll for the friendly REPL prompt before attempting raw mode
+        # entry. This handles devices that are still booting (e.g. after DTR/RTS
+        # toggling on macOS USB-serial converters resets the device on port open),
+        # devices stuck in raw REPL, and fs_hook agents stuck waiting for a VFS
+        # response. Returns True if the prompt was seen, False on timeout.
+        poll_interval = 0.2
+        begin = time.monotonic()
+        attempt = 0
+        while time.monotonic() - begin < timeout_overall:
+            # Alternate Ctrl-C (interrupt running program) with Ctrl-B
+            # (exit raw REPL if stuck) every third attempt.
+            if attempt % 3 == 2:
+                self.serial.write(b"\r\x02")
+            else:
+                self.serial.write(b"\r\x03")
+            # After a few unsuccessful tries also send the VFS-hook ACK byte
+            # (0x18) to unblock a fs_hook agent stuck reading from the host.
+            if attempt >= 4:
+                self.serial.write(b"\x18")
+            data = self.read_until(1, b"\r\n>>> ", timeout=poll_interval)
+            if data.endswith(b"\r\n>>> "):
+                return True
+            attempt += 1
+        return False
 
-        # flush input (without relying on serial.flushInput())
-        n = self.serial.inWaiting()
-        while n > 0:
-            self.serial.read(n)
-            n = self.serial.inWaiting()
+    def enter_raw_repl(self, soft_reset=True, timeout_overall=10):
+        # Actively confirm the device is in friendly REPL before sending Ctrl-A,
+        # which replaces a previous single Ctrl-C + flush + Ctrl-A that failed
+        # when the device was still booting or stuck in raw REPL. The prompt
+        # phase is capped at 3s so transient boot delays surface quickly;
+        # timeout_overall governs the post-Ctrl-A banner reads below.
+        # No explicit input flush is needed: read_until consumes any pending
+        # bytes up to and including the prompt.
+        if not self._wait_for_friendly_prompt(timeout_overall=min(3, timeout_overall)):
+            raise TransportError("could not enter raw repl")
 
         self.serial.write(b"\r\x01")  # ctrl-A: enter raw REPL
 
@@ -553,7 +581,7 @@ class RemoteCommand:
 
     def wr_bytes(self, b):
         if isinstance(b, str):
-            b = bytes(b, "utf8")
+            b = bytes(b, 'utf8')
         self.wr_s32(self.buffer_nbytes(b))
         self.fout.write(b)
 
