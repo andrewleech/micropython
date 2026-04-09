@@ -24,6 +24,7 @@
  * THE SOFTWARE.
  */
 
+#include <string.h>
 #include "py/runtime.h"
 #include "shared/timeutils/timeutils.h"
 #include "extint.h"
@@ -36,6 +37,36 @@
 #define RCC_OSCILLATORTYPE_LSI RCC_OSCILLATORTYPE_LSI1
 #define __HAL_RCC_LSI_ENABLE __HAL_RCC_LSI1_ENABLE
 #define __HAL_RCC_LSI_DISABLE __HAL_RCC_LSI1_DISABLE
+#endif
+
+// Backup register base address: families with TAMP peripheral use
+// TAMP->BKP0R, older families use RTC->BKP0R.
+#if defined(TAMP)
+#define RTC_BKP_REG_BASE (&TAMP->BKP0R)
+#else
+#define RTC_BKP_REG_BASE (&RTC->BKP0R)
+#endif
+
+// Normalize backup register count across CMSIS header variants.
+#if defined(RTC_BKP_NUMBER)
+#define MICROPY_HW_RTC_BKP_REG_COUNT RTC_BKP_NUMBER
+#elif defined(TAMP_BKP_NUMBER)
+#define MICROPY_HW_RTC_BKP_REG_COUNT TAMP_BKP_NUMBER
+#elif defined(RTC_BACKUP_NB)
+#define MICROPY_HW_RTC_BKP_REG_COUNT RTC_BACKUP_NB
+#elif defined(RTC_BKP_NB)
+#define MICROPY_HW_RTC_BKP_REG_COUNT RTC_BKP_NB
+#else
+#define MICROPY_HW_RTC_BKP_REG_COUNT 0
+#endif
+
+#ifndef MICROPY_HW_RTC_USER_MEM_MAX
+#define MICROPY_HW_RTC_USER_MEM_MAX (MICROPY_HW_RTC_BKP_REG_COUNT * 4)
+#endif
+
+#if MICROPY_HW_RTC_USER_MEM_MAX > 0
+MP_STATIC_ASSERT((MICROPY_HW_RTC_USER_MEM_MAX % 4) == 0);
+MP_STATIC_ASSERT(MICROPY_HW_RTC_USER_MEM_MAX / 4 <= MICROPY_HW_RTC_BKP_REG_COUNT);
 #endif
 
 /// \moduleref pyb
@@ -919,12 +950,52 @@ mp_obj_t pyb_rtc_calibration(size_t n_args, const mp_obj_t *args) {
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(pyb_rtc_calibration_obj, 1, 2, pyb_rtc_calibration);
 
+// Expose the full BKP register array as RTC user memory.
+// BKP_DR0 is used by the Arduino bootloader magic value, and the top
+// register (RTC_BKP_NUMBER-1) stores CLK_LAST_FREQ for some boards.
+// These are not hidden, same approach as the mimxrt implementation.
+#if MICROPY_HW_RTC_USER_MEM_MAX > 0
+static mp_obj_t pyb_rtc_memory(size_t n_args, const mp_obj_t *args) {
+    rtc_init_finalise();
+    if (n_args == 1) {
+        // Return a writable uint32 memoryview over the BKP registers.
+        // Typecode 'I' (uint32) forces word-aligned access. High bit
+        // marks the memoryview as read-write.
+        return mp_obj_new_memoryview('I' | 0x80,
+            MICROPY_HW_RTC_USER_MEM_MAX / 4, (void *)RTC_BKP_REG_BASE);
+    } else {
+        // Write data to BKP registers using 32-bit word writes.
+        // Only the registers covered by the data are written; registers
+        // beyond the data length are left untouched. A partial trailing
+        // word is zero-padded to the word boundary.
+        mp_buffer_info_t bufinfo;
+        mp_get_buffer_raise(args[1], &bufinfo, MP_BUFFER_READ);
+        if (bufinfo.len > MICROPY_HW_RTC_USER_MEM_MAX) {
+            mp_raise_ValueError(MP_ERROR_TEXT("buffer too long"));
+        }
+        volatile uint32_t *regs = (volatile uint32_t *)RTC_BKP_REG_BASE;
+        size_t full = bufinfo.len & ~(size_t)3;
+        memcpy((void *)regs, bufinfo.buf, full);
+        if (bufinfo.len & 3) {
+            uint32_t word = regs[full / 4];
+            memcpy(&word, (const uint8_t *)bufinfo.buf + full, bufinfo.len & 3);
+            regs[full / 4] = word;
+        }
+        return mp_const_none;
+    }
+}
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(pyb_rtc_memory_obj, 1, 2, pyb_rtc_memory);
+#endif
+
 static const mp_rom_map_elem_t pyb_rtc_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&pyb_rtc_init_obj) },
     { MP_ROM_QSTR(MP_QSTR_info), MP_ROM_PTR(&pyb_rtc_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_datetime), MP_ROM_PTR(&pyb_rtc_datetime_obj) },
     { MP_ROM_QSTR(MP_QSTR_wakeup), MP_ROM_PTR(&pyb_rtc_wakeup_obj) },
     { MP_ROM_QSTR(MP_QSTR_calibration), MP_ROM_PTR(&pyb_rtc_calibration_obj) },
+    #if MICROPY_HW_RTC_USER_MEM_MAX > 0
+    { MP_ROM_QSTR(MP_QSTR_memory), MP_ROM_PTR(&pyb_rtc_memory_obj) },
+    #endif
 };
 static MP_DEFINE_CONST_DICT(pyb_rtc_locals_dict, pyb_rtc_locals_dict_table);
 
