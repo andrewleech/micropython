@@ -25,6 +25,7 @@
  * THE SOFTWARE.
  */
 
+#include <string.h>
 #include "py/mperrno.h"
 #include "py/runtime.h"
 #include "shared/runtime/mpirq.h"
@@ -328,6 +329,65 @@ static mp_obj_t machine_rtc_alarm_cancel(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_rtc_alarm_cancel_obj, 1, 2, machine_rtc_alarm_cancel);
 
+// Default: use all LPGPR registers, minus one when UF2 reserves LPGPR[3].
+#ifndef MICROPY_HW_RTC_USER_MEM_MAX
+#define MICROPY_HW_RTC_USER_MEM_MAX ((SNVS_LPGPR_COUNT - MICROPY_MACHINE_UF2_BOOTLOADER) * 4)
+#endif
+
+#if MICROPY_HW_RTC_USER_MEM_MAX > 0
+
+MP_STATIC_ASSERT((MICROPY_HW_RTC_USER_MEM_MAX % 4) == 0);
+#if MICROPY_MACHINE_UF2_BOOTLOADER
+MP_STATIC_ASSERT(MICROPY_HW_RTC_USER_MEM_MAX / 4 + 1 <= SNVS_LPGPR_COUNT);
+#else
+MP_STATIC_ASSERT(MICROPY_HW_RTC_USER_MEM_MAX / 4 <= SNVS_LPGPR_COUNT);
+#endif
+
+// Map contiguous user-memory register index to LPGPR index, skipping
+// LPGPR[3] when it is reserved for the UF2 bootloader double-tap.
+static inline mp_uint_t rtc_mem_lpgpr_index(mp_uint_t i) {
+    #if MICROPY_MACHINE_UF2_BOOTLOADER
+    return i >= 3 ? i + 1 : i;
+    #else
+    return i;
+    #endif
+}
+
+static mp_obj_t machine_rtc_memory(size_t n_args, const mp_obj_t *args) {
+    if (n_args == 1) {
+        // Read RTC memory from SNVS LP GPR registers.
+        uint8_t buf[MICROPY_HW_RTC_USER_MEM_MAX];
+        for (mp_uint_t i = 0; i < MICROPY_HW_RTC_USER_MEM_MAX / 4; i++) {
+            uint32_t val = SNVS->LPGPR[rtc_mem_lpgpr_index(i)];
+            buf[i * 4 + 0] = val & 0xff;
+            buf[i * 4 + 1] = (val >> 8) & 0xff;
+            buf[i * 4 + 2] = (val >> 16) & 0xff;
+            buf[i * 4 + 3] = (val >> 24) & 0xff;
+        }
+        return mp_obj_new_bytes(buf, MICROPY_HW_RTC_USER_MEM_MAX);
+    } else {
+        // Write RTC memory to SNVS LP GPR registers.
+        mp_buffer_info_t bufinfo;
+        mp_get_buffer_raise(args[1], &bufinfo, MP_BUFFER_READ);
+        if (bufinfo.len > MICROPY_HW_RTC_USER_MEM_MAX) {
+            mp_raise_ValueError(MP_ERROR_TEXT("buffer too long"));
+        }
+        // Zero-fill a local buffer and copy user data into it.
+        uint8_t buf[MICROPY_HW_RTC_USER_MEM_MAX];
+        memset(buf, 0, sizeof(buf));
+        memcpy(buf, bufinfo.buf, bufinfo.len);
+        for (mp_uint_t i = 0; i < MICROPY_HW_RTC_USER_MEM_MAX / 4; i++) {
+            SNVS->LPGPR[rtc_mem_lpgpr_index(i)] = buf[i * 4 + 0]
+                | ((uint32_t)buf[i * 4 + 1] << 8)
+                | ((uint32_t)buf[i * 4 + 2] << 16)
+                | ((uint32_t)buf[i * 4 + 3] << 24);
+        }
+        return mp_const_none;
+    }
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_rtc_memory_obj, 1, 2, machine_rtc_memory);
+#endif
+
 static mp_obj_t machine_rtc_irq(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     enum { ARG_trigger, ARG_handler, ARG_wake, ARG_hard };
     static const mp_arg_t allowed_args[] = {
@@ -381,6 +441,9 @@ static const mp_rom_map_elem_t machine_rtc_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_cancel), MP_ROM_PTR(&machine_rtc_alarm_cancel_obj) },
     #endif
     { MP_ROM_QSTR(MP_QSTR_irq), MP_ROM_PTR(&machine_rtc_irq_obj) },
+    #if MICROPY_HW_RTC_USER_MEM_MAX > 0
+    { MP_ROM_QSTR(MP_QSTR_memory), MP_ROM_PTR(&machine_rtc_memory_obj) },
+    #endif
     { MP_ROM_QSTR(MP_QSTR_ALARM0), MP_ROM_INT(0) },
 };
 static MP_DEFINE_CONST_DICT(machine_rtc_locals_dict, machine_rtc_locals_dict_table);

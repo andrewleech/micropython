@@ -140,6 +140,15 @@ uint32_t trng_random_u32(void);
 #define MICROPY_PY_ONEWIRE                  (1)
 #define MICROPY_PY_MACHINE_BOOTLOADER       (1)
 
+#ifndef MICROPY_MACHINE_UF2_BOOTLOADER
+#define MICROPY_MACHINE_UF2_BOOTLOADER  (0)
+#endif
+
+// RTC user memory backed by SNVS LP GPR registers (battery-backed).
+// Auto-sized to the hardware LPGPR count; LPGPR[3] is skipped when the
+// UF2 bootloader is enabled. Override in mpconfigboard.h, or set to 0
+// to disable.
+
 // fatfs configuration used in ffconf.h
 #define MICROPY_FATFS_ENABLE_LFN            (2)
 #define MICROPY_FATFS_LFN_CODE_PAGE         437 /* 1=SFN/ANSI 437=LFN/U.S.(OEM) */
