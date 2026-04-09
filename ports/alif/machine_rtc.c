@@ -24,6 +24,8 @@
  * THE SOFTWARE.
  */
 
+#include <string.h>
+
 #include "py/runtime.h"
 #include "py/mphal.h"
 #include "py/mperrno.h"
@@ -192,9 +194,57 @@ static mp_obj_t machine_rtc_alarm(size_t n_args, const mp_obj_t *pos_args, mp_ma
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(machine_rtc_alarm_obj, 1, machine_rtc_alarm);
 
+// Battery-backed 4KB backup SRAM (not defined in CMSIS headers).
+#define ALIF_BACKUP_SRAM_BASE (0x4902C000)
+#define ALIF_BACKUP_SRAM_SIZE (4096)
+
+#ifndef MICROPY_HW_RTC_USER_MEM_MAX
+#define MICROPY_HW_RTC_USER_MEM_MAX ALIF_BACKUP_SRAM_SIZE
+#endif
+
+#if MICROPY_HW_RTC_USER_MEM_MAX > 0
+
+MP_STATIC_ASSERT((MICROPY_HW_RTC_USER_MEM_MAX % 4) == 0);
+MP_STATIC_ASSERT(MICROPY_HW_RTC_USER_MEM_MAX <= ALIF_BACKUP_SRAM_SIZE);
+
+static mp_obj_t machine_rtc_memory(size_t n_args, const mp_obj_t *args) {
+    if (n_args == 1) {
+        // Return a writable uint32 memoryview over the backup SRAM.
+        // The SRAM is byte-addressable but we use uint32 for API
+        // consistency with the register-based ports. High bit marks
+        // the memoryview as read-write.
+        return mp_obj_new_memoryview('I' | 0x80,
+            MICROPY_HW_RTC_USER_MEM_MAX / 4, (void *)ALIF_BACKUP_SRAM_BASE);
+    } else {
+        // Write data to backup SRAM using 32-bit word writes.
+        // Only the words covered by the data are written; words
+        // beyond the data length are left untouched. A partial trailing
+        // word is read-modify-written to preserve unaddressed bytes.
+        mp_buffer_info_t bufinfo;
+        mp_get_buffer_raise(args[1], &bufinfo, MP_BUFFER_READ);
+        if (bufinfo.len > MICROPY_HW_RTC_USER_MEM_MAX) {
+            mp_raise_ValueError(MP_ERROR_TEXT("buffer too long"));
+        }
+        volatile uint32_t *mem = (volatile uint32_t *)ALIF_BACKUP_SRAM_BASE;
+        size_t full = bufinfo.len & ~(size_t)3;
+        memcpy((void *)mem, bufinfo.buf, full);
+        if (bufinfo.len & 3) {
+            uint32_t word = mem[full / 4];
+            memcpy(&word, (const uint8_t *)bufinfo.buf + full, bufinfo.len & 3);
+            mem[full / 4] = word;
+        }
+        return mp_const_none;
+    }
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_rtc_memory_obj, 1, 2, machine_rtc_memory);
+#endif
+
 static const mp_rom_map_elem_t machine_rtc_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_datetime), MP_ROM_PTR(&machine_rtc_datetime_obj) },
     { MP_ROM_QSTR(MP_QSTR_alarm), MP_ROM_PTR(&machine_rtc_alarm_obj) },
+    #if MICROPY_HW_RTC_USER_MEM_MAX > 0
+    { MP_ROM_QSTR(MP_QSTR_memory), MP_ROM_PTR(&machine_rtc_memory_obj) },
+    #endif
 };
 static MP_DEFINE_CONST_DICT(machine_rtc_locals_dict, machine_rtc_locals_dict_table);
 
