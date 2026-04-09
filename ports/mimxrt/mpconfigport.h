@@ -145,9 +145,9 @@ uint32_t trng_random_u32(void);
 #endif
 
 // RTC user memory backed by SNVS LP GPR registers (battery-backed).
-// Auto-sized to the hardware LPGPR count; LPGPR[3] is skipped when the
-// UF2 bootloader is enabled. Override in mpconfigboard.h, or set to 0
-// to disable.
+// Auto-sized to the full hardware LPGPR array. LPGPR[3] is reserved by the
+// UF2 bootloader when enabled; see docs for details. Override in
+// mpconfigboard.h, or set to 0 to disable.
 
 // fatfs configuration used in ffconf.h
 #define MICROPY_FATFS_ENABLE_LFN            (2)

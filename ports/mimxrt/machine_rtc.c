@@ -329,58 +329,43 @@ static mp_obj_t machine_rtc_alarm_cancel(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_rtc_alarm_cancel_obj, 1, 2, machine_rtc_alarm_cancel);
 
-// Default: use all LPGPR registers, minus one when UF2 reserves LPGPR[3].
+// Expose the full LPGPR register array as RTC user memory.
+// LPGPR[3] is used by the UF2 bootloader double-tap (DBL_TAP_REG) when
+// MICROPY_MACHINE_UF2_BOOTLOADER is enabled; users should avoid bytes
+// 12-15 in that case. See docs for reserved register details.
 #ifndef MICROPY_HW_RTC_USER_MEM_MAX
-#define MICROPY_HW_RTC_USER_MEM_MAX ((SNVS_LPGPR_COUNT - MICROPY_MACHINE_UF2_BOOTLOADER) * 4)
+#define MICROPY_HW_RTC_USER_MEM_MAX (SNVS_LPGPR_COUNT * 4)
 #endif
 
 #if MICROPY_HW_RTC_USER_MEM_MAX > 0
 
 MP_STATIC_ASSERT((MICROPY_HW_RTC_USER_MEM_MAX % 4) == 0);
-#if MICROPY_MACHINE_UF2_BOOTLOADER
-MP_STATIC_ASSERT(MICROPY_HW_RTC_USER_MEM_MAX / 4 + 1 <= SNVS_LPGPR_COUNT);
-#else
 MP_STATIC_ASSERT(MICROPY_HW_RTC_USER_MEM_MAX / 4 <= SNVS_LPGPR_COUNT);
-#endif
-
-// Map contiguous user-memory register index to LPGPR index, skipping
-// LPGPR[3] when it is reserved for the UF2 bootloader double-tap.
-static inline mp_uint_t rtc_mem_lpgpr_index(mp_uint_t i) {
-    #if MICROPY_MACHINE_UF2_BOOTLOADER
-    return i >= 3 ? i + 1 : i;
-    #else
-    return i;
-    #endif
-}
 
 static mp_obj_t machine_rtc_memory(size_t n_args, const mp_obj_t *args) {
     if (n_args == 1) {
-        // Read RTC memory from SNVS LP GPR registers.
-        uint8_t buf[MICROPY_HW_RTC_USER_MEM_MAX];
-        for (mp_uint_t i = 0; i < MICROPY_HW_RTC_USER_MEM_MAX / 4; i++) {
-            uint32_t val = SNVS->LPGPR[rtc_mem_lpgpr_index(i)];
-            buf[i * 4 + 0] = val & 0xff;
-            buf[i * 4 + 1] = (val >> 8) & 0xff;
-            buf[i * 4 + 2] = (val >> 16) & 0xff;
-            buf[i * 4 + 3] = (val >> 24) & 0xff;
-        }
-        return mp_obj_new_bytes(buf, MICROPY_HW_RTC_USER_MEM_MAX);
+        // Return a writable uint32 memoryview over the LPGPR registers.
+        // Typecode 'I' (uint32) forces word-aligned access. High bit
+        // marks the memoryview as read-write.
+        return mp_obj_new_memoryview('I' | 0x80,
+            MICROPY_HW_RTC_USER_MEM_MAX / 4, (void *)&SNVS->LPGPR[0]);
     } else {
-        // Write RTC memory to SNVS LP GPR registers.
+        // Write data to LPGPR registers using 32-bit word writes.
+        // Only the registers covered by the data are written; registers
+        // beyond the data length are left untouched. A partial trailing
+        // word is zero-padded to the word boundary.
         mp_buffer_info_t bufinfo;
         mp_get_buffer_raise(args[1], &bufinfo, MP_BUFFER_READ);
         if (bufinfo.len > MICROPY_HW_RTC_USER_MEM_MAX) {
             mp_raise_ValueError(MP_ERROR_TEXT("buffer too long"));
         }
-        // Zero-fill a local buffer and copy user data into it.
-        uint8_t buf[MICROPY_HW_RTC_USER_MEM_MAX];
-        memset(buf, 0, sizeof(buf));
-        memcpy(buf, bufinfo.buf, bufinfo.len);
-        for (mp_uint_t i = 0; i < MICROPY_HW_RTC_USER_MEM_MAX / 4; i++) {
-            SNVS->LPGPR[rtc_mem_lpgpr_index(i)] = buf[i * 4 + 0]
-                | ((uint32_t)buf[i * 4 + 1] << 8)
-                | ((uint32_t)buf[i * 4 + 2] << 16)
-                | ((uint32_t)buf[i * 4 + 3] << 24);
+        volatile uint32_t *regs = (volatile uint32_t *)&SNVS->LPGPR[0];
+        size_t full = bufinfo.len & ~(size_t)3;
+        memcpy((void *)regs, bufinfo.buf, full);
+        if (bufinfo.len & 3) {
+            uint32_t word = regs[full / 4];
+            memcpy(&word, (const uint8_t *)bufinfo.buf + full, bufinfo.len & 3);
+            regs[full / 4] = word;
         }
         return mp_const_none;
     }
