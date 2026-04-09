@@ -128,6 +128,11 @@ uint32_t trng_random_u32(void);
 #define MICROPY_PY_ONEWIRE                  (1)
 #define MICROPY_PY_MACHINE_BOOTLOADER       (1)
 
+// RTC user memory backed by SNVS LP GPR registers (battery-backed).
+#ifndef MICROPY_HW_RTC_USER_MEM_MAX
+#define MICROPY_HW_RTC_USER_MEM_MAX     (16)
+#endif
+
 // fatfs configuration used in ffconf.h
 #define MICROPY_FATFS_ENABLE_LFN            (2)
 #define MICROPY_FATFS_LFN_CODE_PAGE         437 /* 1=SFN/ANSI 437=LFN/U.S.(OEM) */
