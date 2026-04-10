@@ -353,7 +353,7 @@ static mp_obj_t machine_rtc_memory(size_t n_args, const mp_obj_t *args) {
         // Write data to LPGPR registers using 32-bit word writes.
         // Only the registers covered by the data are written; registers
         // beyond the data length are left untouched. A partial trailing
-        // word is zero-padded to the word boundary.
+        // word is read-modify-written to preserve unaddressed bytes.
         mp_buffer_info_t bufinfo;
         mp_get_buffer_raise(args[1], &bufinfo, MP_BUFFER_READ);
         if (bufinfo.len > MICROPY_HW_RTC_USER_MEM_MAX) {

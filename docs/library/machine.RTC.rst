@@ -91,16 +91,74 @@ Methods
 
    ``RTC.memory(data)`` will write *data* to the RTC memory, where *data* is any
    object which supports the buffer protocol (including `bytes`, `bytearray`,
-   `memoryview` and `array.array`). ``RTC.memory()`` reads RTC memory and returns
-   a `bytes` object.
+   `memoryview` and `array.array`). ``RTC.memory()`` reads RTC memory. On
+   alif, mimxrt, rp2, and stm32 it returns a writable ``memoryview`` of
+   32-bit unsigned integers backed directly by the hardware registers or
+   memory. On esp32 and esp8266 it returns a ``bytes`` copy.
 
    Data written to RTC user memory is persistent across restarts, including
-   :ref:`soft_reset` and `machine.deepsleep()`.
+   :ref:`soft_reset` and `machine.deepsleep()`, except on rp2 where data
+   is lost on power-off (see note below).
 
-   The maximum length of RTC user memory is 2048 bytes by default on esp32,
-   and 492 bytes on esp8266.
+   On alif, mimxrt, rp2, and stm32, only the registers covered by the data
+   are modified when writing; registers beyond the data length are left
+   untouched. A partial trailing word is read-modify-written to preserve the
+   remaining bytes.
 
-   Availability: esp32, esp8266 ports.
+   The maximum length depends on the port and hardware:
+
+   =======  ======================================  ============  ==============
+   Port     Backing storage                         Size          Battery-backed
+   =======  ======================================  ============  ==============
+   alif     Backup SRAM                             4096 bytes    yes           
+   esp32    RTC slow memory                         2048 bytes    yes           
+   esp8266  RTC user memory                         492 bytes     yes           
+   mimxrt   SNVS LPGPR registers (4-8 per chip)     16-32 bytes   yes           
+   rp2      Watchdog scratch registers (8)          32 bytes      no            
+   stm32    RTC backup registers (5-32 per family)  20-128 bytes  yes           
+   =======  ======================================  ============  ==============
+
+   .. note::
+
+      On rp2, data persists across soft resets but is lost on power-off.
+
+   Some registers may be reserved by the system depending on port and board
+   configuration. These are exposed in the memoryview but should not be
+   overwritten by application code:
+
+   ======  ==============  =========================================================
+   Port    Register(s)     Used by
+   ======  ==============  =========================================================
+   mimxrt  LPGPR[3]        UF2 bootloader double-tap (when ``USE_UF2_BOOTLOADER``)
+   rp2     scratch[4-7]    pico-sdk ``watchdog_reboot()`` / ``machine.deepsleep()``
+   stm32   BKP0R           Arduino bootloader (Portenta H7, Giga, Opta, Nicla)
+   stm32   BKP16R-BKP18R   ``rfcore_firmware.py`` on STM32WB
+   stm32   last BKP reg    clock frequency (``MICROPY_HW_CLK_LAST_FREQ``)
+   stm32   BKP31R (N6)     mboot bootloader entry
+   ======  ==============  =========================================================
+
+   On ports returning a ``memoryview``, the buffer allows direct register
+   access and can be combined with ``uctypes`` for structured layouts::
+
+      import machine, uctypes
+
+      rtc = machine.RTC()
+      mem = rtc.memory()
+
+      # Direct register access (each element is a 32-bit register)
+      mem[0] = 0x12345678       # write register 0
+      print(hex(mem[0]))        # read register 0
+
+      # Structured access via uctypes (check len(mem) for your board)
+      layout = {
+          "flags": (0 * 4, uctypes.UINT32),    # register 0
+          "counter": (1 * 4, uctypes.UINT32),  # register 1
+      }
+      regs = uctypes.struct(uctypes.addressof(mem), layout)
+      regs.flags = 0x01
+      print(regs.counter)
+
+   Availability: alif, esp32, esp8266, mimxrt, rp2, stm32 ports.
 
 Constants
 ---------
