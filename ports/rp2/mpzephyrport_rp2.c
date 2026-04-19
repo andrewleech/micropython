@@ -334,17 +334,17 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     run_task_in_progress = true;
 
     // Process Zephyr BLE work queues and semaphores
-    mp_bluetooth_zephyr_poll();
+    bool did_work = mp_bluetooth_zephyr_poll();
 
     // Read directly from CYW43 via shared SPI bus.
     // Read and process HCI packets one at a time with work between each.
     extern int cyw43_bluetooth_hci_read(uint8_t *buf, uint32_t max_size, uint32_t *len);
-    extern void mp_bluetooth_zephyr_work_process(void);
+    extern bool mp_bluetooth_zephyr_work_process(void);
 
     while (1) {
         // Check buffer availability before reading HCI data.
         if (!mp_bluetooth_zephyr_buffers_available()) {
-            mp_bluetooth_zephyr_work_process();
+            did_work |= mp_bluetooth_zephyr_work_process();
             if (!mp_bluetooth_zephyr_buffers_available()) {
                 // Still no buffers — stop reading, retry next poll.
                 break;
@@ -358,7 +358,7 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
         }
 
         process_hci_rx_packet(hci_rx_buffer, len);
-        mp_bluetooth_zephyr_work_process();
+        did_work |= mp_bluetooth_zephyr_work_process();
     }
 
     // Flush deferred L2CAP recv notification now that all HCI data is
@@ -371,8 +371,12 @@ void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
 
     run_task_in_progress = false;
 
-    // Reschedule soft timer for continuous HCI polling.
-    mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
+    // Adaptive reschedule: immediate when work was processed, idle interval otherwise.
+    if (did_work) {
+        mp_bluetooth_zephyr_port_poll_now();
+    } else {
+        mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
+    }
 }
 
 // Zephyr HCI driver implementation
