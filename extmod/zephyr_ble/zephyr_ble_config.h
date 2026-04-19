@@ -714,7 +714,7 @@ extern const struct device __device_dts_ord_0;
 #define CONFIG_BT_CONN_PARAM_UPDATE_TIMEOUT 5000  // 5 seconds
 #define CONFIG_BT_CREATE_CONN_TIMEOUT 3000  // 3 seconds
 #define CONFIG_BT_CONN_TX_USER_DATA_SIZE 16  // Must be >= sizeof(struct closure) = 2*sizeof(void*)
-#define CONFIG_BT_CONN_FRAG_COUNT 1
+#define CONFIG_BT_CONN_FRAG_COUNT 4
 
 // Background scanning (for whitelist)
 #define CONFIG_BT_BACKGROUND_SCAN_INTERVAL 2048

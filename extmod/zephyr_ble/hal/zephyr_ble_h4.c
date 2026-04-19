@@ -169,7 +169,11 @@ struct net_buf *mp_bluetooth_zephyr_h4_process_byte(uint8_t byte) {
         }
 
         if (!h4_rx.buf) {
-            mp_printf(&mp_plat_print, "HCI ERROR: Failed to allocate buffer for type 0x%02x, will retry\n", h4_rx.type);
+            if (h4_rx.type == BT_HCI_H4_EVT) {
+                mp_printf(&mp_plat_print, "HCI ERROR: Failed to allocate buffer for evt 0x%02x, will retry\n", h4_rx.hdr.evt.evt);
+            } else {
+                mp_printf(&mp_plat_print, "HCI ERROR: Failed to allocate buffer for type 0x%02x, will retry\n", h4_rx.type);
+            }
             // State preserved: have_hdr=true, buf=NULL, remaining=payload_length
             // Next process_byte call will retry allocation
             return NULL;

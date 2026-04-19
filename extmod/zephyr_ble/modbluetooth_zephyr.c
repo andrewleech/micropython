@@ -191,7 +191,8 @@ typedef struct _mp_bluetooth_zephyr_l2cap_channel_t {
     bool rx_notify_pending;            // True when seg_recv_cb completed an SDU (deferred IRQ)
     uint16_t rx_notify_conn_handle;    // Connection handle for deferred notification
     uint16_t rx_notify_cid;            // CID for deferred notification
-    uint8_t tx_in_flight;             // Number of SDUs submitted but not yet sent
+    uint8_t tx_in_flight;             // Number of SDU chunks submitted but not yet sent
+    uint8_t tx_chunks_per_send;       // Chunks per l2cap_send (for stall threshold)
     uint16_t rx_initial_credits;       // Credits given at accept/connect (pipeline depth)
 } mp_bluetooth_zephyr_l2cap_channel_t;
 
@@ -356,7 +357,7 @@ static mp_bt_zephyr_indicate_params_t mp_bt_zephyr_indicate_pool[CONFIG_BT_MAX_C
 // Uses Zephyr's BT_L2CAP_SDU_BUF_SIZE to account for all required headroom.
 // Keep buffer count low to minimize RAM usage - credit flow control handles pacing.
 #define L2CAP_SDU_BUF_SIZE BT_L2CAP_SDU_BUF_SIZE(CONFIG_BT_L2CAP_TX_MTU)
-#define L2CAP_SDU_BUF_COUNT 5
+#define L2CAP_SDU_BUF_COUNT 10
 NET_BUF_POOL_FIXED_DEFINE(l2cap_sdu_pool, L2CAP_SDU_BUF_COUNT, L2CAP_SDU_BUF_SIZE,
     CONFIG_BT_CONN_TX_USER_DATA_SIZE, NULL);
 
@@ -3996,7 +3997,6 @@ void mp_bluetooth_zephyr_l2cap_flush_recv_notify(void) {
 // ready for more data.  The SEND_READY event accumulates harmlessly if Python
 // is not currently waiting (it unblocks the next stalled send).
 static void l2cap_sent_cb(struct bt_l2cap_chan *chan) {
-    DEBUG_printf("l2cap_sent_cb\n");
     if (!mp_bluetooth_is_active()) {
         return;
     }
@@ -4004,11 +4004,33 @@ static void l2cap_sent_cb(struct bt_l2cap_chan *chan) {
     struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
     mp_bluetooth_zephyr_l2cap_channel_t *l2cap_chan =
         CONTAINER_OF(le_chan, mp_bluetooth_zephyr_l2cap_channel_t, le_chan);
+    int prev = l2cap_chan->tx_in_flight;
     if (l2cap_chan->tx_in_flight > 0) {
         l2cap_chan->tx_in_flight--;
     }
-    uint16_t conn_handle = l2cap_chan_get_conn_handle(chan);
-    mp_bluetooth_on_l2cap_send_ready(conn_handle, le_chan->rx.cid, 0);
+    DEBUG_printf("l2cap_sent_cb: tx_in_flight %d->%d credits=%d chunks_per=%d\n",
+        prev, l2cap_chan->tx_in_flight, (int)atomic_get(&le_chan->tx.credits),
+        l2cap_chan->tx_chunks_per_send);
+
+    // For single-SDU sends (raw API, tx_chunks_per_send <= 1), fire
+    // SEND_READY on every completion so Python can pace individual SDUs.
+    // For bulk/stream sends (tx_chunks_per_send > 1), gate on threshold
+    // to prevent premature wakeups from exhausting the buffer pool.
+    uint8_t cps = l2cap_chan->tx_chunks_per_send;
+    bool fire_ready;
+    if (cps <= 1) {
+        fire_ready = true;
+    } else {
+        uint16_t threshold = 2 * cps;
+        if (threshold > L2CAP_SDU_BUF_COUNT) {
+            threshold = L2CAP_SDU_BUF_COUNT;
+        }
+        fire_ready = (l2cap_chan->tx_in_flight < threshold);
+    }
+    if (fire_ready) {
+        uint16_t conn_handle = l2cap_chan_get_conn_handle(chan);
+        mp_bluetooth_on_l2cap_send_ready(conn_handle, le_chan->rx.cid, 0);
+    }
 }
 
 // Status callback - called when channel status changes (e.g., credits become available).
@@ -4016,8 +4038,10 @@ static void l2cap_sent_cb(struct bt_l2cap_chan *chan) {
 // reschedule tx_processor, so queued SDUs stall indefinitely.  We kick TX here
 // when credits become available so the queued data actually gets sent.
 static void l2cap_status_cb(struct bt_l2cap_chan *chan, atomic_t *status) {
-    DEBUG_printf("l2cap_status_cb: can_send=%d\n",
-        atomic_test_bit(status, BT_L2CAP_STATUS_OUT));
+    struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
+    DEBUG_printf("l2cap_status_cb: can_send=%d credits=%d\n",
+        atomic_test_bit(status, BT_L2CAP_STATUS_OUT),
+        (int)atomic_get(&le_chan->tx.credits));
     if (atomic_test_bit(status, BT_L2CAP_STATUS_OUT)) {
         bt_tx_irq_raise();
     }
@@ -4244,6 +4268,15 @@ int mp_bluetooth_l2cap_disconnect(uint16_t conn_handle, uint16_t cid) {
 int mp_bluetooth_l2cap_send(uint16_t conn_handle, uint16_t cid,
     const uint8_t *buf, size_t len, bool *stalled) {
     DEBUG_printf("mp_bluetooth_l2cap_send: conn=%d cid=%d len=%d\n", conn_handle, cid, (int)len);
+    #if ZEPHYR_BLE_DEBUG
+    {
+        mp_bluetooth_zephyr_l2cap_channel_t *dbg_chan = l2cap_get_channel_for_conn_cid(conn_handle, cid);
+        if (dbg_chan) {
+            DEBUG_printf("  pre-send: tx_in_flight=%d tx.credits=%d\n",
+                dbg_chan->tx_in_flight, (int)atomic_get(&dbg_chan->le_chan.tx.credits));
+        }
+    }
+    #endif
 
     if (!mp_bluetooth_is_active()) {
         return ERRNO_BLUETOOTH_NOT_ACTIVE;
@@ -4256,31 +4289,23 @@ int mp_bluetooth_l2cap_send(uint16_t conn_handle, uint16_t cid,
 
     struct bt_l2cap_le_chan *le_chan = &chan->le_chan;
 
-    // Check that the data fits in the peer's MTU and our local buffer pool.
+    // Single-SDU send: cap at peer MTU to preserve L2CAP CoC message
+    // boundaries.  Each l2cap_send call = one SDU on the wire.
     if (len > le_chan->tx.mtu || len > CONFIG_BT_L2CAP_TX_MTU) {
         return MP_EINVAL;
     }
 
-    // Allocate buffer from our pool.  K_NO_WAIT because we hold the GIL and
+    // Allocate buffer from pool.  K_NO_WAIT because we hold the GIL and
     // l2cap_sent_cb (which frees buffers) needs the GIL on native Zephyr.
     struct net_buf *sdu_buf = net_buf_alloc(&l2cap_sdu_pool, K_NO_WAIT);
     if (!sdu_buf) {
-        // Pool exhausted — cannot accept data.  Return error so Python knows
-        // the payload was NOT consumed (unlike *stalled which means "accepted
-        // but wait before sending more").
         DEBUG_printf("mp_bluetooth_l2cap_send: pool exhausted\n");
         return MP_ENOMEM;
     }
 
-    // Reserve headroom for L2CAP SDU header
     net_buf_reserve(sdu_buf, BT_L2CAP_SDU_CHAN_SEND_RESERVE);
-
-    // Copy data into buffer
     net_buf_add_mem(sdu_buf, buf, len);
 
-    // Send — Zephyr handles credit-based flow control internally.
-    // The SDU is queued and transmitted as credits become available.
-    // l2cap_sent_cb fires when the SDU is fully consumed.
     int ret = bt_l2cap_chan_send(&le_chan->chan, sdu_buf);
     if (ret < 0) {
         DEBUG_printf("mp_bluetooth_l2cap_send: error %d\n", ret);
@@ -4288,18 +4313,143 @@ int mp_bluetooth_l2cap_send(uint16_t conn_handle, uint16_t cid,
         return bt_err_to_errno(ret);
     }
 
-    // Process work queue (no-op on native Zephyr, needed for HAL builds)
+    // Advance the TX pipeline: first work_process flushes pre-existing
+    // work, second processes the newly-queued TX work.  poll_now schedules
+    // async transport processing for completion events.
     mp_bluetooth_zephyr_work_process();
+    mp_bluetooth_zephyr_work_process();
+    mp_bluetooth_hci_poll_now();
 
-    // Track in-flight SDUs.  Allow up to L2CAP_SDU_BUF_COUNT-1 concurrent
-    // SDUs so the TX pipeline stays full without exhausting the buffer pool.
-    // l2cap_sent_cb decrements the counter when each SDU is fully transmitted.
     chan->tx_in_flight++;
+    chan->tx_chunks_per_send = 1;
     *stalled = (chan->tx_in_flight >= L2CAP_SDU_BUF_COUNT - 1);
-    DEBUG_printf("mp_bluetooth_l2cap_send: tx_in_flight=%d stalled=%d\n",
-        chan->tx_in_flight, *stalled);
+    DEBUG_printf("mp_bluetooth_l2cap_send: tx_in_flight=%d stalled=%d credits=%d\n",
+        chan->tx_in_flight, *stalled, (int)atomic_get(&le_chan->tx.credits));
 
     return 0;
+}
+
+// How many chunks per batch for bulk send.  Limited by pool size.
+#define L2CAP_BATCH_SIZE (L2CAP_SDU_BUF_COUNT / 3)
+
+mp_int_t mp_bluetooth_l2cap_send_bulk(uint16_t conn_handle, uint16_t cid,
+    const uint8_t *buf, size_t len) {
+    DEBUG_printf("mp_bluetooth_l2cap_send_bulk: conn=%d cid=%d len=%d\n", conn_handle, cid, (int)len);
+
+    if (!mp_bluetooth_is_active()) {
+        return -ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    mp_bluetooth_zephyr_l2cap_channel_t *chan = l2cap_get_channel_for_conn_cid(conn_handle, cid);
+    if (!chan) {
+        return -MP_EINVAL;
+    }
+
+    struct bt_l2cap_le_chan *le_chan = &chan->le_chan;
+
+    // Max SDU size that fits in a single ACL fragment (no view stall).
+    // K-frame header: L2CAP_HDR(4) + SDU_LEN(2) = 6 bytes overhead.
+    // Also capped by peer MPS: data + SDU_LEN(2) <= tx.mps.
+    uint16_t acl_mtu = bt_dev.le.acl_mtu;
+    uint16_t max_chunk = acl_mtu > 6 ? acl_mtu - 6 : 1;
+    if (le_chan->tx.mps > 2 && (le_chan->tx.mps - 2) < max_chunk) {
+        max_chunk = le_chan->tx.mps - 2;
+    }
+
+    // Each chunk is an independent L2CAP SDU from Zephyr's perspective.
+    if (max_chunk > le_chan->tx.mtu) {
+        max_chunk = le_chan->tx.mtu;
+    }
+    if (max_chunk > CONFIG_BT_L2CAP_TX_MTU) {
+        max_chunk = CONFIG_BT_L2CAP_TX_MTU;
+    }
+
+    DEBUG_printf("mp_bluetooth_l2cap_send_bulk: acl_mtu=%d mps=%d max_chunk=%d len=%d\n",
+        acl_mtu, le_chan->tx.mps, max_chunk, (int)len);
+
+    // Record batch size so sent_cb knows when to fire SEND_READY.
+    // Must be set before the send loop starts — sent_cb can fire from
+    // work_process() within the loop on FreeRTOS/native Zephyr.
+    uint16_t total_chunks = (len + max_chunk - 1) / max_chunk;
+    uint16_t cps = total_chunks < L2CAP_BATCH_SIZE ? total_chunks : L2CAP_BATCH_SIZE;
+    if (cps == 0) {
+        cps = 1;
+    }
+    chan->tx_chunks_per_send = cps;
+
+    // Streaming send loop: sends data in batches of up to L2CAP_BATCH_SIZE
+    // chunks.  Between batches, drains the TX pipeline via hci_poll so
+    // sent_cb frees buffers for the next batch.
+    size_t offset = 0;
+    while (offset < len) {
+        size_t remaining = len - offset;
+        uint16_t batch_chunks = (remaining + max_chunk - 1) / max_chunk;
+        if (batch_chunks > L2CAP_BATCH_SIZE) {
+            batch_chunks = L2CAP_BATCH_SIZE;
+        }
+
+        // Drain in-flight chunks until enough pool space is available.
+        mp_uint_t drain_start = mp_hal_ticks_ms();
+        while (chan->tx_in_flight + batch_chunks > L2CAP_SDU_BUF_COUNT) {
+            if (!mp_bluetooth_is_active()) {
+                return (offset > 0) ? (mp_int_t)offset : -MP_ENODEV;
+            }
+            mp_event_wait_ms(1);
+            if (mp_hal_ticks_ms() - drain_start > 30000) {
+                DEBUG_printf("mp_bluetooth_l2cap_send_bulk: drain timeout tx_in_flight=%d\n",
+                    chan->tx_in_flight);
+                return (offset > 0) ? (mp_int_t)offset : -MP_ETIMEDOUT;
+            }
+        }
+
+        // Pre-allocate all buffers for this batch.
+        struct net_buf *chunk_bufs[L2CAP_BATCH_SIZE];
+        for (uint16_t i = 0; i < batch_chunks; i++) {
+            chunk_bufs[i] = net_buf_alloc(&l2cap_sdu_pool, K_NO_WAIT);
+            if (!chunk_bufs[i]) {
+                for (uint16_t j = 0; j < i; j++) {
+                    net_buf_unref(chunk_bufs[j]);
+                }
+                DEBUG_printf("mp_bluetooth_l2cap_send_bulk: pool exhausted at chunk %d/%d\n",
+                    i, batch_chunks);
+                return (offset > 0) ? (mp_int_t)offset : -MP_ENOMEM;
+            }
+        }
+
+        // Fill and send each chunk.
+        for (uint16_t i = 0; i < batch_chunks; i++) {
+            size_t chunk_len = len - offset;
+            if (chunk_len > max_chunk) {
+                chunk_len = max_chunk;
+            }
+
+            net_buf_reserve(chunk_bufs[i], BT_L2CAP_SDU_CHAN_SEND_RESERVE);
+            net_buf_add_mem(chunk_bufs[i], buf + offset, chunk_len);
+
+            int ret = bt_l2cap_chan_send(&le_chan->chan, chunk_bufs[i]);
+            if (ret < 0) {
+                DEBUG_printf("mp_bluetooth_l2cap_send_bulk: send error %d at offset %d\n",
+                    ret, (int)offset);
+                for (uint16_t j = i; j < batch_chunks; j++) {
+                    net_buf_unref(chunk_bufs[j]);
+                }
+                return (offset > 0) ? (mp_int_t)offset : -bt_err_to_errno(ret);
+            }
+
+            chan->tx_in_flight++;
+            offset += chunk_len;
+        }
+
+        // Kick the TX pipeline after each batch.
+        mp_bluetooth_zephyr_work_process();
+        mp_bluetooth_zephyr_work_process();
+        mp_bluetooth_hci_poll_now();
+    }
+
+    DEBUG_printf("mp_bluetooth_l2cap_send_bulk: done offset=%d tx_in_flight=%d\n",
+        (int)offset, chan->tx_in_flight);
+
+    return (mp_int_t)offset;
 }
 
 int mp_bluetooth_l2cap_recvinto(uint16_t conn_handle, uint16_t cid,
@@ -4345,9 +4495,11 @@ int mp_bluetooth_l2cap_recvinto(uint16_t conn_handle, uint16_t cid,
                 chan->rx_last_credit_pos += freed_credits * mps;
                 int cr_err = bt_l2cap_chan_give_credits(&chan->le_chan.chan, freed_credits);
                 (void)cr_err;
-                // Flush the credit PDU immediately.  Critical for Z2Z
-                // throughput where both sides use cooperative polling.
+                // Flush the credit PDU immediately and schedule transport
+                // processing.  Critical for Z2Z throughput where both sides
+                // use cooperative polling.
                 mp_bluetooth_zephyr_work_process();
+                mp_bluetooth_hci_poll_now();
             }
 
             // Compact buffer when all complete data has been consumed and
@@ -4367,6 +4519,36 @@ int mp_bluetooth_l2cap_recvinto(uint16_t conn_handle, uint16_t cid,
 
     MICROPY_PY_BLUETOOTH_EXIT
 
+    return 0;
+}
+
+int mp_bluetooth_l2cap_send_ready(uint16_t conn_handle, uint16_t cid, bool *ready) {
+    if (!mp_bluetooth_is_active()) {
+        return ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    mp_bluetooth_zephyr_l2cap_channel_t *chan = l2cap_get_channel_for_conn_cid(conn_handle, cid);
+    if (!chan) {
+        return MP_EINVAL;
+    }
+
+    // Matches stall condition in l2cap_send: ready if we can queue
+    // at least one more SDU without exhausting the buffer pool.
+    *ready = (chan->tx_in_flight < L2CAP_SDU_BUF_COUNT - 1);
+    return 0;
+}
+
+int mp_bluetooth_l2cap_get_peer_mtu(uint16_t conn_handle, uint16_t cid, uint16_t *peer_mtu) {
+    if (!mp_bluetooth_is_active()) {
+        return ERRNO_BLUETOOTH_NOT_ACTIVE;
+    }
+
+    mp_bluetooth_zephyr_l2cap_channel_t *chan = l2cap_get_channel_for_conn_cid(conn_handle, cid);
+    if (!chan) {
+        return MP_EINVAL;
+    }
+
+    *peer_mtu = chan->le_chan.tx.mtu;
     return 0;
 }
 

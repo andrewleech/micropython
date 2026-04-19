@@ -210,8 +210,9 @@ extern volatile bool mp_bluetooth_zephyr_in_wait_loop;
 // Used by STM32 port to prevent re-entrancy during post-recv_cb work processing.
 extern volatile int mp_bluetooth_zephyr_hci_processing_depth;
 
-// Called by MicroPython scheduler to process all pending work (regular work queues only)
-void mp_bluetooth_zephyr_work_process(void);
+// Called by MicroPython scheduler to process all pending work (regular work queues only).
+// Returns true if any work items were executed.
+bool mp_bluetooth_zephyr_work_process(void);
 
 
 // Init phase control - used to process work synchronously during bt_enable()
