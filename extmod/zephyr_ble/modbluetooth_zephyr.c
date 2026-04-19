@@ -172,9 +172,11 @@ typedef struct _mp_bt_zephyr_conn_t {
 
 #if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 
-// L2CAP RX accumulation buffer size (must hold total expected data per direction)
-// The ble_l2cap.py test sends 3640 bytes total, so 4096 gives margin
-#define L2CAP_RX_BUF_SIZE 4096
+// L2CAP RX accumulation buffer size.  A deep buffer provides enough initial
+// credits for the sender to pipeline many SDUs without per-SDU credit
+// round-trips.  16KB gives 65 initial credits at MPS=251, enough for ~21 SDUs
+// of 512 bytes without any credit returns during transfer.
+#define L2CAP_RX_BUF_SIZE (16 * 1024)
 
 // L2CAP Connection-Oriented Channel structure
 typedef struct _mp_bluetooth_zephyr_l2cap_channel_t {
@@ -185,13 +187,11 @@ typedef struct _mp_bluetooth_zephyr_l2cap_channel_t {
     size_t rx_write_pos;               // FIFO write position (advances on seg_recv)
     size_t rx_read_pos;                // FIFO read position (advances on recvinto)
     size_t rx_sdu_start;               // Start of current in-progress SDU in rx_buf
-    uint16_t rx_credits_pending;       // Credits earned from complete SDUs (PDU count)
-    uint16_t rx_credits_returned;      // Credits already returned to sender
+    size_t rx_last_credit_pos;         // rx_read_pos at last credit return (for proportional credits)
     bool rx_notify_pending;            // True when seg_recv_cb completed an SDU (deferred IRQ)
     uint16_t rx_notify_conn_handle;    // Connection handle for deferred notification
     uint16_t rx_notify_cid;            // CID for deferred notification
     uint8_t tx_in_flight;             // Number of SDUs submitted but not yet sent
-    uint16_t rx_credits_per_sdu;      // Credits needed to receive one full SDU
     uint16_t rx_initial_credits;       // Credits given at accept/connect (pipeline depth)
 } mp_bluetooth_zephyr_l2cap_channel_t;
 
@@ -307,9 +307,7 @@ typedef struct _mp_bluetooth_zephyr_root_pointers_t {
     #endif // MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 } mp_bluetooth_zephyr_root_pointers_t;
 
-// Volatile: read from callbacks that may execute between main-thread state
-// transitions. See CLAUDE.local.md "Thread safety in callbacks" for details.
-static volatile int mp_bluetooth_zephyr_ble_state;
+static int mp_bluetooth_zephyr_ble_state;
 
 // Set during BLE deinit Phase 3 to make k_sem_take(K_FOREVER) fail immediately.
 // Prevents stale work handlers from blocking on dead-connection semaphores
@@ -1765,7 +1763,7 @@ static void mp_bt_zephyr_gatt_indicate_done(struct bt_conn *conn, struct bt_gatt
 
 static ssize_t mp_bt_zephyr_gatts_attr_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset) {
     uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
-    if (conn_handle == 0xFF) {
+    if (conn_handle == 0xFFFF) {
         return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
     }
 
@@ -2564,7 +2562,7 @@ static uint8_t gattc_notify_cb(struct bt_conn *conn,
 
     // Get connection handle from connection tracking list (not info.id which is identity ID)
     uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
-    if (conn_handle == 0xFF) {
+    if (conn_handle == 0xFFFF) {
         return BT_GATT_ITER_STOP;
     }
 
@@ -2625,7 +2623,7 @@ static uint8_t gattc_auto_notify_cb(struct bt_conn *conn,
 
     // Get connection handle from connection tracking list (not info.id which is identity ID)
     uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
-    if (conn_handle == 0xFF) {
+    if (conn_handle == 0xFFFF) {
         return BT_GATT_ITER_STOP;
     }
 
@@ -3803,15 +3801,9 @@ static int l2cap_create_channel(uint16_t mtu, mp_bluetooth_zephyr_l2cap_channel_
     // tests/bsim/bluetooth/host/l2cap/credits_seg_recv/src/main.c
     chan->le_chan.rx.mps = BT_L2CAP_RX_MTU;
 
-    // Pre-calculate credits per SDU and initial credit window.
-    // Credits per SDU: ceil((mtu + SDU_HDR_SIZE) / mps).
-    // Initial credits: fill the rx_buf pipeline so the peer can send multiple
-    // SDUs back-to-back without per-SDU credit round-trips.  This is critical
-    // for Z2Z throughput where both sides use cooperative polling and each
-    // credit round-trip costs 2+ connection intervals (~100ms at 50ms CI).
-    uint16_t mps = BT_L2CAP_RX_MTU;
-    chan->rx_credits_per_sdu = (mtu + BT_L2CAP_SDU_HDR_SIZE + mps - 1) / mps;
-    chan->rx_initial_credits = L2CAP_RX_BUF_SIZE / mps;
+    // Initial credit window: fill the rx_buf pipeline so the peer can send
+    // multiple SDUs back-to-back without per-SDU credit round-trips.
+    chan->rx_initial_credits = L2CAP_RX_BUF_SIZE / BT_L2CAP_RX_MTU;
 
     rp->l2cap_chan = chan;
     *out = chan;
@@ -3862,30 +3854,21 @@ static void l2cap_connected_cb(struct bt_l2cap_chan *chan) {
         le_chan->rx.mtu,                             // our_mtu
         le_chan->tx.mtu);                            // peer_mtu
 
-    DEBUG_printf("connected: rx_mtu=%d tx_mtu=%d rx_mps=%d tx_mps=%d tx_credits=%ld rx_credits=%ld\n",
-        le_chan->rx.mtu, le_chan->tx.mtu,
-        le_chan->rx.mps, le_chan->tx.mps,
-        atomic_get(&le_chan->tx.credits),
-        atomic_get(&le_chan->rx.credits));
-    // seg_recv path requires manual credit issuance.
+    // seg_recv path requires manual credit issuance.  All credits for one full
+    // SDU are given upfront in accept/connect (included in CONN_RSP/CONN_REQ).
+    // After Python reads the SDU via recvinto(), credits for the next SDU are
+    // issued in one batch.  This avoids sending credit PDUs from within
+    // seg_recv_cb (rx work context), which caused Z2Z disconnections.
     mp_bluetooth_zephyr_l2cap_channel_t *l2cap_chan_connected =
         CONTAINER_OF(le_chan, mp_bluetooth_zephyr_l2cap_channel_t, le_chan);
     l2cap_chan_connected->rx_write_pos = 0;
     l2cap_chan_connected->rx_read_pos = 0;
     l2cap_chan_connected->rx_sdu_start = 0;
-    l2cap_chan_connected->rx_credits_pending = 0;
-    l2cap_chan_connected->rx_credits_returned = 0;
+    l2cap_chan_connected->rx_last_credit_pos = 0;
 }
 
 static void l2cap_disconnected_cb(struct bt_l2cap_chan *chan) {
-    #if ZEPHYR_BLE_DEBUG
-    struct bt_l2cap_le_chan *le_dbg = BT_L2CAP_LE_CHAN(chan);
-    DEBUG_printf("disconnected_cb: tx_credits=%ld rx_credits_pending=%d\n",
-        atomic_get(&le_dbg->tx.credits),
-        MP_STATE_PORT(bluetooth_zephyr_root_pointers) &&
-        MP_STATE_PORT(bluetooth_zephyr_root_pointers)->l2cap_chan ?
-        MP_STATE_PORT(bluetooth_zephyr_root_pointers)->l2cap_chan->rx_credits_pending : -1);
-    #endif
+    DEBUG_printf("l2cap_disconnected_cb\n");
 
     // This callback is called twice:
     // 1. From L2CAP-level disconnect (Disconnect Response processing)
@@ -3975,14 +3958,6 @@ static void l2cap_seg_recv_cb(struct bt_l2cap_chan *chan, size_t sdu_len,
     // On last PDU of this SDU: advance sdu_start for the next SDU and notify Python.
     if ((size_t)seg_offset + copy_len >= sdu_len) {
         l2cap_chan->rx_sdu_start = l2cap_chan->rx_write_pos;
-        // Track PDU count for credit replenishment.  Each PDU uses 1 credit.
-        // ceil(sdu_len / mps) gives the exact number of PDUs for this SDU.
-        uint16_t mps = BT_L2CAP_RX_MTU;
-        uint16_t pdus = (sdu_len + mps - 1) / mps;
-        l2cap_chan->rx_credits_pending += pdus;
-        DEBUG_printf("seg_recv SDU done: sdu_len=%d pdus=%d credits_pending=%d tx_credits=%ld\n",
-            (int)sdu_len, pdus, l2cap_chan->rx_credits_pending,
-            atomic_get(&l2cap_chan->le_chan.tx.credits));
         // Defer the Python notification until after work_process completes.
         // If we call mp_bluetooth_on_l2cap_recv() here, the Python IRQ handler
         // runs synchronously via invoke_irq_handler → mp_call_function_2.
@@ -4021,6 +3996,7 @@ void mp_bluetooth_zephyr_l2cap_flush_recv_notify(void) {
 // ready for more data.  The SEND_READY event accumulates harmlessly if Python
 // is not currently waiting (it unblocks the next stalled send).
 static void l2cap_sent_cb(struct bt_l2cap_chan *chan) {
+    DEBUG_printf("l2cap_sent_cb\n");
     if (!mp_bluetooth_is_active()) {
         return;
     }
@@ -4031,15 +4007,8 @@ static void l2cap_sent_cb(struct bt_l2cap_chan *chan) {
     if (l2cap_chan->tx_in_flight > 0) {
         l2cap_chan->tx_in_flight--;
     }
-    DEBUG_printf("sent_cb: tx_in_flight=%d tx_credits=%ld\n",
-        l2cap_chan->tx_in_flight, atomic_get(&le_chan->tx.credits));
-    // Only fire SEND_READY if we have credits to actually transmit.
-    // Without credits, unblocking Python just causes it to queue more SDUs
-    // that fill the buffer pool. status_cb fires SEND_READY when credits arrive.
-    if (atomic_get(&le_chan->tx.credits) > 0) {
-        uint16_t conn_handle = l2cap_chan_get_conn_handle(chan);
-        mp_bluetooth_on_l2cap_send_ready(conn_handle, le_chan->rx.cid, 0);
-    }
+    uint16_t conn_handle = l2cap_chan_get_conn_handle(chan);
+    mp_bluetooth_on_l2cap_send_ready(conn_handle, le_chan->rx.cid, 0);
 }
 
 // Status callback - called when channel status changes (e.g., credits become available).
@@ -4047,18 +4016,10 @@ static void l2cap_sent_cb(struct bt_l2cap_chan *chan) {
 // reschedule tx_processor, so queued SDUs stall indefinitely.  We kick TX here
 // when credits become available so the queued data actually gets sent.
 static void l2cap_status_cb(struct bt_l2cap_chan *chan, atomic_t *status) {
+    DEBUG_printf("l2cap_status_cb: can_send=%d\n",
+        atomic_test_bit(status, BT_L2CAP_STATUS_OUT));
     if (atomic_test_bit(status, BT_L2CAP_STATUS_OUT)) {
-        struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
-        DEBUG_printf("status_cb: credits available, tx_credits=%ld\n",
-            atomic_get(&le_chan->tx.credits));
         bt_tx_irq_raise();
-        // Notify Python that the channel is ready for more data.
-        // This unblocks wait_for_event(_IRQ_L2CAP_SEND_READY) when Python
-        // stalled because tx_credits was 0 (peer returned credits).
-        if (mp_bluetooth_is_active()) {
-            uint16_t conn_handle = l2cap_chan_get_conn_handle(chan);
-            mp_bluetooth_on_l2cap_send_ready(conn_handle, le_chan->rx.cid, 0);
-        }
     }
 }
 
@@ -4103,7 +4064,7 @@ static int l2cap_server_accept_cb(struct bt_conn *conn, struct bt_l2cap_server *
 
     // Get connection handle (MicroPython connection index, not HCI handle)
     uint16_t conn_handle = mp_bt_zephyr_conn_to_handle(conn);
-    if (conn_handle == 0xFF) {
+    if (conn_handle == 0xFFFF) {
         goto done;
     }
 
@@ -4139,11 +4100,9 @@ static int l2cap_server_accept_cb(struct bt_conn *conn, struct bt_l2cap_server *
     // before accept returns are included in the CONN_RSP initial_credits field.
     // A deep pipeline allows the peer to send multiple SDUs back-to-back
     // without waiting for per-SDU credit replenishment round-trips.
-    DEBUG_printf("accept: giving %d initial credits (mps=%d buf=%d)\n",
-        l2cap_chan->rx_initial_credits, (int)BT_L2CAP_RX_MTU, L2CAP_RX_BUF_SIZE);
     int gc_ret = bt_l2cap_chan_give_credits(&l2cap_chan->le_chan.chan, l2cap_chan->rx_initial_credits);
     if (gc_ret < 0) {
-        DEBUG_printf("accept: give_credits failed %d\n", gc_ret);
+        DEBUG_printf("l2cap_accept: give_credits failed %d\n", gc_ret);
         result = gc_ret;
         goto done;
     }
@@ -4320,8 +4279,8 @@ int mp_bluetooth_l2cap_send(uint16_t conn_handle, uint16_t cid,
     net_buf_add_mem(sdu_buf, buf, len);
 
     // Send — Zephyr handles credit-based flow control internally.
-    DEBUG_printf("send: len=%d tx_credits=%ld tx_in_flight=%d\n",
-        (int)len, atomic_get(&le_chan->tx.credits), chan->tx_in_flight);
+    // The SDU is queued and transmitted as credits become available.
+    // l2cap_sent_cb fires when the SDU is fully consumed.
     int ret = bt_l2cap_chan_send(&le_chan->chan, sdu_buf);
     if (ret < 0) {
         DEBUG_printf("mp_bluetooth_l2cap_send: error %d\n", ret);
@@ -4332,18 +4291,13 @@ int mp_bluetooth_l2cap_send(uint16_t conn_handle, uint16_t cid,
     // Process work queue (no-op on native Zephyr, needed for HAL builds)
     mp_bluetooth_zephyr_work_process();
 
-    // Track in-flight SDUs and report stalled if the TX pipeline is full.
-    // Stall on either condition:
-    // 1. Buffer pool nearly exhausted (too many queued SDUs)
-    // 2. No TX credits remaining (peer must return credits before we can transmit)
-    // Condition 2 is critical when the peer gives few initial credits (e.g. NimBLE
-    // gives 2).  Without it, Python queues SDUs faster than they transmit, then
-    // the peer times out waiting for data it never receives.
+    // Track in-flight SDUs.  Allow up to L2CAP_SDU_BUF_COUNT-1 concurrent
+    // SDUs so the TX pipeline stays full without exhausting the buffer pool.
+    // l2cap_sent_cb decrements the counter when each SDU is fully transmitted.
     chan->tx_in_flight++;
-    *stalled = (chan->tx_in_flight >= L2CAP_SDU_BUF_COUNT - 1)
-        || (atomic_get(&le_chan->tx.credits) == 0);
-    DEBUG_printf("send done: tx_in_flight=%d tx_credits=%ld stalled=%d\n",
-        chan->tx_in_flight, atomic_get(&le_chan->tx.credits), *stalled);
+    *stalled = (chan->tx_in_flight >= L2CAP_SDU_BUF_COUNT - 1);
+    DEBUG_printf("mp_bluetooth_l2cap_send: tx_in_flight=%d stalled=%d\n",
+        chan->tx_in_flight, *stalled);
 
     return 0;
 }
@@ -4381,17 +4335,15 @@ int mp_bluetooth_l2cap_recvinto(uint16_t conn_handle, uint16_t cid,
             *len = to_copy;
             chan->rx_read_pos += to_copy;
 
-            // Return credits for complete SDUs that have been read.
-            uint16_t credits_to_give = chan->rx_credits_pending - chan->rx_credits_returned;
-            DEBUG_printf("recvinto: read=%d/%d avail=%d credits_to_give=%d read_pos=%d sdu_start=%d\n",
-                (int)to_copy, (int)avail, (int)(avail - to_copy),
-                credits_to_give, (int)chan->rx_read_pos, (int)chan->rx_sdu_start);
-            if (credits_to_give > 0 && chan->rx_read_pos == chan->rx_sdu_start) {
-                // Only give credits when we've consumed all complete SDU data.
-                // This ensures buffer space is actually freed before telling
-                // the sender it can send more.
-                chan->rx_credits_returned = chan->rx_credits_pending;
-                int cr_err = bt_l2cap_chan_give_credits(&chan->le_chan.chan, credits_to_give);
+            // Return credits proportional to buffer space freed since last
+            // return.  Each MPS-worth of buffer consumed earns one credit.
+            // This returns credits per-SDU (or even mid-SDU for large reads)
+            // instead of waiting for all data to drain.
+            uint16_t mps = BT_L2CAP_RX_MTU;
+            uint16_t freed_credits = (chan->rx_read_pos - chan->rx_last_credit_pos) / mps;
+            if (freed_credits > 0) {
+                chan->rx_last_credit_pos += freed_credits * mps;
+                int cr_err = bt_l2cap_chan_give_credits(&chan->le_chan.chan, freed_credits);
                 (void)cr_err;
                 // Flush the credit PDU immediately.  Critical for Z2Z
                 // throughput where both sides use cooperative polling.
@@ -4405,6 +4357,7 @@ int mp_bluetooth_l2cap_recvinto(uint16_t conn_handle, uint16_t cid,
                 chan->rx_read_pos = 0;
                 chan->rx_write_pos = 0;
                 chan->rx_sdu_start = 0;
+                chan->rx_last_credit_pos = 0;
             }
         }
     } else {
