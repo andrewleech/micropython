@@ -266,54 +266,53 @@ static mp_obj_t machine_hard_spi_make_new(const mp_obj_type_t *type, size_t n_ar
 }
 
 static void machine_hard_spi_init_helper(const machine_hard_spi_obj_t *self, mp_arg_val_t *args) {
-    int baudrate = args[ARG_INIT_baudrate].u_int;
-
-    if (baudrate <= 125000) {
-        self->p_config->frequency = NRF_SPI_FREQ_125K;
-    } else if (baudrate <= 250000) {
-        self->p_config->frequency = NRF_SPI_FREQ_250K;
-    } else if (baudrate <= 500000) {
-        self->p_config->frequency = NRF_SPI_FREQ_500K;
-    } else if (baudrate <= 1000000) {
-        self->p_config->frequency = NRF_SPI_FREQ_1M;
-    } else if (baudrate <= 2000000) {
-        self->p_config->frequency = NRF_SPI_FREQ_2M;
-    } else if (baudrate <= 4000000) {
-        self->p_config->frequency = NRF_SPI_FREQ_4M;
-    } else if (baudrate <= 8000000) {
-        self->p_config->frequency = NRF_SPI_FREQ_8M;
-    #if defined(NRF52840_XXAA) && NRFX_SPIM_ENABLED
-    } else if (baudrate <= 16000000) {
-        self->p_config->frequency = NRF_SPIM_FREQ_16M;
-    } else if (baudrate <= 32000000) {
-        self->p_config->frequency = NRF_SPIM_FREQ_32M;
-    #endif // NRF52840_XXAA && NRFX_SPIM_ENABLED
-    } else { // Default
-        self->p_config->frequency = NRF_SPI_FREQ_1M;
-    }
-
-    if (args[ARG_INIT_polarity].u_int == 0) {
-        // Active high
-        if (args[ARG_INIT_phase].u_int == 0) {
-            // First clock edge
-            self->p_config->mode = NRF_SPI_MODE_0;
+    if (args[ARG_INIT_baudrate].u_int != -1) {
+        int baudrate = args[ARG_INIT_baudrate].u_int;
+        if (baudrate <= 125000) {
+            self->p_config->frequency = NRF_SPI_FREQ_125K;
+        } else if (baudrate <= 250000) {
+            self->p_config->frequency = NRF_SPI_FREQ_250K;
+        } else if (baudrate <= 500000) {
+            self->p_config->frequency = NRF_SPI_FREQ_500K;
+        } else if (baudrate <= 1000000) {
+            self->p_config->frequency = NRF_SPI_FREQ_1M;
+        } else if (baudrate <= 2000000) {
+            self->p_config->frequency = NRF_SPI_FREQ_2M;
+        } else if (baudrate <= 4000000) {
+            self->p_config->frequency = NRF_SPI_FREQ_4M;
+        } else if (baudrate <= 8000000) {
+            self->p_config->frequency = NRF_SPI_FREQ_8M;
+        #if defined(NRF52840_XXAA) && NRFX_SPIM_ENABLED
+        } else if (baudrate <= 16000000) {
+            self->p_config->frequency = NRF_SPIM_FREQ_16M;
+        } else if (baudrate <= 32000000) {
+            self->p_config->frequency = NRF_SPIM_FREQ_32M;
+        #endif // NRF52840_XXAA && NRFX_SPIM_ENABLED
         } else {
-            // Second clock edge
-            self->p_config->mode = NRF_SPI_MODE_1;
-        }
-    } else {
-        // Active low
-        if (args[ARG_INIT_phase].u_int == 0) {
-            // First clock edge
-            self->p_config->mode = NRF_SPI_MODE_2;
-        } else {
-            // Second clock edge
-            self->p_config->mode = NRF_SPI_MODE_3;
+            self->p_config->frequency = NRF_SPI_FREQ_1M;
         }
     }
 
-    self->p_config->orc = 0xFF;  // Overrun character
-    self->p_config->bit_order = (args[ARG_INIT_firstbit].u_int == 0) ? NRF_SPI_BIT_ORDER_MSB_FIRST : NRF_SPI_BIT_ORDER_LSB_FIRST;
+    int polarity = args[ARG_INIT_polarity].u_int;
+    int phase = args[ARG_INIT_phase].u_int;
+    if (polarity != -1 || phase != -1) {
+        if (polarity == -1) {
+            polarity = (self->p_config->mode == NRF_SPI_MODE_2 || self->p_config->mode == NRF_SPI_MODE_3) ? 1 : 0;
+        }
+        if (phase == -1) {
+            phase = (self->p_config->mode == NRF_SPI_MODE_1 || self->p_config->mode == NRF_SPI_MODE_3) ? 1 : 0;
+        }
+        if (polarity == 0) {
+            self->p_config->mode = (phase == 0) ? NRF_SPI_MODE_0 : NRF_SPI_MODE_1;
+        } else {
+            self->p_config->mode = (phase == 0) ? NRF_SPI_MODE_2 : NRF_SPI_MODE_3;
+        }
+    }
+
+    self->p_config->orc = 0xFF;
+    if (args[ARG_INIT_firstbit].u_int != -1) {
+        self->p_config->bit_order = (args[ARG_INIT_firstbit].u_int == 0) ? NRF_SPI_BIT_ORDER_MSB_FIRST : NRF_SPI_BIT_ORDER_LSB_FIRST;
+    }
 
     // Set context to this instance of SPI
     nrfx_err_t err_code = nrfx_spi_init(self->p_spi, self->p_config, NULL, (void *)self);
@@ -328,11 +327,11 @@ static void machine_hard_spi_init_helper(const machine_hard_spi_obj_t *self, mp_
 
 static void machine_hard_spi_init(mp_obj_base_t *self_in, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     static const mp_arg_t allowed_args[] = {
-        { MP_QSTR_baudrate, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 1000000} },
-        { MP_QSTR_polarity, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
-        { MP_QSTR_phase,    MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
-        { MP_QSTR_bits,     MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 8} },
-        { MP_QSTR_firstbit, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_baudrate, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
+        { MP_QSTR_polarity, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
+        { MP_QSTR_phase,    MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
+        { MP_QSTR_bits,     MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
+        { MP_QSTR_firstbit, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
     };
 
     // parse args
