@@ -25,8 +25,5 @@ CFLAGS += -DMICROPY_VFS_LFS2=1
 # Required because nRF port uses -nostdlib (no libc malloc)
 CFLAGS += -DMICROPY_BLUETOOTH_ZEPHYR_GATT_POOL=1
 
-# Enable auto DLE — on-core controller handles DLE fine
-CFLAGS += -DCONFIG_BT_AUTO_DATA_LEN_UPDATE=1
-
 # Zephyr BLE iterable sections (net_buf pools, GATT services, conn callbacks, etc.)
 LD_FILES += boards/$(BOARD)/zephyr_ble_sections.ld
