@@ -4004,7 +4004,7 @@ static void l2cap_sent_cb(struct bt_l2cap_chan *chan) {
     struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
     mp_bluetooth_zephyr_l2cap_channel_t *l2cap_chan =
         CONTAINER_OF(le_chan, mp_bluetooth_zephyr_l2cap_channel_t, le_chan);
-    int prev = l2cap_chan->tx_in_flight;
+    int prev __attribute__((unused)) = l2cap_chan->tx_in_flight;
     if (l2cap_chan->tx_in_flight > 0) {
         l2cap_chan->tx_in_flight--;
     }
@@ -4038,7 +4038,7 @@ static void l2cap_sent_cb(struct bt_l2cap_chan *chan) {
 // reschedule tx_processor, so queued SDUs stall indefinitely.  We kick TX here
 // when credits become available so the queued data actually gets sent.
 static void l2cap_status_cb(struct bt_l2cap_chan *chan, atomic_t *status) {
-    struct bt_l2cap_le_chan *le_chan = BT_L2CAP_LE_CHAN(chan);
+    struct bt_l2cap_le_chan *le_chan __attribute__((unused)) = BT_L2CAP_LE_CHAN(chan);
     DEBUG_printf("l2cap_status_cb: can_send=%d credits=%d\n",
         atomic_test_bit(status, BT_L2CAP_STATUS_OUT),
         (int)atomic_get(&le_chan->tx.credits));

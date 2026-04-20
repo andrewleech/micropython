@@ -876,9 +876,17 @@ static inline uint32_t __bswap_32(uint32_t x) {
            ((x >> 24) & 0x000000FF);
 }
 
-// ARM Cortex-M is little-endian, so CPU-to-LE is a no-op
+// Endian conversion macros.  Guarded so the real zephyr/sys/byteorder.h
+// can redefine them without -Werror conflicts on embedded ports.
+#ifndef __LITTLE_ENDIAN__
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 #define __LITTLE_ENDIAN__
+#elif defined(__ARM_ARCH) || defined(__arm__) || defined(__aarch64__)
+#define __LITTLE_ENDIAN__
+#endif
+#endif
 
+#ifndef sys_cpu_to_le16
 #ifdef __LITTLE_ENDIAN__
 #define sys_cpu_to_le16(x) (x)
 #define sys_cpu_to_le32(x) (x)
@@ -897,6 +905,7 @@ static inline uint32_t __bswap_32(uint32_t x) {
 #define sys_cpu_to_be32(x) (x)
 #define sys_be16_to_cpu(x) (x)
 #define sys_be32_to_cpu(x) (x)
+#endif
 #endif
 
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_ZEPHYR_BLE_CONFIG_H
