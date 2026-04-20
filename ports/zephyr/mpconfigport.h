@@ -36,6 +36,12 @@
 #define MICROPY_CONFIG_ROM_LEVEL (MICROPY_CONFIG_ROM_LEVEL_BASIC_FEATURES)
 #endif
 
+// Enable random module (not included at BASIC_FEATURES level).
+// Zephyr provides entropy via hardware RNG (device tree) or
+// CONFIG_TEST_RANDOM_GENERATOR fallback (prj.conf).
+#define MICROPY_PY_RANDOM           (1)
+#define MICROPY_PY_RANDOM_EXTRA_FUNCS (1)
+
 // Usually passed from Makefile
 #ifndef MICROPY_HEAP_SIZE
 #define MICROPY_HEAP_SIZE (16 * 1024)
@@ -53,6 +59,9 @@
 #define MICROPY_ENABLE_FINALISER    (MICROPY_VFS)
 #define MICROPY_HELPER_REPL         (1)
 #define MICROPY_REPL_AUTO_INDENT    (1)
+// Reduce raw-paste window to 32 bytes for UART-bridge connections (JLink OB).
+// Default 256 (window=128) overflows USB-UART bridge buffers at 115200 baud.
+#define MICROPY_REPL_STDIN_BUFFER_MAX (64)
 #define MICROPY_ENABLE_EMERGENCY_EXCEPTION_BUF  (1)
 #define MICROPY_KBD_EXCEPTION       (1)
 #define MICROPY_PY_BUILTINS_BYTES_HEX (1)
@@ -91,11 +100,24 @@
 #define MICROPY_PY_SOCKET           (1)
 #endif
 #ifdef CONFIG_BT
-#define MICROPY_PY_BLUETOOTH        (1)
+#define MICROPY_PY_BLUETOOTH                    (1)
+#ifndef MICROPY_BLUETOOTH_ZEPHYR
+#define MICROPY_BLUETOOTH_ZEPHYR                (1)
+#endif
 #ifdef CONFIG_BT_CENTRAL
 #define MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE (1)
 #endif
+#ifdef CONFIG_BT_GATT_CLIENT
+#define MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT (1)
+#else
 #define MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT (0)
+#endif
+#ifdef CONFIG_BT_L2CAP_DYNAMIC_CHANNEL
+#define MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS (1)
+#endif
+#ifdef CONFIG_BT_SMP
+#define MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING (1)
+#endif
 #endif
 #define MICROPY_PY_BINASCII         (1)
 #define MICROPY_PY_HASHLIB          (1)
@@ -112,26 +134,6 @@
 #define MICROPY_ENABLE_SCHEDULER    (1)
 #define MICROPY_VFS                 (1)
 #define MICROPY_READER_VFS          (MICROPY_VFS)
-
-#if defined(CONFIG_RISCV_ISA_RV32I) && defined(CONFIG_RISCV_ISA_EXT_M) && defined(CONFIG_RISCV_ISA_EXT_C)
-
-#ifndef MICROPY_EMIT_RV32
-#define MICROPY_EMIT_RV32        (1)
-#endif
-
-#ifndef MICROPY_EMIT_INLINE_RV32
-#define MICROPY_EMIT_INLINE_RV32 (1)
-#endif
-
-#ifdef CONFIG_RISCV_ISA_EXT_ZBA
-#define MICROPY_EMIT_RV32_ZBA (1)
-#endif
-
-#ifdef CONFIG_RISCV_ISA_EXT_ZCMP
-#define MICROPY_EMIT_RV32_ZCMP (1)
-#endif
-
-#endif // CONFIG_RISCV_ISA_RV32I
 
 // fatfs configuration used in ffconf.h
 #define MICROPY_FATFS_ENABLE_LFN       (1)
@@ -180,6 +182,10 @@ typedef long mp_off_t;
 #define MP_STATE_PORT MP_STATE_VM
 
 #define MP_SSIZE_MAX (0x7fffffff)
+
+// extra built in names to add to the global namespace
+#define MICROPY_PORT_BUILTINS \
+    { MP_ROM_QSTR(MP_QSTR_open), MP_ROM_PTR(&mp_builtin_open_obj) },
 
 #if MICROPY_PY_THREAD
 #define MICROPY_EVENT_POLL_HOOK \
