@@ -648,7 +648,7 @@ void mp_bluetooth_zephyr_poll_uart(void) {
     // Read HCI packets one at a time with work between each.
     // NOTE: This path is only used when HCI RX task is NOT running.
     extern int cyw43_bluetooth_hci_read(uint8_t *buf, uint32_t max_size, uint32_t *len);
-    extern void mp_bluetooth_zephyr_work_process(void);
+    extern bool mp_bluetooth_zephyr_work_process(void);
     while (1) {
         // Check buffer availability before reading more HCI data.
         if (!mp_bluetooth_zephyr_buffers_available()) {
