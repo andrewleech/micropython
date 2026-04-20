@@ -77,7 +77,7 @@ def irq(event, data):
     elif event == _IRQ_GATTC_NOTIFY:
         print("_IRQ_GATTC_NOTIFY", bytes(data[-1]))
     elif event == _IRQ_GATTC_INDICATE:
-        print("_IRQ_GATTC_NOTIFY", bytes(data[-1]))
+        print("_IRQ_GATTC_INDICATE", bytes(data[-1]))
 
     if event not in waiting_events:
         waiting_events[event] = None

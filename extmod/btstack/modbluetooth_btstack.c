@@ -1544,6 +1544,28 @@ int mp_bluetooth_l2cap_recvinto(uint16_t conn_handle, uint16_t cid, uint8_t *buf
     return MP_EOPNOTSUPP;
 }
 
+mp_int_t mp_bluetooth_l2cap_send_bulk(uint16_t conn_handle, uint16_t cid, const uint8_t *buf, size_t len) {
+    (void)conn_handle;
+    (void)cid;
+    (void)buf;
+    (void)len;
+    return -MP_EOPNOTSUPP;
+}
+
+int mp_bluetooth_l2cap_send_ready(uint16_t conn_handle, uint16_t cid, bool *ready) {
+    (void)conn_handle;
+    (void)cid;
+    (void)ready;
+    return MP_EOPNOTSUPP;
+}
+
+int mp_bluetooth_l2cap_get_peer_mtu(uint16_t conn_handle, uint16_t cid, uint16_t *peer_mtu) {
+    (void)conn_handle;
+    (void)cid;
+    (void)peer_mtu;
+    return MP_EOPNOTSUPP;
+}
+
 #endif // MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 
 MP_REGISTER_ROOT_POINTER(struct _mp_bluetooth_btstack_root_pointers_t *bluetooth_btstack_root_pointers);

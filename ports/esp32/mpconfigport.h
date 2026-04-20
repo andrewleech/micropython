@@ -108,6 +108,7 @@
 #define MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING (1)
 #define MICROPY_BLUETOOTH_NIMBLE            (1)
 #define MICROPY_BLUETOOTH_NIMBLE_BINDINGS_ONLY (1)
+#define MICROPY_BLUETOOTH_NIMBLE_PORT_INIT_RETURNS_ERROR (1)
 #endif // MICROPY_PY_BLUETOOTH
 
 #define MICROPY_PY_RANDOM_SEED_INIT_FUNC    (esp_random())
@@ -140,8 +141,8 @@
 #define MICROPY_PY_MACHINE_I2C              (1)
 #define MICROPY_PY_MACHINE_I2C_TRANSFER_WRITE1 (1)
 #ifndef MICROPY_PY_MACHINE_I2C_TARGET
-// I2C target hardware is limited on ESP32 (eg read event comes after the read) so we only support newer SoCs.
-#define MICROPY_PY_MACHINE_I2C_TARGET       (SOC_I2C_SUPPORT_SLAVE && !CONFIG_IDF_TARGET_ESP32)
+// I2C target hardware is limited on ESP32 (eg read event comes after the read) so we only support newer SoCs & ESP-IDF v5.4 or newer
+#define MICROPY_PY_MACHINE_I2C_TARGET       (SOC_I2C_SUPPORT_SLAVE && !CONFIG_IDF_TARGET_ESP32 && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 0))
 #define MICROPY_PY_MACHINE_I2C_TARGET_INCLUDEFILE "ports/esp32/machine_i2c_target.c"
 #define MICROPY_PY_MACHINE_I2C_TARGET_MAX   (2)
 #endif
@@ -193,6 +194,13 @@
 #endif
 #ifndef MICROPY_HW_ENABLE_SDCARD
 #define MICROPY_HW_ENABLE_SDCARD            (1)
+#endif
+#ifndef MICROPY_HW_SDMMC_DEFAULT_SLOT
+#if CONFIG_IDF_TARGET_ESP32P4
+#define MICROPY_HW_SDMMC_DEFAULT_SLOT       (0)
+#else
+#define MICROPY_HW_SDMMC_DEFAULT_SLOT       (1)
+#endif
 #endif
 #define MICROPY_HW_SOFTSPI_MIN_DELAY        (0)
 #define MICROPY_HW_SOFTSPI_MAX_BAUDRATE     (esp_rom_get_cpu_ticks_per_us() * 1000000 / 200) // roughly

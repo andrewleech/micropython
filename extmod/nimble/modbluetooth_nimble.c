@@ -618,7 +618,17 @@ int mp_bluetooth_init(void) {
 
     // Initialise NimBLE memory and data structures.
     DEBUG_printf("mp_bluetooth_init: nimble_port_init\n");
+
+    // On some ports `nimble_port_init` may return an error code indicating a
+    // failed initialisation.
+    #if MICROPY_BLUETOOTH_NIMBLE_PORT_INIT_RETURNS_ERROR
+    if (nimble_port_init() < 0) {
+        mp_bluetooth_deinit();
+        return MP_EIO;
+    }
+    #else
     nimble_port_init();
+    #endif
 
     ble_hs_cfg.reset_cb = reset_cb;
     ble_hs_cfg.sync_cb = sync_cb;
@@ -1888,6 +1898,63 @@ int mp_bluetooth_l2cap_recvinto(uint16_t conn_handle, uint16_t cid, uint8_t *buf
     }
 
     MICROPY_PY_BLUETOOTH_EXIT
+    return 0;
+}
+
+mp_int_t mp_bluetooth_l2cap_send_bulk(uint16_t conn_handle, uint16_t cid, const uint8_t *buf, size_t len) {
+    mp_bluetooth_nimble_l2cap_channel_t *chan = get_l2cap_channel_for_conn_cid(conn_handle, cid);
+    if (!chan) {
+        return -MP_EINVAL;
+    }
+
+    struct ble_l2cap_chan_info info;
+    ble_l2cap_get_chan_info(chan->chan, &info);
+    uint16_t max_chunk = info.peer_coc_mtu;
+
+    size_t offset = 0;
+    while (offset < len) {
+        size_t chunk_len = len - offset;
+        if (chunk_len > max_chunk) {
+            chunk_len = max_chunk;
+        }
+        bool stalled = false;
+        int err = mp_bluetooth_l2cap_send(conn_handle, cid, buf + offset, chunk_len, &stalled);
+        if (err != 0) {
+            return (offset > 0) ? (mp_int_t)offset : -err;
+        }
+        offset += chunk_len;
+        // If stalled, wait for mem_stalled to clear before continuing.
+        if (stalled && offset < len) {
+            mp_uint_t stall_start = mp_hal_ticks_ms();
+            while (chan->mem_stalled) {
+                mp_event_wait_ms(1);
+                if (mp_hal_ticks_ms() - stall_start > 30000) {
+                    return (offset > 0) ? (mp_int_t)offset : -MP_ETIMEDOUT;
+                }
+            }
+        }
+    }
+
+    return (mp_int_t)offset;
+}
+
+int mp_bluetooth_l2cap_send_ready(uint16_t conn_handle, uint16_t cid, bool *ready) {
+    mp_bluetooth_nimble_l2cap_channel_t *chan = get_l2cap_channel_for_conn_cid(conn_handle, cid);
+    if (!chan) {
+        return MP_EINVAL;
+    }
+    *ready = !chan->mem_stalled;
+    return 0;
+}
+
+int mp_bluetooth_l2cap_get_peer_mtu(uint16_t conn_handle, uint16_t cid, uint16_t *peer_mtu) {
+    mp_bluetooth_nimble_l2cap_channel_t *chan = get_l2cap_channel_for_conn_cid(conn_handle, cid);
+    if (!chan) {
+        return MP_EINVAL;
+    }
+    struct ble_l2cap_chan_info info;
+    ble_l2cap_get_chan_info(chan->chan, &info);
+    *peer_mtu = info.peer_coc_mtu;
     return 0;
 }
 

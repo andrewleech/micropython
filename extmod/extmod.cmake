@@ -10,6 +10,7 @@ set(MICROPY_SOURCE_EXTMOD
     ${MICROPY_EXTMOD_DIR}/machine_adc.c
     ${MICROPY_EXTMOD_DIR}/machine_adc_block.c
     ${MICROPY_EXTMOD_DIR}/machine_bitstream.c
+    ${MICROPY_EXTMOD_DIR}/machine_can.c
     ${MICROPY_EXTMOD_DIR}/machine_i2c.c
     ${MICROPY_EXTMOD_DIR}/machine_i2c_target.c
     ${MICROPY_EXTMOD_DIR}/machine_i2s.c
@@ -348,3 +349,6 @@ if(MICROPY_PY_LWIP)
 
     list(APPEND GIT_SUBMODULES lib/lwip)
 endif()
+
+# Note: Bluetooth stack libraries (BTstack, NimBLE, Zephyr BLE) are
+# included directly by each port's CMakeLists.txt, not here in extmod.cmake

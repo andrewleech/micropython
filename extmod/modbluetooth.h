@@ -403,6 +403,9 @@ int mp_bluetooth_l2cap_connect(uint16_t conn_handle, uint16_t psm, uint16_t mtu)
 int mp_bluetooth_l2cap_disconnect(uint16_t conn_handle, uint16_t cid);
 int mp_bluetooth_l2cap_send(uint16_t conn_handle, uint16_t cid, const uint8_t *buf, size_t len, bool *stalled);
 int mp_bluetooth_l2cap_recvinto(uint16_t conn_handle, uint16_t cid, uint8_t *buf, size_t *len);
+mp_int_t mp_bluetooth_l2cap_send_bulk(uint16_t conn_handle, uint16_t cid, const uint8_t *buf, size_t len);
+int mp_bluetooth_l2cap_send_ready(uint16_t conn_handle, uint16_t cid, bool *ready);
+int mp_bluetooth_l2cap_get_peer_mtu(uint16_t conn_handle, uint16_t cid, uint16_t *peer_mtu);
 #endif // MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 
 #if MICROPY_PY_BLUETOOTH_ENABLE_HCI_CMD

@@ -114,15 +114,16 @@ def recv_data(ble, conn_handle, cid):
 # Acting in peripheral role.
 def instance0():
     multitest.globals(BDADDR=ble.config("mac"))
+    # Register L2CAP server BEFORE advertising to avoid race condition where
+    # the central's L2CAP COC request arrives before l2cap_listen() is called.
+    print("l2cap_listen")
+    ble.l2cap_listen(_L2CAP_PSM, _L2CAP_MTU)
     print("gap_advertise")
     ble.gap_advertise(20_000, b"\x02\x01\x06\x04\xffMPY")
     multitest.next()
     try:
         # Wait for central to connect to us.
         conn_handle = wait_for_event(_IRQ_CENTRAL_CONNECT, TIMEOUT_MS)
-
-        print("l2cap_listen")
-        ble.l2cap_listen(_L2CAP_PSM, _L2CAP_MTU)
 
         conn_handle, cid, psm = wait_for_event(_IRQ_L2CAP_ACCEPT, TIMEOUT_MS)
         conn_handle, cid, psm, our_mtu, peer_mtu = wait_for_event(_IRQ_L2CAP_CONNECT, TIMEOUT_MS)

@@ -169,7 +169,6 @@ list(APPEND IDF_COMPONENTS
     esp_app_format
     esp_mm
     esp_common
-    esp_driver_touch_sens
     esp_eth
     esp_event
     esp_hw_support
@@ -197,6 +196,11 @@ list(APPEND IDF_COMPONENTS
     usb
     vfs
 )
+
+if($ENV{IDF_VERSION} VERSION_GREATER_EQUAL "5.4")
+    list(APPEND IDF_COMPONENTS
+        esp_driver_touch_sens)
+endif()
 
 # Provide the default LD fragment if not set
 if (MICROPY_USER_LDFRAGMENTS)
@@ -273,18 +277,15 @@ target_compile_options(${MICROPY_TARGET} PUBLIC
     -Wno-missing-field-initializers
 )
 
+# User C modules don't pick up certain compile options set by the IDF, most
+# importantly the optimisation level.  So set them here.
+idf_build_get_property(idf_compile_options COMPILE_OPTIONS)
+target_compile_options(usermod INTERFACE ${idf_compile_options})
+
 # Additional include directories needed for private NimBLE headers.
 target_include_directories(${MICROPY_TARGET} PUBLIC
     ${IDF_PATH}/components/bt/host/nimble/nimble
 )
-if (IDF_VERSION VERSION_LESS "5.3")
-# Additional include directories needed for private RMT header.
-#  IDF 5.x versions before 5.3.1
-  message(STATUS "Using private rmt headers for ${IDF_VERSION}")
-  target_include_directories(${MICROPY_TARGET} PRIVATE
-    ${IDF_PATH}/components/driver/rmt
-  )
-endif()
 
 # Add additional extmod and usermod components.
 if (MICROPY_PY_BTREE)

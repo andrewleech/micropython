@@ -64,6 +64,18 @@ else ifeq ($(SUPPORTS_HARDWARE_FP_DOUBLE),1)
 CFLAGS += -DMICROPY_HW_FPU=1
 endif
 
+ifneq ($(MICROPY_HW_ROMFS_PART0_START),)
+CFLAGS += -DMICROPY_HW_ROMFS_ENABLE_PART0=1
+CFLAGS += -DMICROPY_HW_ROMFS_PART0_START=$(MICROPY_HW_ROMFS_PART0_START)
+CFLAGS += -DMICROPY_HW_ROMFS_PART0_SIZE=$(MICROPY_HW_ROMFS_PART0_SIZE)
+endif
+
+ifneq ($(MICROPY_HW_ROMFS_PART1_START),)
+CFLAGS += -DMICROPY_HW_ROMFS_ENABLE_PART1=1
+CFLAGS += -DMICROPY_HW_ROMFS_PART1_START=$(MICROPY_HW_ROMFS_PART1_START)
+CFLAGS += -DMICROPY_HW_ROMFS_PART1_SIZE=$(MICROPY_HW_ROMFS_PART1_SIZE)
+endif
+
 ################################################################################
 # ARM specific settings
 
@@ -158,6 +170,14 @@ QEMU_SYSTEM = $(QEMU_BASE)$(QEMU_ARCH)
 QEMU_ARGS += -machine $(QEMU_MACHINE) -nographic -monitor null -semihosting
 QEMU_ARGS += $(QEMU_EXTRA)
 
+# Load ROMFS images into emulated memory if configured.
+ifneq ($(QEMU_ROMFS_IMG0),)
+QEMU_ARGS += -device loader,file=$(QEMU_ROMFS_IMG0),addr=$(MICROPY_HW_ROMFS_PART0_START),force-raw=on
+endif
+ifneq ($(QEMU_ROMFS_IMG1),)
+QEMU_ARGS += -device loader,file=$(QEMU_ROMFS_IMG1),addr=$(MICROPY_HW_ROMFS_PART1_START),force-raw=on
+endif
+
 # Specifying QEMU_DEBUG=1 will block qemu until a debugger is connected.
 ifeq ($(QEMU_DEBUG),1)
 QEMU_DEBUG_ARGS ?= -s
@@ -200,6 +220,16 @@ CFLAGS += $(SPECS_FRAGMENT)
 LDFLAGS += $(SPECS_FRAGMENT)
 endif
 
+# Mount the ROMFS test image only if no other ROMFS partition has been mounted on slot 0.
+
+ROMFS_TEST_IMAGE = assets/random_romfs.bin
+
+ifneq ($(MICROPY_HW_ROMFS_PART0_START),)
+ifeq ($(QEMU_ROMFS_IMG0),)
+QEMU_ARGS += -device loader,file=$(ROMFS_TEST_IMAGE),addr=$(MICROPY_HW_ROMFS_PART0_START),force-raw=on
+endif
+endif
+
 RUN_TESTS_FULL_ARGS = -t execpty:"$(QEMU_SYSTEM) $(QEMU_ARGS) -serial pty -kernel ../ports/qemu/$<" $(RUN_TESTS_ARGS)
 
 ################################################################################
@@ -209,6 +239,7 @@ SRC_C += \
 	main.c \
 	uart.c \
 	mphalport.c \
+	vfs_rom_ioctl.c \
 	shared/libc/string0.c \
 	shared/readline/readline.c \
 	shared/runtime/interrupt_char.c \

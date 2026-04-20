@@ -158,6 +158,9 @@ platform_tests_to_skip = {
     "webassembly": (
         "basics/string_format_modulo.py",  # can't print nulls to stdout
         "basics/string_strip.py",  # can't print nulls to stdout
+        "basics/weakref_callback_exception.py",  # has different exception printing output
+        "basics/weakref_ref_collect.py",  # requires custom test due to GC behaviour
+        "basics/weakref_finalize_collect.py",  # requires custom test due to GC behaviour
         "extmod/asyncio_basic2.py",
         "extmod/asyncio_cancel_self.py",
         "extmod/asyncio_current_task.py",
@@ -175,6 +178,7 @@ platform_tests_to_skip = {
         "extmod/binascii_a2b_base64.py",
         "extmod/deflate_compress_memory_error.py",  # tries to allocate unlimited memory
         "extmod/re_stack_overflow.py",
+        "extmod/re_stack_overflow2.py",
         "extmod/time_res.py",
         "extmod/vfs_posix.py",
         "extmod/vfs_posix_enoent.py",
@@ -289,7 +293,9 @@ tests_requiring_target_wiring = (
     "extmod/machine_spi_rate.py",
     "extmod/machine_uart_irq_txidle.py",
     "extmod/machine_uart_tx.py",
+    "extmod_hardware/machine_can_timings.py",
     "extmod_hardware/machine_encoder.py",
+    "extmod_hardware/machine_pwm.py",
     "extmod_hardware/machine_uart_irq_break.py",
     "extmod_hardware/machine_uart_irq_rx.py",
     "extmod_hardware/machine_uart_irq_rxidle.py",
@@ -431,6 +437,7 @@ tests_with_regex_output = [
         "micropython/meminfo.py",
         "basics/bytes_compare3.py",
         "basics/builtin_help.py",
+        "basics/weakref_callback_exception.py",
         "misc/sys_settrace_cov.py",
         "net_inet/tls_text_errors.py",
         "thread/thread_exc2.py",
@@ -867,7 +874,7 @@ def run_tests(pyb, tests, args, result_dir, num_threads=1):
     def run_one_test(test_file):
         test_file_abspath = os.path.abspath(test_file).replace("\\", "/")
         # If test_file is one of our own tests always make it relative to our tests/ dir and
-        # otherwise use the abosulte path, irregardless of actual path passed,
+        # otherwise use the absolute path, regardless of actual path passed,
         # such that display and result output is always the same.
         try:
             test_file_relpath = os.path.relpath(test_file, start=base_path())
