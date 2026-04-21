@@ -982,7 +982,12 @@ int lll_csrand_get(void *buf, size_t len);  // Controller crypto stub
 // Required for HCI parameter encoding in scan.c and other Zephyr BLE host code
 #include <stdint.h>
 
-// Byte swap functions
+// Byte swap functions.
+// On Linux/Unix, glibc provides __bswap_16/__bswap_32 via <byteswap.h>
+// (transitively included by system headers). Only define on bare-metal.
+#if defined(__linux__) || defined(__APPLE__) || defined(__unix__)
+#include <byteswap.h>
+#else
 static inline uint16_t __bswap_16(uint16_t x) {
     return (uint16_t)((x << 8) | (x >> 8));
 }
@@ -993,9 +998,13 @@ static inline uint32_t __bswap_32(uint32_t x) {
            ((x >> 8) & 0x0000FF00) |
            ((x >> 24) & 0x000000FF);
 }
+#endif
 
-// Endian conversion macros.  Guarded so the real zephyr/sys/byteorder.h
-// can redefine them without -Werror conflicts on embedded ports.
+// Endian conversion macros.  On Unix, the real zephyr/sys/byteorder.h
+// provides these via the stub wrapper.  On embedded, define fallbacks
+// guarded by #ifndef to avoid -Werror conflicts when the real header
+// is also included.
+#if !defined(__linux__) && !defined(__APPLE__) && !defined(__unix__)
 #ifndef __LITTLE_ENDIAN__
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 #define __LITTLE_ENDIAN__
@@ -1025,5 +1034,6 @@ static inline uint32_t __bswap_32(uint32_t x) {
 #define sys_be32_to_cpu(x) (x)
 #endif
 #endif
+#endif // !__linux__ && !__APPLE__ && !__unix__
 
 #endif // MICROPY_INCLUDED_EXTMOD_ZEPHYR_BLE_ZEPHYR_BLE_CONFIG_H

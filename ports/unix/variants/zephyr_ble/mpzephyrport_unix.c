@@ -26,6 +26,9 @@
 
 // Unix port integration for Zephyr BLE stack.
 // Uses Linux HCI_CHANNEL_USER sockets for raw access to USB Bluetooth adapters.
+// A dedicated pthread reads HCI packets from the socket and delivers them to
+// the Zephyr host via recv_cb. The main thread processes work items and Python
+// callbacks via the soft timer / sched_node infrastructure.
 
 #include "py/mpconfig.h"
 
@@ -40,6 +43,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
+#include <poll.h>
+#include <pthread.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 
@@ -103,12 +108,194 @@ struct hci_dev_list_req {
 #define error_printf(...) mp_printf(&mp_plat_print, "mpzephyrport_unix ERROR: " __VA_ARGS__)
 
 // ============================================================================
+// BLE critical section mutex
+// ============================================================================
+
+// Recursive mutex protecting all shared BLE state. Required because the HCI RX
+// thread calls recv_cb and work_process concurrently with the main thread.
+// Recursive because ENTER/EXIT pairs nest (e.g. work_process -> handler ->
+// k_work_submit -> ENTER).
+static pthread_mutex_t ble_mutex;
+static bool ble_mutex_initialised = false;
+
+void mp_bluetooth_zephyr_ble_lock(void) {
+    if (ble_mutex_initialised) {
+        pthread_mutex_lock(&ble_mutex);
+    }
+}
+
+void mp_bluetooth_zephyr_ble_unlock(void) {
+    if (ble_mutex_initialised) {
+        pthread_mutex_unlock(&ble_mutex);
+    }
+}
+
+static void ble_mutex_init(void) {
+    if (!ble_mutex_initialised) {
+        pthread_mutexattr_t attr;
+        pthread_mutexattr_init(&attr);
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+        pthread_mutex_init(&ble_mutex, &attr);
+        pthread_mutexattr_destroy(&attr);
+        ble_mutex_initialised = true;
+    }
+}
+
+static void ble_mutex_deinit(void) {
+    if (ble_mutex_initialised) {
+        pthread_mutex_destroy(&ble_mutex);
+        ble_mutex_initialised = false;
+    }
+}
+
+// ============================================================================
 // HCI socket state
 // ============================================================================
 
 static int hci_socket_fd = -1;
 static volatile bt_hci_recv_t recv_cb = NULL;
 static const struct device *hci_dev_ref = NULL;
+
+// ============================================================================
+// HCI RX thread
+// ============================================================================
+
+static pthread_t hci_rx_thread_id;
+static volatile bool hci_rx_running = false;
+
+// Poll timeout for the RX thread read loop. Allows periodic checks of the
+// stop flag without burning CPU.
+#define HCI_RX_POLL_TIMEOUT_MS 100
+
+// External functions from modbluetooth_zephyr.c / zephyr_ble_work.c used
+// during HCI processing.
+extern bool mp_bluetooth_zephyr_work_process(void);
+extern void mp_bluetooth_zephyr_set_sys_work_q_context(bool in_context);
+extern void mp_bluetooth_zephyr_l2cap_flush_recv_notify(void);
+
+// Read one HCI packet from the socket, parse H:4 framing, allocate a net_buf,
+// and deliver to the Zephyr host via recv_cb.
+// Returns true if a packet was delivered, false otherwise.
+// Caller must NOT hold the BLE mutex; this function acquires it for the
+// recv_cb and work_process calls.
+static bool hci_rx_read_one_packet(void) {
+    uint8_t rx_buf[4 + CONFIG_BT_BUF_ACL_RX_SIZE + 64];
+
+    ssize_t len = read(hci_socket_fd, rx_buf, sizeof(rx_buf));
+    if (len <= 1) {
+        return false;
+    }
+
+    // Parse H:4 type byte.
+    uint8_t pkt_type = rx_buf[0];
+    uint8_t *pkt_data = &rx_buf[1];
+    size_t pkt_len = len - 1;
+
+    struct net_buf *buf = NULL;
+
+    switch (pkt_type) {
+        case H4_EVT: {
+            if (pkt_len < 2) {
+                return false;
+            }
+            uint8_t evt_code = pkt_data[0];
+            // Command Complete (0x0E) and Command Status (0x0F) use
+            // the dedicated command event pool.
+            if (evt_code == 0x0E || evt_code == 0x0F) {
+                buf = bt_buf_get_evt(evt_code, false, K_NO_WAIT);
+            } else {
+                buf = bt_buf_get_rx(BT_BUF_EVT, K_NO_WAIT);
+            }
+            break;
+        }
+        case H4_ACL:
+            buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_FOREVER);
+            break;
+        default:
+            // Unknown type, skip.
+            return false;
+    }
+
+    if (!buf) {
+        return false;
+    }
+
+    net_buf_add_mem(buf, pkt_data, pkt_len);
+
+    // Deliver to Zephyr host.  recv_cb (bt_recv) only enqueues the buffer
+    // to the RX FIFO and submits rx_work -- both use their own internal
+    // atomic sections for queue manipulation.  No BLE mutex needed here;
+    // holding it would starve the main thread which also needs it for
+    // work_process in machine.idle() loops.
+    //
+    // Do NOT set sys_work_q_context here.  Priority events (command
+    // complete) will be processed inline by bt_recv via hci_event_prio,
+    // which only touches the command semaphore (atomic).  Normal events
+    // are queued for the main thread's work_process.
+    int ret = recv_cb(hci_dev_ref, buf);
+
+    if (ret < 0) {
+        net_buf_unref(buf);
+    }
+
+    return true;
+}
+
+static void *hci_rx_thread_func(void *arg) {
+    (void)arg;
+    debug_printf("HCI RX thread started\n");
+
+    struct pollfd pfd = { .fd = hci_socket_fd, .events = POLLIN };
+
+    while (hci_rx_running) {
+        // Verify fd and callback are still valid each iteration.
+        if (hci_socket_fd < 0 || recv_cb == NULL) {
+            break;
+        }
+
+        // Wait for data with timeout so we can check the stop flag.
+        int poll_ret = poll(&pfd, 1, HCI_RX_POLL_TIMEOUT_MS);
+        if (poll_ret < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            // Socket error (likely closed during shutdown).
+            break;
+        }
+        if (poll_ret == 0) {
+            continue; // Timeout, check stop flag.
+        }
+
+        // POLLERR/POLLHUP means the socket was closed.
+        if (pfd.revents & (POLLERR | POLLHUP)) {
+            break;
+        }
+
+        if (pfd.revents & POLLIN) {
+            hci_rx_read_one_packet();
+        }
+    }
+
+    debug_printf("HCI RX thread exiting\n");
+    return NULL;
+}
+
+// Strong overrides of the weak stubs in zephyr_ble_work.c.
+// On unix, the RX thread is started from hci_unix_open() after the socket
+// is ready, not from work_thread_start() which is called before bt_enable().
+void mp_bluetooth_zephyr_work_thread_start(void) {
+    // No-op: thread started from hci_unix_open().
+}
+
+void mp_bluetooth_zephyr_work_thread_stop(void) {
+    if (!hci_rx_running) {
+        return;
+    }
+    debug_printf("Stopping HCI RX thread\n");
+    hci_rx_running = false;
+    pthread_join(hci_rx_thread_id, NULL);
+    debug_printf("HCI RX thread joined\n");
+}
 
 // ============================================================================
 // Device auto-detection
@@ -207,8 +394,18 @@ static int hci_unix_open(const struct device *dev, bt_hci_recv_t recv) {
     hci_dev_ref = dev;
     recv_cb = recv;
 
-    // Start the soft timer for periodic HCI polling.
+    // Start the soft timer for periodic work queue / timer processing.
     mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
+
+    // Start HCI RX thread now that the socket is ready.
+    // mp_bluetooth_zephyr_work_thread_start() may have been called earlier
+    // (from modbluetooth_zephyr.c before bt_enable) when the socket wasn't
+    // open yet. Start the actual thread here.
+    if (!hci_rx_running) {
+        hci_rx_running = true;
+        pthread_create(&hci_rx_thread_id, NULL, hci_rx_thread_func, NULL);
+        debug_printf("HCI RX thread started from hci_unix_open\n");
+    }
 
     debug_printf("hci_unix_open completed, fd=%d\n", hci_socket_fd);
     return 0;
@@ -217,6 +414,13 @@ static int hci_unix_open(const struct device *dev, bt_hci_recv_t recv) {
 static int hci_unix_close(const struct device *dev) {
     (void)dev;
     debug_printf("hci_unix_close\n");
+
+    // Stop RX thread before closing the socket.
+    if (hci_rx_running) {
+        hci_rx_running = false;
+        pthread_join(hci_rx_thread_id, NULL);
+        debug_printf("HCI RX thread joined\n");
+    }
 
     recv_cb = NULL;
     mp_bluetooth_zephyr_poll_stop_timer();
@@ -324,110 +528,42 @@ int bt_hci_transport_teardown(const struct device *dev) {
 // Port glue: strong overrides of weak defaults from zephyr_ble_poll.c
 // ============================================================================
 
-// External functions from modbluetooth_zephyr.c used during HCI processing.
-extern void mp_bluetooth_zephyr_work_process(void);
-extern void mp_bluetooth_zephyr_set_sys_work_q_context(bool in_context);
-extern void mp_bluetooth_zephyr_l2cap_flush_recv_notify(void);
-
-// HCI packet reception and processing -- called from soft timer via sched_node.
+// Work queue and L2CAP processing -- called from soft timer via sched_node.
+// The RX thread handles socket reads; this function only processes work items,
+// timers, and L2CAP flush in the main thread context.
 void mp_bluetooth_zephyr_port_run_task(mp_sched_node_t *node) {
     (void)node;
 
-    if (hci_socket_fd < 0 || recv_cb == NULL || !mp_bluetooth_is_active()) {
+    if (!mp_bluetooth_is_active()) {
         return;
     }
 
     // Process Zephyr BLE work queues and timers.
     mp_bluetooth_zephyr_poll();
 
-    // Non-blocking read loop from HCI socket.
-    // Each read() returns one complete HCI packet: [h4_type | hci_data].
-    uint8_t rx_buf[4 + CONFIG_BT_BUF_ACL_RX_SIZE + 64];
-
-    while (1) {
-        // Check buffer availability before reading HCI data.
-        if (!mp_bluetooth_zephyr_buffers_available()) {
-            mp_bluetooth_zephyr_work_process();
-            if (!mp_bluetooth_zephyr_buffers_available()) {
-                break;
-            }
-        }
-
-        ssize_t len = read(hci_socket_fd, rx_buf, sizeof(rx_buf));
-        if (len <= 1) {
-            break; // EAGAIN/EWOULDBLOCK or too short
-        }
-
-        // Parse H:4 type byte.
-        uint8_t pkt_type = rx_buf[0];
-        uint8_t *pkt_data = &rx_buf[1];
-        size_t pkt_len = len - 1;
-
-        struct net_buf *buf = NULL;
-
-        switch (pkt_type) {
-            case H4_EVT: {
-                if (pkt_len < 2) {
-                    continue;
-                }
-                uint8_t evt_code = pkt_data[0];
-                // Command Complete (0x0E) and Command Status (0x0F) use
-                // the dedicated command event pool.
-                if (evt_code == 0x0E || evt_code == 0x0F) {
-                    buf = bt_buf_get_evt(evt_code, false, K_NO_WAIT);
-                } else {
-                    buf = bt_buf_get_rx(BT_BUF_EVT, K_NO_WAIT);
-                }
-                break;
-            }
-            case H4_ACL:
-                buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_FOREVER);
-                break;
-            default:
-                // Unknown type, skip.
-                continue;
-        }
-
-        if (!buf) {
-            continue;
-        }
-
-        net_buf_add_mem(buf, pkt_data, pkt_len);
-
-        // Set work queue context so priority HCI events can process
-        // TX notify directly instead of queuing work.
-        mp_bluetooth_zephyr_set_sys_work_q_context(true);
-
-        int ret = recv_cb(hci_dev_ref, buf);
-
-        mp_bluetooth_zephyr_set_sys_work_q_context(false);
-
-        if (ret < 0) {
-            net_buf_unref(buf);
-        }
-
-        mp_bluetooth_zephyr_work_process();
-    }
-
-    // Flush deferred L2CAP recv notifications.
+    // Flush deferred L2CAP recv notifications (must run in main thread
+    // because it invokes Python callbacks).
     mp_bluetooth_zephyr_l2cap_flush_recv_notify();
 
-    // Reschedule soft timer for continuous HCI polling.
-    mp_bluetooth_zephyr_port_poll_in_ms(ZEPHYR_BLE_POLL_INTERVAL_MS);
+    // Reschedule with short interval for responsive connection handling.
+    // Embedded ports use 128ms but have IRQ-driven polling; unix relies
+    // solely on this timer for work queue processing.
+    mp_bluetooth_zephyr_port_poll_in_ms(10);
 }
 
-// Called by k_sem_take() to process HCI while waiting for a semaphore.
+// Called by k_sem_take() to process work while waiting for a semaphore.
+// With the RX thread active, HCI packets arrive asynchronously and the work
+// queues get populated by recv_cb. We just need to process pending work items.
 void mp_bluetooth_zephyr_hci_uart_wfi(void) {
-    if (recv_cb == NULL || hci_socket_fd < 0) {
+    if (!mp_bluetooth_is_active()) {
         return;
     }
-    mp_bluetooth_zephyr_port_run_task(NULL);
+    mp_bluetooth_zephyr_poll();
 }
 
 // Main polling function.
 void mp_bluetooth_hci_poll(void) {
     if (mp_bluetooth_is_active()) {
-        // run_task reschedules itself at the end, no extra schedule needed.
         mp_bluetooth_zephyr_port_run_task(NULL);
     }
 }
@@ -445,6 +581,9 @@ void mp_bluetooth_zephyr_port_init(void) {
     volatile const void *keep_device = &__device_dts_ord_0;
     (void)keep_device;
 
+    // Initialise BLE critical section mutex.
+    ble_mutex_init();
+
     // Initialise soft timer infrastructure (idempotent).
     soft_timer_init();
 
@@ -458,18 +597,22 @@ void mp_bluetooth_zephyr_port_deinit(void) {
     recv_cb = NULL;
 
     mp_bluetooth_zephyr_poll_cleanup();
+
+    ble_mutex_deinit();
 }
 
 // ============================================================================
-// Arch IRQ stubs -- no-ops on Unix (single-threaded BLE context)
+// Arch IRQ stubs -- delegate to BLE mutex on Unix
 // ============================================================================
 
 unsigned int arch_irq_lock(void) {
+    mp_bluetooth_zephyr_ble_lock();
     return 0;
 }
 
 void arch_irq_unlock(unsigned int key) {
     (void)key;
+    mp_bluetooth_zephyr_ble_unlock();
 }
 
 #endif // MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR

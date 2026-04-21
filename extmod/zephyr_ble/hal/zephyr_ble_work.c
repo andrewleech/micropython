@@ -492,10 +492,14 @@ struct k_work *mp_bluetooth_zephyr_init_work_get(void) {
 
 
 
-// Stub implementations — work processed via cooperative polling, no dedicated work thread.
+// Weak stub implementations -- work processed via cooperative polling,
+// no dedicated work thread.  Ports with a dedicated HCI RX thread (e.g.
+// Unix) override these with strong definitions.
+__attribute__((weak))
 void mp_bluetooth_zephyr_work_thread_start(void) {
 }
 
+__attribute__((weak))
 void mp_bluetooth_zephyr_work_thread_stop(void) {
 }
 

@@ -125,11 +125,14 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout) {
             return -EAGAIN;
         }
 
+        // Process port-level events (HCI RX polling on unix, no-op on embedded
+        // where the soft timer interrupt handles it).
+        MICROPY_INTERNAL_EVENT_HOOK;
         // Process MicroPython scheduled callbacks without raising exceptions.
         // Uses CALLBACKS_ONLY to avoid nlr_raise which would unwind past
         // Zephyr's C frames without cleanup.
         mp_handle_pending(MP_HANDLE_PENDING_CALLBACKS_ONLY);
-        MICROPY_INTERNAL_WFE(100);
+        MICROPY_INTERNAL_WFE(10);
     }
 
     mp_bluetooth_zephyr_in_wait_loop = false;

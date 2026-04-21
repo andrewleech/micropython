@@ -48,8 +48,8 @@ static pthread_t timer_thread;
 static pthread_mutex_t timer_mutex;  // recursive, shared with PENDSV macros
 static pthread_cond_t timer_cond;
 static volatile bool timer_running;
-static volatile uint32_t timer_target_ms;
-static volatile bool timer_scheduled;
+volatile uint32_t timer_target_ms;
+volatile bool timer_scheduled;
 
 // --- Port API for softtimer.c ---
 
@@ -59,12 +59,19 @@ uint32_t soft_timer_get_ms(void) {
     return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 }
 
+// Track the timer thread ID so we can skip condvar signal when called
+// from within the timer callback (would deadlock).
+static pthread_t timer_thread;
+static volatile bool in_timer_callback = false;
+
 void soft_timer_schedule_at_ms(uint32_t ticks_ms) {
-    pthread_mutex_lock(&timer_mutex);
+    // Just set the target atomically.  Never call pthread_cond_signal here
+    // because it can deadlock on the condvar's internal futex when the timer
+    // threads are in pthread_cond_timedwait.  The timer thread will wake
+    // naturally when its current timedwait expires (at most 128ms latency)
+    // and re-evaluate timer_scheduled / timer_target_ms.
     timer_target_ms = ticks_ms;
-    timer_scheduled = true;
-    pthread_cond_signal(&timer_cond);
-    pthread_mutex_unlock(&timer_mutex);
+    __atomic_store_n(&timer_scheduled, true, __ATOMIC_RELEASE);
 }
 
 // --- Timer Thread ---
@@ -75,7 +82,16 @@ static void *timer_thread_func(void *arg) {
     while (timer_running) {
         if (!timer_scheduled) {
             // No timer pending -- wait indefinitely for signal.
-            pthread_cond_wait(&timer_cond, &timer_mutex);
+            // Use timed wait (not indefinite) since soft_timer_schedule_at_ms
+            // no longer signals the condvar.  Poll every 50ms.
+            struct timespec idle_ts;
+            clock_gettime(CLOCK_MONOTONIC, &idle_ts);
+            idle_ts.tv_nsec += 50000000L; // 50ms
+            if (idle_ts.tv_nsec >= 1000000000L) {
+                idle_ts.tv_sec++;
+                idle_ts.tv_nsec -= 1000000000L;
+            }
+            pthread_cond_timedwait(&timer_cond, &timer_mutex, &idle_ts);
             continue;
         }
 
@@ -85,7 +101,7 @@ static void *timer_thread_func(void *arg) {
 
         if (delay > 0) {
             struct timespec ts;
-            clock_gettime(CLOCK_REALTIME, &ts);
+            clock_gettime(CLOCK_MONOTONIC, &ts);
             ts.tv_sec += delay / 1000;
             ts.tv_nsec += (long)(delay % 1000) * 1000000L;
             if (ts.tv_nsec >= 1000000000L) {
@@ -104,7 +120,9 @@ static void *timer_thread_func(void *arg) {
         timer_scheduled = false;
         // soft_timer_handler modifies the heap, protected by this mutex
         // (same mutex as PENDSV_ENTER/EXIT).
+        in_timer_callback = true;
         soft_timer_handler();
+        in_timer_callback = false;
     }
     pthread_mutex_unlock(&timer_mutex);
     return NULL;
@@ -137,7 +155,14 @@ void soft_timer_init(void) {
     pthread_mutex_init(&timer_mutex, &attr);
     pthread_mutexattr_destroy(&attr);
 
-    pthread_cond_init(&timer_cond, NULL);
+    // Use CLOCK_MONOTONIC for the condvar to match soft_timer_get_ms()
+    // which also uses CLOCK_MONOTONIC.  Avoids clock skew from system
+    // time adjustments causing spurious timeouts or missed wakeups.
+    pthread_condattr_t cond_attr;
+    pthread_condattr_init(&cond_attr);
+    pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC);
+    pthread_cond_init(&timer_cond, &cond_attr);
+    pthread_condattr_destroy(&cond_attr);
     timer_running = true;
     timer_scheduled = false;
     pthread_create(&timer_thread, NULL, timer_thread_func, NULL);

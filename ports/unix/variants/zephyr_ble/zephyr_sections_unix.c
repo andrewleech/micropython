@@ -35,15 +35,15 @@
 
 #if MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_ZEPHYR
 
-// Provide empty start/end pairs via linker --defsym or assembly.
-// GCC inline asm is the most portable approach for ELF targets.
-// Each _start/_end pair is a global symbol at the same address.
+// net_buf_pool start/end symbols are provided by zephyr_sections.ld
+// which collects ._net_buf_pool.static.* sections into a contiguous array.
+//
+// The remaining iterable types use the manual pool registry
+// (net_buf_pool_registry.c) instead of linker sections, but Zephyr
+// host code still references the boundary symbols.  Provide empty
+// pairs so the iteration loops execute zero times.
 
 __asm__ (
-    ".global _net_buf_pool_list_start\n"
-    ".global _net_buf_pool_list_end\n"
-    ".set _net_buf_pool_list_start, _zephyr_empty_sections\n"
-    ".set _net_buf_pool_list_end, _zephyr_empty_sections\n"
     ".global _bt_conn_cb_list_start\n"
     ".global _bt_conn_cb_list_end\n"
     ".set _bt_conn_cb_list_start, _zephyr_empty_sections\n"

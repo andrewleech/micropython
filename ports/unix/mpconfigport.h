@@ -223,7 +223,14 @@ static inline unsigned long mp_random_seed_init(void) {
 
 // Configure the implementation of machine.idle().
 #include <sched.h>
+#ifndef MICROPY_UNIX_MACHINE_IDLE
 #define MICROPY_UNIX_MACHINE_IDLE sched_yield();
+#endif
+
+#ifndef _WIN32
+void mp_hal_signal_event(void);
+#define MICROPY_SCHED_HOOK_SCHEDULED mp_hal_signal_event()
+#endif
 
 #ifndef MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
 #define MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE (1)

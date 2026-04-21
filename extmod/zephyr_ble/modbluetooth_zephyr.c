@@ -1980,6 +1980,9 @@ int mp_bluetooth_set_preferred_mtu(uint16_t mtu) {
 int mp_bluetooth_gap_scan_start(int32_t duration_ms, int32_t interval_us, int32_t window_us, bool active_scan) {
     DEBUG_printf("gap_scan_start: dur=%d\n", (int)duration_ms);
 
+    // Process pending work to ensure previous operations are complete.
+    mp_bluetooth_zephyr_work_process();
+
     // Stop any ongoing GAP scan.
     int ret = mp_bluetooth_gap_scan_stop();
     if (ret) {
@@ -2032,6 +2035,12 @@ int mp_bluetooth_gap_peripheral_connect(uint8_t addr_type, const uint8_t *addr, 
     if (!mp_bluetooth_is_active()) {
         return ERRNO_BLUETOOTH_NOT_ACTIVE;
     }
+
+    // Process pending work items to ensure any previous connection cleanup
+    // (disconnect complete, bt_conn release) has finished.  Without this,
+    // bt_conn_le_create can fail with ENOMEM or EALREADY because the old
+    // connection object is still in the pool.
+    mp_bluetooth_zephyr_work_process();
 
     // Stop scanning if active (can't scan and initiate connection simultaneously)
     if (mp_bluetooth_zephyr_gap_scan_state != MP_BLUETOOTH_ZEPHYR_GAP_SCAN_STATE_INACTIVE) {
@@ -2970,9 +2979,16 @@ int mp_bluetooth_gattc_discover_characteristics(uint16_t conn_handle, uint16_t s
     rp->gattc_discover_conn_handle = conn_handle;
     rp->gattc_discover_end_handle = end_handle;
 
+    // Process work queue before discover to ensure ATT/L2CAP channel setup
+    // completes.  On unix, the RX thread delivers the LE_Connection_Complete
+    // event but ATT channel registration happens via work items on the main
+    // thread.  Without this, bt_gatt_discover returns ENOMEM because the ATT
+    // context hasn't been created yet.
+    mp_bluetooth_zephyr_work_process();
+
     int err = bt_gatt_discover(conn, &rp->gattc_discover_params);
 
-    // Process work queue to send ATT request (Issue #14 fix)
+    // Process work queue to send ATT request
     if (err == 0) {
         mp_bluetooth_zephyr_work_process();
     }

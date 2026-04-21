@@ -15,3 +15,6 @@ CFLAGS_EXTRA += -D__ZEPHYR_BLE_UNIX_PORT__
 # Zephyr BLE
 MICROPY_PY_BLUETOOTH = 1
 MICROPY_BLUETOOTH_ZEPHYR = 1
+
+# Linker script fragment to collect Zephyr iterable sections (net_buf_pool etc.)
+LDFLAGS_EXTRA += -T$(VARIANT_DIR)/zephyr_sections.ld
