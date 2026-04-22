@@ -1,0 +1,94 @@
+name: Retest failed jobs
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: write-all
+
+jobs:
+  retest:
+    if: >-
+      github.event.issue.pull_request
+      && github.event.comment.body == '/retest'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.issue.number }}
+      COMMENT_ID: ${{ github.event.comment.id }}
+      COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+      AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
+    steps:
+      - name: Debug token
+        run: gh auth status
+      - name: Rerun failed jobs
+        run: |
+          set -euo pipefail
+          MAX_RETESTS=3
+
+          react() {
+            gh api "repos/$REPO/issues/comments/$COMMENT_ID/reactions" \
+              -f content="$1" > /dev/null
+          }
+
+          # Fetch PR data once (author for auth, SHA for rerun lookup)
+          PR_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '[.user.login, .head.sha] | @tsv')
+          PR_AUTHOR=$(echo "$PR_JSON" | cut -f1)
+          SHA=$(echo "$PR_JSON" | cut -f2)
+
+          # Authorization: association-based or PR author
+          case "$AUTHOR_ASSOCIATION" in
+            OWNER|MEMBER|COLLABORATOR|CONTRIBUTOR) ;;
+            *)
+              if [ "$COMMENT_AUTHOR" != "$PR_AUTHOR" ]; then
+                react "-1"
+                exit 0
+              fi
+              ;;
+          esac
+
+          # Rate limit: max N successful retests per PR per UTC day.
+          # Uses inline .reactions["+1"] from comment payload to avoid
+          # per-comment API calls. Sums across pages for paginated results.
+          TODAY=$(date -u +%Y-%m-%d)
+          COUNT=$(gh api --paginate \
+            "repos/$REPO/issues/$PR_NUMBER/comments?since=${TODAY}T00:00:00Z" \
+            --jq '
+              [.[] | select(
+                .body == "/retest" and
+                (.created_at[:10] == "'"${TODAY}"'") and
+                .reactions["+1"] > 0
+              )] | length
+            ' | awk '{s+=$0} END {print s+0}')
+
+          if [ "$COUNT" -ge "$MAX_RETESTS" ]; then
+            react "-1"
+            exit 0
+          fi
+
+          # Find failed workflow runs for this PR's head SHA
+          FAILED_RUNS=$(gh api --paginate \
+            "repos/$REPO/actions/runs?head_sha=$SHA&event=pull_request&status=failure" \
+            --jq '.workflow_runs[].id')
+
+          if [ -z "$FAILED_RUNS" ]; then
+            react "-1"
+            exit 0
+          fi
+
+          # Rerun only the failed jobs in each failed run.
+          # Continue on individual failures so remaining runs still get rerun.
+          RERUN_COUNT=0
+          for run_id in $FAILED_RUNS; do
+            if gh api --method POST \
+              "repos/$REPO/actions/runs/$run_id/rerun-failed-jobs" > /dev/null 2>&1; then
+              RERUN_COUNT=$((RERUN_COUNT + 1))
+            fi
+          done
+
+          if [ "$RERUN_COUNT" -gt 0 ]; then
+            react "+1"
+          else
+            react "-1"
+          fi
