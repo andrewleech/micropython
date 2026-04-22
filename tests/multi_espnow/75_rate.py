@@ -17,13 +17,13 @@ if sys.platform == "esp8266":
 
 # Currently the config(rate=...) implementation is not compatible with ESP32-C6
 # (this test passes when C6 is receiver, but not if C6 is sender.)
-if "ESP32C6" in sys.implementation._machine:
+if "ESP32-C6" in sys.implementation._machine:
     print("SKIP")
     raise SystemExit
 
 # ESP32-C2 doesn't support Long Range mode. This test is currently written assuming
 # LR mode can be enabled.
-if "ESP32C2" in sys.implementation._machine:
+if "ESP32-C2" in sys.implementation._machine:
     print("SKIP")
     raise SystemExit
 
