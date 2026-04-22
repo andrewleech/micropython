@@ -57,9 +57,15 @@
 #include "stack_size.h"
 #include "shared/runtime/pyexec.h"
 
+#if MICROPY_MODULE_FROZEN
+#include "py/frozenmod.h"
+#endif
+
 // Command line options, with their defaults
 bool mp_compile_only = false;
+#if MICROPY_ENABLE_COMPILER
 static uint emit_opt = MP_EMIT_OPT_NONE;
+#endif
 
 #if MICROPY_ENABLE_GC
 // Heap size of GC heap (if enabled)
@@ -110,6 +116,7 @@ static int handle_uncaught_exception(mp_obj_base_t *exc) {
     return 1;
 }
 
+#if MICROPY_ENABLE_COMPILER
 #define LEX_SRC_STR (1)
 #define LEX_SRC_STDIN (4)
 
@@ -276,7 +283,9 @@ static int do_str(const char *str) {
     int ret = pyexec_vstr(&vstr, true);
     return convert_pyexec_result(ret);
 }
+#endif // MICROPY_ENABLE_COMPILER
 
+#if !MICROPY_FROZEN_MAIN_MODULE
 static void print_help(char **argv) {
     printf(
         "usage: %s [<opts>] [-X <implopt>] [-c <command> | -m <module> | <filename>]\n"
@@ -316,6 +325,7 @@ static void print_help(char **argv) {
         printf("  (none)\n");
     }
 }
+#endif
 
 static int invalid_args(void) {
     fprintf(stderr, "Invalid command line arguments. Use -h option for help.\n");
@@ -329,10 +339,12 @@ static void pre_process_options(int argc, char **argv) {
             if (strcmp(argv[a], "-c") == 0 || strcmp(argv[a], "-m") == 0) {
                 break; // Everything after this is a command/module and arguments for it
             }
+            #if !MICROPY_FROZEN_MAIN_MODULE
             if (strcmp(argv[a], "-h") == 0) {
                 print_help(argv);
                 exit(0);
             }
+            #endif
             if (strcmp(argv[a], "--version") == 0) {
                 printf(MICROPY_BANNER_NAME_AND_VERSION "; " MICROPY_BANNER_MACHINE "\n");
                 exit(0);
@@ -342,6 +354,7 @@ static void pre_process_options(int argc, char **argv) {
                     exit(invalid_args());
                 }
                 if (0) {
+                #if MICROPY_ENABLE_COMPILER
                 } else if (strcmp(argv[a + 1], "compile-only") == 0) {
                     mp_compile_only = true;
                 } else if (strcmp(argv[a + 1], "emit=bytecode") == 0) {
@@ -352,6 +365,7 @@ static void pre_process_options(int argc, char **argv) {
                 } else if (strcmp(argv[a + 1], "emit=viper") == 0) {
                     emit_opt = MP_EMIT_OPT_VIPER;
                 #endif
+                #endif // MICROPY_ENABLE_COMPILER
                 #if MICROPY_ENABLE_GC
                 } else if (strncmp(argv[a + 1], "heapsize=", sizeof("heapsize=") - 1) == 0) {
                     char *end;
@@ -407,11 +421,13 @@ static void pre_process_options(int argc, char **argv) {
     }
 }
 
+#if MICROPY_ENABLE_COMPILER
 static void set_sys_argv(char *argv[], int argc, int start_arg) {
     for (int i = start_arg; i < argc; i++) {
         mp_obj_list_append(mp_sys_argv, MP_OBJ_NEW_QSTR(qstr_from_str(argv[i])));
     }
 }
+#endif
 
 #if MICROPY_PY_SYS_EXECUTABLE
 extern mp_obj_str_t mp_sys_executable_obj;
@@ -495,11 +511,13 @@ MP_NOINLINE int main_(int argc, char **argv) {
 
     mp_init();
 
+    #if MICROPY_ENABLE_COMPILER
     #if MICROPY_EMIT_NATIVE
     // Set default emitter options
     MP_STATE_VM(default_emit_opt) = emit_opt;
     #else
     (void)emit_opt;
+    #endif
     #endif
 
     #if MICROPY_VFS_POSIX
@@ -563,6 +581,12 @@ MP_NOINLINE int main_(int argc, char **argv) {
         }
     }
 
+    #if MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL
+    // Add "/rom" and "/rom/lib" to sys.path if romfs is mounted
+    mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_rom));
+    mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_rom_slash_lib));
+    #endif
+
     mp_obj_list_init(MP_OBJ_TO_PTR(mp_sys_argv), 0);
 
     #if defined(MICROPY_UNIX_COVERAGE)
@@ -585,9 +609,169 @@ MP_NOINLINE int main_(int argc, char **argv) {
     sys_set_excecutable(argv[0]);
     #endif
 
+    #if MICROPY_ENABLE_COMPILER
     const int NOTHING_EXECUTED = -2;
-    int ret = NOTHING_EXECUTED;
+    #endif
+    int ret = 0;
+    #if MICROPY_ENABLE_COMPILER
     bool inspect = false;
+    #endif
+
+    // Check if a frozen or romfs main module exists and should be run.
+    // Priority: 1) frozen main module, 2) /rom/main.py or /rom/main.mpy
+    // It runs when no -c, -m, -h, or script file is specified.
+    bool run_main = false;
+    bool main_is_frozen = false;
+    const char *main_path = "main";  // For frozen or import-based execution
+
+    #if MICROPY_MODULE_FROZEN
+    {
+        int frozen_type;
+        void *frozen_data;
+        // Try main.py first, then main.mpy (frozen modules use filename with extension)
+        mp_import_stat_t frozen_stat = mp_find_frozen_module("main.py", &frozen_type, &frozen_data);
+        if (frozen_stat != MP_IMPORT_STAT_FILE) {
+            frozen_stat = mp_find_frozen_module("main.mpy", &frozen_type, &frozen_data);
+        }
+        if (frozen_stat == MP_IMPORT_STAT_FILE) {
+            run_main = true;
+            main_is_frozen = true;
+        }
+    }
+    #endif
+
+    #if MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL
+    if (!run_main) {
+        nlr_buf_t nlr;
+        if (nlr_push(&nlr) == 0) {
+            mp_import_stat_t stat = mp_vfs_import_stat("/rom/main.py");
+            if (stat == MP_IMPORT_STAT_FILE) {
+                run_main = true;
+                main_path = "/rom/main.py";
+            } else {
+                stat = mp_vfs_import_stat("/rom/main.mpy");
+                if (stat == MP_IMPORT_STAT_FILE) {
+                    run_main = true;
+                    main_path = "/rom/main.mpy";
+                }
+            }
+            nlr_pop();
+        }
+    }
+    #endif
+
+    if (run_main) {
+        // Check if any argument would bypass main
+        // -c and -m always bypass; -h bypasses only for romfs main (not frozen)
+        for (int a = 1; a < argc; a++) {
+            if (argv[a][0] == '-') {
+                if (strcmp(argv[a], "-c") == 0 || strcmp(argv[a], "-m") == 0) {
+                    run_main = false;
+                    break;
+                } else if (!main_is_frozen && strcmp(argv[a], "-h") == 0) {
+                    run_main = false;
+                    break;
+                } else if (strcmp(argv[a], "-X") == 0) {
+                    if (a + 1 < argc) {
+                        a++;
+                    }
+                }
+            }
+        }
+    }
+
+    if (run_main) {
+        // Process flags that affect execution
+        for (int a = 1; a < argc; a++) {
+            if (argv[a][0] == '-') {
+                #if MICROPY_ENABLE_COMPILER
+                if (strcmp(argv[a], "-i") == 0) {
+                    inspect = true;
+                } else
+                #endif
+                if (strcmp(argv[a], "-X") == 0 && a + 1 < argc) {
+                    a++;
+                #if MICROPY_DEBUG_PRINTERS
+                } else if (strcmp(argv[a], "-v") == 0) {
+                    mp_verbose_flag++;
+                #endif
+                #if MICROPY_ENABLE_COMPILER
+                } else if (strncmp(argv[a], "-O", 2) == 0) {
+                    if (unichar_isdigit(argv[a][2])) {
+                        MP_STATE_VM(mp_optimise_value) = argv[a][2] & 0xf;
+                    } else {
+                        MP_STATE_VM(mp_optimise_value) = 0;
+                        for (char *p = argv[a] + 1; *p && *p == 'O'; p++, MP_STATE_VM(mp_optimise_value)++) {;
+                        }
+                    }
+                #endif
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Build sys.argv: [main_path, remaining_args...]
+        mp_obj_list_append(mp_sys_argv, mp_obj_new_str(main_path, strlen(main_path)));
+        bool in_positional = false;
+        for (int a = 1; a < argc; a++) {
+            if (!in_positional && argv[a][0] == '-') {
+                #if MICROPY_ENABLE_COMPILER
+                if (strcmp(argv[a], "-i") == 0) {
+                    continue;
+                } else
+                #endif
+                #if MICROPY_DEBUG_PRINTERS
+                if (strcmp(argv[a], "-v") == 0) {
+                    continue;
+                } else
+                #endif
+                #if MICROPY_ENABLE_COMPILER
+                if (strncmp(argv[a], "-O", 2) == 0) {
+                    continue;
+                } else
+                #endif
+                if (strcmp(argv[a], "-X") == 0 && a + 1 < argc) {
+                    a++;
+                    continue;
+                }
+                in_positional = true;
+            } else {
+                in_positional = true;
+            }
+            if (in_positional) {
+                mp_obj_list_append(mp_sys_argv, mp_obj_new_str_from_cstr(argv[a]));
+            }
+        }
+
+        // Execute main module
+        if (main_is_frozen || (strlen(main_path) > 4 && strcmp(main_path + strlen(main_path) - 4, ".mpy") == 0)) {
+            // Frozen or .mpy: use import mechanism
+            nlr_buf_t nlr;
+            if (nlr_push(&nlr) == 0) {
+                mp_obj_t import_args[4];
+                import_args[0] = MP_OBJ_NEW_QSTR(MP_QSTR_main);
+                import_args[1] = import_args[2] = mp_const_none;
+                import_args[3] = mp_const_false;
+                mp_builtin___import__(4, import_args);
+                nlr_pop();
+                ret = 0;
+            } else {
+                ret = handle_uncaught_exception(nlr.ret_val);
+            }
+        }
+        #if MICROPY_ENABLE_COMPILER
+        else {
+            // .py file in romfs: use lexer
+            ret = do_file(main_path);
+        }
+        #endif
+        goto done_execution;
+    }
+
+    #if MICROPY_ENABLE_COMPILER
     for (int a = 1; a < argc; a++) {
         if (argv[a][0] == '-') {
             if (strcmp(argv[a], "-i") == 0) {
@@ -693,11 +877,18 @@ MP_NOINLINE int main_(int argc, char **argv) {
             break;
         }
     }
+    #endif // MICROPY_ENABLE_COMPILER
 
+    #if MICROPY_MODULE_FROZEN || (MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL)
+done_execution:
+    #endif
+
+    #if MICROPY_ENABLE_COMPILER
     const char *inspect_env = getenv("MICROPYINSPECT");
     if (inspect_env && inspect_env[0] != '\0') {
         inspect = true;
     }
+
     if (ret == NOTHING_EXECUTED || inspect) {
         if (isatty(0) || inspect) {
             prompt_read_history();
@@ -707,6 +898,7 @@ MP_NOINLINE int main_(int argc, char **argv) {
             ret = execute_from_lexer(LEX_SRC_STDIN, NULL, MP_PARSE_FILE_INPUT, false);
         }
     }
+    #endif // MICROPY_ENABLE_COMPILER
 
     #if MICROPY_PY_SYS_SETTRACE
     MP_STATE_THREAD(prof_trace_callback) = MP_OBJ_NULL;
@@ -769,21 +961,97 @@ void nlr_jump_fail(void *val) {
     exit(1);
 }
 
-#if MICROPY_VFS_ROM_IOCTL
+#if MICROPY_VFS_ROM_IOCTL && !MICROPY_VFS_ROM_IOCTL_USE_EXTERNAL
 
-static uint8_t romfs_buf[4] = { 0xd2, 0xcd, 0x31, 0x00 }; // empty ROMFS
-static const MP_DEFINE_MEMORYVIEW_OBJ(romfs_obj, 'B', 0, sizeof(romfs_buf), romfs_buf);
+// RomFS image buffer and metadata
+static const uint8_t *romfs_buf = NULL;
+static size_t romfs_size = 0;
+static mp_obj_t romfs_memoryview = MP_OBJ_NULL;
+
+#if MICROPY_ROMFS_EMBEDDED
+// Embedded romfs data - symbols provided by objcopy from romfs.img
+// Build will fail to link if ROMFS_IMG was specified but object not provided
+extern const uint8_t romfs_embedded_data[];
+extern const uint8_t romfs_embedded_end[];
+
+static void load_romfs_image(void) {
+    if (romfs_buf != NULL) {
+        return;
+    }
+    romfs_buf = romfs_embedded_data;
+    romfs_size = romfs_embedded_end - romfs_embedded_data;
+}
+
+#else
+// File-loading mode for development - load romfs.img from current directory
+static const uint8_t empty_romfs[4] = { 0xd2, 0xcd, 0x31, 0x00 };
+static uint8_t *romfs_file_buf = NULL;
+
+static void load_romfs_image(void) {
+    if (romfs_buf != NULL) {
+        return;
+    }
+
+    FILE *f = fopen("romfs.img", "rb");
+    if (f == NULL) {
+        romfs_size = sizeof(empty_romfs);
+        romfs_buf = empty_romfs;
+        return;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (file_size <= 0) {
+        fclose(f);
+        romfs_size = sizeof(empty_romfs);
+        romfs_buf = empty_romfs;
+        return;
+    }
+
+    romfs_file_buf = malloc((size_t)file_size);
+    if (romfs_file_buf == NULL) {
+        fclose(f);
+        romfs_size = sizeof(empty_romfs);
+        romfs_buf = empty_romfs;
+        return;
+    }
+
+    size_t read_size = fread(romfs_file_buf, 1, (size_t)file_size, f);
+    fclose(f);
+
+    if (read_size != (size_t)file_size) {
+        free(romfs_file_buf);
+        romfs_file_buf = NULL;
+        romfs_size = sizeof(empty_romfs);
+        romfs_buf = empty_romfs;
+        return;
+    }
+
+    romfs_buf = romfs_file_buf;
+    romfs_size = (size_t)file_size;
+}
+#endif // MICROPY_ROMFS_EMBEDDED
 
 mp_obj_t mp_vfs_rom_ioctl(size_t n_args, const mp_obj_t *args) {
+    load_romfs_image();
+
     switch (mp_obj_get_int(args[0])) {
         case MP_VFS_ROM_IOCTL_GET_NUMBER_OF_SEGMENTS:
             return MP_OBJ_NEW_SMALL_INT(1);
 
-        case MP_VFS_ROM_IOCTL_GET_SEGMENT:
-            return MP_OBJ_FROM_PTR(&romfs_obj);
+        case MP_VFS_ROM_IOCTL_GET_SEGMENT: {
+            // Create memoryview on first request
+            if (romfs_memoryview == MP_OBJ_NULL) {
+                mp_obj_array_t *view = MP_OBJ_TO_PTR(mp_obj_new_memoryview('B', romfs_size, (void *)romfs_buf));
+                romfs_memoryview = MP_OBJ_FROM_PTR(view);
+            }
+            return romfs_memoryview;
+        }
     }
 
     return MP_OBJ_NEW_SMALL_INT(-MP_EINVAL);
 }
 
-#endif
+#endif // MICROPY_VFS_ROM_IOCTL && !MICROPY_VFS_ROM_IOCTL_USE_EXTERNAL

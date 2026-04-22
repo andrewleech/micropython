@@ -69,6 +69,7 @@ SRC_C = \
 	realpath.c \
 	init.c \
 	fmode.c \
+	vfs_rom_ioctl.c \
 	$(wildcard $(VARIANT_DIR)/*.c)
 
 SHARED_SRC_C += $(addprefix shared/,\
@@ -104,9 +105,26 @@ ifeq ($(shell $(CC) -dumpmachine),i686-w64-mingw32)
 CFLAGS += -msse -mfpmath=sse -march=pentium4
 endif
 
+# Build with embedded romfs by linking the binary directly
+# Usage: make ROMFS_IMG=romfs.img
+ifdef ROMFS_IMG
+CFLAGS += -DMICROPY_ROMFS_EMBEDDED=1
+OBJ += $(BUILD)/romfs_data.o
+endif
+
 include $(TOP)/py/mkrules.mk
 
-.PHONY: test test_full
+# Rule to build romfs_data.o from romfs.img (must be after mkrules.mk for OBJCOPY)
+ifdef ROMFS_IMG
+$(BUILD)/romfs_data.o: $(ROMFS_IMG) | $(BUILD)
+	$(Q)$(OBJCOPY) -I binary -O pe-x86-64 -B i386:x86-64 \
+		--rename-section .data=.rodata,alloc,load,readonly,data,contents \
+		--redefine-sym _binary_$(subst .,_,$(subst /,_,$(ROMFS_IMG)))_start=romfs_embedded_data \
+		--redefine-sym _binary_$(subst .,_,$(subst /,_,$(ROMFS_IMG)))_end=romfs_embedded_end \
+		$< $@
+endif
+
+.PHONY: test test_full romfs
 
 # Note for recent gcc versions like 13.2:
 # - mingw64-x86_64 gcc builds will pass the math_domain_special test
@@ -126,3 +144,15 @@ $(BUILD)/$(PROG): $(BUILD)/micropython.res
 $(BUILD)/%.res: %.rc
 	$(ECHO) "WINDRES $<"
 	$(Q)$(WINDRES) $< -O coff -o $@
+
+# Build a romfs image from a directory
+# Usage: make romfs ROMFS_DIR=path/to/directory
+# Creates romfs.img in the current directory
+romfs:
+	@if [ -z "$(ROMFS_DIR)" ]; then \
+		echo "Error: ROMFS_DIR not specified"; \
+		echo "Usage: make romfs ROMFS_DIR=path/to/directory"; \
+		exit 1; \
+	fi
+	$(PYTHON) -m mpremote romfs build $(ROMFS_DIR)
+	mv $(notdir $(ROMFS_DIR)).romfs romfs.img
