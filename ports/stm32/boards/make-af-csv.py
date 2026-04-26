@@ -66,7 +66,9 @@ def generate_af_csv(target: str, verbose: bool = False) -> None:
     # Download all matching MCU XMLs and union their pin sets.
     # Different package variants may have different pin subsets (e.g. BGA vs QFP),
     # so we union them to get the complete set for this MCU family.
-    available_pins, available_pins_afs, adc_pins, gpio_version = collect_mcu_pins(mcu_list, verbose)
+    available_pins, available_pins_afs, adc_pins, gpio_version = collect_mcu_pins(
+        mcu_list, verbose
+    )
 
     if verbose:
         print("  Total pins across all variants: {}".format(len(available_pins)))
@@ -100,65 +102,11 @@ def generate_af_csv(target: str, verbose: bool = False) -> None:
 
     root = parse_stm_xml(xml_data)
 
-    # Search for global mapping of EVENTOUT to AF15.
-    event_out_af15 = False
-    for ref_mode in root.findall("./RefMode"):
-        ref_name = ref_mode.get("Name")
-        if ref_name == "EVENTOUT":
-            for param in ref_mode.findall("Parameter"):
-                if param.get("Name") != "GPIO_AF":
-                    continue
-                pv = param.find("./PossibleValue")
-                if pv == None:
-                    continue
-                if pv.text == "GPIO_AF15_EVENTOUT":
-                    event_out_af15 = True
-    if verbose:
-        print('EVENTOUT on AF15')
+    event_out_af15 = detect_eventout_af15(root)
+    if verbose and event_out_af15:
+        print("  EVENTOUT on AF15")
 
-    # process the GPIO xml file for the STM32 family.
-    mapping = defaultdict(list)
-    for pin in root.findall("./GPIO_Pin"):
-        pin_full_name = pin.get("Name")
-        pname = pin_name(pin_full_name)
-        if pname is None or pname not in available_pins_afs: # Ignore pins not on mcu.
-            continue
-        _ = mapping[pname]  # Ensure pin gets captured / listed
-        if "BOOT0" in pin_full_name:
-            mapping[pname].append(("BOOT0", "SYS"))
-        if ("STM32L1" in cpu or "STM32F4" in cpu) and pname == "PB2":
-            mapping[pname].append(("BOOT1", "SYS"))
-        for pin_signal in pin.findall("./PinSignal"):
-            for specific_param in pin_signal.findall("SpecificParameter"):
-                if specific_param.get("Name") != "GPIO_AF":
-                    continue
-                signal_name = pin_signal.get("Name")
-                # Ignore alt functions not on mcu.
-                if signal_name != "EVENTOUT" and signal_name not in available_pins_afs[pname]:
-                    continue
-                af_fn = specific_param.find("./PossibleValue").text
-                af_fn = fix_st_af_map_errors(target, pname, signal_name, af_fn, verbose) # Fix errors in ST open pin files.
-                mapping[pname].append((signal_name, af_fn))
-        if "EVENTOUT" in available_pins_afs[pname] and event_out_af15: # Add EVENTOUT if globally mapped to AF15.
-            mapping[pname].append(("EVENTOUT", "GPIO_AF15_EVENTOUT"))
-    # Add pins without alt functions. Add SYS functions.
-    sys_functions = ("OSC", "RTC", "BOOT", 'WKUP', "TAMP", 'RCC', "NRST", "DAC", "VBUS", "LSCO", "SLEEP", "PWR")
-    for pin, af_list in available_pins_afs.items():
-        _ = mapping[pin] # Add missing pins (those without alt functions, including missed ADC pins).
-        for signal_name in af_list:
-            for sys_fn in sys_functions:
-                if sys_fn in signal_name and not ("DAC" in signal_name and "EXT" in signal_name): # Found a SYS function.
-                    sys_in_map = False
-                    for map in mapping[pin]:
-                        if signal_name in map:
-                            sys_in_map = True
-                    if not sys_in_map:
-                        if pin == "PI8" and signal_name == "RTC_AF1": # open pin error on F479. PI8 has AF2.
-                            continue
-                        if signal_name in ("PWR_CSLEEP" , "PWR_CDSLEEP" , "PWR_CSTOP" , "PWR_NDSTOP1", "PWR_NDSTOP2", "PWR_D1PWREN", "PWR_D2PWREN"):
-                            mapping[pin].append((signal_name, "AF0_SYS"))
-                        else:
-                            mapping[pin].append((signal_name, "SYS"))
+    mapping = build_af_mapping(root, cpu, target, available_pins_afs, event_out_af15, verbose)
     # Filter GPIO pins to only those present on this MCU package.
     # The GPIO XML is family-wide and includes pins from larger packages.
     if available_pins:
@@ -191,8 +139,10 @@ def generate_af_csv(target: str, verbose: bool = False) -> None:
         for signal, af in functions:
             signal = normalize_signal(signal)
             if af == "SYS":
-                column = len(heading)-1
-                signal = signal.replace("RTC_AF1", "RTC_OUT_ALARM/RTC_OUT_CALIB/RTC_TAMP1/RTC_TS/RTC_WAKEUP/(RTC_AF1)")
+                column = len(heading) - 1
+                signal = signal.replace(
+                    "RTC_AF1", "RTC_OUT_ALARM/RTC_OUT_CALIB/RTC_TAMP1/RTC_TS/RTC_WAKEUP/(RTC_AF1)"
+                )
                 signal = signal.replace("RTC_AF2", "RTC_TAMP1/RTC_TAMP2/RTC_TS/(RTC_AF2)")
             else:
                 column = heading.index(re.search(r"(AF\d+)", af).group(1))
@@ -207,11 +157,11 @@ def generate_af_csv(target: str, verbose: bool = False) -> None:
             row[column] = reorder_signal(row[column], ("SPI", "I2S"))
             row[column] = reorder_signal(row[column], ("FSMC_NE", "FSMC_NC"))
             row[column] = reorder_signal(row[column], ("ETH_MII", "ETH_RMII"))
-            row[column] = reorder_signal(row[column], ("TIM3", "TIM22")) # for L072
+            row[column] = reorder_signal(row[column], ("TIM3", "TIM22"))  # for L072
 
         if pin in adc_pins:
             row[-2] = "/".join(("ADC{}_{}".format(i, ch) for ch, i in adc_pins[pin].items()))
-            row[-2] = reorder_signal(row[-2], ("INP", "INN")) # Reorder INP before INN
+            row[-2] = reorder_signal(row[-2], ("INP", "INN"))  # Reorder INP before INN
 
         for i, val in enumerate(row):
             col_width[i] = max(col_width[i], len(val))
@@ -226,7 +176,7 @@ def generate_af_csv(target: str, verbose: bool = False) -> None:
             row_c[-2] = "/".join(
                 ("ADC{}_{}".format(i, ch) for ch, i in adc_pins[dual_pad].items())
             )
-            row_c[-2] = reorder_signal(row_c[-2], ("INP", "INN")) # Reorder INP before INN
+            row_c[-2] = reorder_signal(row_c[-2], ("INP", "INN"))  # Reorder INP before INN
             rows.append(row_c)
 
     # Simplify the category sets, eg TIM1/TIM2 -> TIM1/2
@@ -264,12 +214,103 @@ def generate_af_csv(target: str, verbose: bool = False) -> None:
         print("  Output: {} pins, {} AF entries".format(len(rows), total_afs))
 
 
+def detect_eventout_af15(root):
+    # Check if EVENTOUT is globally mapped to AF15 in this GPIO XML.
+    for ref_mode in root.findall("./RefMode"):
+        if ref_mode.get("Name") != "EVENTOUT":
+            continue
+        for param in ref_mode.findall("Parameter"):
+            if param.get("Name") != "GPIO_AF":
+                continue
+            pv = param.find("./PossibleValue")
+            if pv is not None and pv.text == "GPIO_AF15_EVENTOUT":
+                return True
+    return False
+
+
+# System functions that belong in the SYS column rather than AF0.
+SYS_FUNCTIONS = (
+    "OSC",
+    "RTC",
+    "BOOT",
+    "WKUP",
+    "TAMP",
+    "RCC",
+    "NRST",
+    "DAC",
+    "USB",
+    "LSCO",
+    "SLEEP",
+    "PWR",
+    "OPAMP",
+    "COMP",
+)
+
+# H7 power mode signals that stay in AF0 rather than SYS.
+AF0_SYS_SIGNALS = (
+    "PWR_CSLEEP",
+    "PWR_CDSLEEP",
+    "PWR_CSTOP",
+    "PWR_NDSTOP1",
+    "PWR_NDSTOP2",
+    "PWR_D1PWREN",
+    "PWR_D2PWREN",
+)
+
+
+def build_af_mapping(root, cpu, target, available_pins_afs, event_out_af15, verbose):
+    # Build the AF mapping from GPIO XML, filtered by available pins/AFs.
+    mapping = defaultdict(list)
+    for pin in root.findall("./GPIO_Pin"):
+        pin_full_name = pin.get("Name")
+        pname = pin_name(pin_full_name)
+        if pname is None or pname not in available_pins_afs:
+            continue
+        _ = mapping[pname]  # Ensure pin gets captured / listed
+        if "BOOT0" in pin_full_name:
+            mapping[pname].append(("BOOT0", "SYS"))
+        if ("STM32L1" in cpu or "STM32F4" in cpu) and pname == "PB2":
+            mapping[pname].append(("BOOT1", "SYS"))
+        for pin_signal in pin.findall("./PinSignal"):
+            for specific_param in pin_signal.findall("SpecificParameter"):
+                if specific_param.get("Name") != "GPIO_AF":
+                    continue
+                signal_name = pin_signal.get("Name")
+                if signal_name != "EVENTOUT" and signal_name not in available_pins_afs[pname]:
+                    continue
+                af_fn = specific_param.find("./PossibleValue").text
+                af_fn = fix_st_af_map_errors(target, pname, signal_name, af_fn, verbose)
+                mapping[pname].append((signal_name, af_fn))
+        if "EVENTOUT" in available_pins_afs[pname] and event_out_af15:
+            mapping[pname].append(("EVENTOUT", "GPIO_AF15_EVENTOUT"))
+
+    # Add pins without alt functions and populate SYS column entries.
+    for pin, af_list in available_pins_afs.items():
+        _ = mapping[pin]
+        for signal_name in af_list:
+            if not any(sys_fn in signal_name for sys_fn in SYS_FUNCTIONS):
+                continue
+            if "DAC" in signal_name and "EXT" in signal_name:
+                continue
+            if any(signal_name in entry for entry in mapping[pin]):
+                continue
+            if pin == "PI8" and signal_name == "RTC_AF1":
+                continue  # ST open pin data error on F479
+            if signal_name in AF0_SYS_SIGNALS:
+                mapping[pin].append((signal_name, "AF0_SYS"))
+            else:
+                mapping[pin].append((signal_name, "SYS"))
+
+    return mapping
+
+
 def collect_mcu_pins(mcu_list, verbose):
     # Download all matching MCU XMLs and union their pin sets and ADC data.
     available_pins = set()
     adc_pins = dict()
     available_pins_afs = defaultdict(list)
     gpio_version = None
+    best_mcu_size = 0
     for mcu in mcu_list:
         mcu_url = xml_url + mcu["path"]
         mcuxmlstr = fetch_url(mcu_url)
@@ -293,19 +334,39 @@ def collect_mcu_pins(mcu_list, verbose):
                 sig_name = sig.get("Name")
                 io_modes = sig.get("IOModes")
                 if pname is not None:
+                    if "NRST" in pin.get("Name"):
+                        if "NRST" not in available_pins_afs[pname]:
+                            available_pins_afs[pname].append(
+                                "NRST"
+                            )  # Add pin and its alt functions.
                     if pin.get("Name").endswith("_C"):
                         if sig_name.startswith("ADC") and "_IN" in sig_name:
                             if sig_name not in available_pins_afs[pname + "_C"]:
-                                available_pins_afs[pname + "_C"].append(sig_name) # Add pin and its
+                                available_pins_afs[pname + "_C"].append(
+                                    sig_name
+                                )  # Add pin and its
                         else:
-                            _ = available_pins_afs[pname + "_C"] # Add analog pin without alt functions.
+                            _ = available_pins_afs[
+                                pname + "_C"
+                            ]  # Add analog pin without alt functions.
                     else:
                         if sig_name not in available_pins_afs[pname]:
-                            available_pins_afs[pname].append(sig_name) # Add pin and its alt functions.
-                        if io_modes is not None and "EVENTOUT"  in io_modes and "EVENTOUT" not in available_pins_afs[pname]:
-                            available_pins_afs[pname].append("EVENTOUT") # Add EVENTOUT.
+                            available_pins_afs[pname].append(
+                                sig_name
+                            )  # Add pin and its alt functions.
+                        if (
+                            io_modes is not None
+                            and "EVENTOUT" in io_modes
+                            and "EVENTOUT" not in available_pins_afs[pname]
+                        ):
+                            available_pins_afs[pname].append("EVENTOUT")  # Add EVENTOUT.
                 # Check if sig is and ADC pin and does not end with bank suffix (eg IN0b in STM32L1xx)
-                if not sig_name or not sig_name.startswith("ADC") or "_IN" not in sig_name or not sig_name[-1].isdigit():
+                if (
+                    not sig_name
+                    or not sig_name.startswith("ADC")
+                    or "_IN" not in sig_name
+                    or not sig_name[-1].isdigit()
+                ):
                     continue
                 sig_name = sig_name.replace("ADC_", "ADC1_")
                 index, channel = sig_name.split("_")
@@ -321,13 +382,13 @@ def collect_mcu_pins(mcu_list, verbose):
                         )
                 else:
                     adc_pins[pname] = {channel: n_index}
-        # Get the GPIO file from the mcu with the most Flash to get the biggest pin count version. 
+        # Pick GPIO version from the largest MCU XML (most peripherals/flash).
+        mcu_size = mcu.get("size", 0)
         for detail in root.findall("./IP[@Name='GPIO']"):
             mcu_gpio_version = detail.get("Version")
-            if gpio_version is None:
+            if gpio_version is None or mcu_size > best_mcu_size:
                 gpio_version = mcu_gpio_version
-            elif mcu_gpio_version[10] > gpio_version[10]:
-                gpio_version = mcu_gpio_version
+                best_mcu_size = mcu_size
     return available_pins, available_pins_afs, adc_pins, gpio_version
 
 
@@ -340,11 +401,13 @@ def normalize_signal(signal):
     signal = signal.replace("CM4-EVENTOUT", "EVENTOUT")
     signal = signal.replace("UCPD1_FRSTX1", "UCPD1_FRSTX")
     signal = signal.replace("UCPD2_FRSTX1", "UCPD2_FRSTX")
-    signal = signal.replace("UCPD1_FRSTX2", "UCPD1_FRSTX") # Duplicates are removed.
+    signal = signal.replace("UCPD1_FRSTX2", "UCPD1_FRSTX")  # Duplicates are removed.
     signal = signal.replace("UCPD2_FRSTX2", "UCPD2_FRSTX")
     if "I2S_CKIN" not in signal:
         signal = signal.replace("I2S_", "I2S1_")
-    if "BK" in signal and "BKIN" not in signal and "SPI" not in signal: # Exclude QUADSPIx_BKn, OCTOSPIx_BKn
+    if (
+        "BK" in signal and "BKIN" not in signal and "SPI" not in signal
+    ):  # Exclude QUADSPIx_BKn, OCTOSPIx_BKn
         signal = signal.replace("BK", "BKIN")
     # STM XML uses I2S2_ext_SD but make-pins.py expects I2S2ext_SD.
     signal = re.sub(r"(I2S\d+)_ext_", r"\1ext_", signal)
@@ -383,19 +446,21 @@ def merge_af_signal(cell, signal):
         return "{}_{}_ETR".format(m_old_ch.group(1), m_old_ch.group(2))
     return "/".join((cell, signal))
 
+
 # Reorder the signals containing specified substrings first, then other signals.
 # Substrings not found are ignored.
-def reorder_signal(signal,sig_list: tuple):
+def reorder_signal(signal, sig_list: tuple):
     new_sigs = []
     sigs = signal.split("/")
-    for ordered_sig in sig_list: # Add the listed sigs first.
+    for ordered_sig in sig_list:  # Add the listed sigs first.
         idx = next((i for i, s in enumerate(sigs) if ordered_sig in s), -1)
         if idx > -1:
             new_sigs.append(sigs[idx])
-    for sig in sigs: # Add the other sigs.
+    for sig in sigs:  # Add the other sigs.
         if sig not in new_sigs:
             new_sigs.append(sig)
     return "/".join(new_sigs)
+
 
 def fix_st_af_map_errors(target, pname, signal_name, af_fn, verbose):
     # Fix errors in open pin data where wrong AF number is assigned to signal and
@@ -403,26 +468,31 @@ def fix_st_af_map_errors(target, pname, signal_name, af_fn, verbose):
     # List format"
     # ((list of mcus | "*", for all mcus), pin | "*" for all pins", signal, new AF, or "SYS")
     fixes = (
-    (("*", ), "*", "WKUP", "SYS"),
-    (("*", ), "*", "RTC_AF", "SYS"),
-    (("*", ), "*", "RTC_OUT_ALARM", "SYS"),
-    (("*", ), "*", "RTC_OUT_CALIB", "SYS"),
-    (("*", ), "*", "RTC_TAMP", "SYS"),
-    (("*", ), "*", "RTC_TS", "SYS"),
-    (("*", ), "*", "RCC_OSC_IN", "SYS"),
-    (("*", ), "*", "RCC_OSC_OUT", "SYS"),
-    (("*", ), "*", "RCC_OSC32_IN", "SYS"),
-    (("*", ), "*", "RCC_OSC32_OUT", "SYS"),
-    (("stm32f413", "stm32f423"), "PB4", "I2S3_ext_SD", "GPIO_AF7_SPI3"),
-    (("stm32f413", "stm32f423"), "PB12", "I2S3_CK", "GPIO_AF7_SPI3")
+        (("*",), "*", "WKUP", "SYS"),
+        (("*",), "*", "RTC_AF", "SYS"),
+        (("*",), "*", "RTC_OUT_ALARM", "SYS"),
+        (("*",), "*", "RTC_OUT_CALIB", "SYS"),
+        (("*",), "*", "RTC_TAMP", "SYS"),
+        (("*",), "*", "RTC_TS", "SYS"),
+        (("*",), "*", "RCC_OSC_IN", "SYS"),
+        (("*",), "*", "RCC_OSC_OUT", "SYS"),
+        (("*",), "*", "RCC_OSC32_IN", "SYS"),
+        (("*",), "*", "RCC_OSC32_OUT", "SYS"),
+        (("stm32f413", "stm32f423"), "PB4", "I2S3_ext_SD", "GPIO_AF7_SPI3"),
+        (("stm32f413", "stm32f423"), "PB12", "I2S3_CK", "GPIO_AF7_SPI3"),
     )
     for fix in fixes:
-        if (target.lower() in fix[0] or fix[0][0] == "*") and (pname == fix[1] or fix[1] == "*") and fix[2] in signal_name:
+        if (
+            (target.lower() in fix[0] or fix[0][0] == "*")
+            and (pname == fix[1] or fix[1] == "*")
+            and fix[2] in signal_name
+        ):
             af_fn = fix[3]
             if verbose:
-                print('FIXED', fix)
+                print("FIXED", fix)
     return af_fn
-    
+
+
 def fetch_url(url):
     # Download a URL, raising SystemExit with a clear message on failure.
     try:
@@ -503,4 +573,4 @@ if __name__ == "__main__":
     parser.add_argument("-v", "--verbose", action="store_true", help="Show diagnostic output")
     args = parser.parse_args()
     for target in args.targets:
-        generate_af_csv(target, verbose=args.verbose)
+            generate_af_csv(target, verbose=args.verbose)
