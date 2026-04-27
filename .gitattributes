@@ -28,3 +28,4 @@ ports/cc3200/hal/des.c -text
 ports/cc3200/hal/i2s.c -text
 ports/cc3200/hal/i2s.h -text
 ports/cc3200/version.h -text
+lib/micropython-lib/unix-ffi/pyusb/usb/*.dll filter=lfs diff=lfs merge=lfs -text
