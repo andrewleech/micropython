@@ -75,6 +75,14 @@ void mp_usbh_int_disable(void);
 // Initialize TinyUSB for host mode.
 void mp_usbh_init_tuh(void);
 
+// Forward-declare the typedefs whose full definitions appear below.
+// They are referenced as parameter types in the prototypes immediately
+// following, and the typedef must be visible to the compiler before use.
+typedef struct _machine_usbh_device_obj_t machine_usbh_device_obj_t;
+typedef struct _machine_usbh_cdc_obj_t machine_usbh_cdc_obj_t;
+typedef struct _machine_usbh_msc_obj_t machine_usbh_msc_obj_t;
+typedef struct _machine_usbh_hid_obj_t machine_usbh_hid_obj_t;
+
 // Fetch string descriptors (manufacturer/product/serial) for a device.
 // Called lazily on first property access. Safe to call from Python context only.
 void mp_usbh_fetch_device_strings(machine_usbh_device_obj_t *dev);
