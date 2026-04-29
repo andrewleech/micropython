@@ -56,7 +56,7 @@ extern "C" {
 
 // ESP32 uses FreeRTOS - enable OS support for proper synchronization.
 #define CFG_TUSB_OS             OPT_OS_FREERTOS
-#define CFG_TUSB_OS_INC_PATH    freertos /
+#define CFG_TUSB_OS_INC_PATH    freertos/
 
 // RHPort mode configuration (required by TinyUSB).
 // Port 0 is used for both device and host on ESP32.
