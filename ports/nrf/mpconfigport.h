@@ -277,6 +277,7 @@
 #define MICROPY_PY_ATTRTUPLE                  (1)
 #define MICROPY_PY_BUILTINS_BYTEARRAY         (1)
 #define MICROPY_PY_BUILTINS_DICT_FROMKEYS     (1)
+#define MICROPY_PY_BUILTINS_DIR               (1)
 #define MICROPY_PY_BUILTINS_ENUMERATE         (1)
 #define MICROPY_PY_BUILTINS_EVAL_EXEC         (1)
 #define MICROPY_PY_BUILTINS_FILTER            (1)
