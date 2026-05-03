@@ -25,3 +25,7 @@
 		memory-region = <&dtcm>;
 	};
 };
+
+&wdt0 {
+	status = "okay";
+};

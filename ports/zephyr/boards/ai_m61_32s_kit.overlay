@@ -21,7 +21,7 @@
 
 	heap_sram1 {
 		compatible = "micropython,heap";
-		size = <DT_SIZE_K(140)>;
+		size = <DT_SIZE_K(116)>;
 		memory-region = <&sram1>;
 	};
 
@@ -30,4 +30,8 @@
 		size = <DT_SIZE_M(4)>;
 		memory-region = <&psram>;
 	};
+};
+
+&wdt0 {
+	status = "okay";
 };
