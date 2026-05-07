@@ -103,6 +103,7 @@
     } while (0)
 #endif
 
+#if MICROPY_PY_MACHINE_SOFTSPI
 // Temporary support for legacy construction of SoftSPI via SPI type.
 #define MP_MACHINE_SPI_CHECK_FOR_LEGACY_SOFTSPI_CONSTRUCTION(n_args, n_kw, all_args) \
     do { \
@@ -115,6 +116,7 @@
             return MP_OBJ_TYPE_GET_SLOT(&mp_machine_soft_spi_type, make_new)(&mp_machine_soft_spi_type, n_args, n_kw, all_args); \
         } \
     } while (0)
+#endif
 
 #if MICROPY_PY_MACHINE_I2C || MICROPY_PY_MACHINE_SOFTI2C
 
