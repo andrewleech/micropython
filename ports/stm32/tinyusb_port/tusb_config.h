@@ -46,6 +46,22 @@
 #endif
 #endif
 
+#if defined(USB_HS_PHYC) && !defined(USB_HS_PHYC_PLL1_PLLSEL_Pos)
+// Providing missing definitions of USB_HS_PHYC_PLL1_PLLSEL constants, required by TinyUSB.
+// (These are added in a newer version of the STM32F7xx CMSIS files.)
+#define USB_HS_PHYC_PLL1_PLLSEL_Pos               (1U)
+#define USB_HS_PHYC_PLL1_PLLSEL_Msk               (0x7UL << USB_HS_PHYC_PLL1_PLLSEL_Pos)
+#define USB_HS_PHYC_PLL1_PLLSEL                   (USB_HS_PHYC_PLL1_PLLSEL_Msk)
+#define USB_HS_PHYC_PLL1_PLLSEL_1                 (0x1UL << USB_HS_PHYC_PLL1_PLLSEL_Pos)
+#define USB_HS_PHYC_PLL1_PLLSEL_2                 (0x2UL << USB_HS_PHYC_PLL1_PLLSEL_Pos)
+#define USB_HS_PHYC_PLL1_PLLSEL_3                 (0x4UL << USB_HS_PHYC_PLL1_PLLSEL_Pos)
+#define USB_HS_PHYC_PLL1_PLLSEL_12MHZ             (0x00000000U)
+#define USB_HS_PHYC_PLL1_PLLSEL_12_5MHZ           (USB_HS_PHYC_PLL1_PLLSEL_1)
+#define USB_HS_PHYC_PLL1_PLLSEL_16MHZ             (USB_HS_PHYC_PLL1_PLLSEL_1 | USB_HS_PHYC_PLL1_PLLSEL_2)
+#define USB_HS_PHYC_PLL1_PLLSEL_24MHZ             (USB_HS_PHYC_PLL1_PLLSEL_3)
+#define USB_HS_PHYC_PLL1_PLLSEL_25MHZ             (USB_HS_PHYC_PLL1_PLLSEL_2 | USB_HS_PHYC_PLL1_PLLSEL_3)
+#endif
+
 #include "shared/tinyusb/tusb_config.h"
 
 #endif // MICROPY_INCLUDED_STM32_TINYUSB_PORT_TUSB_CONFIG_H
