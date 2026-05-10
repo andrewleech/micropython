@@ -140,7 +140,7 @@ int mp_console_init(void) {
     tty_set_rx_buf(&mp_console_serial, mp_console_rxbuf, sizeof(mp_console_rxbuf));
 
     tty_set_rx_timeout(&mp_console_serial, 0);
-    tty_set_tx_timeout(&mp_console_serial, 1);
+    tty_set_tx_timeout(&mp_console_serial, 2);
 
     return 0;
 }
