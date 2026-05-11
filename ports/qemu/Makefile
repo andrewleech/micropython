@@ -105,7 +105,7 @@ GCC_VERSION = $(word 1, $(subst ., , $(shell $(CC) -dumpversion)))
 
 RV32_ABI = ilp32
 
-QEMU_ARGS += -bios none
+QEMU_ARGS += -bios none -cpu rv32,zcd=off,zcmp=on
 
 # GCC 10 and lower do not recognise the Zicsr extension in the architecture name.
 ifeq ($(shell test $(GCC_VERSION) -le 10; echo $$?),0)
