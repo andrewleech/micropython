@@ -254,7 +254,25 @@ $(info Detected arm-linux-gnueabi-gcc. Disabling error message compression.)
 MICROPY_ROM_TEXT_COMPRESSION = 0
 endif
 
+# Build with embedded romfs by linking the binary directly
+# Usage: make ROMFS_IMG=romfs.img
+ifdef ROMFS_IMG
+CFLAGS += -DMICROPY_ROMFS_EMBEDDED=1
+OBJ += $(BUILD)/romfs_data.o
+endif
+
 include $(TOP)/py/mkrules.mk
+
+# Rule to build romfs_data.o from romfs.img (must be after mkrules.mk for OBJCOPY)
+ifdef ROMFS_IMG
+$(BUILD)/romfs_data.o: $(ROMFS_IMG) | $(BUILD)
+	$(Q)$(OBJCOPY) -I binary -O elf64-x86-64 -B i386:x86-64 \
+		--rename-section .data=.rodata,alloc,load,readonly,data,contents \
+		--add-section .note.GNU-stack=/dev/null \
+		--redefine-sym _binary_$(subst .,_,$(subst /,_,$(ROMFS_IMG)))_start=romfs_embedded_data \
+		--redefine-sym _binary_$(subst .,_,$(subst /,_,$(ROMFS_IMG)))_end=romfs_embedded_end \
+		$< $@
+endif
 
 .PHONY: test test_full_no_native test_full test//% test/% test-failures print-failures clean-failures
 
@@ -319,3 +337,16 @@ install: $(BUILD)/$(PROG)
 
 uninstall:
 	-rm $(BINDIR)/$(PROG)
+
+# Build a romfs image from a directory
+# Usage: make romfs ROMFS_DIR=path/to/directory
+# Creates romfs.img in the current directory
+romfs:
+	@if [ -z "$(ROMFS_DIR)" ]; then \
+		echo "Error: ROMFS_DIR not specified"; \
+		echo "Usage: make romfs ROMFS_DIR=path/to/directory"; \
+		exit 1; \
+	fi
+	$(PYTHON) -m mpremote romfs build $(ROMFS_DIR)
+	mv $(notdir $(ROMFS_DIR)).romfs romfs.img
+
