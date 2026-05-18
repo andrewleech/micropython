@@ -61,6 +61,41 @@
 #include "py/frozenmod.h"
 #endif
 
+#if MICROPY_VFS_ROM_TRAILER
+#include "romfs_trailer.h"
+#endif
+
+// MICROPY_APP_RUNNER: opt-in compile-time flag for packaged application binaries.
+// When set to 1, the binary is always in app-runner mode regardless of whether a
+// frozen main module is present.  Set this in the variant's mpconfigvariant.h when
+// the binary is known at build time to embed an application (e.g. a romfs image).
+// Defaults to 0 (standard MicroPython behaviour).
+#ifndef MICROPY_APP_RUNNER
+#define MICROPY_APP_RUNNER (0)
+#endif
+
+// Returns true if the binary should operate in app-runner mode.
+// In app-runner mode, pre_process_options() is skipped and argv[1..] is
+// forwarded verbatim to sys.argv.  Detection covers two cases:
+//  1. MICROPY_APP_RUNNER=1: set at build time for romfs-embedded application binaries.
+//  2. A frozen main module is present at link time (safe to check before mp_init()).
+static bool _is_app_runner(void) {
+    #if MICROPY_APP_RUNNER
+    return true;
+    #endif
+    #if MICROPY_MODULE_FROZEN
+    int frozen_type;
+    void *frozen_data;
+    if (mp_find_frozen_module("main.py", &frozen_type, &frozen_data) == MP_IMPORT_STAT_FILE) {
+        return true;
+    }
+    if (mp_find_frozen_module("main.mpy", &frozen_type, &frozen_data) == MP_IMPORT_STAT_FILE) {
+        return true;
+    }
+    #endif
+    return false;
+}
+
 // Command line options, with their defaults
 bool mp_compile_only = false;
 #if MICROPY_ENABLE_COMPILER
@@ -483,7 +518,14 @@ MP_NOINLINE int main_(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
     #endif
 
-    pre_process_options(argc, argv);
+    // In app-runner mode the entire pre_process_options() walker is skipped.
+    // argv[1..] is forwarded verbatim to sys.argv; no interpreter-level switches
+    // (-h, --version, -c, -m, -O, -X, -i) are honoured.
+    // When not in app-runner mode, fall through to standard behaviour.
+    bool app_runner_mode = _is_app_runner();
+    if (!app_runner_mode) {
+        pre_process_options(argc, argv);
+    }
 
     #if MICROPY_ENABLE_GC
     #if !MICROPY_GC_SPLIT_HEAP
@@ -617,9 +659,9 @@ MP_NOINLINE int main_(int argc, char **argv) {
     bool inspect = false;
     #endif
 
-    // Check if a frozen or romfs main module exists and should be run.
-    // Priority: 1) frozen main module, 2) /rom/main.py or /rom/main.mpy
-    // It runs when no -c, -m, -h, or script file is specified.
+    // Detect whether a main module is actually present (frozen or romfs).
+    // This is separate from app_runner_mode (which gates pre_process_options())
+    // and does not assume a main exists just because the binary is app-runner-flagged.
     bool run_main = false;
     bool main_is_frozen = false;
     const char *main_path = "main";  // For frozen or import-based execution
@@ -628,12 +670,8 @@ MP_NOINLINE int main_(int argc, char **argv) {
     {
         int frozen_type;
         void *frozen_data;
-        // Try main.py first, then main.mpy (frozen modules use filename with extension)
-        mp_import_stat_t frozen_stat = mp_find_frozen_module("main.py", &frozen_type, &frozen_data);
-        if (frozen_stat != MP_IMPORT_STAT_FILE) {
-            frozen_stat = mp_find_frozen_module("main.mpy", &frozen_type, &frozen_data);
-        }
-        if (frozen_stat == MP_IMPORT_STAT_FILE) {
+        if (mp_find_frozen_module("main.py", &frozen_type, &frozen_data) == MP_IMPORT_STAT_FILE ||
+            mp_find_frozen_module("main.mpy", &frozen_type, &frozen_data) == MP_IMPORT_STAT_FILE) {
             run_main = true;
             main_is_frozen = true;
         }
@@ -661,89 +699,14 @@ MP_NOINLINE int main_(int argc, char **argv) {
     #endif
 
     if (run_main) {
-        // Check if any argument would bypass main
-        // -c and -m always bypass; -h bypasses only for romfs main (not frozen)
-        for (int a = 1; a < argc; a++) {
-            if (argv[a][0] == '-') {
-                if (strcmp(argv[a], "-c") == 0 || strcmp(argv[a], "-m") == 0) {
-                    run_main = false;
-                    break;
-                } else if (!main_is_frozen && strcmp(argv[a], "-h") == 0) {
-                    run_main = false;
-                    break;
-                } else if (strcmp(argv[a], "-X") == 0) {
-                    if (a + 1 < argc) {
-                        a++;
-                    }
-                }
-            }
-        }
-    }
-
-    if (run_main) {
-        // Process flags that affect execution
-        for (int a = 1; a < argc; a++) {
-            if (argv[a][0] == '-') {
-                #if MICROPY_ENABLE_COMPILER
-                if (strcmp(argv[a], "-i") == 0) {
-                    inspect = true;
-                } else
-                #endif
-                if (strcmp(argv[a], "-X") == 0 && a + 1 < argc) {
-                    a++;
-                #if MICROPY_DEBUG_PRINTERS
-                } else if (strcmp(argv[a], "-v") == 0) {
-                    mp_verbose_flag++;
-                #endif
-                #if MICROPY_ENABLE_COMPILER
-                } else if (strncmp(argv[a], "-O", 2) == 0) {
-                    if (unichar_isdigit(argv[a][2])) {
-                        MP_STATE_VM(mp_optimise_value) = argv[a][2] & 0xf;
-                    } else {
-                        MP_STATE_VM(mp_optimise_value) = 0;
-                        for (char *p = argv[a] + 1; *p && *p == 'O'; p++, MP_STATE_VM(mp_optimise_value)++) {;
-                        }
-                    }
-                #endif
-                } else {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-
-        // Build sys.argv: [main_path, remaining_args...]
-        mp_obj_list_append(mp_sys_argv, mp_obj_new_str(main_path, strlen(main_path)));
-        bool in_positional = false;
-        for (int a = 1; a < argc; a++) {
-            if (!in_positional && argv[a][0] == '-') {
-                #if MICROPY_ENABLE_COMPILER
-                if (strcmp(argv[a], "-i") == 0) {
-                    continue;
-                } else
-                #endif
-                #if MICROPY_DEBUG_PRINTERS
-                if (strcmp(argv[a], "-v") == 0) {
-                    continue;
-                } else
-                #endif
-                #if MICROPY_ENABLE_COMPILER
-                if (strncmp(argv[a], "-O", 2) == 0) {
-                    continue;
-                } else
-                #endif
-                if (strcmp(argv[a], "-X") == 0 && a + 1 < argc) {
-                    a++;
-                    continue;
-                }
-                in_positional = true;
-            } else {
-                in_positional = true;
-            }
-            if (in_positional) {
-                mp_obj_list_append(mp_sys_argv, mp_obj_new_str_from_cstr(argv[a]));
-            }
+        // App-runner mode: forward argv[0..] verbatim into sys.argv so that
+        // the embedded application sees argv[0] as its program name and
+        // argv[1..] as its arguments.  No interpreter-level switches are
+        // honoured; -h, --version, -c, -m, -O, -X and -i all reach the
+        // application's main.py unchanged (CPython convention: sys.argv[0]
+        // is the program/script name, sys.argv[1..] are the arguments).
+        for (int i = 0; i < argc; i++) {
+            mp_obj_list_append(mp_sys_argv, MP_OBJ_NEW_QSTR(qstr_from_str(argv[i])));
         }
 
         // Execute main module
@@ -774,7 +737,18 @@ MP_NOINLINE int main_(int argc, char **argv) {
     #if MICROPY_ENABLE_COMPILER
     for (int a = 1; a < argc; a++) {
         if (argv[a][0] == '-') {
-            if (strcmp(argv[a], "-i") == 0) {
+            if (strcmp(argv[a], "-h") == 0) {
+                // -h/--help may arrive here when app_runner_mode skipped pre_process_options().
+                // In that case no app was found (run_main=false) so standard help applies.
+                #if !MICROPY_FROZEN_MAIN_MODULE
+                print_help(argv);
+                #endif
+                return 0;
+            } else if (strcmp(argv[a], "--version") == 0) {
+                // --version may arrive here when app_runner_mode skipped pre_process_options().
+                printf(MICROPY_BANNER_NAME_AND_VERSION "; " MICROPY_BANNER_MACHINE "\n");
+                return 0;
+            } else if (strcmp(argv[a], "-i") == 0) {
                 inspect = true;
             } else if (strcmp(argv[a], "-c") == 0) {
                 if (a + 1 >= argc) {
@@ -978,6 +952,13 @@ static void load_romfs_image(void) {
     if (romfs_buf != NULL) {
         return;
     }
+    #if MICROPY_VFS_ROM_TRAILER
+    // Trailer-detection fast path: if the binary has a PYLT trailer appended,
+    // use the appended romfs payload instead of the embedded empty sentinel.
+    if (picolet_load_romfs_trailer(&romfs_buf, &romfs_size)) {
+        return;
+    }
+    #endif
     romfs_buf = romfs_embedded_data;
     romfs_size = romfs_embedded_end - romfs_embedded_data;
 }
@@ -991,6 +972,15 @@ static void load_romfs_image(void) {
     if (romfs_buf != NULL) {
         return;
     }
+
+    #if MICROPY_VFS_ROM_TRAILER
+    // Trailer-detection path also applies in file-load mode (development builds
+    // without MICROPY_ROMFS_EMBEDDED=1), so that a picolet-built binary can be
+    // run directly.
+    if (picolet_load_romfs_trailer(&romfs_buf, &romfs_size)) {
+        return;
+    }
+    #endif
 
     FILE *f = fopen("romfs.img", "rb");
     if (f == NULL) {
