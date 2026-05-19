@@ -37,6 +37,8 @@ INC += -I.
 INC += -I$(TOP)
 INC += -I$(BUILD)
 INC += -I$(VARIANT_DIR)
+# romfs_trailer.h lives in variants/common/ (out-of-tree, PICOLET_RUNTIME_ROOT).
+INC += -I$(PICOLET_RUNTIME_ROOT)/variants/common
 
 # compiler settings
 CFLAGS += $(INC) -Wall -Wpointer-arith -Wdouble-promotion -Werror -std=gnu99 -DUNIX -D__USE_MINGW_ANSI_STDIO=1 $(COPT) $(CFLAGS_EXTRA)
@@ -71,6 +73,11 @@ SRC_C = \
 	fmode.c \
 	vfs_rom_ioctl.c \
 	$(wildcard $(VARIANT_DIR)/*.c)
+
+# romfs_trailer.c lives in variants/common/ (out-of-tree).
+# SRC_C uses plain = above so variant .mk SRC_C += lines are discarded.
+# We append explicitly here, after SRC_C is set, so it always lands in the build.
+SRC_C += $(PICOLET_RUNTIME_ROOT)/variants/common/romfs_trailer.c
 
 SHARED_SRC_C += $(addprefix shared/,\
 	$(SHARED_SRC_C_EXTRA) \

@@ -24,6 +24,12 @@
  * THE SOFTWARE.
  */
 
+// Picolet: add MICROPY_VFS_ROM_TRAILER hook for trailer-detection support.
+// When MICROPY_VFS_ROM_TRAILER=1 (set in the picolet-cli variant's
+// mpconfigvariant.h), load_romfs_image() first attempts to find and map a
+// romfs payload appended to the running .exe before falling back to the
+// linked empty romfs sentinel.
+
 #include "py/runtime.h"
 #include "py/mperrno.h"
 #include "py/objarray.h"
@@ -32,6 +38,10 @@
 #if MICROPY_VFS_ROM_IOCTL
 
 #include <stdio.h>
+
+#if MICROPY_VFS_ROM_TRAILER
+#include "romfs_trailer.h"
+#endif
 
 // RomFS image buffer and metadata
 static const uint8_t *romfs_buf = NULL;
@@ -48,6 +58,13 @@ static void load_romfs_image(void) {
     if (romfs_buf != NULL) {
         return;
     }
+    #if MICROPY_VFS_ROM_TRAILER
+    // Trailer-detection fast path: if the .exe has a PYLT trailer appended,
+    // use the appended romfs payload instead of the embedded empty sentinel.
+    if (picolet_load_romfs_trailer(&romfs_buf, &romfs_size)) {
+        return;
+    }
+    #endif
     romfs_buf = romfs_embedded_data;
     romfs_size = romfs_embedded_end - romfs_embedded_data;
 }
@@ -61,6 +78,15 @@ static void load_romfs_image(void) {
     if (romfs_buf != NULL) {
         return;
     }
+
+    #if MICROPY_VFS_ROM_TRAILER
+    // Trailer-detection path also applies in file-load mode (development builds
+    // without MICROPY_ROMFS_EMBEDDED=1), so that developers testing with a
+    // picolet-built app can run the .exe directly.
+    if (picolet_load_romfs_trailer(&romfs_buf, &romfs_size)) {
+        return;
+    }
+    #endif
 
     FILE *f = fopen("romfs.img", "rb");
     if (f == NULL) {
