@@ -1,0 +1,9 @@
+test_runner
+test_runner_pack
+test_runner_cov
+*.o
+*.gcda
+*.gcno
+*.gcov
+*.info
+coverage/
