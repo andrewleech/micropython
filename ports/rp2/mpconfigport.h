@@ -217,6 +217,14 @@
 #define MICROPY_FATFS_MAX_SS                    (FLASH_SECTOR_SIZE)
 #endif
 
+// When the board opts into mboot (USE_MBOOT=1 in its mpconfigboard.cmake),
+// pull in the rp2_enter_mboot_or_rom() declaration and define
+// MICROPY_BOARD_ENTER_BOOTLOADER to call it so machine.bootloader() reaches
+// mboot.
+#if defined(USE_MBOOT)
+#include "mboot_boardctrl.h"
+#endif
+
 #ifndef MICROPY_BOARD_ENTER_BOOTLOADER
 #define MICROPY_BOARD_ENTER_BOOTLOADER(nargs, args)
 #endif

@@ -176,6 +176,8 @@ set(MICROPY_SOURCE_PORT
     usbd.c
     msc_disk.c
     mbedtls/mbedtls_port.c
+    # mboot_entry.c self-disables via #if MICROPY_HW_USES_MBOOT.
+    mboot_entry.c
     ${CMAKE_BINARY_DIR}/pins_${MICROPY_BOARD}.c
 )
 
