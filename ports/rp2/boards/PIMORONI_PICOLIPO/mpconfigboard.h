@@ -11,3 +11,10 @@
 #define MICROPY_HW_UART1_RX  (9)
 #define MICROPY_HW_UART1_CTS (10)
 #define MICROPY_HW_UART1_RTS (11)
+
+#if defined(USE_MBOOT)
+// Per-board mboot configuration (DFU USB identity + UI).
+#define MBOOT_USB_PID         (0xDFA2u)
+#define MBOOT_LED_PIN         (25)
+#define MBOOT_PRODUCT_STRING  "Pimoroni Pico LiPo Bootloader"
+#endif

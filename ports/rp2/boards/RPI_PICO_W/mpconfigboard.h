@@ -20,5 +20,14 @@
 #define MICROPY_HW_PIN_EXT_COUNT    CYW43_WL_GPIO_COUNT
 
 // If this returns true for a pin then its irq will not be disabled on a soft reboot
+#ifndef __ASSEMBLER__
 int mp_hal_is_pin_reserved(int n);
 #define MICROPY_HW_PIN_RESERVED(i) mp_hal_is_pin_reserved(i)
+#endif
+
+#if defined(USE_MBOOT)
+// Per-board mboot configuration (DFU USB identity + UI).
+#define MBOOT_USB_PID         (0xDFA4u)
+#define MBOOT_LED_PIN         (-1)  // LED is on the CYW43; mboot does not drive it.
+#define MBOOT_PRODUCT_STRING  "RPI_PICO_W Bootloader"
+#endif

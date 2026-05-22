@@ -176,7 +176,7 @@ set(MICROPY_SOURCE_PORT
     usbd.c
     msc_disk.c
     mbedtls/mbedtls_port.c
-    # mboot_entry.c self-disables via #if MICROPY_HW_USES_MBOOT.
+    # mboot_entry.c self-disables via #if defined(USE_MBOOT).
     mboot_entry.c
     ${CMAKE_BINARY_DIR}/pins_${MICROPY_BOARD}.c
 )
@@ -648,6 +648,15 @@ if (NOT MICROPY_BOARD_LINKER_SCRIPT)
     elseif(PICO_RP2350)
         set(MICROPY_BOARD_LINKER_SCRIPT ${CMAKE_CURRENT_LIST_DIR}/memmap_mp_rp2350.ld)
     endif()
+endif()
+
+# Mboot reserves 64 KiB at the start of flash; passing __mboot_reserved__ to
+# the linker shifts the FLASH region origin and shortens its length without
+# requiring a separate linker script.  See memmap_mp_rp2040.ld for details.
+if(USE_MBOOT)
+    target_link_options(${MICROPY_TARGET} PRIVATE
+        -Wl,--defsym=__mboot_reserved__=0x10000
+    )
 endif()
 
 if (PICO_ON_DEVICE AND NOT PICO_NO_FLASH AND NOT PICO_COPY_TO_RAM)

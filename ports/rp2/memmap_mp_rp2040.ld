@@ -21,9 +21,14 @@
     __stack (== StackTop)
 */
 
+/* When the application is built behind an mboot bootloader the caller passes
+ * `--defsym=__mboot_reserved__=<bytes>` so FLASH starts after the reservation;
+ * otherwise the symbol is undefined and the linker uses 0. */
+__mboot_reserved_or_zero__ = DEFINED(__mboot_reserved__) ? __mboot_reserved__ : 0;
+
 MEMORY
 {
-    FLASH(rx) : ORIGIN = 0x10000000, LENGTH = __micropy_flash_size__ - __micropy_flash_storage_bytes__
+    FLASH(rx) : ORIGIN = 0x10000000 + __mboot_reserved_or_zero__, LENGTH = __micropy_flash_size__ - __micropy_flash_storage_bytes__ - __mboot_reserved_or_zero__
     FLASH_FS(rx) : ORIGIN = ORIGIN(FLASH) + LENGTH(FLASH), LENGTH = __micropy_flash_storage_bytes__
     RAM(rwx) : ORIGIN =  0x20000000, LENGTH = 256k
     SCRATCH_X(rwx) : ORIGIN = 0x20040000, LENGTH = 0k
