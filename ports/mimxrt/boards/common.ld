@@ -39,9 +39,11 @@ MEMORY
   m_ivt          (RX) : ORIGIN = ivt_start,             LENGTH = ivt_size
   m_interrupts   (RX) : ORIGIN = interrupts_start,      LENGTH = interrupts_size
   m_text         (RX) : ORIGIN = text_start,            LENGTH = text_size
+#if !defined(BUILDING_MBOOT)
   m_vfs          (RX) : ORIGIN = vfs_start,             LENGTH = vfs_size
   /* Teensy uses the last bit of flash for recovery. */
   m_reserved     (RX) : ORIGIN = (vfs_start + vfs_size), LENGTH = reserved_size
+#endif
   m_isr          (RX) : ORIGIN = itcm_start,            LENGTH = 0x400
   m_itcm         (RX) : ORIGIN = itcm_start + 0x400,    LENGTH = itcm_size - 0x400
   m_dtcm         (RW) : ORIGIN = dtcm_start,            LENGTH = dtcm_size
@@ -59,8 +61,10 @@ SECTIONS
   #if MICROPY_HW_SDRAM_AVAIL
   __sdram_start = sdram_start;
   #endif
+#if !defined(BUILDING_MBOOT)
   __vfs_start = ORIGIN(m_vfs);
   __vfs_end = __vfs_start + LENGTH(m_vfs);
+#endif
 
   .flash_config :
   {
@@ -77,7 +81,9 @@ SECTIONS
     . = ALIGN(4);
     KEEP(* (.boot_hdr.ivt))           /* ivt section */
     KEEP(* (.boot_hdr.boot_data))     /* boot section */
-    KEEP(* (.boot_hdr.dcd_data))      /* dcd section */
+#if !defined(BUILDING_MBOOT)
+    KEEP(* (.boot_hdr.dcd_data))      /* dcd section (mboot disables DCD) */
+#endif
     . = ALIGN(4);
   } > m_ivt
 
@@ -94,11 +100,26 @@ SECTIONS
 
   __Vectors_RAM = ORIGIN(m_isr);
 
-  /* Some program code and other data goes into internal RAM */
+  /* Some program code and other data goes into internal RAM.
+   *
+   * Files in the EXCLUDE_FILE list have their .text* placed in .ram_functions
+   * (ITCM) below.  The two lists differ between the main application build
+   * and the mboot build because each hot path is different:
+   *   - main app: GC, VM, runtime, map, mpirq, machine_i2c_target need RAM speed
+   *   - mboot:    USB device-stack files (usbd, usbd_control, dcd_ci_hs,
+   *               dfu_device) must be in ITCM to avoid I-Cache miss fills
+   *               racing with USB DMA on the AHB bus.
+   *   - both:     fsl_flexspi.o must run from ITCM (AHB flash-access conflict
+   *               during write).
+   */
   .text :
   {
     . = ALIGN(4);
-    *(EXCLUDE_FILE(*fsl_flexspi.o *gc.o *vm.o *runtime*.o *map.o *mpirq.o *machine_i2c_target.o *fsl_lpi2c.o) .text*) /* .text* sections (code) */
+#if defined(BUILDING_MBOOT)
+    *(EXCLUDE_FILE(*fsl_flexspi.o *usbd.o *usbd_control.o *dcd_ci_hs.o *dfu_device.o) .text*)
+#else
+    *(EXCLUDE_FILE(*fsl_flexspi.o *gc.o *vm.o *runtime*.o *map.o *mpirq.o *machine_i2c_target.o *fsl_lpi2c.o) .text*)
+#endif
     *(.rodata)               /* .rodata sections (constants, strings, etc.) */
     *(.rodata*)              /* .rodata* sections (constants, strings, etc.) */
     *(.glue_7)               /* glue arm to thumb code */
@@ -188,7 +209,9 @@ SECTIONS
     __DATA_RAM = .;
     __data_start__ = .;      /* create a global symbol at data start */
     __data_section_table = .;
+#if !defined(BUILDING_MBOOT)
     *(m_usb_dma_init_data)
+#endif
     *(.data)                 /* .data sections */
     *(.data*)                /* .data* sections */
     KEEP(*(.jcr*))
@@ -203,13 +226,24 @@ SECTIONS
     . = ALIGN(4);
     __ram_function_start__ = .;
     *(.ram_functions*)
+#if defined(BUILDING_MBOOT)
+    /* TinyUSB USB event-processing hot paths: placed in ITCM to eliminate
+     * I-Cache miss fills that could race with USB DMA on the AHB bus.
+     * These files are excluded from .text above and collected here instead. */
+    *usbd.o(.text*)
+    *usbd_control.o(.text*)
+    *dcd_ci_hs.o(.text*)
+    *dfu_device.o(.text*)
+#else
     /* remaining .text and .rodata; i.e. stuff we exclude above because we want it in RAM */
     *(.text*)
+#endif
     . = ALIGN(4);
     __ram_function_end__ = .;
   } > m_itcm
 
   __NDATA_ROM = __RAM_FUNCTIONS_ROM + (__ram_function_end__ - __ram_function_start__);
+#if !defined(BUILDING_MBOOT)
   .ncache.init : AT(__NDATA_ROM)
   {
     __noncachedata_start__ = .;   /* create a global symbol at ncache data start */
@@ -227,6 +261,10 @@ SECTIONS
 
   __DATA_END = __NDATA_ROM + (__noncachedata_end__ - __noncachedata_start__);
   __FLASH_DATA_END = __NDATA_ROM + (__noncachedata_init_end__ - __noncachedata_start__);
+#else
+  __DATA_END = __NDATA_ROM;
+  __FLASH_DATA_END = __NDATA_ROM;
+#endif
   text_end = ORIGIN(m_text) + LENGTH(m_text);
   ASSERT(__DATA_END <= text_end, "region m_text overflowed with text and data")
 
@@ -238,7 +276,9 @@ SECTIONS
     __START_BSS = .;
     __bss_start__ = .;
     __bss_section_table = .;
+#if !defined(BUILDING_MBOOT)
     *(m_usb_dma_noninit_data)
+#endif
     *(.bss)
     *(.bss*)
     *(COMMON)
@@ -247,6 +287,19 @@ SECTIONS
     __bss_section_table_end = .;
     __END_BSS = .;
   } > m_dtcm
+
+#if defined(BUILDING_MBOOT)
+  /* USB DMA buffers: must be in OCRAM so the USB AHB bus master can access
+   * them.  NOLOAD: these are zeroed/initialised by TinyUSB at runtime
+   * (dcd_init, bus_reset).  The main application allocates equivalent
+   * buffers via the .ncache section instead. */
+  .usb_dma_noninit (NOLOAD) :
+  {
+    . = ALIGN(2048);
+    *(.usb_dma_noninit*)
+    . = ALIGN(4);
+  } > m_ocrm
+#endif
 
   .heap :
   {
@@ -271,10 +324,13 @@ SECTIONS
   __StackTop   = ORIGIN(m_dtcm) + LENGTH(m_dtcm);
   __StackLimit = __StackTop - STACK_SIZE;
   _vStackTop = __StackTop;
+#if defined(BUILDING_MBOOT)
+  _estack      = __StackTop;
+  _sstack      = __StackLimit;
+#endif
   PROVIDE(__stack = __StackTop);
 
   .ARM.attributes 0 : { *(.ARM.attributes) }
 
   ASSERT(__StackLimit >= __HeapLimit, "region m_dtcm overflowed with stack and heap")
 }
-

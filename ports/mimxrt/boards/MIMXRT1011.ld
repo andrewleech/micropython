@@ -14,6 +14,17 @@ flash_config_start  = flash_start + 0x00000400;
 flash_config_size   = 0x00000C00;
 ivt_start           = flash_start + 0x00001000;
 ivt_size            = 0x00001000;
+
+#if defined(BUILDING_MBOOT)
+/* mboot lives at flash_start + 0x2000 through MBOOT_FLASH_SIZE.  The
+ * application image starts above MBOOT_FLASH_SIZE. */
+interrupts_start    = flash_start + 0x00002000;
+interrupts_size     = 0x00000400;
+text_start          = flash_start + 0x00002400;
+text_size           = MBOOT_FLASH_SIZE - 0x00002400;
+__mboot_start       = flash_start;
+__mboot_end         = flash_start + MBOOT_FLASH_SIZE;
+#else
 interrupts_start    = flash_start + 0x0000C000;
 interrupts_size     = 0x00000400;
 text_start          = flash_start + 0x0000C400;
@@ -22,6 +33,8 @@ vfs_size            = ((flash_end) - (vfs_start));
 _micropy_hw_romfs_part0_start = ((vfs_start) - MICROPY_HW_ROMFS_BYTES);
 _micropy_hw_romfs_part0_size = MICROPY_HW_ROMFS_BYTES;
 text_size           = ((_micropy_hw_romfs_part0_start) - (text_start));
+#endif
+
 itcm_start          = 0x00000000;
 itcm_size           = 0x00008000;
 dtcm_start          = 0x20000000;
@@ -29,6 +42,11 @@ dtcm_size           = 0x00008000;
 ocrm_start          = 0x20200000;
 ocrm_size           = 0x00010000;
 
+#if defined(BUILDING_MBOOT)
+/* mboot: 8 KiB stack, no traditional heap, no GC. */
+__stack_size__ = 0x2000;
+__heap_size__  = 0x0400;
+#else
 /* 16kiB stack. */
 __stack_size__ = 0x4000;
 _estack = __StackTop;
@@ -40,3 +58,4 @@ __heap_size__ = 0;
 /* Use second OCRAM bank for GC heap. */
 _gc_heap_start = ORIGIN(m_ocrm);
 _gc_heap_end = ORIGIN(m_ocrm) + LENGTH(m_ocrm);
+#endif

@@ -84,3 +84,20 @@
     }
 
 #define XBARA1  XBARA
+
+#if defined(USE_MBOOT)
+// Per-board mboot configuration (DFU USB identity + UI).  VID 0xf055 is the
+// MicroPython project VID.
+#define MBOOT_USB_VID        (0xf055U)
+#define MBOOT_USB_PID        (0x0014U)
+#define MBOOT_PRODUCT_STRING "MIMXRT1010 Bootloader"
+
+// Flash base address: FlexSPI_AMBA_BASE on RT1011.
+#define MBOOT_FLASH_BASE     (0x60000000U)
+
+// USER_BUTTON (SW4): GPIO_SD_05 -> GPIO2_IO05, active-low (pressed = 0).
+#define MBOOT_BOARD_USER_BUTTON_GPIO     GPIO2
+#define MBOOT_BOARD_USER_BUTTON_PIN      (5U)
+#define MBOOT_BOARD_USER_BUTTON_IOMUXC \
+    0x401F8070U, 0x5U, 0U, 0U, 0x401F8120U
+#endif
