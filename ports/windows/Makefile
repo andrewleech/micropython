@@ -71,6 +71,12 @@ SRC_C = \
 	fmode.c \
 	$(wildcard $(VARIANT_DIR)/*.c)
 
+# Allow variant mpconfigvariant.mk files to supply additional source files
+# without losing them to SRC_C's plain `=` reassignment above.  Variants set
+# EXTRA_SRC_C += /abs/path/to/file.c (e.g. for shared sources living
+# outside the in-tree variant directory).
+SRC_C += $(EXTRA_SRC_C)
+
 SHARED_SRC_C += $(addprefix shared/,\
 	$(SHARED_SRC_C_EXTRA) \
 	)
