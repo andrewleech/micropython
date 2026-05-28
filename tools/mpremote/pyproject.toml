@@ -7,7 +7,7 @@ requires = [
 build-backend = "hatchling.build"
 
 [project]
-name = "mpremote"
+name = "ampremote"
 description = "Tool for interacting remotely with MicroPython devices"
 readme = "README.md"
 authors = [
@@ -31,7 +31,8 @@ requires-python = ">=3.4"
 dynamic = ["dependencies", "version"]
 
 [project.scripts]
-mpremote = "mpremote.main:main"
+ampremote = "mpremote.main:main"
+ampr = "mpremote.main:main"
 
 [tool.hatch.metadata.hooks.requirements_txt]
 files = ["requirements.txt"]
