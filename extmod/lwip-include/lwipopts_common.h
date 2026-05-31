@@ -58,6 +58,10 @@
 #define LWIP_DNS                        1
 #define LWIP_DNS_SUPPORT_MDNS_QUERIES   1
 #define LWIP_MDNS_RESPONDER             1
+// Allow advertising several browsable mDNS services per netif (lwIP default 1).
+// TXT data for each service is bounded by MDNS_DOMAIN_MAXLEN (256 bytes), so
+// there is no separate per-service TXT-item count to configure.
+#define MDNS_MAX_SERVICES               4
 #define LWIP_IGMP                       1
 
 #if MICROPY_PY_LWIP_PPP
