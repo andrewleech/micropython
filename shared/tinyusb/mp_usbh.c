@@ -44,9 +44,15 @@
 #include "tusb.h"
 #include "host/hcd.h"
 #include "host/usbh.h"
+#if CFG_TUH_CDC
 #include "class/cdc/cdc_host.h"
+#endif
+#if CFG_TUH_MSC
 #include "class/msc/msc_host.h"
+#endif
+#if CFG_TUH_HID
 #include "class/hid/hid_host.h"
+#endif
 #if CFG_TUH_RPI_PIO_USB
 #include "pio_usb.h"
 #endif
@@ -62,6 +68,7 @@ static machine_usbh_device_obj_t *find_device_by_addr(uint8_t addr) {
     return dev->mounted ? dev : NULL;
 }
 
+#if CFG_TUH_CDC
 static machine_usbh_cdc_obj_t *find_cdc_by_itf(uint8_t itf_num) {
     mp_obj_usb_host_t *usbh = MP_OBJ_TO_PTR(MP_STATE_VM(usbh));
     if (usbh == NULL || itf_num >= CFG_TUH_CDC) {
@@ -70,7 +77,9 @@ static machine_usbh_cdc_obj_t *find_cdc_by_itf(uint8_t itf_num) {
     machine_usbh_cdc_obj_t *cdc = &usbh->cdc_pool[itf_num];
     return cdc->connected ? cdc : NULL;
 }
+#endif
 
+#if CFG_TUH_MSC
 static machine_usbh_msc_obj_t *find_msc_by_addr(uint8_t addr) {
     mp_obj_usb_host_t *usbh = MP_OBJ_TO_PTR(MP_STATE_VM(usbh));
     if (usbh == NULL) {
@@ -84,7 +93,9 @@ static machine_usbh_msc_obj_t *find_msc_by_addr(uint8_t addr) {
     }
     return NULL;
 }
+#endif
 
+#if CFG_TUH_HID
 static machine_usbh_hid_obj_t *find_hid_by_addr_instance(uint8_t addr, uint8_t instance) {
     mp_obj_usb_host_t *usbh = MP_OBJ_TO_PTR(MP_STATE_VM(usbh));
     if (usbh == NULL) {
@@ -98,6 +109,7 @@ static machine_usbh_hid_obj_t *find_hid_by_addr_instance(uint8_t addr, uint8_t i
     }
     return NULL;
 }
+#endif
 
 // Helper function to check if a device is connected / mounted.
 bool mp_usbh_device_mounted(uint8_t dev_addr) {
@@ -317,23 +329,30 @@ void tuh_umount_cb(uint8_t dev_addr) {
     usbh->device_pool[dev_addr - 1].mounted = false;
 
     // Mark all class devices for this address as disconnected.
+    #if CFG_TUH_CDC
     for (int i = 0; i < CFG_TUH_CDC; i++) {
         if (usbh->cdc_pool[i].dev_addr == dev_addr) {
             usbh->cdc_pool[i].connected = false;
         }
     }
+    #endif
+    #if CFG_TUH_MSC
     for (int i = 0; i < CFG_TUH_MSC; i++) {
         if (usbh->msc_pool[i].dev_addr == dev_addr) {
             usbh->msc_pool[i].connected = false;
         }
     }
+    #endif
+    #if CFG_TUH_HID
     for (int i = 0; i < CFG_TUH_HID; i++) {
         if (usbh->hid_pool[i].dev_addr == dev_addr) {
             usbh->hid_pool[i].connected = false;
         }
     }
+    #endif
 }
 
+#if CFG_TUH_CDC
 // CDC mount callback.
 // Runs inside tuh_task_ext() — no heap allocation allowed.
 void tuh_cdc_mount_cb(uint8_t idx) {
@@ -396,7 +415,9 @@ void tuh_cdc_rx_cb(uint8_t idx) {
 void tuh_cdc_tx_complete_cb(uint8_t idx) {
     (void)idx;
 }
+#endif // CFG_TUH_CDC
 
+#if CFG_TUH_MSC
 // MSC mount callback.
 // Runs inside tuh_task_ext() — no heap allocation allowed.
 void tuh_msc_mount_cb(uint8_t dev_addr) {
@@ -489,7 +510,9 @@ bool mp_usbh_msc_wait_complete(machine_usbh_msc_obj_t *msc, uint32_t timeout_ms)
 
     return msc->operation_success;
 }
+#endif // CFG_TUH_MSC
 
+#if CFG_TUH_HID
 // HID mount callback.
 // Runs inside tuh_task_ext() — no heap allocation allowed.
 void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *desc_report, uint16_t desc_len) {
@@ -582,6 +605,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
     // Continue receiving reports.
     tuh_hid_receive_report(dev_addr, instance);
 }
+#endif // CFG_TUH_HID
 
 // Enable/disable USB host interrupts.
 // Ports where hcd_int_enable/disable are destructive (e.g. ESP32 where
@@ -619,15 +643,21 @@ void mp_usbh_deinit(void) {
     for (int i = 0; i < CFG_TUH_DEVICE_MAX; i++) {
         usbh->device_pool[i].mounted = false;
     }
+    #if CFG_TUH_CDC
     for (int i = 0; i < CFG_TUH_CDC; i++) {
         usbh->cdc_pool[i].connected = false;
     }
+    #endif
+    #if CFG_TUH_MSC
     for (int i = 0; i < CFG_TUH_MSC; i++) {
         usbh->msc_pool[i].connected = false;
     }
+    #endif
+    #if CFG_TUH_HID
     for (int i = 0; i < CFG_TUH_HID; i++) {
         usbh->hid_pool[i].connected = false;
     }
+    #endif
 
     MP_STATE_VM(usbh) = MP_OBJ_NULL;
 }

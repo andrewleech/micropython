@@ -40,11 +40,16 @@
 // Forward declarations so the function prototypes below can reference
 // these object types before their full definitions later in this header.
 typedef struct _machine_usbh_device_obj_t machine_usbh_device_obj_t;
+#if CFG_TUH_MSC
 typedef struct _machine_usbh_msc_obj_t machine_usbh_msc_obj_t;
+#endif
 
+#if CFG_TUH_CDC
 // CDC IRQ trigger
 #define USBH_CDC_IRQ_RX     1
+#endif
 
+#if CFG_TUH_HID
 // HID Constants
 #define USBH_HID_MAX_REPORT_SIZE  64
 
@@ -56,10 +61,13 @@ typedef struct _machine_usbh_msc_obj_t machine_usbh_msc_obj_t;
 
 // HID report event types
 #define USBH_HID_IRQ_REPORT      1
+#endif
 
+#if CFG_TUH_MSC
 // MSC operation timeout (milliseconds)
 #ifndef MICROPY_HW_USBH_MSC_TIMEOUT
 #define MICROPY_HW_USBH_MSC_TIMEOUT 5000
+#endif
 #endif
 
 // Forward declare STM32 low-level USB init (bypasses tusb_inited() check)
@@ -88,12 +96,14 @@ void mp_usbh_fetch_device_strings(machine_usbh_device_obj_t *dev);
 void mp_usbh_schedule_task(void);
 void mp_usbh_task(void);
 
+#if CFG_TUH_MSC
 // Helper function to wait for MSC operation completion.
 bool mp_usbh_msc_wait_complete(machine_usbh_msc_obj_t *msc, uint32_t timeout_ms);
 
 // MSC transfer complete callback for tuh_msc_read10/write10
 #ifndef NO_QSTR
 bool mp_usbh_msc_xfer_complete(uint8_t dev_addr, tuh_msc_complete_data_t const *cb_data);
+#endif
 #endif
 
 // Deinitialization function
@@ -105,14 +115,20 @@ extern const mp_obj_type_t machine_usb_host_type;
 // The USBH_Device type
 extern const mp_obj_type_t machine_usbh_device_type;
 
+#if CFG_TUH_CDC
 // The USBH_CDC type
 extern const mp_obj_type_t machine_usbh_cdc_type;
+#endif
 
+#if CFG_TUH_MSC
 // The USBH_MSC type
 extern const mp_obj_type_t machine_usbh_msc_type;
+#endif
 
+#if CFG_TUH_HID
 // The USBH_HID type
 extern const mp_obj_type_t machine_usbh_hid_type;
+#endif
 
 // Structure to track USB device information
 typedef struct _machine_usbh_device_obj_t {
@@ -130,6 +146,7 @@ typedef struct _machine_usbh_device_obj_t {
     bool strings_fetched;       // Whether string descriptors have been fetched
 } machine_usbh_device_obj_t;
 
+#if CFG_TUH_CDC
 // Structure for USB CDC device
 typedef struct _machine_usbh_cdc_obj_t {
     mp_obj_base_t base;
@@ -138,7 +155,9 @@ typedef struct _machine_usbh_cdc_obj_t {
     uint8_t itf_num;            // Interface number
     mp_obj_t irq_callback;      // CDC IRQ callbacks
 } machine_usbh_cdc_obj_t;
+#endif
 
+#if CFG_TUH_MSC
 // Structure for USB MSC device (block device)
 typedef struct _machine_usbh_msc_obj_t {
     mp_obj_base_t base;
@@ -152,7 +171,9 @@ typedef struct _machine_usbh_msc_obj_t {
     volatile bool operation_pending;
     volatile bool operation_success;
 } machine_usbh_msc_obj_t;
+#endif
 
+#if CFG_TUH_HID
 // Structure for USB HID device
 typedef struct _machine_usbh_hid_obj_t {
     mp_obj_base_t base;
@@ -168,6 +189,7 @@ typedef struct _machine_usbh_hid_obj_t {
     volatile bool report_ready;
     mp_obj_t irq_callback;      // HID IRQ callbacks
 } machine_usbh_hid_obj_t;
+#endif
 
 // Structure to hold shared USB host state.
 // Uses pre-allocated static pools indexed by TinyUSB device address/index
@@ -180,10 +202,18 @@ typedef struct _mp_obj_usb_host_t {
 
     // Pre-allocated device pools sized by TinyUSB limits.
     // Indexed by dev_addr-1 (device) or TinyUSB class index (CDC/MSC/HID).
+    // A pool sized [CFG_TUH_<CLASS>] would be a zero-length array when that
+    // class is disabled, so the member is guarded out entirely in that case.
     machine_usbh_device_obj_t device_pool[CFG_TUH_DEVICE_MAX];
+    #if CFG_TUH_CDC
     machine_usbh_cdc_obj_t cdc_pool[CFG_TUH_CDC];
+    #endif
+    #if CFG_TUH_MSC
     machine_usbh_msc_obj_t msc_pool[CFG_TUH_MSC];
+    #endif
+    #if CFG_TUH_HID
     machine_usbh_hid_obj_t hid_pool[CFG_TUH_HID];
+    #endif
 } mp_obj_usb_host_t;
 
 // Helper function to check if a device is mounted.

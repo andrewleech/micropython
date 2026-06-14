@@ -41,6 +41,7 @@
 
 #include "shared/tinyusb/mp_usbh.h"
 
+#if CFG_TUH_CDC
 // For CDC stream protocol
 static mp_uint_t machine_usbh_cdc_read_method(mp_obj_t self_in, void *buf_in, mp_uint_t size, int *errcode);
 static mp_uint_t machine_usbh_cdc_write_method(mp_obj_t self_in, const void *buf_in, mp_uint_t size, int *errcode);
@@ -52,6 +53,7 @@ static const mp_stream_p_t machine_usbh_cdc_stream_p = {
     .ioctl = machine_usbh_cdc_ioctl_method,
     .is_text = false,
 };
+#endif
 
 /******************************************************************************/
 // MicroPython bindings for USBHost
@@ -84,20 +86,26 @@ static mp_obj_t machine_usb_host_make_new(const mp_obj_type_t *type, size_t n_ar
             self->device_pool[i].base.type = &machine_usbh_device_type;
             self->device_pool[i].mounted = false;
         }
+        #if CFG_TUH_CDC
         for (int i = 0; i < CFG_TUH_CDC; i++) {
             self->cdc_pool[i].base.type = &machine_usbh_cdc_type;
             self->cdc_pool[i].connected = false;
             self->cdc_pool[i].irq_callback = mp_const_none;
         }
+        #endif
+        #if CFG_TUH_MSC
         for (int i = 0; i < CFG_TUH_MSC; i++) {
             self->msc_pool[i].base.type = &machine_usbh_msc_type;
             self->msc_pool[i].connected = false;
         }
+        #endif
+        #if CFG_TUH_HID
         for (int i = 0; i < CFG_TUH_HID; i++) {
             self->hid_pool[i].base.type = &machine_usbh_hid_type;
             self->hid_pool[i].connected = false;
             self->hid_pool[i].irq_callback = mp_const_none;
         }
+        #endif
         MP_STATE_VM(usbh) = MP_OBJ_FROM_PTR(self);
     }
 
@@ -136,15 +144,21 @@ static mp_obj_t machine_usb_host_active(size_t n_args, const mp_obj_t *args) {
             for (int i = 0; i < CFG_TUH_DEVICE_MAX; i++) {
                 self->device_pool[i].mounted = false;
             }
+            #if CFG_TUH_CDC
             for (int i = 0; i < CFG_TUH_CDC; i++) {
                 self->cdc_pool[i].connected = false;
             }
+            #endif
+            #if CFG_TUH_MSC
             for (int i = 0; i < CFG_TUH_MSC; i++) {
                 self->msc_pool[i].connected = false;
             }
+            #endif
+            #if CFG_TUH_HID
             for (int i = 0; i < CFG_TUH_HID; i++) {
                 self->hid_pool[i].connected = false;
             }
+            #endif
         }
 
         self->active = new_active;
@@ -175,7 +189,11 @@ static mp_obj_t machine_usb_host_devices(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usb_host_devices_obj, machine_usb_host_devices);
 
 // Method to get CDC devices.
+// The accessor stays callable when CFG_TUH_CDC == 0 (returns an empty tuple)
+// so the Python API surface is unchanged; only the pool-indexing internals are
+// guarded out to avoid a zero-length items[] array.
 static mp_obj_t machine_usb_host_cdc_devices(mp_obj_t self_in) {
+    #if CFG_TUH_CDC
     mp_obj_usb_host_t *self = MP_OBJ_TO_PTR(self_in);
     mp_obj_t items[CFG_TUH_CDC];
     size_t count = 0;
@@ -185,11 +203,16 @@ static mp_obj_t machine_usb_host_cdc_devices(mp_obj_t self_in) {
         }
     }
     return mp_obj_new_tuple(count, items);
+    #else
+    (void)self_in;
+    return mp_obj_new_tuple(0, NULL);
+    #endif
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usb_host_cdc_devices_obj, machine_usb_host_cdc_devices);
 
 // Method to get MSC devices.
 static mp_obj_t machine_usb_host_msc_devices(mp_obj_t self_in) {
+    #if CFG_TUH_MSC
     mp_obj_usb_host_t *self = MP_OBJ_TO_PTR(self_in);
     mp_obj_t items[CFG_TUH_MSC];
     size_t count = 0;
@@ -199,11 +222,16 @@ static mp_obj_t machine_usb_host_msc_devices(mp_obj_t self_in) {
         }
     }
     return mp_obj_new_tuple(count, items);
+    #else
+    (void)self_in;
+    return mp_obj_new_tuple(0, NULL);
+    #endif
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usb_host_msc_devices_obj, machine_usb_host_msc_devices);
 
 // Method to get HID devices.
 static mp_obj_t machine_usb_host_hid_devices(mp_obj_t self_in) {
+    #if CFG_TUH_HID
     mp_obj_usb_host_t *self = MP_OBJ_TO_PTR(self_in);
     mp_obj_t items[CFG_TUH_HID];
     size_t count = 0;
@@ -213,6 +241,10 @@ static mp_obj_t machine_usb_host_hid_devices(mp_obj_t self_in) {
         }
     }
     return mp_obj_new_tuple(count, items);
+    #else
+    (void)self_in;
+    return mp_obj_new_tuple(0, NULL);
+    #endif
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_usb_host_hid_devices_obj, machine_usb_host_hid_devices);
 
@@ -291,6 +323,8 @@ MP_DEFINE_CONST_OBJ_TYPE(
 
 /******************************************************************************/
 // MicroPython bindings for USBH_CDC
+
+#if CFG_TUH_CDC
 
 // Print function for USBH_CDC
 static void machine_usbh_cdc_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
@@ -482,8 +516,12 @@ MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &machine_usbh_cdc_locals_dict
     );
 
+#endif // CFG_TUH_CDC
+
 /******************************************************************************/
 // MicroPython bindings for USBH_MSC
+
+#if CFG_TUH_MSC
 
 // Print function for USBH_MSC
 static void machine_usbh_msc_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
@@ -706,8 +744,12 @@ MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &machine_usbh_msc_locals_dict
     );
 
+#endif // CFG_TUH_MSC
+
 /******************************************************************************/
 // MicroPython bindings for USBH_HID
+
+#if CFG_TUH_HID
 
 // Print function for USBH_HID
 static void machine_usbh_hid_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
@@ -805,5 +847,7 @@ MP_DEFINE_CONST_OBJ_TYPE(
     print, machine_usbh_hid_print,
     locals_dict, &machine_usbh_hid_locals_dict
     );
+
+#endif // CFG_TUH_HID
 
 #endif // MICROPY_HW_USB_HOST
