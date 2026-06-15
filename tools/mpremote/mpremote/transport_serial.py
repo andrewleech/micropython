@@ -175,7 +175,7 @@ class SerialTransport(Transport):
                 time.sleep(0.01)
         return data
 
-    def _wait_for_friendly_prompt(self, timeout_overall=3):
+    def _wait_for_friendly_prompt(self, timeout_overall=5):
         # Actively poll for the friendly REPL prompt before attempting raw mode
         # entry. This handles devices that are still booting (e.g. after DTR/RTS
         # toggling on macOS USB-serial converters resets the device on port open),
@@ -202,14 +202,14 @@ class SerialTransport(Transport):
         return False
 
     def enter_raw_repl(self, soft_reset=True, timeout_overall=10):
-        # Actively confirm the device is in friendly REPL before sending Ctrl-A,
-        # which replaces a previous single Ctrl-C + flush + Ctrl-A that failed
-        # when the device was still booting or stuck in raw REPL. The prompt
-        # phase is capped at 3s so transient boot delays surface quickly;
+        # Actively confirm the device is in friendly REPL before sending Ctrl-A.
+        # The prompt phase is capped at 5s to accommodate boards whose boot.py
+        # does network init or similar work before the prompt appears, while
+        # still surfacing genuinely unresponsive devices reasonably quickly.
         # timeout_overall governs the post-Ctrl-A banner reads below.
         # No explicit input flush is needed: read_until consumes any pending
         # bytes up to and including the prompt.
-        if not self._wait_for_friendly_prompt(timeout_overall=min(3, timeout_overall)):
+        if not self._wait_for_friendly_prompt(timeout_overall=min(5, timeout_overall)):
             raise TransportError("could not enter raw repl")
 
         self.serial.write(b"\r\x01")  # ctrl-A: enter raw REPL
