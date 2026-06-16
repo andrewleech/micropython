@@ -888,6 +888,12 @@ typedef uint64_t mp_uint_t;
 #define MICROPY_REPL_EVENT_DRIVEN (0)
 #endif
 
+// Whether to boot into an asyncio-based REPL (asyncio.arepl) instead of the
+// blocking friendly REPL. Requires asyncio.arepl in the frozen manifest.
+#ifndef MICROPY_REPL_ASYNCIO
+#define MICROPY_REPL_ASYNCIO (0)
+#endif
+
 // The number of items to keep in the readline history.
 #ifndef MICROPY_READLINE_HISTORY_SIZE
 #define MICROPY_READLINE_HISTORY_SIZE (8)
@@ -1612,6 +1618,11 @@ typedef time_t mp_timestamp_t;
 // Support for micropython.RingIO()
 #ifndef MICROPY_PY_MICROPYTHON_RINGIO
 #define MICROPY_PY_MICROPYTHON_RINGIO (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
+#endif
+
+// Whether to provide "micropython.stdio_mode_raw" function
+#ifndef MICROPY_PY_MICROPYTHON_STDIO_RAW
+#define MICROPY_PY_MICROPYTHON_STDIO_RAW (0)
 #endif
 
 // Whether to provide "array" module. Note that large chunk of the

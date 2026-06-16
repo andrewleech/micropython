@@ -99,6 +99,16 @@ uint64_t mp_hal_time_ns(void);
 #include "extmod/virtpin.h"
 #endif
 
+// If the port doesn't provide stdio mode switching, define trivial no-ops.
+// Ports like unix that switch between raw/cooked terminal modes should define
+// MICROPY_HAL_HAS_STDIO_MODE_SWITCH and provide their own implementations.
+#if !MICROPY_HAL_HAS_STDIO_MODE_SWITCH
+static inline void mp_hal_stdio_mode_raw(void) {
+}
+static inline void mp_hal_stdio_mode_orig(void) {
+}
+#endif
+
 // Event handling and wait-for-event functions.
 
 #ifndef MICROPY_INTERNAL_WFE
