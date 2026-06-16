@@ -31,6 +31,9 @@
 
 #define MICROPY_PY_PYB_LEGACY       (1)
 #define MICROPY_HW_ENABLE_INTERNAL_FLASH_STORAGE (0)
+
+// Insufficient internal flash (FLASH_APP) to also carry the asyncio REPL.
+#define MICROPY_REPL_ASYNCIO        (0)
 #define MICROPY_HW_HAS_SWITCH       (1)
 #define MICROPY_HW_HAS_FLASH        (1)
 #define MICROPY_HW_ENABLE_RNG       (1)
