@@ -30,6 +30,14 @@
 #include "mpconfigboard.h"
 #include "fsl_common.h"
 
+// When the board opts into mboot (USE_MBOOT=1 in its mpconfigboard.mk), pull
+// in the mimxrt_enter_mboot() declaration and define
+// MICROPY_BOARD_ENTER_BOOTLOADER to call it so machine.bootloader() reaches
+// mboot.
+#if defined(USE_MBOOT)
+#include "mboot_boardctrl.h"
+#endif
+
 uint32_t trng_random_u32(void);
 
 // Config level

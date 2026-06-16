@@ -24,6 +24,17 @@ text_start          = flash_start + 0x00002400;
 text_size           = MBOOT_FLASH_SIZE - 0x00002400;
 __mboot_start       = flash_start;
 __mboot_end         = flash_start + MBOOT_FLASH_SIZE;
+#elif defined(USE_MBOOT)
+/* App built behind mboot: vector table and code shifted to start after the
+ * mboot reservation (MBOOT_FLASH_SIZE bytes, default 64 KiB). */
+interrupts_start    = flash_start + MBOOT_FLASH_SIZE;
+interrupts_size     = 0x00000400;
+text_start          = flash_start + MBOOT_FLASH_SIZE + 0x00000400;
+vfs_start           = flash_start + 0x00100000;
+vfs_size            = ((flash_end) - (vfs_start));
+_micropy_hw_romfs_part0_start = ((vfs_start) - MICROPY_HW_ROMFS_BYTES);
+_micropy_hw_romfs_part0_size = MICROPY_HW_ROMFS_BYTES;
+text_size           = ((_micropy_hw_romfs_part0_start) - (text_start));
 #else
 interrupts_start    = flash_start + 0x0000C000;
 interrupts_size     = 0x00000400;

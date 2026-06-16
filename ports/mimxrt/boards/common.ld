@@ -32,11 +32,17 @@ STACK_SIZE = DEFINED(__stack_size__) ? __stack_size__ : 0x0400;
  */
 reserved_size = DEFINED(reserved_size) ? reserved_size : 0k;
 
-/* Specify the memory areas */
+/* Specify the memory areas.  When the app is built behind mboot
+ * (USE_MBOOT && !BUILDING_MBOOT), the FCB at 0x...0400 and the IVT at
+ * 0x...1000 belong to mboot - the app must not emit its own or it will
+ * overwrite them on flash and the boot ROM will jump past mboot.
+ */
 MEMORY
 {
+#if !defined(USE_MBOOT) || defined(BUILDING_MBOOT)
   m_flash_config (RX) : ORIGIN = flash_config_start,    LENGTH = flash_config_size
   m_ivt          (RX) : ORIGIN = ivt_start,             LENGTH = ivt_size
+#endif
   m_interrupts   (RX) : ORIGIN = interrupts_start,      LENGTH = interrupts_size
   m_text         (RX) : ORIGIN = text_start,            LENGTH = text_size
 #if !defined(BUILDING_MBOOT)
@@ -66,6 +72,11 @@ SECTIONS
   __vfs_end = __vfs_start + LENGTH(m_vfs);
 #endif
 
+#if !defined(USE_MBOOT) || defined(BUILDING_MBOOT)
+  /* The FCB and IVT are emitted only when this image lives at the bottom of
+   * flash - i.e. mboot itself, or an app built without an mboot reservation.
+   * App builds behind mboot (USE_MBOOT && !BUILDING_MBOOT) reuse mboot's
+   * existing FCB/IVT and must NOT emit their own. */
   .flash_config :
   {
     . = ALIGN(4);
@@ -86,6 +97,20 @@ SECTIONS
 #endif
     . = ALIGN(4);
   } > m_ivt
+#else
+  /* App behind mboot: the boot-header sections must NOT be emitted at
+   * 0x...0400 / 0x...1000 - those belong to mboot.  qspiflash_config (in
+   * .boot_hdr.conf) is referenced by flash.c for geometry queries so we
+   * must keep its bytes in the image, just place them inside .text instead
+   * of at the FCB location.  The IVT/BootData/DCD bytes are not referenced
+   * after mboot has done its job, so they can be discarded outright. */
+  /DISCARD/ :
+  {
+    *(.boot_hdr.ivt)
+    *(.boot_hdr.boot_data)
+    *(.boot_hdr.dcd_data)
+  }
+#endif
 
   /* ISR Vector table in flash. Copied to ITCM by ResetHandler(). */
 
@@ -119,6 +144,11 @@ SECTIONS
     *(EXCLUDE_FILE(*fsl_flexspi.o *usbd.o *usbd_control.o *dcd_ci_hs.o *dfu_device.o) .text*)
 #else
     *(EXCLUDE_FILE(*fsl_flexspi.o *gc.o *vm.o *runtime*.o *map.o *mpirq.o *machine_i2c_target.o *fsl_lpi2c.o) .text*)
+#endif
+#if defined(USE_MBOOT) && !defined(BUILDING_MBOOT)
+    /* App behind mboot: qspiflash_config lives in .boot_hdr.conf; emit it
+     * here so flash.c can still reference its geometry fields. */
+    KEEP(*(.boot_hdr.conf))
 #endif
     *(.rodata)               /* .rodata sections (constants, strings, etc.) */
     *(.rodata*)              /* .rodata* sections (constants, strings, etc.) */
@@ -227,9 +257,15 @@ SECTIONS
     __ram_function_start__ = .;
     *(.ram_functions*)
 #if defined(BUILDING_MBOOT)
-    /* TinyUSB USB event-processing hot paths: placed in ITCM to eliminate
+    /* fsl_flexspi.o MUST run from ITCM: while a FlexSPI page-program is in
+     * progress the AHB read interface is suspended, so any instruction
+     * fetched from XIP flash would fault.  Without this rule the orphan-
+     * section placer puts FLEXSPI_TransferBlocking/Read/Write in m_text and
+     * the chip hangs on the first DNLOAD.
+     * TinyUSB USB event-processing hot paths: placed in ITCM to eliminate
      * I-Cache miss fills that could race with USB DMA on the AHB bus.
-     * These files are excluded from .text above and collected here instead. */
+     * All files in this list are excluded from .text above. */
+    *fsl_flexspi.o(.text*)
     *usbd.o(.text*)
     *usbd_control.o(.text*)
     *dcd_ci_hs.o(.text*)

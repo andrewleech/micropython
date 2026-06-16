@@ -198,11 +198,20 @@ INC_HAL_IMX += \
 CFLAGS += -DMICROPY_PY_MACHINE_QECNT=1
 endif
 
+# Application entry point.  Default places the app at flash_start+0xC000
+# (vector table at the start of the application slot).  When the board is
+# built behind the mboot bootloader, shift past the MBOOT_FLASH_SIZE
+# reservation so the linker and the UF2 base offset agree.
+APP_BASE_OFFSET := 0xC000
+ifeq ($(USE_MBOOT),1)
+APP_BASE_OFFSET := $(MBOOT_FLASH_SIZE)
+endif
+
 # If not empty, then it is 10xx.
 ifneq ($(findstring MIMXRT10, $(MCU_SERIES)),)
-APPLICATION_ADDR := 0x6000C000
+APPLICATION_ADDR := $(shell printf 0x%X $$((0x60000000 + $(APP_BASE_OFFSET))))
 else
-APPLICATION_ADDR := 0x3000C000
+APPLICATION_ADDR := $(shell printf 0x%X $$((0x30000000 + $(APP_BASE_OFFSET))))
 endif
 
 ifeq ($(MCU_SERIES), MIMXRT1176)
@@ -280,6 +289,7 @@ SRC_C += \
 	systick.c \
 	ticks.c \
 	usbd.c \
+	mboot_entry.c \
 
 SHARED_SRC_C += \
 	shared/libc/printf.c \
@@ -319,6 +329,14 @@ endif
 # Set a flag if the UF2 bootloader is used
 ifeq ($(USE_UF2_BOOTLOADER),1)
 	CFLAGS += -DMICROPY_MACHINE_UF2_BOOTLOADER=1
+endif
+
+# Set a flag if the board ships behind the mboot bootloader (USE_MBOOT=1 in
+# its mpconfigboard.mk).  This shifts the application past the mboot
+# reservation and wires machine.bootloader() to mimxrt_enter_mboot().
+ifeq ($(USE_MBOOT),1)
+	MBOOT_FLASH_SIZE ?= 0x10000
+	CFLAGS += -DUSE_MBOOT -DMBOOT_FLASH_SIZE=$(MBOOT_FLASH_SIZE)
 endif
 
 # Set the default size of the VfsRom file system. Can be changed at board level
@@ -519,6 +537,10 @@ LDDEFINES += \
 
 ifdef MICROPY_HW_FLASH_RESERVED
 LDDEFINES += -DMICROPY_HW_FLASH_RESERVED=$(MICROPY_HW_FLASH_RESERVED)
+endif
+
+ifeq ($(USE_MBOOT),1)
+LDDEFINES += -DUSE_MBOOT -DMBOOT_FLASH_SIZE=$(MBOOT_FLASH_SIZE)
 endif
 
 ifdef MICROPY_HW_SDRAM_AVAIL
