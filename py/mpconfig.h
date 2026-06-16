@@ -567,11 +567,6 @@ typedef uint64_t mp_uint_t;
 #define MICROPY_DYNAMIC_COMPILER (0)
 #endif
 
-// Whether the compiler allows compiling top-level await expressions
-#ifndef MICROPY_COMP_ALLOW_TOP_LEVEL_AWAIT
-#define MICROPY_COMP_ALLOW_TOP_LEVEL_AWAIT (0)
-#endif
-
 // Whether to enable constant folding; eg 1+2 rewritten as 3
 #ifndef MICROPY_COMP_CONST_FOLDING
 #define MICROPY_COMP_CONST_FOLDING (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_CORE_FEATURES)
@@ -891,7 +886,18 @@ typedef uint64_t mp_uint_t;
 // Whether to boot into an asyncio-based REPL (asyncio.arepl) instead of the
 // blocking friendly REPL. Requires asyncio.arepl in the frozen manifest.
 #ifndef MICROPY_REPL_ASYNCIO
+#if MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES
+#define MICROPY_REPL_ASYNCIO (1)
+#else
 #define MICROPY_REPL_ASYNCIO (0)
+#endif
+#endif
+
+// Whether the compiler allows compiling top-level await expressions.  The
+// asyncio REPL needs this to compile REPL input containing await into a
+// coroutine that runs on the event loop.
+#ifndef MICROPY_COMP_ALLOW_TOP_LEVEL_AWAIT
+#define MICROPY_COMP_ALLOW_TOP_LEVEL_AWAIT (MICROPY_REPL_ASYNCIO)
 #endif
 
 // The number of items to keep in the readline history.

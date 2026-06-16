@@ -48,6 +48,7 @@ exclude = [  # Ruff finds Python SyntaxError in these files
   "tests/basics/string_tstring_operations.py",
   "tests/basics/string_tstring_parser1.py",
   "tests/cmdline/cmd_compile_only_error.py",
+  "tests/cmdline/repl_asyncio_intr.py",
   "tests/cmdline/repl_autocomplete.py",
   "tests/cmdline/repl_autocomplete_underscore.py",
   "tests/cmdline/repl_autoindent.py",
