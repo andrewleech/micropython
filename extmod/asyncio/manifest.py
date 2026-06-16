@@ -14,5 +14,9 @@ package(
     opt=3,
 )
 
+options.defaults(repl_asyncio=False)
+if options.repl_asyncio:
+    module("asyncio/arepl.py", base_path="..", opt=3)
+
 # Backwards-compatible uasyncio module.
 module("uasyncio.py", opt=3)
