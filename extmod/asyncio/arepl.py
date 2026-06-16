@@ -90,7 +90,13 @@ async def _async_exec(coro, s, pending):
 # raw REPL, raw-paste and synchronous execution happen in C; only complete lines
 # containing top-level `await` are compiled to a coroutine and handed back here
 # to run on the event loop.
-async def task():
+#
+# stop_loop_on_exit: on Ctrl-D stop the event loop (default), so a boot REPL
+#   soft-resets; set False to just end this task and leave the loop and any
+#   other tasks running.
+# persistent: if True, Ctrl-D re-prompts instead of exiting, keeping the console
+#   up for the life of the program (it still ends if stdin closes).
+async def task(stop_loop_on_exit=True, persistent=False):
     # Deliver Ctrl-C as a byte to the REPL rather than raising KeyboardInterrupt.
     micropython.kbd_intr(-1)
     _stdio_raw(True)
@@ -159,8 +165,14 @@ async def task():
                 await _async_exec(r, s, pending)
                 micropython.repl_event_resume()
             elif r & _PYEXEC_FORCED_EXIT:
-                # Ctrl-D: end the REPL and let the boot loop soft-reset.
-                asyncio.get_event_loop().stop()
+                # Ctrl-D.
+                if persistent:
+                    # Keep the console alive: re-prompt instead of exiting.
+                    micropython.repl_event_resume()
+                    continue
+                if stop_loop_on_exit:
+                    # Boot REPL: stop the loop so the caller soft-resets.
+                    asyncio.get_event_loop().stop()
                 return
             if pending:
                 # More bytes already buffered: yield once per character, same

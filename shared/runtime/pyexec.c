@@ -518,9 +518,11 @@ static int pyexec_friendly_repl_process_char(int c) {
             mp_hal_stdout_tx_str("\r\n");
             goto input_restart;
         } else if (ret == CHAR_CTRL_D) {
-            // exit for a soft reset
+            // Ctrl-D: signal exit.  Reset (not free) the line so the buffer
+            // survives for reuse if the caller re-prompts instead of exiting
+            // (e.g. a persistent asyncio REPL).
             mp_hal_stdout_tx_str("\r\n");
-            vstr_clear(MP_STATE_VM(repl_line));
+            vstr_reset(MP_STATE_VM(repl_line));
             return PYEXEC_FORCED_EXIT;
         } else if (ret == CHAR_CTRL_E) {
             // paste mode
