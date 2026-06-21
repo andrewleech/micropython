@@ -40,6 +40,16 @@
 #include "hardware/regs/udma.h"
 #include "hardware/uart.h"
 
+#if MICROPY_HW_ENABLE_USBDEV
+#include "shared/tinyusb/mp_usbd.h"
+#include "shared/tinyusb/mp_usbd_cdc.h"
+#include "usb/dcd_baochip.h"
+#endif
+
+#if MICROPY_PY_OS_DUPTERM
+#include "extmod/misc.h"
+#endif
+
 #ifndef MICROPY_HW_STDIN_BUFFER_LEN
 #define MICROPY_HW_STDIN_BUFFER_LEN 256
 #endif
@@ -87,31 +97,74 @@ static void stdout_flush(void) {
     }
 }
 
-void mp_hal_stdout_tx_strn(const char *str, mp_uint_t len) {
-    bool ends_with_newline = (len > 0) && (str[len - 1] == '\n');
-    mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
-    while (len > 0) {
-        size_t space = STDOUT_TXBUF_SIZE - stdout_txbuf_len;
-        if (len >= space) {
-            memcpy(stdout_txbuf + stdout_txbuf_len, str, space);
-            stdout_txbuf_len = STDOUT_TXBUF_SIZE;
+mp_uint_t mp_hal_stdout_tx_strn(const char *str, size_t len) {
+    mp_uint_t ret = len;
+    bool did_write = false;
+
+    // UART path: buffered, line-flushed for the USB/IP bridge.
+    {
+        const char *uart_str = str;
+        size_t uart_len = len;
+        bool ends_with_newline = (uart_len > 0) && (uart_str[uart_len - 1] == '\n');
+        mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
+        while (uart_len > 0) {
+            size_t space = STDOUT_TXBUF_SIZE - stdout_txbuf_len;
+            if (uart_len >= space) {
+                memcpy(stdout_txbuf + stdout_txbuf_len, uart_str, space);
+                stdout_txbuf_len = STDOUT_TXBUF_SIZE;
+                stdout_flush();
+                uart_str += space;
+                uart_len -= space;
+            } else {
+                memcpy(stdout_txbuf + stdout_txbuf_len, uart_str, uart_len);
+                stdout_txbuf_len += uart_len;
+                break;
+            }
+        }
+        // Flush line-buffered: keeps print() output prompt when the REPL is
+        // not blocked on stdin.  Bursts without a trailing newline stay
+        // buffered so the USB/IP bridge sees one TCP segment per logical
+        // message.
+        if (ends_with_newline) {
             stdout_flush();
-            str += space;
-            len -= space;
-        } else {
-            memcpy(stdout_txbuf + stdout_txbuf_len, str, len);
-            stdout_txbuf_len += len;
-            break;
+        }
+        MICROPY_END_ATOMIC_SECTION(atomic_state);
+        did_write = true;
+    }
+
+    #if MICROPY_HW_USB_CDC
+    // tud_rhport_init() in lib/tinyusb/src/device/usbd.c sets
+    // _usbd_rhport BEFORE calling dcd_init, so tusb_inited() returns
+    // true during dcd_init.  mp_usbd_cdc_tx_strn's own guard accepts
+    // that and proceeds to spin tud_task_ext() and tud_cdc_write_flush()
+    // for up to MICROPY_HW_USB_CDC_TX_TIMEOUT (500 ms default) per
+    // call.  Any mp_printf inside dcd_init then recurses into the
+    // very TinyUSB stack that's still bringing itself up, which on
+    // this controller hangs dcd_init before it reaches the final
+    // USBCMD.RUN_STOP write.
+    //
+    // tud_ready() is the right gate: it returns true only when the
+    // device is configured (post SET_CONFIG).  CDC writes before that
+    // would have nowhere to go anyway.
+    //
+    if (tud_ready()) {
+        mp_uint_t cdc_res = mp_usbd_cdc_tx_strn(str, len);
+        if (cdc_res > 0) {
+            did_write = true;
+            ret = MIN(cdc_res, ret);
         }
     }
-    // Flush line-buffered: keeps print() output prompt when the REPL is
-    // not blocked on stdin.  Bursts without a trailing newline stay
-    // buffered so the USB/IP bridge sees one TCP segment per logical
-    // message.
-    if (ends_with_newline) {
-        stdout_flush();
+    #endif
+
+    #if MICROPY_PY_OS_DUPTERM
+    int dupterm_res = mp_os_dupterm_tx_strn(str, len);
+    if (dupterm_res >= 0) {
+        did_write = true;
+        ret = MIN((mp_uint_t)dupterm_res, ret);
     }
-    MICROPY_END_ATOMIC_SECTION(atomic_state);
+    #endif
+
+    return did_write ? ret : 0;
 }
 
 // mp_hal_stdout_tx_str and mp_hal_stdout_tx_strn_cooked come from
@@ -121,11 +174,25 @@ void mp_hal_stdout_tx_strn(const char *str, mp_uint_t len) {
 int mp_hal_stdin_rx_chr(void) {
     stdout_flush();
     for (;;) {
+        #if MICROPY_HW_USB_CDC
+        // Same reasoning as in mp_hal_stdout_tx_strn: only pump CDC
+        // once the device is configured.  Before tud_ready(),
+        // mp_usbd_cdc_poll_interfaces() would call mp_usbd_task()
+        // which could recurse into a half-initialised TinyUSB stack.
+        if (tud_ready()) {
+            mp_usbd_cdc_poll_interfaces(0);
+        }
+        #endif
         int c = ringbuf_get(&stdin_ringbuf);
         if (c != -1) {
             return c;
         }
-        // The RX_CHAR ISR feeds stdin_ringbuf; nothing to poll here.
+        #if MICROPY_PY_OS_DUPTERM
+        int dupterm_c = mp_os_dupterm_rx_chr();
+        if (dupterm_c >= 0) {
+            return dupterm_c;
+        }
+        #endif
         mp_event_handle_nowait();
     }
 }
@@ -138,6 +205,14 @@ uintptr_t mp_hal_stdio_poll(uintptr_t poll_flags) {
     if (poll_flags & MP_STREAM_POLL_WR) {
         ret |= MP_STREAM_POLL_WR;
     }
+    #if MICROPY_HW_USB_CDC
+    if (tud_ready()) {
+        ret |= mp_usbd_cdc_poll_interfaces(poll_flags);
+    }
+    #endif
+    #if MICROPY_PY_OS_DUPTERM
+    ret |= mp_os_dupterm_poll(poll_flags);
+    #endif
     return ret;
 }
 
@@ -194,8 +269,14 @@ void mp_hal_uart_repl_init(void) {
 // irq_enable_events() also enables the IRQ line in MIM; a separate
 // irq_enable() would override EV_ENABLE to 0xFFFF, enabling every
 // event for every UART instance -- specifically not what we want.
+//
+// This must NOT call irq_init(): that resets the whole interrupt
+// controller (clears every handler slot, zeroes MIM), which would strip
+// the USB DCD interrupt registered during the first mp_usbd_init() and
+// leave native USB-CDC input dead after a soft reset.  main() calls
+// irq_init() once before the soft-reset loop; here we only (re)register
+// the UART REPL handler, which is idempotent across iterations.
 void mp_hal_stdin_uart_irq_init(void) {
-    irq_init();
     irq_set_handler(IRQ_UART, uart_repl_irq_handler);
     irq_enable_events(IRQ_UART, REPL_UART_RX_CHAR_EVT | REPL_UART_ERR_EVT);
 }
@@ -242,9 +323,18 @@ void mp_hal_delay_us(mp_uint_t us) {
     }
 }
 
+// Sleeps `ms` milliseconds while pumping the MicroPython event loop.
+// Calling mp_event_handle_nowait() inside the busy-wait is LOAD-BEARING
+// for USB device support: when a SETUP packet arrives in the DCD IRQ,
+// the descriptor response is dispatched via a scheduled callback
+// (mp_sched_schedule_node) so that the work happens in non-ISR
+// context.  If main() ever sits in a busy-wait without pumping
+// scheduled tasks, those callbacks never run and the host times out
+// waiting for the response, so enumeration silently stalls.
 void mp_hal_delay_ms(mp_uint_t ms) {
     uint64_t start = ticktimer_read_us();
     uint64_t target = (uint64_t)ms * 1000U;
     while ((ticktimer_read_us() - start) < target) {
+        mp_event_handle_nowait();
     }
 }
