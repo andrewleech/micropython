@@ -60,4 +60,34 @@ void dcd_baochip_irq_resume(void);
 // dcd_init has run.
 void dcd_baochip_request_reinit(void);
 
+// Workaround for a Corigine UDC hardware bug: occasionally the IRQ
+// chain stops delivering edges while the controller continues to
+// write events to the event ring.  At wedge time we have:
+//
+//   USBSTS.EINT = 1   (controller asserting "event interrupt pending")
+//   IMAN.IE     = 1   (interrupter enable still set)
+//   IMAN.IP     = 0   (NOT asserting -- propagation broken)
+//   EV_PENDING  = 0   (irqarray sees no pending event)
+//
+// Software-level re-arming of IMAN (W1C IP, re-write IE, blanket
+// EV_PENDING clear, EV_ENABLE re-arm) all empirically make the wedge
+// fire faster -- the race is in a layer below software.  See
+// notes/dabao-port-investigation.md (2026-06-14 entries) and
+// notes/captures/usbmon-wedge-2026-06-14.pcap for the wire-level
+// evidence: EP0 control transfers (typically SET_CONTROL_LINE_STATE
+// at CDC port open/close) take 5 s to complete and Linux unlinks them
+// with -ENOENT.
+//
+// This function is the agreed workaround.  It reads USBSTS.EINT and,
+// if set, runs dcd_int_handler() directly.  Wired into the standard
+// MicroPython event pump via MICROPY_INTERNAL_EVENT_HOOK
+// (mpconfigport.h), so it runs on every mp_event_handle_nowait() and
+// mp_event_wait_ms() call -- the same sites where other ports pump
+// port-specific event work.  Cost in the healthy path is one register
+// read.
+//
+// This function must remain; without it the device wedges under sustained
+// CDC churn (see notes/corigine-udc-irq-bug-report.md).
+void dcd_baochip_poll_pending_events(void);
+
 #endif // MICROPY_INCLUDED_BAOCHIP_USB_DCD_BAOCHIP_H

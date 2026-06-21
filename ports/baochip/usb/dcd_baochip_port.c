@@ -67,6 +67,12 @@ void dcd_baochip_irq_resume(void) {
     dcd_int_enable(0);
 }
 
+// Poll the UDC for pending events that the IRQ chain may have missed.
+// Wired into MICROPY_INTERNAL_EVENT_HOOK (see mpconfigport.h).
+void dcd_baochip_poll_pending_events(void) {
+    dcd_corigine_poll_pending_events(0);
+}
+
 // Deferred full controller re-bring-up, scheduled via the MicroPython
 // scheduler so it runs in task context, not inside an ISR.
 static mp_sched_node_t udc_reinit_node;
