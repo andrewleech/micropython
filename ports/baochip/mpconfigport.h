@@ -96,6 +96,14 @@ typedef long mp_off_t;
 #ifndef MICROPY_HW_USB_PID
 #define MICROPY_HW_USB_PID          (0x9802)
 #endif
+// Workaround for the Corigine UDC IRQ-propagation bug
+// (USBSTS.EINT=1 with IMAN.IP=0 / EV_PENDING=0 -- see
+// dcd_baochip_poll_pending_events() in usb/dcd_baochip.h).
+// MICROPY_INTERNAL_EVENT_HOOK is the canonical MicroPython macro called
+// by mp_event_handle_nowait() and mp_event_wait_ms() -- same pattern
+// used by esp8266 (ets_loop_iter()), renesas-ra, etc.
+extern void dcd_baochip_poll_pending_events(void);
+#define MICROPY_INTERNAL_EVENT_HOOK     dcd_baochip_poll_pending_events()
 #endif
 
 // Board-specific overrides.
