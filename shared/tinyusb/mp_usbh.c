@@ -184,7 +184,14 @@ void mp_usbh_init_tuh(void) {
     }
     #endif
 
+    // TinyUSB 0.20 deprecates tuh_init() in favour of tusb_init(rhport, rh_init),
+    // but it remains a working inline wrapper and the role pre-set sequencing above
+    // depends on its exact behaviour (enabling the host interrupt), so keep it and
+    // suppress the deprecation here. Harmless on ports whose TinyUSB predates it.
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     tuh_init(BOARD_TUH_RHPORT);
+    #pragma GCC diagnostic pop
     // Note: tuh_init() already calls hcd_int_enable() internally.
     // Don't call mp_usbh_int_enable() again as it causes double interrupt
     // allocation on ESP32 (esp_intr_alloc called twice).
