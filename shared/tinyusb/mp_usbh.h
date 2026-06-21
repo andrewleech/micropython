@@ -95,6 +95,12 @@ void mp_usbh_fetch_device_strings(machine_usbh_device_obj_t *dev);
 // Schedule a call to mp_usbd_task(), even if no USB interrupt has occurred
 void mp_usbh_schedule_task(void);
 void mp_usbh_task(void);
+// Open/close the tuh_task poll window for TinyUSB 0.20+ deferred enumeration:
+// start opens it when the host goes active (the HCD attach/remove path re-opens
+// it per port edge), stop closes it when the host goes inactive. No-op on ports
+// whose bundled TinyUSB enumerates synchronously.
+void mp_usbh_start_task_timer(void);
+void mp_usbh_stop_task_timer(void);
 
 #if CFG_TUH_MSC
 // Helper function to wait for MSC operation completion.

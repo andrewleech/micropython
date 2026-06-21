@@ -35,6 +35,7 @@
 #include "py/stream.h"
 #include "extmod/vfs.h"
 #include "shared/runtime/mpirq.h"
+#include "shared/runtime/softtimer.h"
 
 #include "mp_usbh.h"
 
@@ -261,12 +262,27 @@ void mp_usbh_fetch_device_strings(machine_usbh_device_obj_t *dev) {
     dev->strings_fetched = true;
 }
 
+// File-scope so the HCD-event path (mp_usbh_schedule_task) and the windowed poll
+// timer below both feed the same scheduler node; mp_sched_schedule_node is
+// idempotent, so they never double-queue.
+static mp_sched_node_t usbh_task_node;
+
+// Re-entrancy guard: tuh_task_ext() is not re-entrant, but a class driver's
+// cooperative wait loop may pump the scheduler (and thus this node) while
+// tuh_task_ext is already on the stack.
+static volatile bool usbh_task_running;
+
+#if TUSB_VERSION_NUMBER >= 2001
+// Defined with the deferred-enum poll timer below; called from mp_usbh_task.
+static void mp_usbh_poll_update(void);
+#endif
+
 // Process USB host tasks.
 void mp_usbh_task(void) {
     mp_obj_usb_host_t *usbh = MP_OBJ_TO_PTR(MP_STATE_VM(usbh));
 
-    // Skip if not initialized.
-    if (usbh == NULL || !usbh->initialized || !usbh->active) {
+    // Skip if not initialized/active, or already running (re-entrancy guard).
+    if (usbh == NULL || !usbh->initialized || !usbh->active || usbh_task_running) {
         return;
     }
 
@@ -275,7 +291,16 @@ void mp_usbh_task(void) {
     // expands to tuh_task_ext(UINT32_MAX, false) which blocks forever waiting
     // for USB events. In MicroPython's cooperative scheduling model, we must
     // return control to the main loop to process other tasks.
+    usbh_task_running = true;
     tuh_task_ext(0, false);
+    usbh_task_running = false;
+
+    #if TUSB_VERSION_NUMBER >= 2001
+    // Arm/disarm the deferred-enum poll timer to match the current window. Done
+    // here (scheduler context) so its soft-timer heap entry is only touched
+    // outside the timer callback and outside any ISR.
+    mp_usbh_poll_update();
+    #endif
 }
 
 void mp_usbh_task_callback(mp_sched_node_t *node) {
@@ -284,8 +309,92 @@ void mp_usbh_task_callback(mp_sched_node_t *node) {
 }
 
 TU_ATTR_FAST_FUNC void mp_usbh_schedule_task(void) {
-    static mp_sched_node_t usbh_task_node;
     mp_sched_schedule_node(&usbh_task_node, mp_usbh_task_callback);
+}
+
+#if TUSB_VERSION_NUMBER >= 2001
+// TinyUSB 0.20 runs host enumeration as a deferred, timer-driven state machine: a
+// contact-debounce plus bus-reset/recovery delays, each advanced inside tuh_task
+// as a plain millisecond deadline with no completion interrupt to wake it. The
+// HCD interrupt path (mp_usbh_schedule_task from __wrap_hcd_event_handler) pumps
+// tuh_task on every USB event, so all transfers - enumeration and steady-state -
+// complete immediately; what it cannot do is advance those pure time delays
+// between transfers. So tuh_task needs a timed poll, but ONLY across those gaps.
+//
+// Enumeration is episodic (a forwarding device needs no poll at all), so rather
+// than poll forever this opens a bounded polling window on each device
+// attach/remove edge and lets it lapse once enumeration has settled. The PERIODIC
+// poll timer is armed and disarmed from mp_usbh_task (scheduler context) only:
+// soft_timer_handler re-inserts a periodic entry after the callback returns and
+// writes the heap back, so removing/inserting from inside the callback is
+// clobbered, and the soft-timer heap is not ISR-safe. The ISR/edge path therefore
+// only stores a window deadline (a single 32-bit write). Older bundled TinyUSB
+// (e.g. esp32 via ESP-IDF) enumerates synchronously and needs none of this, hence
+// the version guard.
+#define MP_USBH_POLL_INTERVAL_MS (20)    // tuh_task cadence while the window is open
+#define MP_USBH_POLL_WINDOW_MS   (1500)  // keep polling this long after a port edge
+
+static soft_timer_entry_t usbh_poll_timer;
+static bool usbh_poll_armed;               // timer currently in the soft-timer heap
+static volatile uint32_t usbh_poll_until;  // tick (ms) at which the window closes
+
+// Open/extend the polling window. ISR- and edge-safe: a single 32-bit store, no
+// heap access. mp_usbh_poll_update (scheduler context) does the actual arming.
+static inline void mp_usbh_poll_open_window(void) {
+    usbh_poll_until = mp_hal_ticks_ms() + MP_USBH_POLL_WINDOW_MS;
+}
+
+// Runs at PendSV level: only schedules the task node (tuh_task allocates and
+// invokes Python, so it must run in the scheduler, not here). Skips while inactive.
+static void mp_usbh_poll_timer_callback(soft_timer_entry_t *self) {
+    (void)self;
+    mp_obj_usb_host_t *usbh = MP_OBJ_TO_PTR(MP_STATE_VM(usbh));
+    if (usbh == NULL || !usbh->active) {
+        return;
+    }
+    mp_usbh_schedule_task();
+}
+
+// Arm the poll timer while inside the window, remove it once the window lapses.
+// Must run in scheduler context (mp_usbh_task), where a periodic entry is back in
+// the global heap. Only ever inserts when not armed / removes when armed, so a
+// stale (already-popped) heap node is never touched.
+static void mp_usbh_poll_update(void) {
+    bool in_window = soft_timer_ticks_diff(usbh_poll_until, mp_hal_ticks_ms()) > 0;
+    if (in_window && !usbh_poll_armed) {
+        soft_timer_insert(&usbh_poll_timer, MP_USBH_POLL_INTERVAL_MS);
+        usbh_poll_armed = true;
+    } else if (!in_window && usbh_poll_armed) {
+        soft_timer_remove(&usbh_poll_timer);
+        usbh_poll_armed = false;
+    }
+}
+#endif
+
+void mp_usbh_start_task_timer(void) {
+    #if TUSB_VERSION_NUMBER >= 2001
+    // Host just became active. Configure the timer fresh (removing any orphan
+    // first), then open a window so a DUT already attached at init enumerates -
+    // its connect event may have fired before this. mp_usbh_task arms the poll.
+    if (usbh_poll_armed) {
+        soft_timer_remove(&usbh_poll_timer);
+        usbh_poll_armed = false;
+    }
+    soft_timer_static_init(&usbh_poll_timer, SOFT_TIMER_MODE_PERIODIC,
+        MP_USBH_POLL_INTERVAL_MS, mp_usbh_poll_timer_callback);
+    mp_usbh_poll_open_window();
+    mp_usbh_schedule_task();
+    #endif
+}
+
+void mp_usbh_stop_task_timer(void) {
+    #if TUSB_VERSION_NUMBER >= 2001
+    usbh_poll_until = 0;
+    if (usbh_poll_armed) {
+        soft_timer_remove(&usbh_poll_timer);
+        usbh_poll_armed = false;
+    }
+    #endif
 }
 
 extern void __real_hcd_event_handler(hcd_event_t const *event, bool in_isr);
@@ -295,6 +404,15 @@ extern void __real_hcd_event_handler(hcd_event_t const *event, bool in_isr);
 // hcd_event_handler() is called from an ISR or task context.
 TU_ATTR_FAST_FUNC void __wrap_hcd_event_handler(hcd_event_t const *event, bool in_isr) {
     __real_hcd_event_handler(event, in_isr);
+    #if TUSB_VERSION_NUMBER >= 2001
+    // A device attach/remove starts TinyUSB 0.20's timed enum sequence; open the
+    // polling window so its deferred delays get advanced. Transfer-complete events
+    // don't need the window - they wake the task directly below.
+    if (event->event_id == HCD_EVENT_DEVICE_ATTACH ||
+        event->event_id == HCD_EVENT_DEVICE_REMOVE) {
+        mp_usbh_poll_open_window();
+    }
+    #endif
     mp_usbh_schedule_task();
     if (in_isr) {
         mp_hal_wake_main_task_from_isr();
@@ -632,6 +750,9 @@ void mp_usbh_deinit(void) {
     if (usbh == NULL) {
         return;
     }
+
+    // Cancel the periodic tuh_task poll timer before tearing the host down.
+    mp_usbh_stop_task_timer();
 
     if (usbh->initialized) {
         #if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)

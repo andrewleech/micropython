@@ -136,8 +136,12 @@ static mp_obj_t machine_usb_host_active(size_t n_args, const mp_obj_t *args) {
                 // Re-activating after deactivation - just re-enable interrupts
                 mp_usbh_int_enable();
             }
+            // Pump tuh_task periodically so TinyUSB 0.20's deferred enumeration
+            // advances without further HCD interrupts (no-op on older TinyUSB).
+            mp_usbh_start_task_timer();
         } else if (self->active) {
             // Deactivating - disable interrupts and clear state.
+            mp_usbh_stop_task_timer();
             mp_usbh_int_disable();
 
             // Clear device pools to prevent stale references.
