@@ -39,6 +39,8 @@
 #define MICROPY_ALLOC_PATH_MAX      (128)
 #define MICROPY_ALLOC_PARSE_CHUNK_INIT (32)
 #define MICROPY_ENABLE_GC           (1)
+#define MICROPY_ENABLE_SCHEDULER    (1)
+#define MICROPY_SCHEDULER_STATIC_NODES (1)
 #define MICROPY_HELPER_REPL         (1)
 #define MICROPY_REPL_AUTO_INDENT    (1)
 #define MICROPY_KBD_EXCEPTION       (1)
@@ -52,14 +54,11 @@
 #define MICROPY_PY_MACHINE_RESET                (1)
 #define MICROPY_PY_MACHINE_BARE_METAL_FUNCS     (1)
 #define MICROPY_PY_MACHINE_DISABLE_IRQ_ENABLE_IRQ (1)
-#define MICROPY_PY_IO               (1)
-#define MICROPY_PY_SYS              (1)
 #define MICROPY_PY_SYS_PLATFORM     "baochip"
-#define MICROPY_PY_SYS_STDFILES     (1)
-#define MICROPY_PY_OS               (1)
 #define MICROPY_PY_OS_UNAME         (1)
-#define MICROPY_PY_GC               (1)
-#define MICROPY_PY_TIME             (1)
+#ifndef MICROPY_PY_OS_DUPTERM
+#define MICROPY_PY_OS_DUPTERM       (1)
+#endif
 #define MICROPY_PY_TIME_TIME_TIME_NS (0)
 
 // All port-side root pointers live alongside the vm-side ones.
@@ -80,6 +79,23 @@ typedef long mp_off_t;
 #endif
 #ifndef MICROPY_HW_UART_REPL_BAUD
 #define MICROPY_HW_UART_REPL_BAUD   (115200)
+#endif
+
+// Native USB device support.
+#ifndef MICROPY_HW_ENABLE_USBDEV
+#define MICROPY_HW_ENABLE_USBDEV    (1)
+#endif
+
+#if MICROPY_HW_ENABLE_USBDEV
+#ifndef MICROPY_HW_USB_CDC
+#define MICROPY_HW_USB_CDC          (1)
+#endif
+#ifndef MICROPY_HW_USB_VID
+#define MICROPY_HW_USB_VID          (0xf055)
+#endif
+#ifndef MICROPY_HW_USB_PID
+#define MICROPY_HW_USB_PID          (0x9802)
+#endif
 #endif
 
 // Board-specific overrides.

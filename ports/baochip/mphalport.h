@@ -54,6 +54,12 @@ static inline void enable_irq(mp_uint_t state) {
 
 #define MICROPY_INTERNAL_WFE(TIMEOUT_MS)   __asm__ volatile ("wfi")
 
+// Required by shared/tinyusb/mp_usbd.c.  No tickless idle on this
+// port yet, so a no-op is correct: the main loop is already
+// polling-style.
+static inline void mp_hal_wake_main_task_from_isr(void) {
+}
+
 #include "hardware/gpio.h"
 #include "machine_pin.h"
 

@@ -54,8 +54,21 @@ MEMORY
     IFRAM (rw)    : ORIGIN = 0x50000000, LENGTH = 0x20000
 }
 
+/*
+ * Dedicated trap/interrupt stack at the very top of SRAM, separate from
+ * the main C stack.  crt0's _trap_entry switches to _trap_stack_top on
+ * every trap; keeping it out of the main stack means a deep interrupt
+ * handler (the USB DCD's event-ring drain) can never corrupt the main
+ * thread's frames.  Sized generously: the fixed trap overhead is ~400
+ * bytes (register save frame + C-stack reserve) and the deepest handler
+ * path is well under the remainder.
+ */
+_trap_stack_size = 0x1000;
+_trap_stack_top  = ORIGIN(SRAM) + LENGTH(SRAM);
+
 _stack_size = 0x4000;
-_stack_top  = ORIGIN(SRAM) + LENGTH(SRAM);
+/* Main C stack starts just below the dedicated trap stack and grows down. */
+_stack_top  = _trap_stack_top - _trap_stack_size;
 
 SECTIONS
 {

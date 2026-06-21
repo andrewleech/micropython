@@ -90,26 +90,31 @@ CFLAGS += $(INC)
 # Port C sources.
 SRC_C = \
     main.c \
+    baochip_irq.c \
     machine_pin.c \
     mphalport.c \
 
 # SDK sources compiled directly into the firmware. Listed here per file
 # so the build picks up only what we actually use.
 # NOTE: never compile $(DABAO_SDK_DIR)/src/common/bao_stdlib/stdlib.c --
-# it defines a weak trap_dispatch that conflicts with the real one in
-# hardware_irq/irq.c, plus SDK-style wrappers (bao_init, mini_printf)
-# that we replace with MicroPython idioms.
+# it defines a weak trap_dispatch that conflicts with the real one.
+# NOTE: hardware_irq/irq.c is replaced by ports/baochip/baochip_irq.c so
+# the port owns the trap handler (it dumps mcause/mepc/mtval on a fault
+# instead of the SDK's silent halt).  baochip_irq.c provides the same
+# irq_* symbols the SDK uart.c/gpio.c link against.
 SDK_SRC = $(addprefix $(DABAO_SDK)/, \
-    src/bao1x/hardware_irq/irq.c \
     src/bao1x/hardware_uart/uart.c \
     src/bao1x/hardware_gpio/gpio.c \
     src/sevs/sevs_assert_target.c \
     )
 
 # Assembly sources.
-SRC_S = $(addprefix $(DABAO_SDK)/, \
-    src/runtime/crt0.S \
-    )
+# crt0.S is a port-owned copy (not the SDK's) so the trap entry can use a
+# dedicated trap stack instead of scratch space at the top of the main
+# stack -- see ports/baochip/crt0.S and the _trap_stack_* symbols in
+# baochip.ld.
+SRC_S = \
+    crt0.S \
 
 SRC_S += shared/runtime/gchelper_rv32i.s
 
@@ -121,6 +126,38 @@ SRC_C += \
     shared/runtime/stdout_helpers.c \
     shared/runtime/sys_stdio_mphal.c \
     shared/readline/readline.c \
+
+# Native USB-CDC support (Phase 2).  Build inputs are gated entirely
+# on this make variable, so MICROPY_HW_ENABLE_USBDEV=0 sees zero
+# TinyUSB cost.
+MICROPY_HW_ENABLE_USBDEV ?= 1
+ifeq ($(MICROPY_HW_ENABLE_USBDEV),1)
+GIT_SUBMODULES += lib/tinyusb
+
+INC += -I$(TOP)/lib/tinyusb/src
+INC += -I$(TOP)/lib/tinyusb/src/portable/corigine/udc
+INC += -I$(TOP)/shared/tinyusb
+INC += -Iusb
+
+CFLAGS += -DMICROPY_HW_ENABLE_USBDEV=1
+
+SRC_C += \
+    usb/dcd_baochip_port.c \
+    shared/tinyusb/mp_usbd.c \
+    shared/tinyusb/mp_usbd_cdc.c \
+    shared/tinyusb/mp_usbd_descriptor.c \
+    shared/tinyusb/mp_usbd_runtime.c \
+
+TINYUSB_SRC_C += \
+    lib/tinyusb/src/tusb.c \
+    lib/tinyusb/src/common/tusb_fifo.c \
+    lib/tinyusb/src/device/usbd.c \
+    lib/tinyusb/src/device/usbd_control.c \
+    lib/tinyusb/src/class/cdc/cdc_device.c \
+    lib/tinyusb/src/portable/corigine/udc/dcd_corigine_udc.c \
+
+SRC_QSTR += shared/tinyusb/mp_usbd_runtime.c shared/tinyusb/mp_usbd.c
+endif
 
 # Pin generation
 GEN_PIN_MKPINS     = boards/make-pins.py
@@ -136,6 +173,9 @@ OBJ += $(GEN_PINS_SRC:.c=.o)
 OBJ += $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SDK_SRC:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(patsubst %.S,%.o, $(patsubst %.s,%.o, $(SRC_S))))
+ifeq ($(MICROPY_HW_ENABLE_USBDEV),1)
+OBJ += $(addprefix $(BUILD)/, $(TINYUSB_SRC_C:.c=.o))
+endif
 
 LDFLAGS += -T baochip.ld
 
