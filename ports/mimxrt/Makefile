@@ -20,7 +20,7 @@ endif
 BUILD ?= build-$(BOARD)
 PORT ?= /dev/ttyACM0
 CROSS_COMPILE ?= arm-none-eabi-
-GIT_SUBMODULES += lib/tinyusb lib/nxp_driver
+GIT_SUBMODULES += lib/CMSIS_6 lib/tinyusb lib/nxp_driver
 UF2CONV ?= $(TOP)/tools/uf2conv.py
 
 # MicroPython feature configurations
@@ -73,7 +73,7 @@ GEN_PINS_SRC = $(BUILD)/pins_gen.c
 INC += -I$(BOARD_DIR)
 INC += -I$(BUILD)
 INC += -I$(TOP)
-INC += -I$(TOP)/lib/cmsis/inc
+INC += -I$(TOP)/lib/CMSIS_6/CMSIS/Core/Include
 INC += -I$(TOP)/lib/oofatfs
 INC += -I$(TOP)/lib/tinyusb/hw
 INC += -I$(TOP)/lib/tinyusb/hw/bsp/teensy_40
@@ -177,6 +177,10 @@ endif
 ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES), MIMXRT1021 MIMXRT1052 MIMXRT1062 MIMXRT1064 MIMXRT1176))
 SRC_HAL_IMX_C += $(MCUX_SDK_DIR)/drivers/usdhc/fsl_usdhc.c
 INC_HAL_IMX += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/usdhc
+
+SRC_HAL_IMX_C += $(MCUX_SDK_DIR)/drivers/flexcan/fsl_flexcan.c
+INC_HAL_IMX += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/flexcan
+MICROPY_PY_MACHINE_CAN = 1
 endif
 
 ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES), MIMXRT1015 MIMXRT1021 MIMXRT1052 MIMXRT1062 MIMXRT1064 MIMXRT1176))
@@ -406,6 +410,7 @@ endif
 # Set default values for optional variables
 MICROPY_HW_SDRAM_AVAIL ?= 0
 MICROPY_HW_SDRAM_SIZE ?= 0
+MICROPY_PY_MACHINE_CAN ?= 0
 
 # Configure default compiler flags
 CFLAGS += \
@@ -426,6 +431,7 @@ CFLAGS += \
 	-DMICROPY_HW_FLASH_SIZE=$(MICROPY_HW_FLASH_SIZE) \
 	-DMICROPY_HW_SDRAM_AVAIL=$(MICROPY_HW_SDRAM_AVAIL) \
 	-DMICROPY_HW_SDRAM_SIZE=$(MICROPY_HW_SDRAM_SIZE) \
+	-DMICROPY_PY_MACHINE_CAN=$(MICROPY_PY_MACHINE_CAN) \
 	-DXIP_BOOT_HEADER_ENABLE=1 \
 	-DXIP_EXTERNAL_FLASH=1 \
 	-fdata-sections \

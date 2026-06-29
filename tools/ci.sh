@@ -42,8 +42,7 @@ function ci_picotool_setup {
 # c code formatting
 
 function ci_c_code_formatting_setup {
-    sudo apt-get update
-    sudo apt-get install uncrustify
+    pip install micropython-uncrustify==1.0.0.post1
     uncrustify --version
 }
 
@@ -91,7 +90,7 @@ function ci_code_size_build {
     # Override the list by setting PORTS_TO_CHECK in the environment before invoking ci.
     : ${PORTS_TO_CHECK:=bmus3xpdv}
     
-    SUBMODULES="lib/asf4 lib/berkeley-db-1.xx lib/btstack lib/cyw43-driver lib/lwip lib/mbedtls lib/micropython-lib lib/nxp_driver lib/pico-sdk lib/stm32lib lib/tinyusb"
+    SUBMODULES="lib/CMSIS_5 lib/CMSIS_6 lib/asf4 lib/berkeley-db-1.xx lib/btstack lib/cyw43-driver lib/lwip lib/mbedtls lib/micropython-lib lib/nxp_driver lib/pico-sdk lib/stm32lib lib/tinyusb"
 
     # Default GitHub pull request sets HEAD to a generated merge commit
     # between PR branch (HEAD^2) and base branch (i.e. master) (HEAD^1).
@@ -182,6 +181,21 @@ function ci_mpy_cross_debug_emitter {
     # Make sure the debug emitter does not crash or fail for simple files
     $mpy_cross -X emit=native -march=debug ./tests/basics/0prelim.py | \
 	    grep -E "ENTRY|EXIT" | wc -l | grep "^2$"
+}
+
+########################################################################################
+# ports/alif
+
+function ci_alif_setup {
+    ci_gcc_arm_setup
+}
+
+function ci_alif_ae3_build {
+    make ${MAKEOPTS} -C mpy-cross
+    make ${MAKEOPTS} -C ports/alif BOARD=OPENMV_AE3 MCU_CORE=M55_HP submodules
+    make ${MAKEOPTS} -C ports/alif BOARD=OPENMV_AE3 MCU_CORE=M55_HE submodules
+    make ${MAKEOPTS} -C ports/alif BOARD=OPENMV_AE3 MCU_CORE=M55_DUAL
+    make ${MAKEOPTS} -C ports/alif BOARD=ALIF_ENSEMBLE MCU_CORE=M55_DUAL USER_C_MODULES=../../examples/usercmodule
 }
 
 ########################################################################################
@@ -291,25 +305,6 @@ function ci_esp8266_build {
 
     # Test building native .mpy with xtensa architecture.
     ci_native_mpy_modules_build xtensa
-}
-
-########################################################################################
-# ports/webassembly
-
-function ci_webassembly_setup {
-    npm install terser
-    git clone https://github.com/emscripten-core/emsdk.git
-    (cd emsdk && ./emsdk install latest && ./emsdk activate latest)
-}
-
-function ci_webassembly_build {
-    source emsdk/emsdk_env.sh
-    make ${MAKEOPTS} -C ports/webassembly VARIANT=pyscript submodules
-    make ${MAKEOPTS} -C ports/webassembly VARIANT=pyscript
-}
-
-function ci_webassembly_run_tests {
-    make -C ports/webassembly VARIANT=pyscript test_min
 }
 
 ########################################################################################
@@ -612,6 +607,12 @@ CI_UNIX_OPTS_QEMU_RISCV64=(
     MICROPY_STANDALONE=1
 )
 
+CI_UNIX_OPTS_QEMU_LOONG64=(
+    CROSS_COMPILE=loongarch64-linux-gnu-
+    VARIANT=coverage
+    MICROPY_STANDALONE=1
+)
+
 CI_UNIX_OPTS_SANITIZE_ADDRESS=(
     # Macro MP_ASAN allows detecting ASan on gcc<=13
     CFLAGS_EXTRA="-fsanitize=address --param asan-use-after-return=0 -DMP_ASAN=1"
@@ -720,6 +721,14 @@ function ci_unix_standard_v2_run_tests {
     ci_unix_run_tests_full_helper standard
 }
 
+function ci_unix_standard_terse_build {
+    ci_unix_build_helper VARIANT=standard CFLAGS_EXTRA="-DMICROPY_ERROR_REPORTING=MICROPY_ERROR_REPORTING_TERSE"
+}
+
+function ci_unix_standard_terse_run_tests {
+    make -C ports/unix VARIANT=standard test
+}
+
 function ci_unix_coverage_setup {
     pip3 install setuptools
     pip3 install pyelftools
@@ -746,6 +755,12 @@ function ci_unix_coverage_run_mpy_merge_tests {
     # Compile a selection of tests to .mpy and execute them, collecting the output.
     # None of the tests should SKIP.
     for inpy in $mptop/tests/basics/[acdel]*.py; do
+        if grep -q "import unittest" $inpy; then
+            # Merging >1 unittest-enabled module leads to unexpected
+            # results, as each file runs all previously registered unittest cases
+            echo "SKIPPING $inpy"
+            continue
+        fi
         test=$(basename $inpy .py)
         echo $test
         outmpy=$outdir/$test.mpy
@@ -972,6 +987,36 @@ function ci_unix_qemu_riscv64_run_tests {
     popd
 }
 
+function ci_unix_qemu_loong64_setup {
+    sudo apt-get update
+    sudo apt-get install gcc-14-loongarch64-linux-gnu g++-14-loongarch64-linux-gnu libc6-loong64-cross libltdl-dev
+    sudo apt-get install qemu-user-static
+    qemu-loongarch64-static --version
+    sudo mkdir -p /usr/gnemul
+    sudo ln -s /usr/loongarch64-linux-gnu /usr/gnemul/qemu-loongarch64
+    sudo ln -s /usr/bin/loongarch64-linux-gnu-gcc-14 /usr/bin/loongarch64-linux-gnu-gcc
+    sudo ln -s /usr/bin/loongarch64-linux-gnu-g++-14 /usr/bin/loongarch64-linux-gnu-g++
+}
+
+function ci_unix_qemu_loong64_build {
+    ci_unix_build_helper "${CI_UNIX_OPTS_QEMU_LOONG64[@]}"
+    ci_unix_build_ffi_lib_helper loongarch64-linux-gnu-gcc
+}
+
+function ci_unix_qemu_loong64_run_tests {
+    # Issues with LOONG64 tests:
+    # - thread/stress_aes.py takes around 90 seconds
+    file ./ports/unix/build-coverage/micropython
+    # Loongarch64 isn't defined in the CI image's binfmt list.
+    cat << 'EOF' > ./ports/unix/build-coverage/micropython-runner
+#!/bin/sh
+MPY_PATH=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+qemu-loongarch64-static "$MPY_PATH"/micropython $@
+EOF
+    chmod +x ./ports/unix/build-coverage/micropython-runner
+    (cd tests && MICROPY_MICROPYTHON=../ports/unix/build-coverage/micropython-runner MICROPY_TEST_TIMEOUT=180 ./run-tests.py)
+}
+
 function ci_unix_repr_b_build {
     ci_unix_build_helper "${CI_UNIX_OPTS_REPR_B[@]}"
     ci_unix_build_ffi_lib_helper gcc -m32
@@ -981,6 +1026,25 @@ function ci_unix_repr_b_run_tests {
     # ci_unix_run_tests_full_no_native_helper is not used due to
     # https://github.com/micropython/micropython/issues/18105
     ci_unix_run_tests_helper "${CI_UNIX_OPTS_REPR_B[@]}"
+}
+
+########################################################################################
+# ports/webassembly
+
+function ci_webassembly_setup {
+    npm install terser
+    git clone https://github.com/emscripten-core/emsdk.git
+    (cd emsdk && ./emsdk install latest && ./emsdk activate latest)
+}
+
+function ci_webassembly_build {
+    source emsdk/emsdk_env.sh
+    make ${MAKEOPTS} -C ports/webassembly VARIANT=pyscript submodules
+    make ${MAKEOPTS} -C ports/webassembly VARIANT=pyscript
+}
+
+function ci_webassembly_run_tests {
+    make -C ports/webassembly VARIANT=pyscript test_min
 }
 
 ########################################################################################
@@ -1055,18 +1119,22 @@ function ci_zephyr_run_tests {
 }
 
 ########################################################################################
-# ports/alif
+# Helpers to run this script as a CLI tool.
 
-function ci_alif_setup {
-    ci_gcc_arm_setup
+########################################################################################
+# ports/baochip
+
+function ci_baochip_setup {
+    ci_gcc_riscv_setup
+    # sign_and_uf2.py from the vendored dabao-sdk uses pure25519 to
+    # sign the UF2 image with the SDK's developer Ed25519ph key.
+    sudo pip3 install pure25519
 }
 
-function ci_alif_ae3_build {
+function ci_baochip_build {
     make ${MAKEOPTS} -C mpy-cross
-    make ${MAKEOPTS} -C ports/alif BOARD=OPENMV_AE3 MCU_CORE=M55_HP submodules
-    make ${MAKEOPTS} -C ports/alif BOARD=OPENMV_AE3 MCU_CORE=M55_HE submodules
-    make ${MAKEOPTS} -C ports/alif BOARD=OPENMV_AE3 MCU_CORE=M55_DUAL
-    make ${MAKEOPTS} -C ports/alif BOARD=ALIF_ENSEMBLE MCU_CORE=M55_DUAL USER_C_MODULES=../../examples/usercmodule
+    make ${MAKEOPTS} -C ports/baochip BOARD=DABAO submodules
+    make ${MAKEOPTS} -C ports/baochip BOARD=DABAO
 }
 
 function _ci_help {

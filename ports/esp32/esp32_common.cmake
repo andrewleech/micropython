@@ -129,6 +129,7 @@ list(APPEND MICROPY_SOURCE_PORT
     network_lan.c
     network_ppp.c
     network_wlan.c
+    network_wlan_csi.c
     mpnimbleport.c
     modsocket.c
     lwip_patch.c
@@ -314,6 +315,10 @@ foreach(comp ${__COMPONENT_NAMES_RESOLVED})
     micropy_gather_target_properties(__idf_${comp})
     micropy_gather_target_properties(${comp})
 endforeach()
+
+# Explicitly add extra definitions for MicroPython's preprocessing stage
+# (these are not picked up by the above micropy_gather_target_properties).
+list(APPEND MICROPY_CPP_DEF_EXTRA "ESP_PLATFORM")
 
 # Include the main MicroPython cmake rules.
 include(${MICROPY_DIR}/py/mkrules.cmake)

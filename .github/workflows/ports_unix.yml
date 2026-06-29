@@ -67,6 +67,18 @@ jobs:
       if: failure()
       run: tests/run-tests.py --print-failures
 
+  standard_terse:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: Build
+      run: tools/ci.sh unix_standard_terse_build
+    - name: Run main test suite
+      run: tools/ci.sh unix_standard_terse_run_tests
+    - name: Print failures
+      if: failure()
+      run: tests/run-tests.py --print-failures
+
   coverage:
     runs-on: ubuntu-latest
     steps:
@@ -93,7 +105,7 @@ jobs:
         (cd ports/unix && gcov -o build-coverage/py ../../py/*.c || true)
         (cd ports/unix && gcov -o build-coverage/extmod ../../extmod/*.c || true)
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v6
+      uses: codecov/codecov-action@v7
       with:
         # Only fail the job on error if a token is set, or we're running against upstream repo.
         # This avoids the annoying situation of the job failing on every push to a fork (if no token is set).
@@ -323,6 +335,25 @@ jobs:
       run: tools/ci.sh unix_qemu_riscv64_build
     - name: Run main test suite
       run: tools/ci.sh unix_qemu_riscv64_run_tests
+    - name: Print failures
+      if: failure()
+      run: tests/run-tests.py --print-failures
+
+  qemu_loong64:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      # Python 3.12 is the default for ubuntu-24.04, but that has compatibility issues with settrace tests.
+      # Can remove this step when ubuntu-latest uses a more recent Python 3.x as the default.
+      with:
+        python-version: '3.11'
+    - name: Install packages
+      run: tools/ci.sh unix_qemu_loong64_setup
+    - name: Build
+      run: tools/ci.sh unix_qemu_loong64_build
+    - name: Run main test suite
+      run: tools/ci.sh unix_qemu_loong64_run_tests
     - name: Print failures
       if: failure()
       run: tests/run-tests.py --print-failures

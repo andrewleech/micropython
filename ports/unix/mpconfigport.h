@@ -45,13 +45,20 @@
 #ifndef MICROPY_PY_SYS_PLATFORM
 #if defined(__APPLE__) && defined(__MACH__)
     #define MICROPY_PY_SYS_PLATFORM  "darwin"
+#elif defined(__FreeBSD__)
+    #define MICROPY_PY_SYS_PLATFORM  "freebsd"
 #else
     #define MICROPY_PY_SYS_PLATFORM  "linux"
 #endif
 #endif
 
 #ifndef MICROPY_PY_SYS_PATH_DEFAULT
-#define MICROPY_PY_SYS_PATH_DEFAULT ".frozen:~/.micropython/lib:/usr/lib/micropython"
+#if defined(__FreeBSD__)
+#define SYSTEM_LIB_PATH "/usr/local/lib/micropython"
+#else
+#define SYSTEM_LIB_PATH "/usr/lib/micropython"
+#endif
+#define MICROPY_PY_SYS_PATH_DEFAULT ".frozen:~/.micropython/lib:" SYSTEM_LIB_PATH
 #endif
 
 #define MP_STATE_PORT MP_STATE_VM
@@ -99,7 +106,7 @@ typedef long mp_off_t;
 // Always enable GC.
 #define MICROPY_ENABLE_GC           (1)
 
-#if !(defined(MICROPY_GCREGS_SETJMP) || defined(__x86_64__) || defined(__i386__) || defined(__thumb2__) || defined(__thumb__) || defined(__arm__) || (defined(__riscv) && __riscv_xlen <= 64))
+#if !(defined(MICROPY_GCREGS_SETJMP) || defined(__x86_64__) || defined(__i386__) || defined(__thumb2__) || defined(__thumb__) || defined(__arm__) || (defined(__riscv) && __riscv_xlen <= 64) || (defined(__loongarch__) && defined(__loongarch64)))
 // Fall back to setjmp() implementation for discovery of GC pointers in registers.
 #define MICROPY_GCREGS_SETJMP (1)
 #endif
