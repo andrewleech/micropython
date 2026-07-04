@@ -52,6 +52,15 @@
 #endif
 #endif
 
+// Deferred-deadline pump (see mp_usbh_poll_update): needs the 0.21
+// tuh_next_deferred_ms accessor and soft_timer, so it is off on esp32.
+#if TUSB_VERSION_NUMBER >= 2001 && !defined(ESP_PLATFORM)
+#define MICROPY_USBH_DEFERRED_PUMP (1)
+#include "shared/runtime/softtimer.h"
+#else
+#define MICROPY_USBH_DEFERRED_PUMP (0)
+#endif
+
 // Helper functions to find devices by pool index.
 static machine_usbh_device_obj_t *find_device_by_addr(uint8_t addr) {
     mp_obj_usb_host_t *usbh = MP_OBJ_TO_PTR(MP_STATE_VM(usbh));
@@ -154,28 +163,15 @@ void mp_usbh_init_tuh(void) {
     #endif
     #endif
 
-    // Pre-set host role before tuh_init() to prevent an ISR race condition:
-    // tuh_init() enables the host interrupt before setting _tusb_rhport_role,
-    // so if a device is already connected the ISR fires immediately, finds
-    // role=INVALID, leaves the interrupt uncleared, and loops forever.
-    #ifndef NO_QSTR
-    {
-        // TinyUSB internal: pre-set host role before tuh_init() to prevent ISR
-        // race condition where interrupt fires before role is set.
-        // TODO: propose upstream fix so tuh_init() sets role before enabling interrupts.
-        #if TUSB_VERSION_MAJOR == 0 && TUSB_VERSION_MINOR <= 20
-        extern tusb_role_t _tusb_rhport_role[];
-        _tusb_rhport_role[BOARD_TUH_RHPORT] = TUSB_ROLE_HOST;
-        #else
-        #warning "Check if TinyUSB still needs pre-setting _tusb_rhport_role before tuh_init()"
-        #endif
-    }
-    #endif
-
-    tuh_init(BOARD_TUH_RHPORT);
-    // Note: tuh_init() already calls hcd_int_enable() internally.
-    // Don't call mp_usbh_int_enable() again as it causes double interrupt
-    // allocation on ESP32 (esp_intr_alloc called twice).
+    // Init host on the root-hub port. Passing the role atomically avoids the ISR
+    // race where a pre-attached device's interrupt fires before the role is set.
+    tusb_rhport_init_t host_init = {
+        .role = TUSB_ROLE_HOST,
+        .speed = TUSB_SPEED_AUTO,
+    };
+    tusb_init(BOARD_TUH_RHPORT, &host_init);
+    // Note: tusb_init() already enables the host interrupt internally, so don't
+    // call mp_usbh_int_enable() again (double esp_intr_alloc on ESP32).
 }
 
 // Convert UTF-16LE bytes to UTF-8 string.
@@ -242,6 +238,10 @@ void mp_usbh_fetch_device_strings(machine_usbh_device_obj_t *dev) {
     dev->strings_fetched = true;
 }
 
+#if MICROPY_USBH_DEFERRED_PUMP
+static void mp_usbh_poll_update(void);
+#endif
+
 // Process USB host tasks.
 void mp_usbh_task(void) {
     mp_obj_usb_host_t *usbh = MP_OBJ_TO_PTR(MP_STATE_VM(usbh));
@@ -257,6 +257,12 @@ void mp_usbh_task(void) {
     // for USB events. In MicroPython's cooperative scheduling model, we must
     // return control to the main loop to process other tasks.
     tuh_task_ext(0, false);
+
+    #if MICROPY_USBH_DEFERRED_PUMP
+    // Arm a one-shot for the stack's next time-deferred enum deadline (if any)
+    // so deferred enumeration steps are pumped when due, not just on events.
+    mp_usbh_poll_update();
+    #endif
 }
 
 void mp_usbh_task_callback(mp_sched_node_t *node) {
@@ -267,6 +273,59 @@ void mp_usbh_task_callback(mp_sched_node_t *node) {
 TU_ATTR_FAST_FUNC void mp_usbh_schedule_task(void) {
     static mp_sched_node_t usbh_task_node;
     mp_sched_schedule_node(&usbh_task_node, mp_usbh_task_callback);
+}
+
+#if MICROPY_USBH_DEFERRED_PUMP
+// TinyUSB's timed enum steps (call_after debounce/reset delays) aren't driven by
+// USB events, so arm a one-shot soft timer for the next deferred deadline to
+// pump tuh_task when due; disarmed while idle.
+static soft_timer_entry_t usbh_poll_timer;
+static bool usbh_poll_armed;   // one-shot currently in the soft-timer heap
+
+// One-shot fired: clear the armed flag and reschedule the task (tuh_task runs in
+// the scheduler, not the timer callback).
+static void mp_usbh_poll_timer_callback(soft_timer_entry_t *self) {
+    (void)self;
+    usbh_poll_armed = false;
+    mp_obj_usb_host_t *usbh = MP_OBJ_TO_PTR(MP_STATE_VM(usbh));
+    if (usbh == NULL || !usbh->active) {
+        return;
+    }
+    mp_usbh_schedule_task();
+}
+
+// Arm the one-shot for the next deferred deadline if not already armed. Called
+// from scheduler context; only inserts, never removes a possibly-popped node.
+static void mp_usbh_poll_update(void) {
+    uint32_t next_ms;
+    if (!usbh_poll_armed && tuh_next_deferred_ms(&next_ms)) {
+        soft_timer_insert(&usbh_poll_timer, next_ms ? next_ms : 1);
+        usbh_poll_armed = true;
+    }
+}
+#endif
+
+void mp_usbh_start_task_timer(void) {
+    #if MICROPY_USBH_DEFERRED_PUMP
+    // Host activated: (re)init the one-shot and pump once so an already-attached
+    // device starts enumerating; mp_usbh_poll_update arms it thereafter.
+    if (usbh_poll_armed) {
+        soft_timer_remove(&usbh_poll_timer);
+        usbh_poll_armed = false;
+    }
+    soft_timer_static_init(&usbh_poll_timer, SOFT_TIMER_MODE_ONE_SHOT, 0,
+        mp_usbh_poll_timer_callback);
+    mp_usbh_schedule_task();
+    #endif
+}
+
+void mp_usbh_stop_task_timer(void) {
+    #if MICROPY_USBH_DEFERRED_PUMP
+    if (usbh_poll_armed) {
+        soft_timer_remove(&usbh_poll_timer);
+        usbh_poll_armed = false;
+    }
+    #endif
 }
 
 // TinyUSB calls this weak hook from queue_event() on every host event, in ISR

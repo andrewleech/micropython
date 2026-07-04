@@ -487,8 +487,9 @@ TINYUSB_SRC_C := $(sort $(addprefix lib/tinyusb/, \
 	src/portable/synopsys/dwc2/hcd_dwc2.c \
 	))
 
-# Disable warnings for TinyUSB code
-$(BUILD)/lib/tinyusb/src/%.o: CFLAGS += -Wno-unused-variable
+# Disable warnings for vendored TinyUSB code (host class drivers leave some
+# functions and variables unused depending on the enabled CFG_TUH_* features).
+$(BUILD)/lib/tinyusb/src/%.o: CFLAGS += -Wno-unused-variable -Wno-unused-function
 
 ifeq ($(MICROPY_SSL_MBEDTLS),1)
 LIB_SRC_C += mbedtls/mbedtls_port.c

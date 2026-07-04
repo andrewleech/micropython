@@ -94,6 +94,12 @@ void mp_usbh_fetch_device_strings(machine_usbh_device_obj_t *dev);
 void mp_usbh_schedule_task(void);
 void mp_usbh_task(void);
 
+// Start/stop the deferred-deadline poll timer that advances host enumeration
+// across TinyUSB's time-deferred steps. No-ops on TinyUSB builds without the
+// tuh_next_deferred_ms accessor (e.g. esp32's bundled ESP-IDF stack).
+void mp_usbh_start_task_timer(void);
+void mp_usbh_stop_task_timer(void);
+
 // Helper function to wait for MSC operation completion.
 bool mp_usbh_msc_wait_complete(machine_usbh_msc_obj_t *msc, uint32_t timeout_ms);
 

@@ -101,14 +101,16 @@ TINYUSB_SRC_C := $(sort $(addprefix lib/tinyusb/, \
 	))
 
 ifeq ($(MICROPY_HW_USB_HOST),1)
-SRC_TINYUSB_C += \
+# tinyusb.mk omits this port's ChipIdea HS host controller driver (EHCI-based),
+# so add it (and the host sources; sort dedups any overlap) to the build.
+TINYUSB_SRC_C := $(sort $(TINYUSB_SRC_C) \
 	lib/tinyusb/src/class/cdc/cdc_host.c \
 	lib/tinyusb/src/class/msc/msc_host.c \
 	lib/tinyusb/src/class/hid/hid_host.c \
 	lib/tinyusb/src/host/hub.c \
 	lib/tinyusb/src/host/usbh.c \
 	lib/tinyusb/src/portable/ehci/ehci.c \
-	lib/tinyusb/src/portable/chipidea/ci_hs/hcd_ci_hs.c
+	lib/tinyusb/src/portable/chipidea/ci_hs/hcd_ci_hs.c)
 endif
 
 # All settings for Ethernet support are controller by the value of MICROPY_PY_LWIP
@@ -573,8 +575,9 @@ OBJ += $(GEN_PINS_SRC:.c=.o)
 # Workaround for bug in older gcc, warning on "static usbd_device_t _usbd_dev = { 0 };"
 $(BUILD)/lib/tinyusb/src/device/usbd.o: CFLAGS += -Wno-missing-braces
 
-# Suppress unused variable warning in TinyUSB host drivers
-$(BUILD)/lib/tinyusb/src/class/cdc/cdc_host.o: CFLAGS += -Wno-unused-variable
+# Suppress unused variable/function warnings in TinyUSB host drivers (which
+# functions and variables are unused depends on the enabled CFG_TUH_* features).
+$(BUILD)/lib/tinyusb/src/class/cdc/cdc_host.o: CFLAGS += -Wno-unused-variable -Wno-unused-function
 
 # =============================================================================
 # Build targets

@@ -632,8 +632,9 @@ if(TARGET tinyusb_pico_pio_usb)
     )
 endif()
 
-# Suppress upstream -Wunused-variable warnings in TinyUSB host class sources
-# (same as the stm32/mimxrt ports do for these files).
+# Suppress upstream -Wunused-variable/-Wunused-function warnings in TinyUSB host
+# class sources (same as the stm32/mimxrt ports do for these files). Which
+# functions and variables are unused depends on the enabled CFG_TUH_* features.
 if(MICROPY_HW_USB_HOST)
     set_source_files_properties(
         ${PICO_TINYUSB_PATH}/src/class/cdc/cdc_host.c
@@ -641,7 +642,7 @@ if(MICROPY_HW_USB_HOST)
         ${PICO_TINYUSB_PATH}/src/class/hid/hid_host.c
         ${PICO_TINYUSB_PATH}/src/host/usbh.c
         PROPERTIES
-        COMPILE_OPTIONS "-Wno-error=unused-variable"
+        COMPILE_OPTIONS "-Wno-error=unused-variable;-Wno-error=unused-function"
     )
 endif()
 

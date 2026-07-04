@@ -117,7 +117,9 @@ static mp_obj_t usb_device_submit_xfer(mp_obj_t self, mp_obj_t ep, mp_obj_t buff
         mp_raise_OSError(MP_EBUSY);
     }
 
-    result = usbd_edpt_xfer(RHPORT, ep_addr, buf_info.buf, buf_info.len);
+    // TinyUSB 0.21 added the is_isr argument; this path runs from the Python
+    // submit_xfer() call on the main task, never from an interrupt.
+    result = usbd_edpt_xfer(RHPORT, ep_addr, buf_info.buf, buf_info.len, false);
 
     if (result) {
         // Store the buffer object until the transfer completes

@@ -124,13 +124,16 @@ static mp_obj_t machine_usb_host_active(size_t n_args, const mp_obj_t *args) {
                 // First activation - full initialization
                 mp_usbh_init_tuh();
                 self->initialized = true;
+                mp_usbh_start_task_timer();
             } else if (!self->active) {
                 // Re-activating after deactivation - just re-enable interrupts
                 mp_usbh_int_enable();
+                mp_usbh_start_task_timer();
             }
         } else if (self->active) {
             // Deactivating - disable interrupts and clear state.
             mp_usbh_int_disable();
+            mp_usbh_stop_task_timer();
 
             // Clear device pools to prevent stale references.
             for (int i = 0; i < CFG_TUH_DEVICE_MAX; i++) {

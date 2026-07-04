@@ -9,9 +9,12 @@ as a USB host device. It can discover, enumerate, and communicate with various
 types of USB devices including CDC (Communications Device Class), MSC (Mass
 Storage Class), and HID (Human Interface Device) devices.
 
-.. note:: ``machine.USBHost`` is currently supported on the esp32, mimxrt, rp2,
-          and stm32 ports. Requires a board variant configured for USB host mode
-          (e.g. boards with ``_USBHOST`` suffix).
+.. note:: ``machine.USBHost`` is currently supported on the mimxrt, rp2, and
+          stm32 ports. Requires a board variant configured for USB host mode
+          (e.g. boards with ``_USBHOST`` suffix). The esp32 port builds its host
+          support against the ESP-IDF TinyUSB component, which does not provide
+          the TinyUSB 0.21 host API used here, so esp32 host is unavailable at
+          this TinyUSB revision.
 
 Example usage::
 
