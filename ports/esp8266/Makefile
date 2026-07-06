@@ -82,7 +82,7 @@ CFLAGS_XTENSA = -fsingle-precision-constant -Wdouble-promotion \
 	-Wl,-EL -mlongcalls -mtext-section-literals -mforce-l32 \
 	-DLWIP_OPEN_SRC
 
-CFLAGS += $(INC) -Wall -Wpointer-arith -Werror -std=gnu99 -nostdlib -DUART_OS=$(UART_OS) \
+CFLAGS += $(INC) -Wall -Wpointer-arith -Werror -std=gnu99 -DUART_OS=$(UART_OS) \
 	$(CFLAGS_XTENSA) $(COPT) $(CFLAGS_EXTRA) -I$(BOARD_DIR)
 
 LD_FILES ?= boards/esp8266_2m.ld
@@ -106,9 +106,6 @@ CFLAGS += -fdata-sections -ffunction-sections
 COPT += -Os -DNDEBUG
 LDFLAGS += --gc-sections
 endif
-
-# Flags for optional C++ source code
-CXXFLAGS += $(filter-out -Wmissing-prototypes -Wold-style-definition -std=gnu99,$(CFLAGS))
 
 # Options for mpy-cross
 MPY_CROSS_FLAGS += -march=xtensa
@@ -199,7 +196,7 @@ FROZEN_EXTRA_DEPS = $(CONFVARS_FILE)
 
 deploy: $(FWBIN)
 	$(ECHO) "Writing $< to the board"
-	$(Q)$(ESPTOOL) --port $(PORT) --baud $(BAUD) write_flash --verify --flash_size=$(FLASH_SIZE) --flash_mode=$(FLASH_MODE) 0 $<
+	$(Q)$(ESPTOOL) --port $(PORT) --baud $(BAUD) write_flash --flash_size=$(FLASH_SIZE) --flash_mode=$(FLASH_MODE) 0 $<
 
 erase:
 	$(ECHO) "Erase flash"

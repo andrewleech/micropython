@@ -47,6 +47,7 @@ SRC_USERMOD_LIB_ASM :=
 CFLAGS_USERMOD :=
 CXXFLAGS_USERMOD :=
 LDFLAGS_USERMOD :=
+LIBS_USERMOD :=
 
 # Backwards compatibility with older user c modules that set SRC_USERMOD
 # added to SRC_USERMOD_C below
@@ -69,6 +70,7 @@ SRC_USERMOD_PATHFIX_LIB_ASM += $(patsubst $(USER_C_MODULES)/%.S,%.S,$(SRC_USERMO
 CFLAGS += $(CFLAGS_USERMOD)
 CXXFLAGS += $(CXXFLAGS_USERMOD)
 LDFLAGS += $(LDFLAGS_USERMOD)
+LIBS += $(LIBS_USERMOD)
 
 SRC_QSTR += $(SRC_USERMOD_PATHFIX_C) $(SRC_USERMOD_PATHFIX_CXX)
 PY_O += $(addprefix $(BUILD)/, $(SRC_USERMOD_PATHFIX_C:.c=.o))
@@ -91,6 +93,7 @@ PY_CORE_O_BASENAME = $(addprefix py/,\
 	nlrxtensa.o \
 	nlrrv32.o \
 	nlrrv64.o \
+	nlrloong64.o \
 	nlrsetjmp.o \
 	malloc.o \
 	gc.o \
@@ -180,6 +183,7 @@ PY_CORE_O_BASENAME = $(addprefix py/,\
 	objstr.o \
 	objstrunicode.o \
 	objstringio.o \
+	objtemplate.o \
 	objtuple.o \
 	objtype.o \
 	objzip.o \
@@ -198,10 +202,12 @@ PY_CORE_O_BASENAME = $(addprefix py/,\
 	modmath.o \
 	modcmath.o \
 	modmicropython.o \
+	modstring.o \
 	modstruct.o \
 	modsys.o \
 	moderrno.o \
 	modthread.o \
+	modweakref.o \
 	vm.o \
 	bc.o \
 	showbc.o \

@@ -584,9 +584,6 @@ void nimble_reset_gatts_bss(void) {
     // These variables are defined in ble_hs.c and are only ever incremented
     // (during service registration) and never reset.
     // See https://github.com/apache/mynewt-nimble/issues/896
-    extern uint16_t ble_hs_max_attrs;
-    extern uint16_t ble_hs_max_services;
-    extern uint16_t ble_hs_max_client_configs;
     ble_hs_max_attrs = 0;
     ble_hs_max_services = 0;
     ble_hs_max_client_configs = 0;
@@ -618,7 +615,17 @@ int mp_bluetooth_init(void) {
 
     // Initialise NimBLE memory and data structures.
     DEBUG_printf("mp_bluetooth_init: nimble_port_init\n");
+
+    // On some ports `nimble_port_init` may return an error code indicating a
+    // failed initialisation.
+    #if MICROPY_BLUETOOTH_NIMBLE_PORT_INIT_RETURNS_ERROR
+    if (nimble_port_init() < 0) {
+        mp_bluetooth_deinit();
+        return MP_EIO;
+    }
+    #else
     nimble_port_init();
+    #endif
 
     ble_hs_cfg.reset_cb = reset_cb;
     ble_hs_cfg.sync_cb = sync_cb;

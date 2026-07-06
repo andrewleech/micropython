@@ -10,6 +10,7 @@ set(MICROPY_SOURCE_EXTMOD
     ${MICROPY_EXTMOD_DIR}/machine_adc.c
     ${MICROPY_EXTMOD_DIR}/machine_adc_block.c
     ${MICROPY_EXTMOD_DIR}/machine_bitstream.c
+    ${MICROPY_EXTMOD_DIR}/machine_can.c
     ${MICROPY_EXTMOD_DIR}/machine_i2c.c
     ${MICROPY_EXTMOD_DIR}/machine_i2c_target.c
     ${MICROPY_EXTMOD_DIR}/machine_i2s.c
@@ -20,6 +21,7 @@ set(MICROPY_SOURCE_EXTMOD
     ${MICROPY_EXTMOD_DIR}/machine_spi.c
     ${MICROPY_EXTMOD_DIR}/machine_uart.c
     ${MICROPY_EXTMOD_DIR}/machine_usb_device.c
+    ${MICROPY_EXTMOD_DIR}/machine_usb_host.c
     ${MICROPY_EXTMOD_DIR}/machine_wdt.c
     ${MICROPY_EXTMOD_DIR}/modbluetooth.c
     ${MICROPY_EXTMOD_DIR}/modframebuf.c

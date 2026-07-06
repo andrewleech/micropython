@@ -34,6 +34,7 @@
 #include "shared/runtime/pyexec.h"
 #include "shared/runtime/softtimer.h"
 #include "shared/tinyusb/mp_usbd.h"
+#include "shared/tinyusb/mp_usbh.h"
 #include "ticks.h"
 #include "led.h"
 #include "pendsv.h"
@@ -60,6 +61,11 @@
 #include "extmod/vfs.h"
 
 extern uint8_t _sstack, _estack, _gc_heap_start, _gc_heap_end;
+extern void machine_encoder_deinit_all(void);
+#if MICROPY_PY_MACHINE_CAN
+void machine_can_deinit_all(void);
+#endif
+
 
 void board_init(void);
 
@@ -177,6 +183,9 @@ int main(void) {
 
     soft_reset_exit:
         mp_printf(MP_PYTHON_PRINTER, "MPY: soft reboot\n");
+        #if MICROPY_PY_MACHINE_CAN
+        machine_can_deinit_all();
+        #endif
         machine_pin_irq_deinit();
         machine_rtc_irq_deinit();
         #if MICROPY_PY_MACHINE_I2S
@@ -195,6 +204,12 @@ int main(void) {
         machine_pwm_deinit_all();
         #endif
         soft_timer_deinit();
+        #if MICROPY_PY_MACHINE_QECNT
+        machine_encoder_deinit_all();
+        #endif
+        #if MICROPY_HW_USB_HOST
+        mp_usbh_deinit();
+        #endif
         gc_sweep_all();
         mp_deinit();
     }
@@ -209,6 +224,11 @@ void gc_collect(void) {
 }
 
 void nlr_jump_fail(void *val) {
+    for (;;) {
+    }
+}
+
+void abort(void) {
     for (;;) {
     }
 }

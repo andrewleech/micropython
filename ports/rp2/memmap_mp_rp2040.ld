@@ -23,7 +23,8 @@
 
 MEMORY
 {
-    FLASH(rx) : ORIGIN = 0x10000000, LENGTH = __micropy_flash_size__
+    FLASH(rx) : ORIGIN = 0x10000000, LENGTH = __micropy_flash_size__ - __micropy_flash_storage_bytes__
+    FLASH_FS(rx) : ORIGIN = ORIGIN(FLASH) + LENGTH(FLASH), LENGTH = __micropy_flash_storage_bytes__
     RAM(rwx) : ORIGIN =  0x20000000, LENGTH = 256k
     SCRATCH_X(rwx) : ORIGIN = 0x20040000, LENGTH = 0k
     SCRATCH_Y(rwx) : ORIGIN = 0x20040000, LENGTH = 8k
@@ -69,7 +70,7 @@ SECTIONS
          * FLASH ... we will include any thing excluded here in .data below by default */
         *(.init)
         /* Change for MicroPython... exclude gc.c, parse.c, vm.c from flash */
-        *(EXCLUDE_FILE(*libgcc.a: *libc.a: *lib_a-mem*.o *libm.a: *gc.c.obj *vm.c.obj *parse.c.obj) .text*)
+        *(EXCLUDE_FILE(*libgcc.a: *libc.a: *lib_a-mem*.o *libm.a: *py/gc.c.o *py/vm.c.o *py/parse.c.o) .text*)
         *(.fini)
         /* Pull all c'tors into .text */
         *crtbegin.o(.ctors)

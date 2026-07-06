@@ -57,6 +57,8 @@ uint32_t trng_random_u32(void);
 
 // Optimisations
 
+// Compiler configuration
+
 // Python internal features
 #define MICROPY_TRACKED_ALLOC               (MICROPY_SSL_MBEDTLS)
 #define MICROPY_READER_VFS                  (1)
@@ -103,6 +105,11 @@ uint32_t trng_random_u32(void);
 #define MICROPY_PY_MACHINE_PWM              (1)
 #define MICROPY_PY_MACHINE_PWM_INCLUDEFILE  "ports/mimxrt/machine_pwm.c"
 #define MICROPY_PY_MACHINE_I2C              (1)
+#define MICROPY_PY_MACHINE_CAN_INCLUDEFILE  "ports/mimxrt/machine_can.c"
+// Function to determine if the given can_id is reserved for system use or not.
+#ifndef MICROPY_HW_CAN_IS_RESERVED
+#define MICROPY_HW_CAN_IS_RESERVED(can_id) (false)
+#endif
 #ifndef MICROPY_PY_MACHINE_I2C_TARGET
 #define MICROPY_PY_MACHINE_I2C_TARGET       (1)
 #define MICROPY_PY_MACHINE_I2C_TARGET_INCLUDEFILE "ports/mimxrt/machine_i2c_target.c"
@@ -155,11 +162,9 @@ uint32_t trng_random_u32(void);
 #endif
 #define MICROPY_PY_WEBSOCKET                (MICROPY_PY_LWIP)
 #define MICROPY_PY_WEBREPL                  (MICROPY_PY_LWIP)
-#define MICROPY_PY_LWIP_SOCK_RAW            (MICROPY_PY_LWIP)
 #ifndef MICROPY_PY_NETWORK_PPP_LWIP
 #define MICROPY_PY_NETWORK_PPP_LWIP         (MICROPY_PY_LWIP)
 #endif
-#define MICROPY_PY_LWIP_PPP                 (MICROPY_PY_NETWORK_PPP_LWIP)
 
 #ifndef MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
 #define MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE (1)
@@ -173,7 +178,9 @@ uint32_t trng_random_u32(void);
 #define MICROPY_PY_NETWORK_HOSTNAME_DEFAULT "mpy-mimxrt"
 #endif
 
+#ifndef MICROPY_HW_ENABLE_USBDEV
 #define MICROPY_HW_ENABLE_USBDEV            (1)
+#endif
 // Enable USB-CDC serial port
 #ifndef MICROPY_HW_USB_CDC
 #define MICROPY_HW_USB_CDC                  (1)
@@ -182,6 +189,18 @@ uint32_t trng_random_u32(void);
 // Enable USB Mass Storage with FatFS filesystem.
 #ifndef MICROPY_HW_USB_MSC
 #define MICROPY_HW_USB_MSC                  (0)
+#endif
+
+// Enable USB runtime device support (machine.USBDevice / usb.device).
+// Requires USB device mode; host-only variants disable USBDEV and so get this
+// disabled too, otherwise machine_usb_device.c references undefined CFG_TUD_*.
+#ifndef MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
+#define MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE (MICROPY_HW_ENABLE_USBDEV)
+#endif
+
+// Enable USB Host support.
+#ifndef MICROPY_HW_USB_HOST
+#define MICROPY_HW_USB_HOST                 (0)
 #endif
 
 // Hooks to add builtins
@@ -219,14 +238,6 @@ extern const struct _mp_obj_type_t network_lan_type;
 
 #ifndef MICROPY_HW_USB_PID
 #define MICROPY_HW_USB_PID (0x9802)
-#endif
-
-#ifndef  MICROPY_EVENT_POLL_HOOK
-#define MICROPY_EVENT_POLL_HOOK \
-    do { \
-        mp_handle_pending(MP_HANDLE_PENDING_CALLBACKS_AND_EXCEPTIONS); \
-        __WFE(); \
-    } while (0);
 #endif
 
 #define MICROPY_MAKE_POINTER_CALLABLE(p) ((void *)((mp_uint_t)(p) | 1))

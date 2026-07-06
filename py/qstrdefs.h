@@ -53,7 +53,9 @@ Q({:#x})
 Q({:#b})
 Q( )
 Q(\n)
+#if MICROPY_STACK_CHECK
 Q(maximum recursion depth exceeded)
+#endif
 Q(<module>)
 Q(<lambda>)
 Q(<listcomp>)
@@ -75,4 +77,8 @@ Q(/rom/lib)
 
 #if MICROPY_ENABLE_PYSTACK
 Q(pystack exhausted)
+#endif
+
+#if MICROPY_PY_TSTRINGS
+Q(string.templatelib)
 #endif

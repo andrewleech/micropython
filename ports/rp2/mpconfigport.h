@@ -103,10 +103,6 @@
 #if PICO_ARM
 #define MICROPY_EMIT_THUMB                      (1)
 #define MICROPY_EMIT_INLINE_THUMB               (1)
-#if PICO_RP2040
-#define MICROPY_EMIT_THUMB_ARMV7M               (0)
-#define MICROPY_EMIT_INLINE_THUMB_FLOAT         (0)
-#endif
 #elif PICO_RISCV
 #define MICROPY_EMIT_RV32                       (1)
 #define MICROPY_EMIT_RV32_ZBA                   (1)
@@ -202,8 +198,6 @@
 #define MICROPY_VFS_FAT                         (1)
 #define MICROPY_VFS_ROM                         (MICROPY_HW_ROMFS_BYTES > 0)
 #define MICROPY_SSL_MBEDTLS                     (1)
-#define MICROPY_PY_LWIP_PPP                     (MICROPY_PY_NETWORK_PPP_LWIP)
-#define MICROPY_PY_LWIP_SOCK_RAW                (MICROPY_PY_LWIP)
 
 // Hardware timer alarm index. Available range 0-3.
 // Number 3 is currently used by pico-sdk alarm pool (PICO_TIME_DEFAULT_ALARM_POOL_HARDWARE_ALARM_NUM)
@@ -246,7 +240,7 @@
 #endif
 
 #ifndef MICROPY_PY_NETWORK_PPP_LWIP
-#define MICROPY_PY_NETWORK_PPP_LWIP     (0)
+#define MICROPY_PY_NETWORK_PPP_LWIP     (MICROPY_PY_LWIP)
 #endif
 #endif
 
@@ -316,4 +310,9 @@ extern void lwip_poll_hook(void);
 
 #ifndef MICROPY_BOARD_END_SOFT_RESET
 #define MICROPY_BOARD_END_SOFT_RESET()
+#endif
+
+// Include USB host configuration if enabled
+#if MICROPY_HW_USB_HOST
+#include "mpconfigport_usbhost.h"
 #endif

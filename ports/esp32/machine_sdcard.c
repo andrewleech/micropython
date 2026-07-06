@@ -29,12 +29,16 @@
 #include "py/runtime.h"
 #include "py/mphal.h"
 #include "py/mperrno.h"
+#include "extmod/modmachine.h"
 #include "extmod/vfs_fat.h"
 
-#if MICROPY_HW_ENABLE_SDCARD
+#if MICROPY_PY_MACHINE_SDCARD
 
 #if SOC_SDMMC_HOST_SUPPORTED
 #include "driver/sdmmc_host.h"
+#if SOC_SDMMC_IO_POWER_EXTERNAL
+#include "sd_pwr_ctrl_by_on_chip_ldo.h"
+#endif
 #endif
 #include "driver/sdspi_host.h"
 #include "sdmmc_cmd.h"
@@ -53,9 +57,6 @@
 // Cards gets initialised by ioctl op==1 and de-inited by ioctl 2
 // Hosts are de-inited in __del__. Slots do not need de-initing.
 //
-
-// Forward declaration
-const mp_obj_type_t machine_sdcard_type;
 
 typedef struct _sdcard_obj_t {
     mp_obj_base_t base;
@@ -211,10 +212,13 @@ static mp_obj_t machine_sdcard_make_new(const mp_obj_type_t *type, size_t n_args
         ARG_cmd,
         ARG_data,
         #endif
+        #if SOC_SDMMC_IO_POWER_EXTERNAL
+        ARG_ldo,
+        #endif
         ARG_freq,
     };
     #if SOC_SDMMC_HOST_SUPPORTED
-    static const int DEFAULT_SLOT = 1;
+    static const int DEFAULT_SLOT = MICROPY_HW_SDMMC_DEFAULT_SLOT;
     #else
     static const int DEFAULT_SLOT = SD_SLOT_MAX;
     #endif
@@ -232,6 +236,13 @@ static mp_obj_t machine_sdcard_make_new(const mp_obj_type_t *type, size_t n_args
         #if SOC_SDMMC_USE_GPIO_MATRIX
         { MP_QSTR_cmd,      MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_data,     MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        #endif
+        #if SOC_SDMMC_IO_POWER_EXTERNAL
+        #ifdef MICROPY_HW_SDMMC_LDO_CHAN_ID
+        { MP_QSTR_ldo,      MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = MP_OBJ_NEW_SMALL_INT(MICROPY_HW_SDMMC_LDO_CHAN_ID)} },
+        #else
+        { MP_QSTR_ldo,      MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        #endif
         #endif
         // freq is valid for both SPI and SDMMC interfaces
         { MP_QSTR_freq,     MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 20000000} },
@@ -311,6 +322,16 @@ static mp_obj_t machine_sdcard_make_new(const mp_obj_type_t *type, size_t n_args
         _temp_host.max_freq_khz = freq / 1000;
         _temp_host.slot = slot_num;
         self->host = _temp_host;
+    }
+    #endif
+    #if SOC_SDMMC_IO_POWER_EXTERNAL
+    if (arg_vals[ARG_ldo].u_obj != mp_const_none) {
+        sd_pwr_ctrl_ldo_config_t ldo_config = {
+            .ldo_chan_id = mp_obj_get_int(arg_vals[ARG_ldo].u_obj),
+        };
+        sd_pwr_ctrl_handle_t pwr_ctrl_handle = NULL;
+        check_esp_err(sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &pwr_ctrl_handle));
+        self->host.pwr_ctrl_handle = pwr_ctrl_handle;
     }
     #endif
 
@@ -434,6 +455,11 @@ static mp_obj_t sd_deinit(mp_obj_t self_in) {
             // SD card used a (dedicated) SPI bus, so free that SPI bus.
             spi_bus_free(self->host.slot);
         }
+        #if SOC_SDMMC_IO_POWER_EXTERNAL
+        if (self->host.pwr_ctrl_handle) {
+            check_esp_err(sd_pwr_ctrl_del_on_chip_ldo(self->host.pwr_ctrl_handle));
+        }
+        #endif
         self->flags &= ~SDCARD_CARD_FLAGS_HOST_INIT_DONE;
     }
 
@@ -474,7 +500,8 @@ static mp_obj_t machine_sdcard_readblocks(mp_obj_t self_in, mp_obj_t block_num, 
     mp_get_buffer_raise(buf, &bufinfo, MP_BUFFER_WRITE);
     err = sdmmc_read_sectors(&(self->card), bufinfo.buf, mp_obj_get_int(block_num), bufinfo.len / _SECTOR_SIZE(self));
 
-    return mp_obj_new_bool(err == ESP_OK);
+    int ret = err == ESP_OK ? 0 : -MP_EIO;
+    return MP_OBJ_NEW_SMALL_INT(ret);
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(machine_sdcard_readblocks_obj, machine_sdcard_readblocks);
 
@@ -491,7 +518,8 @@ static mp_obj_t machine_sdcard_writeblocks(mp_obj_t self_in, mp_obj_t block_num,
     mp_get_buffer_raise(buf, &bufinfo, MP_BUFFER_READ);
     err = sdmmc_write_sectors(&(self->card), bufinfo.buf, mp_obj_get_int(block_num), bufinfo.len / _SECTOR_SIZE(self));
 
-    return mp_obj_new_bool(err == ESP_OK);
+    int ret = err == ESP_OK ? 0 : -MP_EIO;
+    return MP_OBJ_NEW_SMALL_INT(ret);
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(machine_sdcard_writeblocks_obj, machine_sdcard_writeblocks);
 
@@ -554,4 +582,4 @@ MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &machine_sdcard_locals_dict
     );
 
-#endif // MICROPY_HW_ENABLE_SDCARD
+#endif // MICROPY_PY_MACHINE_SDCARD

@@ -95,16 +95,40 @@ if(MICROPY_PY_TINYUSB)
     )
 
     list(APPEND MICROPY_INC_TINYUSB
+        ${MICROPY_PORT_DIR}/tinyusb_port/
         ${MICROPY_DIR}/shared/tinyusb/
     )
 
-    # Build the Espressif tinyusb component with MicroPython shared/tinyusb/tusb_config.h
+    # Build the Espressif tinyusb component with port's tusb_config.h (must be first for host mode)
     idf_component_get_property(tusb_lib espressif__tinyusb COMPONENT_LIB)
     target_include_directories(${tusb_lib} PRIVATE
+        ${MICROPY_PORT_DIR}/tinyusb_port
         ${MICROPY_DIR}/shared/tinyusb
         ${MICROPY_DIR}
         ${MICROPY_PORT_DIR}
         ${MICROPY_BOARD_DIR})
+endif()
+
+# USB Host support
+if(MICROPY_HW_USB_HOST)
+    list(APPEND MICROPY_SOURCE_TINYUSB
+        ${MICROPY_DIR}/shared/tinyusb/mp_usbh.c
+        # TinyUSB host core and class drivers (not in ESP-IDF component)
+        ${MICROPY_DIR}/lib/tinyusb/src/host/usbh.c
+        ${MICROPY_DIR}/lib/tinyusb/src/host/hub.c
+        ${MICROPY_DIR}/lib/tinyusb/src/class/cdc/cdc_host.c
+        ${MICROPY_DIR}/lib/tinyusb/src/class/msc/msc_host.c
+        ${MICROPY_DIR}/lib/tinyusb/src/class/hid/hid_host.c
+        # TinyUSB DWC2 host controller driver (ESP32-S3 uses DWC2)
+        ${MICROPY_DIR}/lib/tinyusb/src/portable/synopsys/dwc2/hcd_dwc2.c
+        ${MICROPY_DIR}/lib/tinyusb/src/portable/synopsys/dwc2/dwc2_common.c
+    )
+    list(APPEND MICROPY_INC_TINYUSB
+        ${MICROPY_DIR}/lib/tinyusb/src
+    )
+    list(APPEND MICROPY_DEF_TINYUSB
+        MICROPY_HW_USB_HOST=1
+    )
 endif()
 
 list(APPEND MICROPY_SOURCE_PORT
@@ -129,6 +153,7 @@ list(APPEND MICROPY_SOURCE_PORT
     network_lan.c
     network_ppp.c
     network_wlan.c
+    network_wlan_csi.c
     mpnimbleport.c
     modsocket.c
     lwip_patch.c
@@ -169,7 +194,6 @@ list(APPEND IDF_COMPONENTS
     esp_app_format
     esp_mm
     esp_common
-    esp_driver_touch_sens
     esp_eth
     esp_event
     esp_hw_support
@@ -197,6 +221,11 @@ list(APPEND IDF_COMPONENTS
     usb
     vfs
 )
+
+if($ENV{IDF_VERSION} VERSION_GREATER_EQUAL "5.4")
+    list(APPEND IDF_COMPONENTS
+        esp_driver_touch_sens)
+endif()
 
 # Provide the default LD fragment if not set
 if (MICROPY_USER_LDFRAGMENTS)
@@ -273,18 +302,15 @@ target_compile_options(${MICROPY_TARGET} PUBLIC
     -Wno-missing-field-initializers
 )
 
+# User C modules don't pick up certain compile options set by the IDF, most
+# importantly the optimisation level.  So set them here.
+idf_build_get_property(idf_compile_options COMPILE_OPTIONS)
+target_compile_options(usermod INTERFACE ${idf_compile_options})
+
 # Additional include directories needed for private NimBLE headers.
 target_include_directories(${MICROPY_TARGET} PUBLIC
     ${IDF_PATH}/components/bt/host/nimble/nimble
 )
-if (IDF_VERSION VERSION_LESS "5.3")
-# Additional include directories needed for private RMT header.
-#  IDF 5.x versions before 5.3.1
-  message(STATUS "Using private rmt headers for ${IDF_VERSION}")
-  target_include_directories(${MICROPY_TARGET} PRIVATE
-    ${IDF_PATH}/components/driver/rmt
-  )
-endif()
 
 # Add additional extmod and usermod components.
 if (MICROPY_PY_BTREE)
@@ -313,6 +339,10 @@ foreach(comp ${__COMPONENT_NAMES_RESOLVED})
     micropy_gather_target_properties(__idf_${comp})
     micropy_gather_target_properties(${comp})
 endforeach()
+
+# Explicitly add extra definitions for MicroPython's preprocessing stage
+# (these are not picked up by the above micropy_gather_target_properties).
+list(APPEND MICROPY_CPP_DEF_EXTRA "ESP_PLATFORM")
 
 # Include the main MicroPython cmake rules.
 include(${MICROPY_DIR}/py/mkrules.cmake)

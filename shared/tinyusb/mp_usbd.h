@@ -55,6 +55,12 @@
 #include "py/objarray.h"
 #include "py/runtime.h"
 
+// Include tusb_config.h unconditionally for macros used in mp_usbd.h
+// (USBD_ITF_BUILTIN_MAX, TUD_CONFIG_DESC_LEN, etc.)
+// Use <> to search include path - finds port-specific config first,
+// which should in turn include shared/tinyusb/tusb_config.h
+#include <tusb_config.h>
+
 #ifndef NO_QSTR
 #include "tusb.h"
 #include "device/dcd.h"
@@ -63,7 +69,18 @@
 
 // Initialise TinyUSB device.
 static inline void mp_usbd_init_tud(void) {
+    #if CFG_TUH_ENABLED
+    // When host stack is also enabled, only initialize the device stack here.
+    // Host stack initialization is deferred to machine.USBHost().active(True)
+    // so that enumeration events are processed after MicroPython is ready.
+    const tusb_rhport_init_t dev_init = {
+        .role = TUSB_ROLE_DEVICE,
+        .speed = TUD_OPT_HIGH_SPEED ? TUSB_SPEED_HIGH : TUSB_SPEED_FULL
+    };
+    tusb_rhport_init(TUD_OPT_RHPORT, &dev_init);
+    #else
     tusb_init();
+    #endif
     #if MICROPY_HW_USB_CDC
     tud_cdc_configure_t cfg = {
         .rx_persistent = 0,
@@ -98,6 +115,9 @@ void mp_usbd_hex_str(char *out_str, const uint8_t *bytes, size_t bytes_len);
 // Built-in USB device and configuration descriptor values
 extern const tusb_desc_device_t mp_usbd_builtin_desc_dev;
 extern const uint8_t mp_usbd_builtin_desc_cfg[MP_USBD_BUILTIN_DESC_CFG_LEN];
+#if (CFG_TUD_MAX_SPEED == OPT_MODE_HIGH_SPEED)
+extern const tusb_desc_device_qualifier_t mp_usbd_builtin_desc_qual;
+#endif
 
 void mp_usbd_task_callback(mp_sched_node_t *node);
 

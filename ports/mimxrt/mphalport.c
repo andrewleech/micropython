@@ -30,7 +30,9 @@
 #include "py/mphal.h"
 #include "shared/timeutils/timeutils.h"
 #include "shared/runtime/interrupt_char.h"
+#if MICROPY_HW_USB_CDC
 #include "shared/tinyusb/mp_usbd_cdc.h"
+#endif
 #include "extmod/misc.h"
 #include "ticks.h"
 #include "tusb.h"
@@ -71,7 +73,7 @@ int mp_hal_stdin_rx_chr(void) {
             return dupterm_c;
         }
         #endif
-        MICROPY_EVENT_POLL_HOOK
+        mp_event_wait_indefinite();
     }
 }
 

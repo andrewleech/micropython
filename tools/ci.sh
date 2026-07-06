@@ -10,7 +10,9 @@ fi
 ulimit -n 1024
 
 # Fail on some things which are warnings otherwise
-export MICROPY_MAINTAINER_BUILD=1
+if [ -z "$MICROPY_MAINTAINER_BUILD" ]; then
+    export MICROPY_MAINTAINER_BUILD=1
+fi
 
 ########################################################################################
 # general helper functions
@@ -40,8 +42,7 @@ function ci_picotool_setup {
 # c code formatting
 
 function ci_c_code_formatting_setup {
-    sudo apt-get update
-    sudo apt-get install uncrustify
+    pip install micropython-uncrustify==1.0.0.post1
     uncrustify --version
 }
 
@@ -89,7 +90,7 @@ function ci_code_size_build {
     # Override the list by setting PORTS_TO_CHECK in the environment before invoking ci.
     : ${PORTS_TO_CHECK:=bmus3xpdv}
     
-    SUBMODULES="lib/asf4 lib/berkeley-db-1.xx lib/btstack lib/cyw43-driver lib/lwip lib/mbedtls lib/micropython-lib lib/nxp_driver lib/pico-sdk lib/stm32lib lib/tinyusb"
+    SUBMODULES="lib/CMSIS_5 lib/CMSIS_6 lib/asf4 lib/berkeley-db-1.xx lib/btstack lib/cyw43-driver lib/lwip lib/mbedtls lib/micropython-lib lib/nxp_driver lib/pico-sdk lib/stm32lib lib/tinyusb"
 
     # Default GitHub pull request sets HEAD to a generated merge commit
     # between PR branch (HEAD^2) and base branch (i.e. master) (HEAD^1).
@@ -156,7 +157,7 @@ function ci_mpy_format_setup {
 
 function ci_mpy_format_test {
     # Test mpy-tool.py dump feature on bytecode
-    python3 ./tools/mpy-tool.py -xd tests/frozen/frozentest.mpy
+    python3 ./tools/mpy-tool.py -xd tests/assets/frozentest.mpy
 
     # Build MicroPython
     ci_unix_standard_build
@@ -165,7 +166,7 @@ function ci_mpy_format_test {
     export MICROPYPATH=.
 
     # Test mpy-tool.py running under MicroPython
-    $micropython ./tools/mpy-tool.py -x -d tests/frozen/frozentest.mpy
+    $micropython ./tools/mpy-tool.py -x -d tests/assets/frozentest.mpy
 
     # Test mpy-tool.py dump feature on native code
     make -C examples/natmod/features1
@@ -180,6 +181,21 @@ function ci_mpy_cross_debug_emitter {
     # Make sure the debug emitter does not crash or fail for simple files
     $mpy_cross -X emit=native -march=debug ./tests/basics/0prelim.py | \
 	    grep -E "ENTRY|EXIT" | wc -l | grep "^2$"
+}
+
+########################################################################################
+# ports/alif
+
+function ci_alif_setup {
+    ci_gcc_arm_setup
+}
+
+function ci_alif_ae3_build {
+    make ${MAKEOPTS} -C mpy-cross
+    make ${MAKEOPTS} -C ports/alif BOARD=OPENMV_AE3 MCU_CORE=M55_HP submodules
+    make ${MAKEOPTS} -C ports/alif BOARD=OPENMV_AE3 MCU_CORE=M55_HE submodules
+    make ${MAKEOPTS} -C ports/alif BOARD=OPENMV_AE3 MCU_CORE=M55_DUAL
+    make ${MAKEOPTS} -C ports/alif BOARD=ALIF_ENSEMBLE MCU_CORE=M55_DUAL USER_C_MODULES=../../examples/usercmodule
 }
 
 ########################################################################################
@@ -206,20 +222,11 @@ function ci_embedding_build {
 ########################################################################################
 # ports/esp32
 
-# GitHub tag of ESP-IDF to use for CI, extracted from the esp32 dependency lockfile
-# This should end up as a tag name like vX.Y.Z
-# (note: This hacky parsing can be replaced with 'yq' once Ubuntu >=24.04 is in use)
-IDF_VER=v$(grep -A10 "idf:" ports/esp32/lockfiles/dependencies.lock.esp32 | grep "version:" | head -n1 | sed -E 's/ +version: //')
-PYTHON=$(command -v python3 2> /dev/null)
-PYTHON_VER=$(${PYTHON:-python} --version | cut -d' ' -f2)
-
-export IDF_CCACHE_ENABLE=1
-
-function ci_esp32_idf_ver {
-    echo "IDF_VER=${IDF_VER}-py${PYTHON_VER}"
-}
-
 function ci_esp32_idf_setup {
+    if [ -z "$IDF_VER" ]; then
+        echo "IDF_VER environment variable must be set before running"
+        return 1
+    fi
     echo "Using ESP-IDF version $IDF_VER"
     git clone --depth 1 --branch $IDF_VER https://github.com/espressif/esp-idf.git
     # doing a treeless clone isn't quite as good as --shallow-submodules, but it
@@ -294,29 +301,10 @@ function ci_esp8266_build {
     make ${MAKEOPTS} -C ports/esp8266 submodules
     make ${MAKEOPTS} -C ports/esp8266 BOARD=ESP8266_GENERIC
     make ${MAKEOPTS} -C ports/esp8266 BOARD=ESP8266_GENERIC BOARD_VARIANT=FLASH_512K
-    make ${MAKEOPTS} -C ports/esp8266 BOARD=ESP8266_GENERIC BOARD_VARIANT=FLASH_1M
+    make ${MAKEOPTS} -C ports/esp8266 BOARD=ESP8266_GENERIC BOARD_VARIANT=FLASH_1M USER_C_MODULES=../../examples/usercmodule
 
     # Test building native .mpy with xtensa architecture.
     ci_native_mpy_modules_build xtensa
-}
-
-########################################################################################
-# ports/webassembly
-
-function ci_webassembly_setup {
-    npm install terser
-    git clone https://github.com/emscripten-core/emsdk.git
-    (cd emsdk && ./emsdk install latest && ./emsdk activate latest)
-}
-
-function ci_webassembly_build {
-    source emsdk/emsdk_env.sh
-    make ${MAKEOPTS} -C ports/webassembly VARIANT=pyscript submodules
-    make ${MAKEOPTS} -C ports/webassembly VARIANT=pyscript
-}
-
-function ci_webassembly_run_tests {
-    make -C ports/webassembly VARIANT=pyscript test_min
 }
 
 ########################################################################################
@@ -331,7 +319,7 @@ function ci_mimxrt_build {
     make ${MAKEOPTS} -C ports/mimxrt BOARD=MIMXRT1020_EVK submodules
     make ${MAKEOPTS} -C ports/mimxrt BOARD=MIMXRT1020_EVK
     make ${MAKEOPTS} -C ports/mimxrt BOARD=TEENSY40 submodules
-    make ${MAKEOPTS} -C ports/mimxrt BOARD=TEENSY40
+    make ${MAKEOPTS} -C ports/mimxrt BOARD=TEENSY40 USER_C_MODULES=../../examples/usercmodule
     make ${MAKEOPTS} -C ports/mimxrt BOARD=MIMXRT1060_EVK submodules
     make ${MAKEOPTS} -C ports/mimxrt BOARD=MIMXRT1060_EVK CFLAGS_EXTRA=-DMICROPY_HW_USB_MSC=1
 }
@@ -348,7 +336,7 @@ function ci_nrf_build {
     make ${MAKEOPTS} -C mpy-cross
     make ${MAKEOPTS} -C ports/nrf submodules
     make ${MAKEOPTS} -C ports/nrf BOARD=PCA10040
-    make ${MAKEOPTS} -C ports/nrf BOARD=MICROBIT
+    make ${MAKEOPTS} -C ports/nrf BOARD=MICROBIT USER_C_MODULES=../../examples/usercmodule
     make ${MAKEOPTS} -C ports/nrf BOARD=PCA10056 SD=s140
     make ${MAKEOPTS} -C ports/nrf BOARD=PCA10090
 }
@@ -413,7 +401,7 @@ function ci_qemu_build_arm_sabrelite {
 
 function ci_qemu_build_arm_thumb_softfp {
     ci_qemu_build_arm_prepare
-    make BOARD=MPS2_AN385 ${MAKEOPTS} -C ports/qemu test_full
+    make BOARD=MPS2_AN385 ${MAKEOPTS} -C ports/qemu USER_C_MODULES=../../examples/usercmodule test_full
 
     # Test building native .mpy with ARM-M softfp architectures.
     ci_native_mpy_modules_build armv6m
@@ -469,7 +457,7 @@ function ci_renesas_ra_board_build {
     make ${MAKEOPTS} -C mpy-cross
     make ${MAKEOPTS} -C ports/renesas-ra submodules
     make ${MAKEOPTS} -C ports/renesas-ra BOARD=RA4M1_CLICKER
-    make ${MAKEOPTS} -C ports/renesas-ra BOARD=EK_RA6M2
+    make ${MAKEOPTS} -C ports/renesas-ra BOARD=EK_RA6M2 USER_C_MODULES=../../examples/usercmodule
     make ${MAKEOPTS} -C ports/renesas-ra BOARD=EK_RA6M1
     make ${MAKEOPTS} -C ports/renesas-ra BOARD=EK_RA4M1
     make ${MAKEOPTS} -C ports/renesas-ra BOARD=EK_RA4W1
@@ -619,6 +607,12 @@ CI_UNIX_OPTS_QEMU_RISCV64=(
     MICROPY_STANDALONE=1
 )
 
+CI_UNIX_OPTS_QEMU_LOONG64=(
+    CROSS_COMPILE=loongarch64-linux-gnu-
+    VARIANT=coverage
+    MICROPY_STANDALONE=1
+)
+
 CI_UNIX_OPTS_SANITIZE_ADDRESS=(
     # Macro MP_ASAN allows detecting ASan on gcc<=13
     CFLAGS_EXTRA="-fsanitize=address --param asan-use-after-return=0 -DMP_ASAN=1"
@@ -727,6 +721,14 @@ function ci_unix_standard_v2_run_tests {
     ci_unix_run_tests_full_helper standard
 }
 
+function ci_unix_standard_terse_build {
+    ci_unix_build_helper VARIANT=standard CFLAGS_EXTRA="-DMICROPY_ERROR_REPORTING=MICROPY_ERROR_REPORTING_TERSE"
+}
+
+function ci_unix_standard_terse_run_tests {
+    make -C ports/unix VARIANT=standard test
+}
+
 function ci_unix_coverage_setup {
     pip3 install setuptools
     pip3 install pyelftools
@@ -736,6 +738,7 @@ function ci_unix_coverage_setup {
 }
 
 function ci_unix_coverage_build {
+    # note: the coverage variant incorporates ../../examples/usercmodule, set in mpconfigvariant.mk
     ci_unix_build_helper VARIANT=coverage
     ci_unix_build_ffi_lib_helper gcc
 }
@@ -752,6 +755,12 @@ function ci_unix_coverage_run_mpy_merge_tests {
     # Compile a selection of tests to .mpy and execute them, collecting the output.
     # None of the tests should SKIP.
     for inpy in $mptop/tests/basics/[acdel]*.py; do
+        if grep -q "import unittest" $inpy; then
+            # Merging >1 unittest-enabled module leads to unexpected
+            # results, as each file runs all previously registered unittest cases
+            echo "SKIPPING $inpy"
+            continue
+        fi
         test=$(basename $inpy .py)
         echo $test
         outmpy=$outdir/$test.mpy
@@ -905,9 +914,7 @@ function ci_unix_macos_run_tests {
     # Issues with macOS tests:
     # - float_parse and float_parse_doubleprec parse/print floats out by a few mantissa bits
     # - ffi_callback crashes for an unknown reason
-    # - thread/stress_heap.py is flaky
-    # - thread/thread_gc1.py is flaky
-    (cd tests && MICROPY_MICROPYTHON=../ports/unix/build-standard/micropython ./run-tests.py --exclude '(float_parse|float_parse_doubleprec|ffi_callback|thread/stress_heap|thread/thread_gc1).py')
+    (cd tests && MICROPY_MICROPYTHON=../ports/unix/build-standard/micropython ./run-tests.py --exclude '(float_parse|float_parse_doubleprec|ffi_callback).py')
 }
 
 function ci_unix_qemu_mips_setup {
@@ -927,10 +934,8 @@ function ci_unix_qemu_mips_build {
 function ci_unix_qemu_mips_run_tests {
     # Issues with MIPS tests:
     # - thread/stress_aes.py takes around 90 seconds
-    # - thread/stress_recurse.py is flaky
-    # - thread/thread_gc1.py is flaky
     file ./ports/unix/build-coverage/micropython
-    (cd tests && MICROPY_MICROPYTHON=../ports/unix/build-coverage/micropython MICROPY_TEST_TIMEOUT=180 ./run-tests.py --exclude 'thread/stress_recurse.py|thread/thread_gc1.py')
+    (cd tests && MICROPY_MICROPYTHON=../ports/unix/build-coverage/micropython MICROPY_TEST_TIMEOUT=180 ./run-tests.py)
 }
 
 function ci_unix_qemu_arm_setup {
@@ -949,11 +954,9 @@ function ci_unix_qemu_arm_build {
 
 function ci_unix_qemu_arm_run_tests {
     # Issues with ARM tests:
-    # - thread/stress_aes.py takes around 70 seconds
-    # - thread/stress_recurse.py is flaky
-    # - thread/thread_gc1.py is flaky
+    # - thread/stress_aes.py takes around 90 seconds
     file ./ports/unix/build-coverage/micropython
-    (cd tests && MICROPY_MICROPYTHON=../ports/unix/build-coverage/micropython MICROPY_TEST_TIMEOUT=90 ./run-tests.py --exclude 'thread/stress_recurse.py|thread/thread_gc1.py')
+    (cd tests && MICROPY_MICROPYTHON=../ports/unix/build-coverage/micropython MICROPY_TEST_TIMEOUT=120 ./run-tests.py)
 }
 
 function ci_unix_qemu_riscv64_setup {
@@ -976,14 +979,42 @@ function ci_unix_qemu_riscv64_build {
 
 function ci_unix_qemu_riscv64_run_tests {
     # Issues with RISCV-64 tests:
-    # - thread/stress_aes.py takes around 180 seconds
-    # - thread/stress_recurse.py is flaky
-    # - thread/thread_gc1.py is flaky
+    # - thread/stress_aes.py takes around 180 seconds, so exclude it to keep execution time down
     file ./ports/unix/build-coverage/micropython
     pushd tests
-    MICROPY_MICROPYTHON=../ports/unix/build-coverage/micropython MICROPY_TEST_TIMEOUT=200 ./run-tests.py --exclude 'thread/stress_recurse.py|thread/thread_gc1.py'
+    MICROPY_MICROPYTHON=../ports/unix/build-coverage/micropython ./run-tests.py --exclude 'thread/stress_aes.py'
     MICROPY_MICROPYTHON=../ports/unix/build-coverage/micropython ./run-natmodtests.py extmod/btree*.py extmod/deflate*.py extmod/framebuf*.py extmod/heapq*.py extmod/random_basic*.py extmod/re*.py
     popd
+}
+
+function ci_unix_qemu_loong64_setup {
+    sudo apt-get update
+    sudo apt-get install gcc-14-loongarch64-linux-gnu g++-14-loongarch64-linux-gnu libc6-loong64-cross libltdl-dev
+    sudo apt-get install qemu-user-static
+    qemu-loongarch64-static --version
+    sudo mkdir -p /usr/gnemul
+    sudo ln -s /usr/loongarch64-linux-gnu /usr/gnemul/qemu-loongarch64
+    sudo ln -s /usr/bin/loongarch64-linux-gnu-gcc-14 /usr/bin/loongarch64-linux-gnu-gcc
+    sudo ln -s /usr/bin/loongarch64-linux-gnu-g++-14 /usr/bin/loongarch64-linux-gnu-g++
+}
+
+function ci_unix_qemu_loong64_build {
+    ci_unix_build_helper "${CI_UNIX_OPTS_QEMU_LOONG64[@]}"
+    ci_unix_build_ffi_lib_helper loongarch64-linux-gnu-gcc
+}
+
+function ci_unix_qemu_loong64_run_tests {
+    # Issues with LOONG64 tests:
+    # - thread/stress_aes.py takes around 90 seconds
+    file ./ports/unix/build-coverage/micropython
+    # Loongarch64 isn't defined in the CI image's binfmt list.
+    cat << 'EOF' > ./ports/unix/build-coverage/micropython-runner
+#!/bin/sh
+MPY_PATH=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+qemu-loongarch64-static "$MPY_PATH"/micropython $@
+EOF
+    chmod +x ./ports/unix/build-coverage/micropython-runner
+    (cd tests && MICROPY_MICROPYTHON=../ports/unix/build-coverage/micropython-runner MICROPY_TEST_TIMEOUT=180 ./run-tests.py)
 }
 
 function ci_unix_repr_b_build {
@@ -998,26 +1029,45 @@ function ci_unix_repr_b_run_tests {
 }
 
 ########################################################################################
+# ports/webassembly
+
+function ci_webassembly_setup {
+    npm install terser
+    git clone https://github.com/emscripten-core/emsdk.git
+    (cd emsdk && ./emsdk install latest && ./emsdk activate latest)
+}
+
+function ci_webassembly_build {
+    source emsdk/emsdk_env.sh
+    make ${MAKEOPTS} -C ports/webassembly VARIANT=pyscript submodules
+    make ${MAKEOPTS} -C ports/webassembly VARIANT=pyscript
+}
+
+function ci_webassembly_run_tests {
+    make -C ports/webassembly VARIANT=pyscript test_min
+}
+
+########################################################################################
 # ports/windows
 
 function ci_windows_setup {
     sudo apt-get update
-    sudo apt-get install gcc-mingw-w64
+    sudo apt-get install gcc-mingw-w64 g++-mingw-w64
 }
 
 function ci_windows_build {
     make ${MAKEOPTS} -C mpy-cross
     make ${MAKEOPTS} -C ports/windows submodules
-    make ${MAKEOPTS} -C ports/windows CROSS_COMPILE=i686-w64-mingw32-
+    make ${MAKEOPTS} -C ports/windows CROSS_COMPILE=i686-w64-mingw32- USER_C_MODULES=../../examples/usercmodule
     make ${MAKEOPTS} -C ports/windows CROSS_COMPILE=x86_64-w64-mingw32- BUILD=build-standard-w64
 }
 
 ########################################################################################
 # ports/zephyr
 
-ZEPHYR_DOCKER_VERSION=v0.28.1
-ZEPHYR_SDK_VERSION=0.17.2
-ZEPHYR_VERSION=v4.2.0
+ZEPHYR_DOCKER_VERSION=v0.29.2
+ZEPHYR_SDK_VERSION=1.0.1
+ZEPHYR_VERSION=v4.4.0
 
 function ci_zephyr_setup {
     IMAGE=ghcr.io/zephyrproject-rtos/ci:${ZEPHYR_DOCKER_VERSION}
@@ -1057,9 +1107,9 @@ function ci_zephyr_install {
 
 function ci_zephyr_build {
     git submodule update --init lib/micropython-lib
-    docker exec zephyr-ci west build -p auto -b qemu_x86 -- -DCONF_FILE=prj_minimal.conf
+    docker exec zephyr-ci west build -p auto -b qemu_x86 -- -DCONF_FILE='prj_minimal.conf;boards/qemu_x86.conf'
     docker exec zephyr-ci west build -p auto -b frdm_k64f
-    docker exec zephyr-ci west build -p auto -b mimxrt1050_evk
+    docker exec zephyr-ci west build -p auto -b mimxrt1050_evk/mimxrt1052/qspi
     docker exec zephyr-ci west build -p auto -b nucleo_wb55rg # for bluetooth
 }
 
@@ -1069,19 +1119,7 @@ function ci_zephyr_run_tests {
 }
 
 ########################################################################################
-# ports/alif
-
-function ci_alif_setup {
-    ci_gcc_arm_setup
-}
-
-function ci_alif_ae3_build {
-    make ${MAKEOPTS} -C mpy-cross
-    make ${MAKEOPTS} -C ports/alif BOARD=OPENMV_AE3 MCU_CORE=M55_HP submodules
-    make ${MAKEOPTS} -C ports/alif BOARD=OPENMV_AE3 MCU_CORE=M55_HE submodules
-    make ${MAKEOPTS} -C ports/alif BOARD=OPENMV_AE3 MCU_CORE=M55_DUAL
-    make ${MAKEOPTS} -C ports/alif BOARD=ALIF_ENSEMBLE MCU_CORE=M55_DUAL
-}
+# Helpers to run this script as a CLI tool.
 
 function _ci_help {
     # Note: these lines must be indented with tab characters (required by bash <<-EOF)
