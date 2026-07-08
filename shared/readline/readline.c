@@ -51,13 +51,17 @@ enum { ESEQ_NONE, ESEQ_ESC, ESEQ_ESC_BRACKET, ESEQ_ESC_BRACKET_DIGIT, ESEQ_ESC_O
 #pragma warning(disable : 4090)
 #endif
 
+#if MICROPY_REPL_ASYNCIO_BREAKPOINT
 // Guards the single-level readline save slot (rl_saved) used by
 // readline_push/readline_pop; reset in readline_init0.
 static bool rl_saved_valid = false;
+#endif
 
 void readline_init0(void) {
     memset(MP_STATE_PORT(readline_hist), 0, MICROPY_READLINE_HISTORY_SIZE * sizeof(const char*));
+    #if MICROPY_REPL_ASYNCIO_BREAKPOINT
     rl_saved_valid = false;
+    #endif
 }
 
 static char *str_dup_maybe(const char *str) {
@@ -598,6 +602,7 @@ void readline_push_history(const char *line) {
     }
 }
 
+#if MICROPY_REPL_ASYNCIO_BREAKPOINT
 // Save/restore readline state for reentrant use (e.g. sync REPL breakpoint
 // from within an async REPL session). Single-level stack since only one
 // level of nesting is needed.
@@ -624,5 +629,6 @@ void readline_pop(void) {
         rl_saved_valid = false;
     }
 }
+#endif // MICROPY_REPL_ASYNCIO_BREAKPOINT
 
 MP_REGISTER_ROOT_POINTER(const char *readline_hist[MICROPY_READLINE_HISTORY_SIZE]);
