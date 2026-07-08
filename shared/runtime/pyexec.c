@@ -636,6 +636,41 @@ MP_REGISTER_ROOT_POINTER(mp_obj_t repl_pending_coro);
 
 #if !MICROPY_REPL_EVENT_DRIVEN
 
+#if MICROPY_REPL_ASYNCIO
+// Blocking raw REPL, used after a soft reset while the host is still in raw
+// REPL mode: a feed loop over the event-driven raw REPL core, so the raw
+// REPL protocol isn't implemented a second time for ports that also carry
+// the asyncio REPL.
+int pyexec_raw_repl(void) {
+    mp_hal_stdio_mode_raw();
+
+    pyexec_mode_kind = PYEXEC_MODE_RAW_REPL;
+    pyexec_event_repl_init();
+
+    int ret = 0;
+    for (;;) {
+        int c = mp_hal_stdin_rx_chr();
+        if (c == CHAR_CTRL_B) {
+            // Change to friendly REPL: return to the caller, which prints
+            // the banner. Handled here rather than by the core, whose
+            // in-place mode switch prints the banner itself and would
+            // otherwise produce it a second time.
+            mp_hal_stdout_tx_str("\r\n");
+            pyexec_mode_kind = PYEXEC_MODE_FRIENDLY_REPL;
+            break;
+        }
+        ret = pyexec_raw_repl_process_char(c);
+        if (ret != 0) {
+            break;
+        }
+    }
+
+    mp_hal_stdio_mode_orig();
+    return ret;
+}
+
+#else // !MICROPY_REPL_ASYNCIO
+
 int pyexec_raw_repl(void) {
     vstr_t line;
     vstr_init(&line, 32);
@@ -702,6 +737,8 @@ raw_repl_reset:
         mp_hal_stdio_mode_raw();
     }
 }
+
+#endif // MICROPY_REPL_ASYNCIO
 
 int pyexec_friendly_repl(void) {
     #if MICROPY_REPL_ASYNCIO
