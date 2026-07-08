@@ -188,8 +188,8 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mp_micropython_stdio_mode_raw_obj, mp_micropyth
 
 // micropython.repl_event_init(): start a REPL session (banner + first prompt).
 static mp_obj_t mp_micropython_repl_event_init(void) {
-    pyexec_event_repl_async = true;
     pyexec_event_repl_init();
+    pyexec_event_repl_async = true;
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mp_micropython_repl_event_init_obj, mp_micropython_repl_event_init);
@@ -224,7 +224,9 @@ static mp_obj_t mp_micropython_repl_event_resume(void) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mp_micropython_repl_event_resume_obj, mp_micropython_repl_event_resume);
+#endif
 
+#if MICROPY_REPL_ASYNCIO_BREAKPOINT
 // micropython.repl(): blocking interactive breakpoint REPL, Ctrl-D returns to
 // the caller.
 static mp_obj_t mp_micropython_repl(void) {
@@ -292,6 +294,8 @@ static const mp_rom_map_elem_t mp_module_micropython_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_repl_event_init), MP_ROM_PTR(&mp_micropython_repl_event_init_obj) },
     { MP_ROM_QSTR(MP_QSTR_repl_event), MP_ROM_PTR(&mp_micropython_repl_event_obj) },
     { MP_ROM_QSTR(MP_QSTR_repl_event_resume), MP_ROM_PTR(&mp_micropython_repl_event_resume_obj) },
+    #endif
+    #if MICROPY_REPL_ASYNCIO_BREAKPOINT
     { MP_ROM_QSTR(MP_QSTR_repl), MP_ROM_PTR(&mp_micropython_repl_obj) },
     #endif
 };

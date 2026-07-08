@@ -866,7 +866,7 @@ friendly_repl_reset:
 
 #endif // !MICROPY_REPL_EVENT_DRIVEN
 
-#if MICROPY_REPL_ASYNCIO
+#if MICROPY_REPL_ASYNCIO_BREAKPOINT
 // Blocking breakpoint REPL: no banner, Ctrl-D returns to caller.
 // Terminal raw mode must be set by caller (e.g. from arepl).
 // Uses readline push/pop for reentrant state.
@@ -937,7 +937,7 @@ int pyexec_repl_breakpoint(void) {
     }
     return 0;
 }
-#endif // MICROPY_REPL_ASYNCIO
+#endif // MICROPY_REPL_ASYNCIO_BREAKPOINT
 
 #if MICROPY_REPL_ASYNCIO
 int pyexec_asyncio_repl(void) {

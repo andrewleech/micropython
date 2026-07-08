@@ -893,6 +893,14 @@ typedef uint64_t mp_uint_t;
 #endif
 #endif
 
+// Whether asyncio.arepl provides breakpoint(), a blocking micropython.repl()
+// debugger REPL that nests inside a running asyncio REPL session. Separate
+// from MICROPY_REPL_ASYNCIO because it is an optional convenience with its
+// own flash cost, not needed for the asyncio REPL itself.
+#ifndef MICROPY_REPL_ASYNCIO_BREAKPOINT
+#define MICROPY_REPL_ASYNCIO_BREAKPOINT (MICROPY_REPL_ASYNCIO && MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EVERYTHING)
+#endif
+
 // Whether the compiler allows compiling top-level await expressions.  The
 // asyncio REPL needs this to compile REPL input containing await into a
 // coroutine that runs on the event loop.

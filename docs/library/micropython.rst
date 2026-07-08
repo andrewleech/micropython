@@ -207,7 +207,7 @@ Functions
    This backs :func:`asyncio.arepl.breakpoint`, providing a synchronous
    breakpoint-style REPL from within async code.
 
-   Availability: Requires ``MICROPY_REPL_ASYNCIO``.
+   Availability: Requires ``MICROPY_REPL_ASYNCIO_BREAKPOINT``.
 
 .. function:: repl_event_init()
 
