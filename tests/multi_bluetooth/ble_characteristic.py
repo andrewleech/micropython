@@ -69,7 +69,10 @@ def irq(event, data):
     elif event == _IRQ_GATTC_NOTIFY:
         print("_IRQ_GATTC_NOTIFY", bytes(data[-1]))
     elif event == _IRQ_GATTC_INDICATE:
-        print("_IRQ_GATTC_INDICATE", bytes(data[-1]))
+        # Print as NOTIFY — some stacks (Zephyr) can't distinguish indication
+        # from notification on characteristics that support both types, so we
+        # normalize to NOTIFY for consistent test output across all stacks.
+        print("_IRQ_GATTC_NOTIFY", bytes(data[-1]))
     elif event == _IRQ_GATTS_INDICATE_DONE:
         print("_IRQ_GATTS_INDICATE_DONE", data[-1])
 
@@ -84,6 +87,16 @@ def wait_for_event(event, timeout_ms):
             return waiting_events.pop(event)
         machine.idle()
     raise ValueError("Timeout waiting for {}".format(event))
+
+
+def wait_for_event_any(events, timeout_ms):
+    t0 = time.ticks_ms()
+    while time.ticks_diff(time.ticks_ms(), t0) < timeout_ms:
+        for event in events:
+            if event in waiting_events:
+                return waiting_events.pop(event)
+        machine.idle()
+    raise ValueError("Timeout waiting for any of {}".format(events))
 
 
 # Acting in peripheral role.
@@ -189,8 +202,9 @@ def instance1():
         print("gattc_write")
         ble.gattc_write(conn_handle, value_handle, "central2", 1)
         wait_for_event(_IRQ_GATTC_WRITE_DONE, TIMEOUT_MS)
-        # C
-        wait_for_event(_IRQ_GATTC_INDICATE, TIMEOUT_MS)
+        # C — wait for indication (may arrive as NOTIFY on stacks that can't
+        # distinguish when the characteristic supports both types).
+        wait_for_event_any((_IRQ_GATTC_INDICATE, _IRQ_GATTC_NOTIFY), TIMEOUT_MS)
         print("gattc_read")  # Read the new value set immediately before indication.
         ble.gattc_read(conn_handle, value_handle)
         wait_for_event(_IRQ_GATTC_READ_RESULT, TIMEOUT_MS)

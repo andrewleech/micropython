@@ -1,0 +1,17 @@
+--- instance0 ---
+gap_advertise
+_IRQ_CENTRAL_CONNECT
+_IRQ_CENTRAL_DISCONNECT
+gap_advertise
+_IRQ_CENTRAL_CONNECT
+_IRQ_CENTRAL_DISCONNECT
+--- instance1 ---
+gap_connect
+_IRQ_PERIPHERAL_CONNECT
+in-IRQ active(0)
+_IRQ_PERIPHERAL_DISCONNECT
+gap_connect
+_IRQ_PERIPHERAL_CONNECT
+reconnect ok
+gap_disconnect: True
+_IRQ_PERIPHERAL_DISCONNECT
