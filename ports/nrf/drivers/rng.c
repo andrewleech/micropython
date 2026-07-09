@@ -61,6 +61,18 @@ static inline uint32_t generate_hw_random(void) {
 
 uint32_t rng_generate_random_word(void) {
 
+#if MICROPY_BLUETOOTH_ZEPHYR
+    // When Zephyr BLE controller is active, it owns the RNG peripheral.
+    // Route through the BLE stack's entropy function.
+    extern bool mp_bluetooth_is_active(void);
+    if (mp_bluetooth_is_active()) {
+        uint32_t retval = 0;
+        extern int bt_rand(void *buf, size_t len);
+        bt_rand(&retval, sizeof(retval));
+        return retval;
+    }
+#endif
+
 #if BLUETOOTH_SD
     if (BLUETOOTH_STACK_ENABLED() == 1) {
         uint32_t retval = 0;

@@ -48,6 +48,35 @@ SECTIONS
         *(.data)           /* .data sections */
         *(.data*)          /* .data* sections */
 
+        /* Zephyr BLE iterable sections - must be inside .data so the startup
+        code's FLASH-to-RAM copy loop initialises them on every boot.  The
+        symbols are required by Zephyr's TYPE_SECTION_START/END macros and are
+        harmless (empty) when the Zephyr BLE stack is not compiled in. */
+        . = ALIGN(4);
+        _net_buf_pool_list_start = .;
+        KEEP(*(SORT(._net_buf_pool.static.*)));
+        _net_buf_pool_list_end = .;
+
+        . = ALIGN(4);
+        _bt_conn_cb_list_start = .;
+        KEEP(*(SORT(._bt_conn_cb.static.*)));
+        _bt_conn_cb_list_end = .;
+
+        . = ALIGN(4);
+        _bt_gatt_service_static_list_start = .;
+        KEEP(*(SORT(._bt_gatt_service_static.static.*)));
+        _bt_gatt_service_static_list_end = .;
+
+        . = ALIGN(4);
+        _bt_l2cap_fixed_chan_list_start = .;
+        KEEP(*(SORT(._bt_l2cap_fixed_chan.static.*)));
+        _bt_l2cap_fixed_chan_list_end = .;
+
+        . = ALIGN(4);
+        _bt_l2cap_br_fixed_chan_list_start = .;
+        KEEP(*(SORT(._bt_l2cap_br_fixed_chan.static.*)));
+        _bt_l2cap_br_fixed_chan_list_end = .;
+
         . = ALIGN(4);
         _edata = .;        /* define a global symbol at data end; used by startup code in order to initialise the .data section in RAM */
     } >RAM AT>FLASH_TEXT
