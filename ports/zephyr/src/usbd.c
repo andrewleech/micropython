@@ -190,4 +190,4 @@ int mp_usbd_init(void) {
     return 0;
 }
 
-#endif // defined(CONFIG_USB_DEVICE_STACK_NEXT)
+#endif // defined(CONFIG_USB_DEVICE_STACK_NEXT) && !defined(CONFIG_CDC_ACM_SERIAL_INITIALIZE_AT_BOOT)
