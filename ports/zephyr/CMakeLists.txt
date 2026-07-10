@@ -69,7 +69,7 @@ set(MICROPY_SOURCE_PORT
     machine_spi.c
     machine_pin.c
     machine_timer.c
-    modbluetooth_zephyr.c
+    mpzephyrport_ble.c
     modsocket.c
     modzephyr.c
     modzsensor.c
@@ -175,6 +175,25 @@ zephyr_library_compile_definitions(
 
 zephyr_library_sources(${MICROPY_SOURCE_QSTR})
 zephyr_library_link_libraries(kernel)
+
+if(CONFIG_BT)
+    set(MICROPY_SOURCE_ZEPHYR_BLE
+        ${MICROPY_DIR}/extmod/zephyr_ble/modbluetooth_zephyr.c
+    )
+    zephyr_library_sources(${MICROPY_SOURCE_ZEPHYR_BLE})
+    list(APPEND MICROPY_SOURCE_QSTR ${MICROPY_SOURCE_ZEPHYR_BLE})
+    zephyr_library_include_directories(
+        ${MICROPY_DIR}/extmod/zephyr_ble/hal
+        ${ZEPHYR_BASE}/subsys/bluetooth
+    )
+    zephyr_library_compile_definitions(
+        MICROPY_BLUETOOTH_ZEPHYR=1
+        MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS=1
+        MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS_WITH_INTERLOCK=1
+        MICROPY_PY_BLUETOOTH_SYNC_EVENT_STACK_SIZE=4096
+        ZEPHYR_BLE_DEBUG=0
+    )
+endif()
 
 include(${MICROPY_DIR}/py/mkrules.cmake)
 
