@@ -1,6 +1,14 @@
 // Board and hardware specific configuration
 #define MICROPY_HW_BOARD_NAME                   "Raspberry Pi Pico W"
 
+// This board is a debug-firmware build target: enable sys.settrace() support.
+#ifndef MICROPY_PY_SYS_SETTRACE
+#define MICROPY_PY_SYS_SETTRACE (1)
+#endif
+#ifndef MICROPY_PY_SYS_SETTRACE_LOCALNAMES
+#define MICROPY_PY_SYS_SETTRACE_LOCALNAMES (1)
+#endif
+
 // todo: We need something to check our binary size
 
 // Enable networking.
