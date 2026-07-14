@@ -148,36 +148,68 @@ static mp_obj_t frame_f_locals(mp_obj_t self_in) {
 
     mp_obj_dict_t *locals_dict = mp_obj_new_dict(code_state->n_state);
 
-    // Expose local variables with names when available, otherwise use index
-    for (size_t i = 0; i < code_state->n_state; ++i) {
-        mp_obj_t state_obj = code_state->state[i];
+    // Local variables occupy the top of the state array in reverse order: local
+    // number `local_num` lives at physical slot `n_state - 1 - local_num` (see
+    // "fastn" addressing in vm.c). The remaining low slots are the value stack.
+    size_t num_locals = 0;
+    #if MICROPY_PY_SYS_SETTRACE_LOCALNAMES || MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
+    const mp_raw_code_t *rc = (code_state->fun_bc != NULL) ? code_state->fun_bc->rc : NULL;
+    if (rc != NULL && rc->local_names != NULL) {
+        num_locals = rc->local_names_len;
+    }
+    #endif
 
-        // Skip NULL values
-        if (state_obj == MP_OBJ_NULL) {
-            continue;
-        }
-
-        qstr var_name_qstr = MP_QSTRnull;
-
+    if (num_locals > 0 && num_locals <= code_state->n_state) {
+        // Real variable names are available: expose only the true local slots.
+        //
+        // mp_raw_code_get_local_name() is only declared when name tracking is
+        // built (LOCALNAMES and/or PERSIST); guard its call site the same way
+        // so a SETTRACE-only build still compiles. num_locals is always 0
+        // there (nothing above ever sets it), so this branch is unreachable
+        // in that build and the guard changes no other build's behaviour.
         #if MICROPY_PY_SYS_SETTRACE_LOCALNAMES || MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
-        // Try to get actual variable name
-        if (code_state->fun_bc != NULL && code_state->fun_bc->rc != NULL) {
-            var_name_qstr = mp_raw_code_get_local_name(code_state->fun_bc->rc, i);
+        for (size_t local_num = 0; local_num < num_locals; ++local_num) {
+            size_t slot = code_state->n_state - 1 - local_num;
+            mp_obj_t state_obj = code_state->state[slot];
+            if (state_obj == MP_OBJ_NULL) {
+                continue;
+            }
+
+            qstr var_name_qstr = mp_raw_code_get_local_name(rc, local_num);
+            if (var_name_qstr == MP_QSTRnull) {
+                char var_name[16];
+                snprintf(var_name, sizeof(var_name), "local_%02d", (int)local_num);
+                var_name_qstr = qstr_from_str(var_name);
+                if (var_name_qstr == MP_QSTRnull) {
+                    continue; // Skip if qstr creation fails
+                }
+            }
+
+            mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), state_obj);
         }
         #endif
+    } else {
+        // No name data is available for this code object: either the feature
+        // is compiled out, or this is .mpy-loaded bytecode without persisted
+        // names. Fall back to exposing every occupied slot (locals and any
+        // live value-stack temporaries) by physical index, so occupied slots
+        // are still visible as local_NN placeholders rather than an empty
+        // dict.
+        for (size_t i = 0; i < code_state->n_state; ++i) {
+            mp_obj_t state_obj = code_state->state[i];
+            if (state_obj == MP_OBJ_NULL) {
+                continue;
+            }
 
-        // Fall back to index-based name if no actual name available
-        if (var_name_qstr == MP_QSTRnull) {
             char var_name[16];
             snprintf(var_name, sizeof(var_name), "local_%02d", (int)i);
-            var_name_qstr = qstr_from_str(var_name);
+            qstr var_name_qstr = qstr_from_str(var_name);
             if (var_name_qstr == MP_QSTRnull) {
                 continue; // Skip if qstr creation fails
             }
-        }
 
-        // Store the variable
-        mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), state_obj);
+            mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), state_obj);
+        }
     }
     return MP_OBJ_FROM_PTR(locals_dict);
 }
