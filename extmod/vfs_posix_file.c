@@ -254,8 +254,15 @@ static mp_uint_t vfs_posix_file_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_
 
 static const mp_rom_map_elem_t vfs_posix_rawfile_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_fileno), MP_ROM_PTR(&vfs_posix_file_fileno_obj) },
-    { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&mp_stream_read_obj) },
-    { MP_ROM_QSTR(MP_QSTR_readinto), MP_ROM_PTR(&mp_stream_readinto_obj) },
+    // Raw FileIO.read(n)/readinto perform a single underlying read() syscall
+    // (CPython io.FileIO semantics: "only one system call is ever made"),
+    // returning whatever is currently available rather than looping to fill n
+    // bytes.  Filling would block the whole process on a blocking fd (e.g.
+    // stdin) after the fd first became readable, which starves the asyncio
+    // scheduler until EOF and breaks asyncio.StreamReader(sys.stdin.buffer)
+    // .read(n).  readall() (read() with no size) still drains to EOF.
+    { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&mp_stream_read1_obj) },
+    { MP_ROM_QSTR(MP_QSTR_readinto), MP_ROM_PTR(&mp_stream_readinto1_obj) },
     { MP_ROM_QSTR(MP_QSTR_readline), MP_ROM_PTR(&mp_stream_unbuffered_readline_obj) },
     { MP_ROM_QSTR(MP_QSTR_readlines), MP_ROM_PTR(&mp_stream_unbuffered_readlines_obj) },
     { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&mp_stream_write_obj) },
