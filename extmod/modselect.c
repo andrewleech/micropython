@@ -55,7 +55,17 @@
 // When non-file-descriptor objects are on the list to be polled (the polling of
 // which involves repeatedly calling ioctl(MP_STREAM_POLL)), this variable sets
 // the period between polling these objects.
+//
+// A port or variant may override this. The 1ms default keeps latency low for a
+// pure poll() on non-fd streams, but is pathologically tight when an object
+// that *does* wrap a file descriptor is nonetheless classified as non-fd (it
+// does not answer MP_STREAM_GET_FILENO) and so forces the whole set onto this
+// periodic-probe path. The prime case is an SSL/TLS socket under asyncio: the
+// event loop then wakes every 1ms even while idle. Raising the period trades a
+// little inbound-readiness latency for a large drop in idle wakeups.
+#ifndef MICROPY_PY_SELECT_IOCTL_CALL_PERIOD_MS
 #define MICROPY_PY_SELECT_IOCTL_CALL_PERIOD_MS (1)
+#endif
 
 #endif
 
