@@ -10,6 +10,7 @@ from micropython import const
 
 _MP_STREAM_POLL = const(3)
 _MP_STREAM_GET_FILENO = const(10)
+_MP_STREAM_SET_EVENT_SOURCE = const(13)
 
 _MP_STREAM_POLL_RD = const(0x0001)
 _MP_STREAM_POLL_WR = const(0x0004)
@@ -26,6 +27,12 @@ class CustomPollable(io.IOBase):
     def ioctl(self, cmd, arg):
         if cmd == _MP_STREAM_GET_FILENO:
             # Bare-metal ports don't call this ioctl, so don't print it.
+            return -1
+        if cmd == _MP_STREAM_SET_EVENT_SOURCE:
+            # Registration-time probe that this mock object does not implement.
+            # No test scenario in this file depends on declaring wake sources, so
+            # behave as an object that doesn't implement the ioctl at all (the
+            # tested compatibility path).
             return -1
 
         print("CustomPollable.ioctl", cmd, arg)
