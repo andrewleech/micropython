@@ -66,19 +66,35 @@
 typedef struct _poll_obj_t {
     mp_obj_t obj;
     mp_uint_t (*ioctl)(mp_obj_t obj, mp_uint_t request, uintptr_t arg, int *errcode);
-    #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
-    // If the pollable object has an associated file descriptor, then pollfd points to an entry
-    // in poll_set_t::pollfds, and the events/revents fields for this object are stored in the
-    // pollfd entry (and the nonfd_* members are unused).
-    // Otherwise the object is a non-file-descriptor object and pollfd==NULL, and the events/
-    // revents fields are stored in the nonfd_* members (which are named as such so that code
-    // doesn't accidentally mix the use of these members when this optimisation is used).
-    struct pollfd *pollfd;
-    uint16_t nonfd_events;
-    uint16_t nonfd_revents;
-    #else
+
+    // The mask the caller requested via register()/modify(), persistent for the life of the
+    // registration, and the readiness resolved from exactly one authoritative source:
+    // poll_obj->ioctl(MP_STREAM_POLL, ...) for a non-fd or ioctl-authoritative object, or
+    // pollfd->revents when the fd itself is authoritative for readiness (see pollfd below).
+    // Storage distinct from any fd-level mask, so neither can clobber the other.
     mp_uint_t events;
     mp_uint_t revents;
+
+    #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
+    // If non-NULL, points into poll_set_t::pollfds and gives this object something the
+    // kernel can sleep on. pollfd->events carries the fd-level direction to watch; today
+    // that always mirrors `events` above (see poll_obj_set_events), because every fd-backed
+    // object is currently also authoritative for its own readiness. pollfd->revents is raw
+    // kernel output: read directly by poll_obj_get_revents() for such an object, and never
+    // written by anything but poll() itself.
+    struct pollfd *pollfd;
+
+    #if MICROPY_PY_SELECT_EVENT_SOURCE
+    // Wake-source properties declared via MP_STREAM_SET_EVENT_SOURCE, probed once at
+    // registration alongside the MP_STREAM_GET_FILENO probe (the Register cadence; see
+    // py/stream.h). All zero/NULL if the object does not implement the ioctl, which is the
+    // compatibility path: such an object is handled exactly as it would be without this
+    // config, keyed only off GET_FILENO. Not yet consulted anywhere.
+    void (*event_cb)(void *ctx);
+    void *event_ctx;
+    uint16_t event_fd_events;
+    uint8_t event_flags;
+    #endif
     #endif
 } poll_obj_t;
 
@@ -115,32 +131,30 @@ static void poll_set_deinit(poll_set_t *poll_set) {
 #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
 
 static mp_uint_t poll_obj_get_events(poll_obj_t *poll_obj) {
-    assert(poll_obj->pollfd == NULL);
-    return poll_obj->nonfd_events;
+    return poll_obj->events;
 }
 
 static void poll_obj_set_events(poll_obj_t *poll_obj, mp_uint_t events) {
+    poll_obj->events = events;
     if (poll_obj->pollfd != NULL) {
+        // Legacy fd-authoritative path: the fd-level direction to watch is exactly the
+        // requested mask. A wake-source-only fd (not authoritative for readiness) would
+        // resolve fd_events independently instead of mirroring this write.
         poll_obj->pollfd->events = events;
-    } else {
-        poll_obj->nonfd_events = events;
     }
 }
 
 static mp_uint_t poll_obj_get_revents(poll_obj_t *poll_obj) {
     if (poll_obj->pollfd != NULL) {
         return poll_obj->pollfd->revents;
-    } else {
-        return poll_obj->nonfd_revents;
     }
+    return poll_obj->revents;
 }
 
 static void poll_obj_set_revents(poll_obj_t *poll_obj, mp_uint_t revents) {
-    if (poll_obj->pollfd != NULL) {
-        poll_obj->pollfd->revents = revents;
-    } else {
-        poll_obj->nonfd_revents = revents;
-    }
+    // Always the resolved-readiness field, never pollfd->revents: that storage belongs to
+    // poll() alone, so a subsequent poll() call can never overwrite a value set here.
+    poll_obj->revents = revents;
 }
 
 // How much (in pollfds) to grow the allocation for poll_set->pollfds by.
@@ -242,6 +256,12 @@ static void poll_set_add_obj(poll_set_t *poll_set, const mp_obj_t *obj, mp_uint_
 
             #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
             int fd = -1;
+            #if MICROPY_PY_SELECT_EVENT_SOURCE
+            poll_obj->event_cb = NULL;
+            poll_obj->event_ctx = NULL;
+            poll_obj->event_fd_events = 0;
+            poll_obj->event_flags = 0;
+            #endif
             if (mp_obj_is_int(obj[i])) {
                 // A file descriptor integer passed in as the object, so use it directly.
                 fd = mp_obj_get_int(obj[i]);
@@ -258,6 +278,30 @@ static void poll_set_add_obj(poll_set_t *poll_set, const mp_obj_t *obj, mp_uint_
                 if (res != MP_STREAM_ERROR) {
                     fd = res;
                 }
+                #if MICROPY_PY_SELECT_EVENT_SOURCE
+                // The Register cadence (py/stream.h): called once, here, alongside the
+                // GET_FILENO probe above. A stream that does not implement the ioctl
+                // returns MP_STREAM_ERROR and poll_obj->event_flags stays 0, which is the
+                // same compatibility path as a stream that never implements it at all.
+                // A Python-level ioctl() (the IOBase trampoline in py/modio.c) can raise
+                // instead of returning MP_STREAM_ERROR for a request it does not
+                // recognise; caught here for the same reason, so an unadapted stream
+                // never crashes registration.
+                mp_stream_event_source_t source = {
+                    .cb = NULL, .ctx = NULL, .events = events, .fd = -1, .fd_events = 0, .flags = 0,
+                };
+                nlr_buf_t nlr;
+                if (nlr_push(&nlr) == 0) {
+                    mp_uint_t source_res = stream_p->ioctl(obj[i], MP_STREAM_SET_EVENT_SOURCE, (uintptr_t)&source, &err);
+                    if (source_res != MP_STREAM_ERROR) {
+                        poll_obj->event_cb = source.cb;
+                        poll_obj->event_ctx = source.ctx;
+                        poll_obj->event_fd_events = source.fd_events;
+                        poll_obj->event_flags = source.flags;
+                    }
+                    nlr_pop();
+                }
+                #endif
             }
             if (fd >= 0) {
                 // Object has a file descriptor so add it to pollfds.
