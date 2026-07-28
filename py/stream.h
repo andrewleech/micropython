@@ -48,6 +48,10 @@
 #if MICROPY_STREAMS_DELEGATE_ERROR
 #define MP_STREAM_RAISE_ERROR       (12) // Raise an error with detailed error string
 #endif
+// Allocated unconditionally: 12 is already conditional on
+// MICROPY_STREAMS_DELEGATE_ERROR, and a second config-dependent ioctl number
+// would make the numbering fragile.
+#define MP_STREAM_SET_EVENT_SOURCE  (13) // Declare the stream's wake source(s); see mp_stream_event_source_t
 
 // These poll ioctl values are compatible with Linux
 #define MP_STREAM_POLL_RD       (0x0001)
@@ -69,6 +73,41 @@ struct mp_stream_seek_t {
 #define MP_SEEK_SET (0)
 #define MP_SEEK_CUR (1)
 #define MP_SEEK_END (2)
+
+// Wake source kinds, returned in mp_stream_event_source_t::flags by
+// MP_STREAM_SET_EVENT_SOURCE. A stream that does not implement this ioctl
+// leaves the caller to fall back to MP_STREAM_GET_FILENO, so support is
+// optional and per-driver.
+#define MP_STREAM_EVENT_SOURCE_FD        (0x01) // fd in .fd should be watched
+#define MP_STREAM_EVENT_SOURCE_SIGNAL    (0x02) // stream will call cb(ctx)
+#define MP_STREAM_EVENT_FD_IS_READINESS  (0x04) // fd revents ARE readiness; skip my POLL
+#define MP_STREAM_EVENT_FD_DYNAMIC       (0x08) // re-query .fd_events every cycle
+
+// Argument structure for MP_STREAM_SET_EVENT_SOURCE, passed as a pointer via
+// the ioctl's uintptr_t arg. The caller uses it for three cadences:
+//   Register:   called once when the object enters the poll set. Installs
+//               cb/ctx and learns fd/fd_events/flags, which are static for
+//               the life of the registration.
+//   Refresh:    called only for entries that declared FD_DYNAMIC, after the
+//               readiness sweep and immediately before the block. Must only
+//               update fd_events; must not re-arm or tear down cb/ctx, and
+//               must not register or unregister any entry in the poll set.
+//   Unregister: called with cb == NULL before the entry is released, so the
+//               stream never holds a stale callback.
+typedef struct _mp_stream_event_source_t {
+    // In: supplied by the caller. The stream stores these if it declares
+    // SOURCE_SIGNAL, and calls cb(ctx) when its readiness may have changed.
+    // cb == NULL means disarm. ctx is opaque and must never be a pointer
+    // into caller-owned memory that can move (e.g. a poll set entry).
+    void (*cb)(void *ctx);
+    void *ctx;
+    // In: the event mask the caller is waiting for.
+    uint16_t events;
+    // Out: filled in by the stream.
+    int fd;             // -1 if none
+    uint16_t fd_events; // direction to watch on fd, if SOURCE_FD is set
+    uint8_t flags;      // MP_STREAM_EVENT_* flags above
+} mp_stream_event_source_t;
 
 // Stream protocol
 typedef struct _mp_stream_p_t {
