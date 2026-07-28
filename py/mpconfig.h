@@ -1894,6 +1894,13 @@ typedef time_t mp_timestamp_t;
 #define MICROPY_PY_SELECT_SELECT (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
 #endif
 
+// Whether streams can declare their wake source(s) to the "select" module via
+// MP_STREAM_SET_EVENT_SOURCE, instead of being treated as fd-backed-and-
+// authoritative or period-swept.
+#ifndef MICROPY_PY_SELECT_EVENT_SOURCE
+#define MICROPY_PY_SELECT_EVENT_SOURCE (0)
+#endif
+
 // Whether to provide the "time" module
 #ifndef MICROPY_PY_TIME
 #define MICROPY_PY_TIME (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_BASIC_FEATURES)
