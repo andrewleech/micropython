@@ -118,10 +118,24 @@ typedef struct _poll_set_t {
 static void poll_set_init(poll_set_t *poll_set, size_t n) {
     mp_map_init(&poll_set->map, n);
     #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
+    #if MICROPY_PY_SELECT_EVENT_SOURCE
+    // pollfds[0] is reserved for ports/unix's wake event, not a registered object, so the
+    // set always has one fd-level entry more than poll_set->map.used. Reserved rather than
+    // added on demand so the blocking-poll gate below can rely on it being present from the
+    // first call, before any object has been registered.
+    poll_set->alloc = 1;
+    poll_set->max_used = 1;
+    poll_set->used = 1;
+    poll_set->pollfds = m_new(struct pollfd, 1);
+    poll_set->pollfds[0].fd = -1;
+    poll_set->pollfds[0].events = POLLIN;
+    poll_set->pollfds[0].revents = 0;
+    #else
     poll_set->alloc = 0;
     poll_set->max_used = 0;
     poll_set->used = 0;
     poll_set->pollfds = NULL;
+    #endif
     #endif
 }
 
@@ -238,7 +252,16 @@ static struct pollfd *poll_set_add_fd(poll_set_t *poll_set, int fd) {
         free_slot = &poll_set->pollfds[poll_set->max_used++];
     } else {
         // There should be a free slot below max_used.
-        for (unsigned int i = 0; i < poll_set->max_used; ++i) {
+        #if MICROPY_PY_SELECT_EVENT_SOURCE
+        // Start at 1: pollfds[0] is the reserved wake-event slot (see poll_set_init), which
+        // sits at fd == -1 whenever the wake event is momentarily unavailable, e.g. before
+        // the first poll() call in this set or while gated off between iterations. Scanning
+        // from 0 would read that as a free slot and hand the reservation to this object.
+        unsigned int start = 1;
+        #else
+        unsigned int start = 0;
+        #endif
+        for (unsigned int i = start; i < poll_set->max_used; ++i) {
             struct pollfd *slot = &poll_set->pollfds[i];
             if (slot->fd == -1) {
                 free_slot = slot;
@@ -263,9 +286,18 @@ static struct pollfd *poll_set_add_fd(poll_set_t *poll_set, int fd) {
 // entry needs the periodic sweep below to notice readiness that appears independently of its
 // fd, exactly as an entry with no fd at all always has.
 static bool poll_set_all_are_fds(poll_set_t *poll_set) {
+    #if MICROPY_PY_SELECT_EVENT_SOURCE
+    // poll_set->used counts the reserved wake-event slot at pollfds[0] (see poll_set_init),
+    // which is not a registered object, so map.used is one less than used whenever every
+    // registered entry also has a pollfd.
+    if (poll_set->map.used != (mp_uint_t)(poll_set->used - 1)) {
+        return false;
+    }
+    #else
     if (poll_set->map.used != poll_set->used) {
         return false;
     }
+    #endif
     #if MICROPY_PY_SELECT_EVENT_SOURCE
     for (mp_uint_t i = 0; i < poll_set->map.alloc; ++i) {
         if (!mp_map_slot_is_filled(&poll_set->map, i)) {
@@ -533,19 +565,27 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
         poll_set_refresh_fd_events(poll_set);
         #endif
 
+        #if MICROPY_PY_SELECT_EVENT_SOURCE
+        // Refresh the reserved slot immediately before poll() blocks on it. -1 when this
+        // thread may not act on the wake event (mp_sched_thread_can_run_callbacks(), see the
+        // caveat at its definition): registering the real fd here on a thread that will
+        // never drain it would be a lost wakeup for whichever thread actually needed it, so
+        // this thread's poll() falls back to the periodic sweep below instead.
+        //
+        // KNOWN GAP: on a GIL build, mp_sched_thread_can_run_callbacks() returns true for
+        // every thread, not just the one that owns this wait. Two threads each running their
+        // own select.poll() with the wake fd both injected would race to drain it, and
+        // whichever loses never sees its own wakeup. Fine for this branch's single-threaded
+        // asyncio measurement; not a resolved answer for increment 1 in general (unix-sleep-
+        // process-pending flagged this, 2026-07-29).
+        poll_set->pollfds[0].fd = mp_sched_thread_can_run_callbacks() ? mp_hal_wake_event_fd() : -1;
+        poll_set->pollfds[0].events = POLLIN;
+        poll_set->pollfds[0].revents = 0;
+        #endif
+
         MP_THREAD_GIL_EXIT();
 
         // Compute the timeout.
-        //
-        // TODO: poll_set_all_are_fds() requiring fd-authoritative entries (rather than the
-        // weaker "every registered entry has a wake source", see
-        // planning/20260725_notify_api_spec.md, "The sleep gate") is a stand-in for that
-        // predicate until the ports/unix wakeup fd from the unix-sleep-process-pending
-        // branch (#18810) is added to poll_set->pollfds so a scheduled callback can still
-        // break a blocking poll(). That transport is not in this tree; a wake-source-only
-        // entry (e.g. SSL) would otherwise unlock the blocking sleep below while nothing
-        // could wake it for a scheduled callback raised on another thread, turning a bounded
-        // ~1 ms latency into a wait-for-the-deadline hang for cross-thread scheduling.
         int t = MICROPY_PY_SELECT_IOCTL_CALL_PERIOD_MS;
         if (poll_set_all_are_fds(poll_set)) {
             // All our pollables are file descriptors, so we can use a blocking
@@ -576,6 +616,15 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
             }
         }
 
+        #if MICROPY_PY_SELECT_EVENT_SOURCE
+        // Drain only after polling readable, never before: the event is level-triggered and
+        // counting, so draining ahead of the wait it was meant to end discards the raise and
+        // leaves that wait with nothing to wake it (mp_hal_wake_event_fd()'s contract).
+        if (poll_set->pollfds[0].revents != 0) {
+            mp_hal_wake_event_drain();
+        }
+        #endif
+
         // Resolve readiness for every entry now that poll() has produced fresh state.
         mp_uint_t n_ready = poll_set_resolve_readiness(poll_set, first_pass);
 
@@ -585,8 +634,8 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
         }
 
         // Drain before pumping: mp_sched_unlock() raises for any callbacks left queued
-        // after a pump, and draining afterwards would eat that token. (No wakeup fd exists
-        // in this tree yet to drain; see the TODO above -- this is where its drain belongs.)
+        // after a pump, and draining afterwards would eat that token. The wake-event drain
+        // above already happened before this point, so this is only the queued-callback pump.
         //
         // This would be mp_event_wait_ms() but the call to poll() above already includes a
         // delay.

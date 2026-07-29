@@ -168,6 +168,11 @@ typedef long mp_off_t;
 
 #define MICROPY_PY_SOCKET_LISTEN_BACKLOG_DEFAULT (SOMAXCONN < 128 ? SOMAXCONN : 128)
 
+// Scratch override for the event-notify-composed-measurement branch only: exercises the
+// MP_STREAM_SET_EVENT_SOURCE ioctl and the wake-event integration in modselect.c against
+// unix-sleep-process-pending's wake event. Not meant to land as-is.
+#define MICROPY_PY_SELECT_EVENT_SOURCE (1)
+
 // Bare-metal ports don't have stderr. Printing debug to stderr may give tests
 // which check stdout a chance to pass, etc.
 extern const struct _mp_print_t mp_stderr_print;
