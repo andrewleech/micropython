@@ -509,6 +509,17 @@ static void poll_set_refresh_fd_events(poll_set_t *poll_set) {
 // check already excludes it from the deadline-sleep gate whenever it is registered, so there
 // is no block for it to be stranded behind, and poll_set_resolve_readiness() already asks it
 // unconditionally on every pass regardless.
+//
+// Once per poll_set_poll_until_ready_or_timeout() call is sufficient, and not merely
+// convenient: within a single call, no caller read happens until this function has already
+// returned, so no new leftover readiness can appear between this ask and the poll() that
+// follows it. The only source of leftover readiness is a read the caller made *before*
+// calling in, which precedes this call and so is already covered by the one unconditional
+// ask. Gating this on poll_obj_should_be_asked() like poll_set_resolve_readiness() does would
+// look like a reasonable simplification and would reopen exactly the hole this function
+// exists to close, because should_be_asked() answers "did the fd fire", not "is there
+// leftover readiness from before this wait" -- the two coincide for a wake, never for a
+// pre-existing state, which is the entire case this function is for.
 static mp_uint_t poll_set_resolve_composed_pre_block(poll_set_t *poll_set) {
     mp_uint_t n_ready = 0;
     for (mp_uint_t i = 0; i < poll_set->map.alloc; ++i) {
