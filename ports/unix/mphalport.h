@@ -131,6 +131,17 @@ void mp_hal_wake_event_wait_ms(mp_uint_t timeout_ms);
 // timeout.  Returns 0 on timeout, or -1 with errno EINTR if cut short.
 int mp_hal_wake_event_wait_tv(struct timeval *tv);
 
+// The descriptor the wake event can be waited on, for a caller that runs its own
+// poll set and wants the event in it alongside its own descriptors, or -1 when
+// there is none to give.  Defined only where the wake event is backed by a
+// descriptor, so on this port and not on Windows.
+//
+// Drain it after, and only after, it has polled readable.  It is
+// level-triggered, so it stays readable until drained, and draining before a
+// wait instead discards a raise and leaves that wait with nothing to end it.
+int mp_hal_wake_event_fd(void);
+void mp_hal_wake_event_drain(void);
+
 #if MICROPY_PY_BLUETOOTH
 enum {
     MP_HAL_MAC_BDADDR,
