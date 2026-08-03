@@ -48,6 +48,7 @@ INC += -I$(VARIANT_DIR)
 CFLAGS += -std=c99 -Wall -Werror -Wdouble-promotion -Wfloat-conversion
 CFLAGS += -Os -DNDEBUG
 CFLAGS += $(INC)
+CFLAGS += $(CFLAGS_EXTRA)
 
 EXPORTED_FUNCTIONS_EXTRA += ,\
 	_mp_js_do_exec,\
