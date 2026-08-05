@@ -250,8 +250,10 @@ The full list of supported commands are:
   The device to debug is resolved in this order: ``--target``/``-t`` if
   given; otherwise the device a preceding ``connect`` in the same chain is
   already on, so ``mpremote connect <device> debug app:main`` debugs that
-  device. ``--target`` itself takes a connect string as accepted by
-  ``mpremote connect``.
+  device; otherwise the sole target in an ``mpdebug.toml`` (see below), or an
+  error listing the available names if it defines several. ``--target``
+  itself takes either the name of a target in ``mpdebug.toml`` or a connect
+  string as accepted by ``mpremote connect``.
 
   Every option must come before ``module[:method]``: mpremote reads the first
   bare word after ``debug`` as the program and everything after it as the
