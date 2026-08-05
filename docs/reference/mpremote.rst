@@ -252,7 +252,8 @@ The full list of supported commands are:
   already on, so ``mpremote connect <device> debug app:main`` debugs that
   device; otherwise the sole target in an ``mpdebug.toml`` (see below), or an
   error listing the available names if it defines several. ``--target``
-  itself takes either the name of a target in ``mpdebug.toml`` or a connect
+  itself takes either the name of a target in ``mpdebug.toml``, ``unix`` (a
+  local unix-port build, POSIX hosts only - it needs ``fcntl``), or a connect
   string as accepted by ``mpremote connect``.
 
   Every option must come before ``module[:method]``: mpremote reads the first
