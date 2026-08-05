@@ -186,14 +186,19 @@ def argparse_debug():
     )
     cmd_parser.add_argument(
         "target",
-        help="'unix' (not yet implemented) or a connect string as accepted by 'mpremote connect'",
+        nargs="?",
+        default=None,
+        help="name of a target in mpdebug.toml, 'unix' (not yet implemented), or a "
+        "connect string as accepted by 'mpremote connect'; omit to use the file's "
+        "sole target, or list the available names if it defines several",
     )
     cmd_parser.add_argument(
         "program",
         nargs="?",
-        default="target:main",
-        help="module[:method] to run under the debugger (default: target:main); "
-        "put '+' before a chained command so it isn't read as this argument",
+        default=None,
+        help="module[:method] to run under the debugger (default: the target's own "
+        "'program', or 'target:main'); put '+' before a chained command so it "
+        "isn't read as this argument",
     )
     # No port in this tree binds socket.getsockname(), so the device cannot
     # report a system-assigned port and listen(port=0) raises there. Leaving
