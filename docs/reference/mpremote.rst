@@ -72,6 +72,7 @@ The full list of supported commands are:
 - `eval <mpremote_command_eval>`
 - `exec <mpremote_command_exec>`
 - `run <mpremote_command_run>`
+- `debug <mpremote_command_debug>`
 - `fs <mpremote_command_fs>`
 - `df <mpremote_command_df>`
 - `edit <mpremote_command_edit>`
@@ -220,6 +221,66 @@ The full list of supported commands are:
   is no different from any other name.  The script is executed in raw REPL
   after a soft reset, so the device's own ``main.py`` is not run beforehand.
   Any ``main.py`` already stored on the device filesystem is left untouched.
+
+.. _mpremote_command_debug:
+
+- **debug** -- debug a script on the device with a DAP client:
+
+  .. code-block:: bash
+
+      $ mpremote debug [options] [module[:method]]
+
+  Runs code on the device under a DAP (Debug Adapter Protocol) server, so an
+  editor such as VS Code can set breakpoints in it, step through it and read
+  its variables. Two things have to be in place first:
+
+  - the firmware must be built with ``MICROPY_PY_SYS_SETTRACE``, which is not
+    enabled by default on most boards;
+  - the ``debugpy`` package must be installed on the device. It lives in
+    ``micropython-lib`` under ``python-ecosys/debugpy``.
+
+  Without either one the command reports which is missing rather than
+  failing inside the debug server.
+
+  ``module[:method]`` names the code to run under the debugger. It defaults
+  to the resolved target's own ``program``, or ``target:main`` if there is
+  none. Put ``+`` in front of a chained mpremote command so it is not read as
+  this argument.
+
+  The device to debug is resolved in this order: ``--target``/``-t`` if
+  given; otherwise the device a preceding ``connect`` in the same chain is
+  already on, so ``mpremote connect <device> debug app:main`` debugs that
+  device. ``--target`` itself takes a connect string as accepted by
+  ``mpremote connect``.
+
+  Every option must come before ``module[:method]``: mpremote reads the first
+  bare word after ``debug`` as the program and everything after it as the
+  next chained command, so an option placed later is silently taken as part
+  of that next command rather than as an option here.
+
+  The device reports its debug-server endpoint and firmware capabilities as
+  soon as it has bound the listening socket, before any DAP client attaches,
+  on one line of stdout:
+
+  .. code-block:: text
+
+      MPDBG-READY {"host": "192.0.2.10", "port": 5678, "caps": {...}}
+
+  Tooling parses that one line and ignores everything around it. A device
+  reporting a real address prints it verbatim and the command returns,
+  leaving the device waiting for a client; a board with no address to report
+  (no network interface, or one the firmware cannot read) reports the
+  wildcard ``0.0.0.0``, which is not an address to connect to, so the command
+  errors instead of printing an endpoint.
+
+  ``--port`` sets the listening port; left unset, the device applies its own
+  default. ``--port 0`` is rejected: it asks the system to choose, which the
+  device can only report back through ``getsockname()``, and no port
+  currently binds it. ``--timeout`` sets how long to wait for the device's
+  report; it does not bound anything after that.
+
+  ``--dap-log`` is accepted by the parser but not implemented yet; using it
+  is an error rather than a silent no-op.
 
 .. _mpremote_command_fs:
 
