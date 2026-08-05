@@ -14,6 +14,7 @@ import serial.tools.list_ports
 from .transport import TransportError, TransportExecError, stdout_write_bytes
 from .transport_serial import SerialTransport
 from .romfs import make_romfs, VfsRomWriter
+from .mpdebug_config import resolve_target, target_hint, warn_if_tty_device
 
 
 class CommandError(Exception):
@@ -619,12 +620,28 @@ def _read_mpdbg_ready(transport, timeout):
 
 
 def do_debug(state, args):
-    module, method = _parse_program_spec(args.program)
+    resolved = resolve_target(args.target)
 
-    if args.target == "unix":
-        raise CommandError("target 'unix' is not supported yet")
-    if args.target == "list":
-        raise CommandError("target 'list' is not a debuggable device")
+    program_spec = args.program
+    if program_spec is None:
+        program_spec = (resolved.program if resolved is not None else None) or "target:main"
+    module, method = _parse_program_spec(program_spec)
+
+    if resolved is None:
+        # No mpdebug.toml matched (or none exists): args.target is a literal
+        # connect string, as it was before named targets existed.
+        if args.target == "unix":
+            raise CommandError("target 'unix' is not supported yet")
+        if args.target == "list":
+            raise CommandError("target 'list' is not a debuggable device")
+        connect_device = args.target
+        warn_if_tty_device(connect_device, "device")
+    elif resolved.kind == "unix":
+        raise CommandError(f"target {resolved.name!r} has kind 'unix', which is not supported yet")
+    else:
+        connect_device = resolved.device or "auto"
+        warn_if_tty_device(connect_device, f"target {resolved.name!r}")
+
     if args.dap_log:
         raise CommandError("--dap-log is not implemented yet")
     # Both checked here rather than after a full raw-REPL round trip.
@@ -637,8 +654,13 @@ def do_debug(state, args):
     if args.port is not None and not 1 <= args.port <= 65535:
         raise CommandError(f"--port must be between 1 and 65535, got {args.port}")
 
-    if state.transport is None or state.transport.device_name != args.target:
-        do_connect(state, device=args.target)
+    if state.transport is None or state.transport.device_name != connect_device:
+        try:
+            do_connect(state, device=connect_device)
+        except CommandError as er:
+            # A name that is not a configured target is handed to the transport
+            # as a connect string, so a mistyped target name surfaces here.
+            raise CommandError(f"{er}{target_hint(args.target)}") from None
     state.ensure_raw_repl()
     state.did_action()
 
@@ -652,10 +674,24 @@ def do_debug(state, args):
         sys.exit(1)
 
     try:
-        print("debug server listening on {}:{}".format(handshake["host"], handshake["port"]))
-        print("capabilities:", handshake["caps"])
+        host, port, caps = handshake["host"], handshake["port"], handshake["caps"]
     except KeyError as er:
         raise CommandError(f"malformed handshake payload from the device, missing key {er}")
+    if not isinstance(caps, dict):
+        raise CommandError(
+            f"malformed handshake payload from the device, 'caps' is not a table: {caps!r}"
+        )
+
+    if resolved is not None and resolved.requires:
+        missing = [c for c in resolved.requires if caps.get(c) is not True]
+        if missing:
+            raise CommandError(
+                f"target {resolved.name!r} requires {', '.join(missing)}, which this "
+                f"firmware does not provide (probed caps: {caps})"
+            )
+
+    print("debug server listening on {}:{}".format(host, port))
+    print("capabilities:", caps)
 
 
 def do_mount(state, args):
