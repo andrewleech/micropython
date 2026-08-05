@@ -1,0 +1,7 @@
+Total events: 21
+Events with real names: 21
+Events with fallback names: 0
+Expected names found: 9
+Sample real names: ['active', 'age', 'count', 'data', 'i', 'item', 'items', 'name', 'results']
+Test results correct: True
+Comprehensive test passed: True
