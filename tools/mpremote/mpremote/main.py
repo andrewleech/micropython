@@ -197,10 +197,10 @@ def argparse_debug():
         "--target",
         "-t",
         default=None,
-        help="name of a target in mpdebug.toml, 'unix' (not yet implemented), or a "
-        "connect string as accepted by 'mpremote connect'; omit to use a preceding "
-        "'connect', then the file's sole target, or list the available names if it "
-        "defines several",
+        help="name of a target in mpdebug.toml, 'unix' to debug a local unix-port "
+        "build, or a connect string as accepted by 'mpremote connect'; omit to use "
+        "a preceding 'connect', then the file's sole target, or list the available "
+        "names if it defines several",
     )
     # No port in this tree binds socket.getsockname(), so the device cannot
     # report a system-assigned port and listen(port=0) raises there. Leaving
