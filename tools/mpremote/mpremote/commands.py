@@ -2,8 +2,12 @@ import binascii
 import codecs
 import errno
 import hashlib
+import json
 import os
 import pkgutil
+import shutil
+import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -14,7 +18,7 @@ import serial.tools.list_ports
 from .transport import TransportError, TransportExecError, stdout_write_bytes
 from .transport_serial import SerialTransport
 from .romfs import make_romfs, VfsRomWriter
-from .mpdebug_config import resolve_target, target_hint, warn_if_tty_device
+from .mpdebug_config import find_config, resolve_target, target_hint, warn_if_tty_device
 from . import mpdebug_handshake
 
 
@@ -610,6 +614,294 @@ def _read_mpdbg_ready(
         raise CommandError(str(er))
 
 
+def _check_requires(resolved, caps):
+    if resolved is not None and resolved.requires:
+        missing = [c for c in resolved.requires if caps.get(c) is not True]
+        if missing:
+            raise CommandError(
+                f"target {resolved.name!r} requires {', '.join(missing)}, which this "
+                f"firmware does not provide (probed caps: {caps})"
+            )
+
+
+def _report_debug_result(handshake):
+    # flush=True: a caller reading this over a pipe (s7.1's extension, a test
+    # harness) must see it as soon as it's printed, not whenever Python's
+    # block-buffering (the default for a non-tty stdout) next drains.
+    host, port, caps = handshake["host"], handshake["port"], handshake["caps"]
+    print("debug server listening on {}:{}".format(host, port), flush=True)
+    print("capabilities:", caps, flush=True)
+    # The device's own MPDBG-READY line (raw bind address, possibly a
+    # wildcard) is consumed by the handshake parser and never echoed; re-emit
+    # it with the resolved host as the one line a tool watching this
+    # process's stdout (e.g. s7.1's extension) can parse.
+    print(
+        mpdebug_handshake.PREFIX + json.dumps({"host": host, "port": port, "caps": caps}),
+        flush=True,
+    )
+    return handshake
+
+
+def _resolve_unix_binary(resolved):
+    env_path = os.environ.get("MPY_DEBUG_FIRMWARE")
+    if env_path:
+        if not os.path.isfile(env_path):
+            raise CommandError(f"MPY_DEBUG_FIRMWARE={env_path!r} does not exist")
+        return env_path
+
+    firmware = resolved.firmware if resolved is not None else None
+    if not firmware:
+        raise CommandError(
+            "no unix debug binary found: set MPY_DEBUG_FIRMWARE to a built "
+            "micropython binary, or build one (e.g. `make -C ports/unix`) and "
+            "point the target's 'firmware' at it in mpdebug.toml"
+        )
+    if firmware == "system":
+        found = shutil.which("micropython")
+        if not found:
+            raise CommandError(
+                f"target {resolved.name!r} firmware is 'system' but no 'micropython' is on PATH"
+            )
+        return found
+    # A relative path (one containing a separator) is resolved against the
+    # config file's directory, not the cwd, so the same mpdebug.toml works
+    # regardless of where mpremote is invoked from - matching how the config
+    # file itself is found. A bare name with no separator that isn't a file
+    # relative to the cwd is assumed to be a firmware.toml variant id (e.g.
+    # "fw-f9d7c96b96"), which this tool cannot fetch - firmware/firmware.toml
+    # and its verify/fetch machinery are part of the wrapper repo, out of
+    # reach from inside micropython/tools/mpremote.
+    if os.sep in firmware and not os.path.isabs(firmware):
+        config_path = find_config()
+        if config_path:
+            firmware = os.path.join(os.path.dirname(config_path), firmware)
+    elif os.sep not in firmware and not os.path.isfile(firmware):
+        raise CommandError(
+            f"target {resolved.name!r} firmware {firmware!r} names a "
+            "firmware-manifest variant, which this tool cannot fetch; build it "
+            "(e.g. `make -C ports/unix`), or set MPY_DEBUG_FIRMWARE to a built "
+            "micropython binary"
+        )
+    if not os.path.isfile(firmware):
+        raise CommandError(f"target {resolved.name!r} firmware {firmware!r} does not exist")
+    return firmware
+
+
+# ports/unix/mpconfigport.h's MICROPY_PY_SYS_PATH_DEFAULT: what the unix port
+# puts on sys.path when MICROPYPATH is unset. Setting MICROPYPATH at all
+# suppresses these, so they are appended explicitly below rather than relied
+# on implicitly - debugpy may live in any of them (frozen, mip-installed) or
+# in a path the caller already put on MICROPYPATH.
+_UNIX_SYS_PATH_DEFAULT = (".frozen", "~/.micropython/lib", "/usr/lib/micropython")
+
+
+def _unix_env():
+    # MICROPYPATH is rebuilt rather than inherited verbatim: the target
+    # module's project directory goes on the front, and the port's own
+    # defaults go on the back, with whatever the caller already set kept in
+    # between - so this always reaches the project's modules and never
+    # silently drops the caller's or the port's own module locations.
+    config_path = find_config()
+    project_dir = os.path.dirname(config_path) if config_path else os.getcwd()
+    env = dict(os.environ)
+    caller_parts = [p for p in env.get("MICROPYPATH", "").split(":") if p]
+    parts = [project_dir] + caller_parts + list(_UNIX_SYS_PATH_DEFAULT)
+    seen = set()
+    deduped = []
+    for p in parts:
+        if p not in seen:
+            seen.add(p)
+            deduped.append(p)
+    env["MICROPYPATH"] = ":".join(deduped)
+    return env
+
+
+def _reap(proc):
+    # terminate -> kill ladder: an unreaped subprocess keeps its debug-server
+    # port bound, and the next run collides with it. SIGINT is ignored for
+    # the duration so a second Ctrl-C during the ladder can't abandon it
+    # half-done.
+    if proc.poll() is not None:
+        return
+    try:
+        old_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except ValueError:
+        old_handler = None  # not called from the main thread
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=2)
+    finally:
+        if old_handler is not None:
+            signal.signal(signal.SIGINT, old_handler)
+
+
+_UNIX_EOF_MARKER = "\x00mpremote-debug-unix-eof\x00"  # never appears in real program output
+
+
+def _do_debug_unix(resolved, module, method, port, timeout):
+    try:
+        # The non-blocking fd handling below is POSIX-only, unlike the rest of
+        # mpremote, which supports Windows.
+        import fcntl
+    except ImportError:
+        raise CommandError(
+            "'debug' with a unix target needs a POSIX host (no fcntl here)"
+        ) from None
+
+    binary = _resolve_unix_binary(resolved)
+
+    # The boot script ships as a package resource, not a path into this repo
+    # (s5.1); write it out so the subprocess, which needs a real file to
+    # run, can read it.
+    tmpdir = tempfile.mkdtemp(prefix="mpremote-debug-unix-")
+    try:
+        script_path = os.path.join(tmpdir, "mpy_launch_debugpy.py")
+        with open(script_path, "wb") as f:
+            f.write(pkgutil.get_data(__package__, "mpy_launch_debugpy.py"))
+    except Exception:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        raise
+
+    argv = [binary, script_path, module, method]
+    if port is not None:
+        argv.append(str(port))
+
+    try:
+        proc = subprocess.Popen(
+            argv, env=_unix_env(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+        )
+    except OSError as er:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        raise CommandError(f"failed to launch {binary!r}: {er}")
+
+    def cleanup():
+        # SIGINT ignored for the whole ladder, not just _reap's: a second
+        # Ctrl-C landing during rmtree must not abandon cleanup half-done.
+        try:
+            old_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        except ValueError:
+            old_handler = None  # not called from the main thread
+        try:
+            _reap(proc)
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        finally:
+            if old_handler is not None:
+                signal.signal(signal.SIGINT, old_handler)
+
+    # A live child now exists, so every signal that would otherwise kill this
+    # process outright has to reap it first: SIGTERM (what Node's
+    # child.kill(), `timeout`, systemd and CI teardown send) and SIGHUP (what
+    # the kernel sends the foreground group when a terminal window closes on a
+    # running session). Turned into SystemExit so they land in the same
+    # BaseException handler below as any other escape path.
+    _reaping_signals = [signal.SIGTERM]
+    if hasattr(signal, "SIGHUP"):  # POSIX-only, keep Windows imports clean
+        _reaping_signals.append(signal.SIGHUP)
+    old_handlers = {}
+    for _sig in _reaping_signals:
+        try:
+            old_handlers[_sig] = signal.signal(_sig, lambda *_a: sys.exit(1))
+        except ValueError:
+            pass  # not called from the main thread
+    try:
+        # Everything from here on runs against a live child: any exception
+        # that isn't handled below (a raw OSError out of a read, a
+        # BrokenPipeError from a downstream reader going away, ...) must
+        # still reap it rather than leaving it bound to its port forever.
+        try:
+            fl = fcntl.fcntl(proc.stdout.fileno(), fcntl.F_GETFL)
+            fcntl.fcntl(proc.stdout.fileno(), fcntl.F_SETFL, fl | os.O_NONBLOCK)
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+            deadline = time.monotonic() + timeout
+            ended = False
+
+            def read_chunk():
+                nonlocal ended
+                if ended:
+                    return ""
+                poll = max(0.0, min(_POLL_S, deadline - time.monotonic()))
+                try:
+                    chunk = os.read(proc.stdout.fileno(), 4096)
+                except BlockingIOError:
+                    time.sleep(poll)
+                    return ""
+                if chunk == b"":
+                    # A pipe read only ever returns b"" at true EOF (every write
+                    # end closed) - the subprocess exited without printing a
+                    # handshake.
+                    ended = True
+                    return _UNIX_EOF_MARKER
+                return decoder.decode(chunk)
+
+            def on_eof(rest):
+                try:
+                    code = proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    return "; process closed stdout without exiting"
+                return f"; process exited with code {code}"
+
+            try:
+                handshake = mpdebug_handshake.read_handshake(
+                    read_chunk,
+                    timeout,
+                    mpdebug_handshake.CONTROL_KIND_UNIX,
+                    on_line=lambda line: stdout_write_bytes(line.encode()),
+                    eof=_UNIX_EOF_MARKER,
+                    on_eof=on_eof,
+                )
+            except mpdebug_handshake.HandshakeError as er:
+                raise CommandError(str(er)) from None
+
+            _check_requires(resolved, handshake["caps"])
+
+            # The interpreter compiles the whole script before executing any of
+            # it (same as CPython), so by the time a handshake or an error has
+            # come back the temp file has already been fully read and is no
+            # longer needed.
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            _report_debug_result(handshake)
+
+            # Unlike the serial/network paths, where the firmware runs
+            # independently of the host tool, mpremote owns this child: stay
+            # attached to its console until it exits on its own (the debug
+            # session ran to completion) or the user ends it with Ctrl-C.
+            fcntl.fcntl(proc.stdout.fileno(), fcntl.F_SETFL, fl)
+            while True:
+                chunk = os.read(proc.stdout.fileno(), 4096)
+                if not chunk:
+                    break
+                stdout_write_bytes(chunk)
+            # EOF means every write end of the pipe closed, which normally
+            # means the child has exited too; wait() picks up its exit status
+            # so a crashing debuggee is reported as a failure, not silently
+            # swallowed.
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+        except KeyboardInterrupt:
+            cleanup()
+            sys.exit(1)
+        except BrokenPipeError:
+            cleanup()
+            sys.exit(1)
+        except BaseException:
+            cleanup()
+            raise
+
+        _reap(proc)
+        if proc.returncode:
+            sys.exit(proc.returncode)
+        return handshake
+    finally:
+        for _sig, _old in old_handlers.items():
+            signal.signal(_sig, _old)
+
+
 def do_debug(state, args):
     resolved = resolve_target(args.target)
 
@@ -617,21 +909,6 @@ def do_debug(state, args):
     if program_spec is None:
         program_spec = (resolved.program if resolved is not None else None) or "target:main"
     module, method = _parse_program_spec(program_spec)
-
-    if resolved is None:
-        # No mpdebug.toml matched (or none exists): args.target is a literal
-        # connect string, as it was before named targets existed.
-        if args.target == "unix":
-            raise CommandError("target 'unix' is not supported yet")
-        if args.target == "list":
-            raise CommandError("target 'list' is not a debuggable device")
-        connect_device = args.target
-        warn_if_tty_device(connect_device, "device")
-    elif resolved.kind == "unix":
-        raise CommandError(f"target {resolved.name!r} has kind 'unix', which is not supported yet")
-    else:
-        connect_device = resolved.device or "auto"
-        warn_if_tty_device(connect_device, f"target {resolved.name!r}")
 
     if args.dap_log:
         raise CommandError("--dap-log is not implemented yet")
@@ -644,6 +921,24 @@ def do_debug(state, args):
         )
     if args.port is not None and not 1 <= args.port <= 65535:
         raise CommandError(f"--port must be between 1 and 65535, got {args.port}")
+
+    is_unix = resolved.kind == "unix" if resolved is not None else args.target == "unix"
+    if is_unix:
+        state.did_action()
+        # Reports the endpoint and supervises the child itself (unlike the
+        # serial/network path below, mpremote owns this process).
+        return _do_debug_unix(resolved, module, method, args.port, args.timeout)
+
+    if resolved is None:
+        # No mpdebug.toml matched (or none exists): args.target is a literal
+        # connect string, as it was before named targets existed.
+        if args.target == "list":
+            raise CommandError("target 'list' is not a debuggable device")
+        connect_device = args.target
+        warn_if_tty_device(connect_device, "device")
+    else:
+        connect_device = resolved.device or "auto"
+        warn_if_tty_device(connect_device, f"target {resolved.name!r}")
 
     if state.transport is None or state.transport.device_name != connect_device:
         try:
@@ -671,20 +966,8 @@ def do_debug(state, args):
     except KeyboardInterrupt:
         sys.exit(1)
 
-    host, port, caps = handshake["host"], handshake["port"], handshake["caps"]
-
-    if resolved is not None and resolved.requires:
-        missing = [c for c in resolved.requires if caps.get(c) is not True]
-        if missing:
-            raise CommandError(
-                f"target {resolved.name!r} requires {', '.join(missing)}, which this "
-                f"firmware does not provide (probed caps: {caps})"
-            )
-
-    print("debug server listening on {}:{}".format(host, port))
-    print("capabilities:", caps)
-    # Returned for the flows that act on the endpoint rather than print it.
-    return handshake
+    _check_requires(resolved, handshake["caps"])
+    return _report_debug_result(handshake)
 
 
 def do_mount(state, args):
