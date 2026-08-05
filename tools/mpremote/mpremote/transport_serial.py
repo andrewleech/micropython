@@ -149,31 +149,43 @@ class SerialTransport(Transport):
         assert isinstance(timeout, (type(None), int, float))
         assert isinstance(timeout_overall, (type(None), int, float))
 
-        data = b""
-        begin_overall_s = begin_char_s = time.monotonic()
-        while True:
-            if data.endswith(ending):
-                break
-            new_data = None
-            if self.is_pty or self.serial.inWaiting() > 0:
-                new_data = self.serial.read(1)
-            if new_data:
-                if data_consumer:
-                    data_consumer(new_data)
-                    data = new_data
+        # A pty (e.g. QEMU) has no inWaiting() to poll, so read(1) below is
+        # called unconditionally; the port is opened with timeout=None, so
+        # that read blocks forever once the peer stops producing bytes
+        # unless bounded here, and the timeout/timeout_overall checks below
+        # would never get a chance to run.
+        saved_timeout = self.serial.timeout
+        if self.is_pty:
+            self.serial.timeout = 0.1
+        try:
+            data = b""
+            begin_overall_s = begin_char_s = time.monotonic()
+            while True:
+                if data.endswith(ending):
+                    break
+                new_data = None
+                if self.is_pty or self.serial.inWaiting() > 0:
+                    new_data = self.serial.read(1)
+                if new_data:
+                    if data_consumer:
+                        data_consumer(new_data)
+                        data = new_data
+                    else:
+                        data = data + new_data
+                    begin_char_s = time.monotonic()
                 else:
-                    data = data + new_data
-                begin_char_s = time.monotonic()
-            else:
-                if timeout is not None and time.monotonic() >= begin_char_s + timeout:
-                    break
-                if (
-                    timeout_overall is not None
-                    and time.monotonic() >= begin_overall_s + timeout_overall
-                ):
-                    break
-                time.sleep(0.01)
-        return data
+                    if timeout is not None and time.monotonic() >= begin_char_s + timeout:
+                        break
+                    if (
+                        timeout_overall is not None
+                        and time.monotonic() >= begin_overall_s + timeout_overall
+                    ):
+                        break
+                    time.sleep(0.01)
+            return data
+        finally:
+            if self.is_pty:
+                self.serial.timeout = saved_timeout
 
     def enter_raw_repl(self, soft_reset=True, timeout_overall=10):
         self.serial.write(b"\r\x03")  # ctrl-C: interrupt any running program
