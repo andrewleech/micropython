@@ -228,24 +228,61 @@ The full list of supported commands are:
 
   .. code-block:: bash
 
-      $ mpremote debug <target> [module[:method]]
+      $ mpremote debug [target] [module[:method]]
 
-  ``target`` is a connect string as accepted by ``mpremote connect`` (``unix``
-  is accepted but not yet implemented). ``module[:method]`` names the code to
-  run under the debugger and defaults to ``target:main``. The device reports
-  its debug-server endpoint and firmware capabilities as soon as it has bound
-  the listening socket, before any DAP client attaches; a DAP client then
-  connects to that endpoint. ``--port`` sets the listening port; left unset,
-  the device applies its own default. ``--port 0`` is rejected: it asks the
-  system to choose, which the device can only report back through
-  ``getsockname()``, and no port currently binds it. ``--timeout`` sets how long
-  to wait for the device's report. ``--dap-log`` is accepted but not yet
-  implemented. The command returns once it has printed the endpoint, leaving
-  the device waiting for a client to attach; note that a board with no network
-  interface reports the wildcard ``0.0.0.0``, which is not an address to
-  connect to. As with any other mpremote option,
+  ``target`` is either the name of a target defined in a project's
+  ``mpdebug.toml`` (see below), a connect string as accepted by ``mpremote
+  connect``, or ``unix`` (accepted but not yet implemented). ``module[:method]``
+  names the code to run under the debugger; it defaults to the resolved
+  target's own ``program``, or ``target:main`` if there is none. The device
+  reports its debug-server endpoint and firmware capabilities as soon as it
+  has bound the listening socket, before any DAP client attaches; a DAP
+  client then connects to that endpoint. ``--port`` sets the listening port;
+  left unset, the device applies its own default. ``--port 0`` is rejected:
+  it asks the system to choose, which the device can only report back
+  through ``getsockname()``, and no port currently binds it. ``--timeout``
+  sets how long to wait for the device's report. ``--dap-log`` is accepted
+  but not yet implemented. The command returns once it has printed the
+  endpoint, leaving the device waiting for a client to attach; note that a
+  board with no network interface reports the wildcard ``0.0.0.0``, which is
+  not an address to connect to. As with any other mpremote option,
   ``--port``/``--timeout``/``--dap-log`` must come before
   ``target``/``module[:method]``.
+
+  A project-level ``mpdebug.toml``, discovered by searching the current
+  directory and its parents (stopping at a ``.git`` directory or ``$HOME``),
+  replaces per-invocation connect strings and capability bookkeeping with
+  named targets:
+
+  .. code-block:: toml
+
+      [target.pico]
+      kind = "serial"
+      device = "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_XXXX-if00"
+      requires = ["settrace", "save_names"]
+      program = "app:run"
+
+  ``kind`` is one of ``unix``, ``serial``, ``network``. ``device`` is a
+  connect string, required for ``serial`` and optional for ``network``
+  (where it names the control-plane device used for the pre-boot handshake -
+  the debug endpoint itself is always reported by the device, never written
+  here); prefer a stable ``/dev/serial/by-id/...`` path over ``/dev/ttyACMn``,
+  which can renumber on replug (using one prints a warning but still works).
+  ``firmware`` names a firmware variant id, for tooling outside mpremote that
+  fetches or builds it. ``program`` is this target's ``module[:method]``
+  default. ``requires`` lists capability names that must appear (and be
+  true) in the device's handshake; an unrecognised name is rejected when the
+  file is read, and a missing capability is a hard error once the device has
+  connected, both before any client attaches.
+
+  Omitting ``target`` resolves to the file's only target if it defines
+  exactly one, or lists the available names as an error if it defines
+  several. A ``target`` naming an entry in the file resolves to it; anything
+  else is passed to the transport as a connect string, exactly as
+  ``mpremote connect`` would take it, so device paths, ``id:``/``port:``
+  selectors and bare names such as ``COM4`` keep working. A mistyped target
+  name therefore fails as a device, and the error then names the targets the
+  file defines.
 
 .. _mpremote_command_fs:
 
