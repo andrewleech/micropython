@@ -28,23 +28,6 @@ _HOSTS = {
 _ALLOWED_MIP_URL_PREFIXES = ("http://", "https://", "codeberg:", "github:", "gitlab:")
 
 
-# This implements os.makedirs(os.dirname(path))
-def _ensure_path_exists(transport, path):
-    split = path.split("/")
-
-    # Handle paths starting with "/".
-    if not split[0]:
-        split.pop(0)
-        split[0] = "/" + split[0]
-
-    prefix = ""
-    for i in range(len(split) - 1):
-        prefix += split[i]
-        if not transport.fs_exists(prefix):
-            transport.fs_mkdir(prefix)
-        prefix += "/"
-
-
 # Check if the specified path exists and matches the hash.
 def _check_exists(transport, path, short_hash):
     try:
@@ -88,7 +71,7 @@ def _download_file(transport, url, dest):
             raise CommandError(f"{e.strerror} opening {url}")
 
     print("Installing:", dest)
-    _ensure_path_exists(transport, dest)
+    transport.fs_ensure_path_exists(dest)
     transport.fs_writefile(dest, data, progress_callback=show_progress_bar)
 
 
