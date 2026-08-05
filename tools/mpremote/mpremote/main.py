@@ -188,9 +188,9 @@ def argparse_debug():
         "target",
         nargs="?",
         default=None,
-        help="name of a target in mpdebug.toml, 'unix' (not yet implemented), or a "
-        "connect string as accepted by 'mpremote connect'; omit to use the file's "
-        "sole target, or list the available names if it defines several",
+        help="name of a target in mpdebug.toml, 'unix' to debug a local unix-port "
+        "build, or a connect string as accepted by 'mpremote connect'; omit to use "
+        "the file's sole target, or list the available names if it defines several",
     )
     cmd_parser.add_argument(
         "program",
