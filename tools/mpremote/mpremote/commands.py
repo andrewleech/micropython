@@ -1,7 +1,7 @@
 import binascii
+import codecs
 import errno
 import hashlib
-import json
 import os
 import pkgutil
 import sys
@@ -15,6 +15,7 @@ from .transport import TransportError, TransportExecError, stdout_write_bytes
 from .transport_serial import SerialTransport
 from .romfs import make_romfs, VfsRomWriter
 from .mpdebug_config import resolve_target, target_hint, warn_if_tty_device
+from . import mpdebug_handshake
 
 
 class CommandError(Exception):
@@ -550,77 +551,67 @@ def _debug_boot_script(module, method, port):
     return preamble + script
 
 
-def _mpdbg_tail(output):
-    # Quote whatever the device printed before it stopped, if anything.
-    text = output.decode(errors="replace").strip()
-    return f"; last output: {text!r}" if text else ""
-
-
-_MPDBG_POLL_S = 0.2  # read_until window; keeps EOF-without-newline detection prompt
+_POLL_S = 0.2  # read_until() poll cadence for both the handshake scan and the error drain below
 
 
 def _mpdbg_error(transport, rest):
     # The raw REPL frames output as <stdout> \x04 <exception> \x04>, so the
     # traceback follows the marker that ends stdout: collect it, since a script
     # that dies on import prints nothing to stdout and the exception is the
-    # only useful thing to report.
+    # only useful thing to report. `rest` is the raw bytes already read past
+    # the marker, not text decoded by the handshake scan, so a non-ASCII
+    # exception message isn't put through a second decode/encode round trip.
     eof = b"\x04"
     deadline = time.monotonic() + 1
     while eof not in rest and time.monotonic() < deadline:
         try:
-            rest += transport.read_until(
-                1, eof, timeout=_MPDBG_POLL_S, timeout_overall=_MPDBG_POLL_S
-            )
+            rest += transport.read_until(1, eof, timeout=_POLL_S, timeout_overall=_POLL_S)
         except Exception:
             break
     text = rest.partition(eof)[0].decode(errors="replace").strip()
     return f"; device error: {text}" if text else ""
 
 
-def _read_mpdbg_ready(transport, timeout):
+def _read_mpdbg_ready(
+    transport, timeout, control_kind=mpdebug_handshake.CONTROL_KIND_SERIAL, known_host=None
+):
     # Boot script output is normal print()s until its one handshake line;
     # echo everything else and stop at the line carrying the JSON payload.
-    # Polled in short windows rather than one read_until(..., timeout=timeout)
-    # call so a device that exits without a trailing newline (raw REPL's
-    # `\x04\x04` with no `\n`) is caught within one poll instead of stalling
-    # for the whole `timeout`.
-    prefix = b"MPDBG-READY "  # single machine-readable line, see mpy_launch_debugpy.py
-    eof = b"\x04"  # raw-REPL end-of-output marker: script exited, nothing more is coming
+    # read_chunk polls in short windows rather than blocking for the whole
+    # `timeout` so a device that exits without a trailing newline (raw REPL's
+    # `\x04\x04` with no `\n`) is caught within one poll instead of stalling.
+    # Each poll is clamped to what's left of `timeout` so the wait can't
+    # overshoot it by a full poll window.
     deadline = time.monotonic() + timeout
-    buf = b""
-    last_line = b""
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise CommandError(
-                "timed out waiting for a {!r} line from the device{}".format(
-                    prefix.decode(), _mpdbg_tail(last_line + buf)
-                )
-            )
-        poll = min(remaining, _MPDBG_POLL_S)
-        buf += transport.read_until(1, b"\n", timeout=poll, timeout_overall=poll)
-        if eof in buf:
-            seen, _, rest = buf.partition(eof)
-            raise CommandError(
-                "device exited before printing a {!r} line{}{}".format(
-                    prefix.decode(),
-                    _mpdbg_tail(last_line + seen),
-                    _mpdbg_error(transport, rest),
-                )
-            )
-        if not buf.endswith(b"\n"):
-            continue
-        line, buf = buf, b""
-        if line.startswith(prefix):
-            payload = line[len(prefix) :]
-            try:
-                return json.loads(payload)
-            except json.JSONDecodeError as er:
-                raise CommandError(
-                    f"malformed {prefix.decode()!r} line from the device: {payload!r} ({er})"
-                )
-        stdout_write_bytes(line)
-        last_line = line
+    # An incremental decoder carries an incomplete multi-byte UTF-8 sequence
+    # across poll boundaries instead of decoding each raw chunk in isolation,
+    # which would turn a split character into two separate replacement chars.
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    raw = bytearray()  # mirrors what's been decoded, for _mpdbg_error below
+
+    def read_chunk():
+        poll = max(0.0, min(_POLL_S, deadline - time.monotonic()))
+        chunk = transport.read_until(1, b"\n", timeout=poll, timeout_overall=poll)
+        raw.extend(chunk)
+        return decoder.decode(chunk)
+
+    def on_eof(rest):
+        # Recover the bytes after the marker from `raw` rather than
+        # re-encoding `rest` (see _mpdbg_error).
+        return _mpdbg_error(transport, bytes(raw[raw.index(b"\x04") + 1 :]))
+
+    try:
+        return mpdebug_handshake.read_handshake(
+            read_chunk,
+            timeout,
+            control_kind,
+            known_host=known_host,
+            on_line=lambda line: stdout_write_bytes(line.encode()),
+            eof="\x04",  # raw-REPL end-of-output marker: script exited, nothing more coming
+            on_eof=on_eof,
+        )
+    except mpdebug_handshake.HandshakeError as er:
+        raise CommandError(str(er))
 
 
 def do_debug(state, args):
@@ -671,20 +662,20 @@ def do_debug(state, args):
     try:
         state.transport.exec_raw_no_follow(_debug_boot_script(module, method, args.port))
         print("waiting for the device to report its debug-server endpoint...", flush=True)
-        handshake = _read_mpdbg_ready(state.transport, timeout=args.timeout)
+        # A pty peer is a local process by construction (a unix build or QEMU
+        # behind a pty pair), so a wildcard bind on it is reachable at the
+        # loopback address. Anything else gets no known_host: a
+        # socket://host:port or rfc2217://host:port host may be the device
+        # itself (esp-link and similar) or a bridge in front of it (ser2net),
+        # and guessing wrong points the client at the wrong machine.
+        known_host = "127.0.0.1" if getattr(state.transport, "is_pty", False) else None
+        handshake = _read_mpdbg_ready(state.transport, timeout=args.timeout, known_host=known_host)
     except TransportError as er:
         raise CommandError(er.args[0])
     except KeyboardInterrupt:
         sys.exit(1)
 
-    try:
-        host, port, caps = handshake["host"], handshake["port"], handshake["caps"]
-    except KeyError as er:
-        raise CommandError(f"malformed handshake payload from the device, missing key {er}")
-    if not isinstance(caps, dict):
-        raise CommandError(
-            f"malformed handshake payload from the device, 'caps' is not a table: {caps!r}"
-        )
+    host, port, caps = handshake["host"], handshake["port"], handshake["caps"]
 
     if resolved is not None and resolved.requires:
         missing = [c for c in resolved.requires if caps.get(c) is not True]
@@ -696,6 +687,8 @@ def do_debug(state, args):
 
     print("debug server listening on {}:{}".format(host, port))
     print("capabilities:", caps)
+    # Returned for the flows that act on the endpoint rather than print it.
+    return handshake
 
 
 def do_mount(state, args):
