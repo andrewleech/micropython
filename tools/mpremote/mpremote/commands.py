@@ -1,9 +1,12 @@
 import binascii
 import errno
 import hashlib
+import json
 import os
+import pkgutil
 import sys
 import tempfile
+import time
 import zlib
 
 import serial.tools.list_ports
@@ -17,8 +20,8 @@ class CommandError(Exception):
     pass
 
 
-def do_connect(state, args=None):
-    dev = args.device[0] if args else "auto"
+def do_connect(state, args=None, device=None):
+    dev = device if device is not None else (args.device[0] if args else "auto")
     do_disconnect(state)
 
     try:
@@ -517,6 +520,146 @@ def do_run(state, args):
     except OSError:
         raise CommandError(f"could not read file '{filename}'")
     _do_execbuffer(state, buf, args.follow)
+
+
+def _parse_program_spec(spec):
+    # "module[:method]", method defaults to "main" as advertised in --help.
+    parts = spec.split(":")
+    if len(parts) > 2 or not parts[0] or not parts[-1]:
+        raise CommandError(f"invalid program {spec!r}: expected 'module[:method]'")
+    module = parts[0]
+    method = parts[1] if len(parts) == 2 else "main"
+    if module.endswith(".py") or "/" in module or "\\" in module:
+        raise CommandError(f"invalid program {spec!r}: expected an import name, not a path")
+    return module, method
+
+
+def _debug_boot_script(module, method, port):
+    # Raw REPL exec has no OS argv, so sys.argv is injected here to preserve
+    # mpy_launch_debugpy.py's own argv contract ([module] [method] [port]).
+    # sys.argv is rebound in place (not reassigned): the `sys` module dict is
+    # read-only on MicroPython, so `sys.argv = [...]` raises AttributeError.
+    # port=None omits the argv element so the device applies its own default
+    # port instead of the host choosing one.
+    script = pkgutil.get_data(__package__, "mpy_launch_debugpy.py").decode()
+    argv = ["mpy_launch_debugpy.py", module, method]
+    if port is not None:
+        argv.append(str(port))
+    preamble = "import sys\nsys.argv[:] = [{}]\n".format(", ".join(repr(a) for a in argv))
+    return preamble + script
+
+
+def _mpdbg_tail(output):
+    # Quote whatever the device printed before it stopped, if anything.
+    text = output.decode(errors="replace").strip()
+    return f"; last output: {text!r}" if text else ""
+
+
+_MPDBG_POLL_S = 0.2  # read_until window; keeps EOF-without-newline detection prompt
+
+
+def _mpdbg_error(transport, rest):
+    # The raw REPL frames output as <stdout> \x04 <exception> \x04>, so the
+    # traceback follows the marker that ends stdout: collect it, since a script
+    # that dies on import prints nothing to stdout and the exception is the
+    # only useful thing to report.
+    eof = b"\x04"
+    deadline = time.monotonic() + 1
+    while eof not in rest and time.monotonic() < deadline:
+        try:
+            rest += transport.read_until(
+                1, eof, timeout=_MPDBG_POLL_S, timeout_overall=_MPDBG_POLL_S
+            )
+        except Exception:
+            break
+    text = rest.partition(eof)[0].decode(errors="replace").strip()
+    return f"; device error: {text}" if text else ""
+
+
+def _read_mpdbg_ready(transport, timeout):
+    # Boot script output is normal print()s until its one handshake line;
+    # echo everything else and stop at the line carrying the JSON payload.
+    # Polled in short windows rather than one read_until(..., timeout=timeout)
+    # call so a device that exits without a trailing newline (raw REPL's
+    # `\x04\x04` with no `\n`) is caught within one poll instead of stalling
+    # for the whole `timeout`.
+    prefix = b"MPDBG-READY "  # single machine-readable line, see mpy_launch_debugpy.py
+    eof = b"\x04"  # raw-REPL end-of-output marker: script exited, nothing more is coming
+    deadline = time.monotonic() + timeout
+    buf = b""
+    last_line = b""
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise CommandError(
+                "timed out waiting for a {!r} line from the device{}".format(
+                    prefix.decode(), _mpdbg_tail(last_line + buf)
+                )
+            )
+        poll = min(remaining, _MPDBG_POLL_S)
+        buf += transport.read_until(1, b"\n", timeout=poll, timeout_overall=poll)
+        if eof in buf:
+            seen, _, rest = buf.partition(eof)
+            raise CommandError(
+                "device exited before printing a {!r} line{}{}".format(
+                    prefix.decode(),
+                    _mpdbg_tail(last_line + seen),
+                    _mpdbg_error(transport, rest),
+                )
+            )
+        if not buf.endswith(b"\n"):
+            continue
+        line, buf = buf, b""
+        if line.startswith(prefix):
+            payload = line[len(prefix) :]
+            try:
+                return json.loads(payload)
+            except json.JSONDecodeError as er:
+                raise CommandError(
+                    f"malformed {prefix.decode()!r} line from the device: {payload!r} ({er})"
+                )
+        stdout_write_bytes(line)
+        last_line = line
+
+
+def do_debug(state, args):
+    module, method = _parse_program_spec(args.program)
+
+    if args.target == "unix":
+        raise CommandError("target 'unix' is not supported yet")
+    if args.target == "list":
+        raise CommandError("target 'list' is not a debuggable device")
+    if args.dap_log:
+        raise CommandError("--dap-log is not implemented yet")
+    # Both checked here rather than after a full raw-REPL round trip.
+    if args.port == 0:
+        raise CommandError(
+            "--port 0 is rejected: it asks the system to choose, which the "
+            "device can only report back through getsockname(), and no port "
+            "in this tree binds it"
+        )
+    if args.port is not None and not 1 <= args.port <= 65535:
+        raise CommandError(f"--port must be between 1 and 65535, got {args.port}")
+
+    if state.transport is None or state.transport.device_name != args.target:
+        do_connect(state, device=args.target)
+    state.ensure_raw_repl()
+    state.did_action()
+
+    try:
+        state.transport.exec_raw_no_follow(_debug_boot_script(module, method, args.port))
+        print("waiting for the device to report its debug-server endpoint...", flush=True)
+        handshake = _read_mpdbg_ready(state.transport, timeout=args.timeout)
+    except TransportError as er:
+        raise CommandError(er.args[0])
+    except KeyboardInterrupt:
+        sys.exit(1)
+
+    try:
+        print("debug server listening on {}:{}".format(handshake["host"], handshake["port"]))
+        print("capabilities:", handshake["caps"])
+    except KeyError as er:
+        raise CommandError(f"malformed handshake payload from the device, missing key {er}")
 
 
 def do_mount(state, args):
