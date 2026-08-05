@@ -242,10 +242,12 @@ The full list of supported commands are:
   it asks the system to choose, which the device can only report back
   through ``getsockname()``, and no port currently binds it. ``--timeout``
   sets how long to wait for the device's report. ``--dap-log`` is accepted
-  but not yet implemented. The command returns once it has printed the
-  endpoint, leaving the device waiting for a client to attach; note that a
-  board with no network interface reports the wildcard ``0.0.0.0``, which is
-  not an address to connect to. As with any other mpremote option,
+  but not yet implemented. A device reporting a real address prints it
+  verbatim and the command returns, leaving the device waiting for a client
+  to attach; a board with no address to report (no network interface, or one
+  the firmware can't read) reports the wildcard ``0.0.0.0``, which is not an
+  address to connect to, so the command errors instead of printing an
+  endpoint. As with any other mpremote option,
   ``--port``/``--timeout``/``--dap-log`` must come before
   ``target``/``module[:method]``.
 
