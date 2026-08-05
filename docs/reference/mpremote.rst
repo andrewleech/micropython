@@ -72,6 +72,7 @@ The full list of supported commands are:
 - `eval <mpremote_command_eval>`
 - `exec <mpremote_command_exec>`
 - `run <mpremote_command_run>`
+- `debug <mpremote_command_debug>`
 - `fs <mpremote_command_fs>`
 - `df <mpremote_command_df>`
 - `edit <mpremote_command_edit>`
@@ -214,6 +215,31 @@ The full list of supported commands are:
   By default, ``mpremote run`` will display any output from the script until it
   terminates. The ``--no-follow`` flag can be specified to return immediately and leave
   the device running the script in the background.
+
+.. _mpremote_command_debug:
+
+- **debug** -- debug a script on the device with a DAP client:
+
+  .. code-block:: bash
+
+      $ mpremote debug <target> [module[:method]]
+
+  ``target`` is a connect string as accepted by ``mpremote connect`` (``unix``
+  is accepted but not yet implemented). ``module[:method]`` names the code to
+  run under the debugger and defaults to ``target:main``. The device reports
+  its debug-server endpoint and firmware capabilities as soon as it has bound
+  the listening socket, before any DAP client attaches; a DAP client then
+  connects to that endpoint. ``--port`` sets the listening port; left unset,
+  the device applies its own default. ``--port 0`` is rejected: it asks the
+  system to choose, which the device can only report back through
+  ``getsockname()``, and no port currently binds it. ``--timeout`` sets how long
+  to wait for the device's report. ``--dap-log`` is accepted but not yet
+  implemented. The command returns once it has printed the endpoint, leaving
+  the device waiting for a client to attach; note that a board with no network
+  interface reports the wildcard ``0.0.0.0``, which is not an address to
+  connect to. As with any other mpremote option,
+  ``--port``/``--timeout``/``--dap-log`` must come before
+  ``target``/``module[:method]``.
 
 .. _mpremote_command_fs:
 
