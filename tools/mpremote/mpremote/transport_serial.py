@@ -149,31 +149,48 @@ class SerialTransport(Transport):
         assert isinstance(timeout, (type(None), int, float))
         assert isinstance(timeout_overall, (type(None), int, float))
 
-        data = b""
-        begin_overall_s = begin_char_s = time.monotonic()
-        while True:
-            if data.endswith(ending):
-                break
-            new_data = None
-            if self.is_pty or self.serial.inWaiting() > 0:
-                new_data = self.serial.read(1)
-            if new_data:
-                if data_consumer:
-                    data_consumer(new_data)
-                    data = new_data
+        # A pty (e.g. QEMU) has no inWaiting() to poll, so read(1) below is
+        # called unconditionally; the port is opened with timeout=None, so
+        # that read blocks forever once the peer stops producing bytes
+        # unless bounded here, and the timeout/timeout_overall checks below
+        # would never get a chance to run.
+        saved_timeout = self.serial.timeout
+        if self.is_pty and saved_timeout is None:
+            # Only lower an unbounded read. A mount substitutes SerialIntercept
+            # for the serial object and gives the real port a 5s timeout so a
+            # filesystem RPC is not cut off mid-command; overwriting that here
+            # would make an ordinary pause look like a device that stopped
+            # answering.
+            self.serial.timeout = 0.1
+        try:
+            data = b""
+            begin_overall_s = begin_char_s = time.monotonic()
+            while True:
+                if data.endswith(ending):
+                    break
+                new_data = None
+                if self.is_pty or self.serial.inWaiting() > 0:
+                    new_data = self.serial.read(1)
+                if new_data:
+                    if data_consumer:
+                        data_consumer(new_data)
+                        data = new_data
+                    else:
+                        data = data + new_data
+                    begin_char_s = time.monotonic()
                 else:
-                    data = data + new_data
-                begin_char_s = time.monotonic()
-            else:
-                if timeout is not None and time.monotonic() >= begin_char_s + timeout:
-                    break
-                if (
-                    timeout_overall is not None
-                    and time.monotonic() >= begin_overall_s + timeout_overall
-                ):
-                    break
-                time.sleep(0.01)
-        return data
+                    if timeout is not None and time.monotonic() >= begin_char_s + timeout:
+                        break
+                    if (
+                        timeout_overall is not None
+                        and time.monotonic() >= begin_overall_s + timeout_overall
+                    ):
+                        break
+                    time.sleep(0.01)
+            return data
+        finally:
+            if self.is_pty and saved_timeout is None:
+                self.serial.timeout = saved_timeout
 
     def enter_raw_repl(self, soft_reset=True, timeout_overall=10):
         self.serial.write(b"\r\x03")  # ctrl-C: interrupt any running program
@@ -1037,16 +1054,27 @@ class SerialIntercept:
         self.orig_serial = serial
         self.cmd = cmd
         self.buf = b""
-        self.orig_serial.timeout = 5.0
+        # A filesystem RPC is a multi-read exchange that an ordinary pause in
+        # the middle of must not end. Polling reads run at whatever timeout
+        # the caller has set - `read_until` lowers it on a pty so its loop
+        # gets a wall-clock tick - so the floor is applied around the
+        # exchange itself rather than left on the port for everything.
+        self.rpc_timeout = 5.0
+        self.orig_serial.timeout = self.rpc_timeout
 
     def _check_input(self, blocking):
         if blocking or self.orig_serial.inWaiting() > 0:
             c = self.orig_serial.read(1)
             if c == b"\x18":
                 # a special command
-                c = self.orig_serial.read(1)[0]
-                self.orig_serial.write(b"\x18")  # Acknowledge command
-                PyboardCommand.cmd_table[c](self.cmd)
+                poll_timeout = self.orig_serial.timeout
+                self.orig_serial.timeout = self.rpc_timeout
+                try:
+                    c = self.orig_serial.read(1)[0]
+                    self.orig_serial.write(b"\x18")  # Acknowledge command
+                    PyboardCommand.cmd_table[c](self.cmd)
+                finally:
+                    self.orig_serial.timeout = poll_timeout
             elif not VT_ENABLED and c == b"\x1b":
                 # ESC code, ignore these on windows
                 esctype = self.orig_serial.read(1)
@@ -1060,6 +1088,17 @@ class SerialIntercept:
     @property
     def fd(self):
         return self.orig_serial.fd
+
+    # Stands in for the serial object everywhere the transport reads or
+    # writes, so `read_until`'s save/restore of the read timeout has to reach
+    # the real port through it.
+    @property
+    def timeout(self):
+        return self.orig_serial.timeout
+
+    @timeout.setter
+    def timeout(self, value):
+        self.orig_serial.timeout = value
 
     def close(self):
         self.orig_serial.close()
