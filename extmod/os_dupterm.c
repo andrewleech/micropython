@@ -86,6 +86,11 @@ uintptr_t mp_os_dupterm_poll(uintptr_t poll_flags) {
         }
 
         if (ret != MP_STREAM_ERROR) {
+            if (ret & (MP_STREAM_POLL_HUP | MP_STREAM_POLL_ERR | MP_STREAM_POLL_NVAL)) {
+                // Closed/errored slot has no readable byte; don't let it mark stdin
+                // ready (would block a poll-driven reader like asyncio.arepl).
+                ret &= ~(MP_STREAM_POLL_RD | MP_STREAM_POLL_HUP | MP_STREAM_POLL_ERR | MP_STREAM_POLL_NVAL);
+            }
             poll_flags_out |= ret;
             if (poll_flags_out == poll_flags) {
                 // Finish early if all requested flags are set

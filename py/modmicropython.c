@@ -31,6 +31,9 @@
 #include "py/runtime.h"
 #include "py/gc.h"
 #include "py/mphal.h"
+#if MICROPY_REPL_ASYNCIO
+#include "shared/runtime/pyexec.h"
+#endif
 
 #if MICROPY_PY_MICROPYTHON
 
@@ -166,6 +169,84 @@ static mp_obj_t mp_micropython_schedule(mp_obj_t function, mp_obj_t arg) {
 static MP_DEFINE_CONST_FUN_OBJ_2(mp_micropython_schedule_obj, mp_micropython_schedule);
 #endif
 
+#if MICROPY_PY_MICROPYTHON_STDIO_RAW
+static mp_obj_t mp_micropython_stdio_mode_raw(mp_obj_t enabled) {
+    if (mp_obj_is_true(enabled)) {
+        mp_hal_stdio_mode_raw();
+    } else {
+        mp_hal_stdio_mode_orig();
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_micropython_stdio_mode_raw_obj, mp_micropython_stdio_mode_raw);
+#endif
+
+#if MICROPY_REPL_ASYNCIO
+// Drive the C event-driven REPL from an asyncio task.  All line editing, paste
+// mode, raw REPL, raw-paste and synchronous execution run in C; only complete
+// lines containing "await" are handed back here to run on the event loop.
+
+// micropython.repl_event_init(): start a REPL session (banner + first prompt).
+static mp_obj_t mp_micropython_repl_event_init(void) {
+    pyexec_event_repl_init();
+    pyexec_event_repl_async = true;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mp_micropython_repl_event_init_obj, mp_micropython_repl_event_init);
+
+// micropython.repl_event(c): feed one input character to the REPL.  Returns an
+// int status (0 to continue, PYEXEC_FORCED_EXIT to soft-reset), or a coroutine
+// when a top-level-await line is deferred to run on the event loop.
+static mp_obj_t mp_micropython_repl_event(mp_obj_t c_in) {
+    if (MP_STATE_VM(repl_line) == NULL) {
+        // repl_event_init() must run first, else the REPL state is NULL.
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("repl not active"));
+    }
+    int ret = pyexec_event_repl_process_char(mp_obj_get_int(c_in));
+    if (ret == PYEXEC_ASYNC_PENDING) {
+        return MP_STATE_VM(repl_pending_coro);
+    }
+    if (pyexec_mode_kind == PYEXEC_MODE_RAW_REPL) {
+        // Signal the driver to keep feeding synchronously (no yield) while raw.
+        ret |= PYEXEC_RAW_ACTIVE;
+    }
+    return MP_OBJ_NEW_SMALL_INT(ret);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_micropython_repl_event_obj, mp_micropython_repl_event);
+
+// micropython.repl_event_resume(): re-prompt after the driver has executed a
+// deferred "await" line on the event loop.
+static mp_obj_t mp_micropython_repl_event_resume(void) {
+    if (MP_STATE_VM(repl_line) == NULL) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("repl not active"));
+    }
+    pyexec_event_repl_resume();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mp_micropython_repl_event_resume_obj, mp_micropython_repl_event_resume);
+#endif
+
+#if MICROPY_REPL_ASYNCIO_BREAKPOINT
+// micropython.repl(): blocking interactive breakpoint REPL, Ctrl-D returns to
+// the caller.
+static mp_obj_t mp_micropython_repl(void) {
+    mp_hal_stdio_mode_raw();
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        pyexec_repl_breakpoint();
+        nlr_pop();
+        mp_hal_stdio_mode_orig();
+    } else {
+        // Restore terminal mode and re-raise; pyexec_repl_breakpoint has
+        // already unwound its own readline state.
+        mp_hal_stdio_mode_orig();
+        nlr_jump(nlr.ret_val);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mp_micropython_repl_obj, mp_micropython_repl);
+#endif
+
 static const mp_rom_map_elem_t mp_module_micropython_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_micropython) },
     { MP_ROM_QSTR(MP_QSTR_const), MP_ROM_PTR(&mp_identity_obj) },
@@ -205,6 +286,17 @@ static const mp_rom_map_elem_t mp_module_micropython_globals_table[] = {
     #endif
     #if MICROPY_ENABLE_SCHEDULER
     { MP_ROM_QSTR(MP_QSTR_schedule), MP_ROM_PTR(&mp_micropython_schedule_obj) },
+    #endif
+    #if MICROPY_PY_MICROPYTHON_STDIO_RAW
+    { MP_ROM_QSTR(MP_QSTR_stdio_mode_raw), MP_ROM_PTR(&mp_micropython_stdio_mode_raw_obj) },
+    #endif
+    #if MICROPY_REPL_ASYNCIO
+    { MP_ROM_QSTR(MP_QSTR_repl_event_init), MP_ROM_PTR(&mp_micropython_repl_event_init_obj) },
+    { MP_ROM_QSTR(MP_QSTR_repl_event), MP_ROM_PTR(&mp_micropython_repl_event_obj) },
+    { MP_ROM_QSTR(MP_QSTR_repl_event_resume), MP_ROM_PTR(&mp_micropython_repl_event_resume_obj) },
+    #endif
+    #if MICROPY_REPL_ASYNCIO_BREAKPOINT
+    { MP_ROM_QSTR(MP_QSTR_repl), MP_ROM_PTR(&mp_micropython_repl_obj) },
     #endif
 };
 

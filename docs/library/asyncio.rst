@@ -361,3 +361,65 @@ Event Loop
 
     Call the current exception handler.  The argument *context* is passed through and
     is a dictionary containing keys: ``'message'``, ``'exception'``, ``'future'``.
+
+
+Interactive REPL
+----------------
+
+.. module:: asyncio.arepl
+    :synopsis: asyncio-based interactive REPL
+
+``asyncio.arepl`` provides an interactive REPL that runs as an asyncio task, so
+the event loop and any other tasks keep running while it waits for input.  The
+REPL can therefore share a single thread with networking, USB and other
+background work.  Line editing, paste mode, raw and raw-paste mode, and
+synchronous statement execution are handled by the underlying C REPL; only
+complete lines containing ``await`` are run on the event loop.
+
+On ports that enable ``MICROPY_REPL_ASYNCIO`` (the default at the
+``EXTRA_FEATURES`` ROM level) and freeze ``asyncio.arepl``, this is the REPL the
+board boots into.
+
+.. note::
+
+    Import the module as ``import asyncio.arepl``.  ``from asyncio import arepl``
+    does not work, because :mod:`asyncio` resolves attribute access through
+    ``__getattr__`` before falling back to importing a submodule.
+
+.. function:: task(stop_loop_on_exit=True, persistent=False)
+
+    Run the REPL.  This is a coroutine: ``await`` it, or schedule it with
+    `asyncio.create_task`.  Executed code runs in the main global namespace.
+
+    *stop_loop_on_exit* controls what Ctrl-D does.  When ``True`` (the default)
+    Ctrl-D stops the event loop, which lets a boot REPL perform a soft reset.
+    Set it to ``False`` to run the REPL as one task among others, so that Ctrl-D
+    ends only the REPL task and leaves the loop and the other tasks running.
+
+    *persistent*, when ``True``, makes Ctrl-D re-prompt instead of exiting, so
+    the console stays available for the lifetime of the program.  The task still
+    returns if ``sys.stdin`` is closed.
+
+    For example, to run the REPL as a long-lived console alongside other tasks:
+
+    .. code-block:: python3
+
+        import asyncio
+        import asyncio.arepl
+
+        async def main():
+            asyncio.create_task(background_work())
+            await asyncio.arepl.task(stop_loop_on_exit=False, persistent=True)
+
+        asyncio.run(main())
+
+.. function:: breakpoint()
+
+    Drop into a blocking interactive REPL from async code, as an awaitable
+    breakpoint::
+
+        await asyncio.arepl.breakpoint()
+
+    It returns when Ctrl-D is pressed, resuming the awaiting code.  Internally it
+    uses :func:`micropython.repl`, which saves and restores REPL state so it
+    nests safely inside a running `task`.

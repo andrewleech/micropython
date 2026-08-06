@@ -186,6 +186,60 @@ Functions
    There is a finite queue to hold the scheduled functions and `schedule()`
    will raise a `RuntimeError` if the queue is full.
 
+.. function:: stdio_mode_raw(enabled)
+
+   Switch the terminal (stdin/stdout) between raw and original mode.  When
+   *enabled* is ``True`` the terminal is placed in raw mode (no echo, no line
+   editing, characters available immediately).  When *enabled* is ``False`` the
+   terminal settings are restored to their original state.
+
+   This is useful for code that needs to take over terminal I/O, for example
+   an alternative REPL such as ``asyncio.arepl``.
+
+   Availability: Unix port.  Requires ``MICROPY_PY_MICROPYTHON_STDIO_RAW``.
+
+.. function:: repl()
+
+   Enter a blocking interactive REPL.  Ctrl-D returns to the caller.  The
+   terminal's raw mode is set on entry and restored on return, even if an
+   exception is raised.
+
+   This backs :func:`asyncio.arepl.breakpoint`, providing a synchronous
+   breakpoint-style REPL from within async code.
+
+   Availability: Requires ``MICROPY_REPL_ASYNCIO_BREAKPOINT``.
+
+.. function:: repl_event_init()
+
+   Start the event-driven REPL used to build an asyncio REPL: print the banner
+   and the first prompt, then accept input one character at a time via
+   :func:`repl_event`.  Most code should use :mod:`asyncio.arepl` instead of
+   driving the REPL directly.
+
+   Availability: Requires ``MICROPY_REPL_ASYNCIO``.
+
+.. function:: repl_event(c)
+
+   Feed the single character *c* (an integer) to the event-driven REPL, which
+   echoes, edits and, on a complete line, executes it.  Returns either:
+
+   - a coroutine: a complete line containing a top-level ``await``, compiled to a
+     coroutine that the caller should run on the event loop, then call
+     :func:`repl_event_resume`; or
+   - an integer status, with bit ``0x100`` set on Ctrl-D (exit / soft reset) and
+     bit ``0x400`` set while the REPL is in raw mode (the caller should keep
+     feeding input without yielding so other output cannot corrupt the transfer).
+
+   Availability: Requires ``MICROPY_REPL_ASYNCIO``.
+
+.. function:: repl_event_resume()
+
+   Reset the input line and print a fresh prompt, after the caller has run the
+   deferred coroutine returned by :func:`repl_event`.
+
+   Availability: Requires ``MICROPY_REPL_ASYNCIO``.
+
+
 Classes
 -------
 
