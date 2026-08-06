@@ -181,8 +181,8 @@ def argparse_run():
 def argparse_debug():
     cmd_parser = argparse.ArgumentParser(
         description="debug a MicroPython script with a DAP client",
-        epilog="--port/--timeout/--dap-log must come before target/program, "
-        "as with any other mpremote option",
+        epilog="--port/--timeout/--dap-log/--dap-log-file must come before "
+        "target/program, as with any other mpremote option",
     )
     cmd_parser.add_argument(
         "target",
@@ -219,7 +219,21 @@ def argparse_debug():
         help="seconds to wait for the device to bind its debug-server socket "
         "and report the endpoint (default: 60)",
     )
-    _bool_flag(cmd_parser, "dap-log", "d", False, "log DAP traffic (not yet implemented)")
+    _bool_flag(
+        cmd_parser,
+        "dap-log",
+        "d",
+        False,
+        "log DAP traffic as JSONL via a local proxy inserted between the "
+        "client and the device (default file: a timestamped file in the "
+        "current directory; name one with --dap-log-file)",
+    )
+    cmd_parser.add_argument(
+        "--dap-log-file",
+        metavar="FILE",
+        default=None,
+        help="path for --dap-log's JSONL output; requires --dap-log",
+    )
     return cmd_parser
 
 
