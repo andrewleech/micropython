@@ -627,6 +627,15 @@ if(TARGET tinyusb_pico_pio_usb)
         COMPILE_OPTIONS "-Wno-error=conversion;-Wno-error=cast-qual;-Wno-error=attributes"
     )
 endif()
+# cdc_host.c declares idx unconditionally but only uses it under
+# CFG_TUH_CDC_LINE_CODING_ON_ENUM / CFG_TUH_CDC_LINE_CONTROL_ON_ENUM, so a USB
+# host build with neither defined trips -Werror=unused-variable on vendored
+# TinyUSB. Suppress it here until the pinned TinyUSB carries the fix.
+set_source_files_properties(
+    ${PICO_TINYUSB_PATH}/src/class/cdc/cdc_host.c
+    PROPERTIES
+    COMPILE_OPTIONS "-Wno-error=unused-variable"
+)
 
 target_compile_definitions(${MICROPY_TARGET} PRIVATE
     ${MICROPY_DEF_BOARD}
