@@ -183,42 +183,82 @@ class Transport:
         except TransportExecError as e:
             raise _convert_filesystem_error(e, src) from None
 
-    def fs_readfile(self, src, chunk_size=256, progress_callback=None):
+    def fs_readfile(self, src, chunk_size=256, progress_callback=None, verify_hash=False):
         if progress_callback:
             src_size = self.fs_stat(src).st_size
 
         contents = bytearray()
 
         try:
-            self.exec("f=open(%s,'rb')\nr=f.read" % _quote_path(src))
+            if verify_hash:
+                # Initialize hash on device along with file read
+                self.exec(
+                    "import hashlib\nh=hashlib.sha256()\nf=open(%s,'rb')\nr=f.read\nu=h.update"
+                    % _quote_path(src)
+                )
+            else:
+                self.exec("f=open(%s,'rb')\nr=f.read" % _quote_path(src))
             while True:
                 chunk = self.eval("r({})".format(chunk_size))
                 if not chunk:
                     break
+                if verify_hash:
+                    # Update hash with chunk
+                    self.exec("u(" + repr(chunk) + ")")
                 contents.extend(chunk)
                 if progress_callback:
                     progress_callback(len(contents), src_size)
             self.exec("f.close()")
+
+            if verify_hash:
+                # Get final hash from device
+                remote_hash = self.eval("h.digest()")
+                # Calculate local hash
+                local_hash = hashlib.sha256(contents).digest()
+                if remote_hash != local_hash:
+                    raise TransportError("file transfer verification failed for '%s'" % src)
         except TransportExecError as e:
             raise _convert_filesystem_error(e, src) from None
 
         return contents
 
-    def fs_writefile(self, dest, data, chunk_size=256, progress_callback=None):
+    def fs_writefile(self, dest, data, chunk_size=256, progress_callback=None, verify_hash=False):
         if progress_callback:
             src_size = len(data)
             written = 0
 
         try:
-            self.exec("f=open(%s,'wb')\nw=f.write" % _quote_path(dest))
-            while data:
-                chunk = data[:chunk_size]
-                self.exec("w(" + repr(chunk) + ")")
-                data = data[len(chunk) :]
+            if verify_hash:
+                # Calculate source hash
+                source_hash = hashlib.sha256(data).digest()
+                # Initialize hash on device along with file write
+                self.exec(
+                    "import hashlib\nh=hashlib.sha256()\nf=open(%s,'wb')\nw=f.write\nu=h.update"
+                    % _quote_path(dest)
+                )
+            else:
+                self.exec("f=open(%s,'wb')\nw=f.write" % _quote_path(dest))
+
+            data_remaining = data
+            while data_remaining:
+                chunk = data_remaining[:chunk_size]
+                if verify_hash:
+                    # Write chunk and update hash in one call
+                    self.exec("d=" + repr(chunk) + "\nw(d)\nu(d)")
+                else:
+                    self.exec("w(" + repr(chunk) + ")")
+                data_remaining = data_remaining[len(chunk) :]
                 if progress_callback:
                     written += len(chunk)
                     progress_callback(written, src_size)
+
             self.exec("f.close()")
+
+            if verify_hash:
+                # Get final hash from device
+                remote_hash = self.eval("h.digest()")
+                if remote_hash != source_hash:
+                    raise TransportError("file transfer verification failed for '%s'" % dest)
         except TransportExecError as e:
             raise _convert_filesystem_error(e, dest) from None
 
