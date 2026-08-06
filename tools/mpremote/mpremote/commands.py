@@ -7,6 +7,7 @@ import os
 import pkgutil
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,7 @@ from .transport_serial import SerialTransport
 from .romfs import make_romfs, VfsRomWriter
 from .mpdebug_config import find_config, resolve_target, target_hint, warn_if_tty_device
 from . import mpdebug_handshake
+from . import dap_log
 
 
 class CommandError(Exception):
@@ -642,6 +644,54 @@ def _report_debug_result(handshake):
     return handshake
 
 
+def _start_dap_log(dap_log_arg, handshake, bind_port=0):
+    # Neither transport puts the byte stream through mpremote, so logging
+    # means interposing a proxy in front of the device's real endpoint and
+    # reporting *its* host/port instead - a client that got the device's own
+    # endpoint would attach straight past the logger.
+    # dap_log_arg is True for --dap-log with no --dap-log-file, else the path.
+    path = dap_log_arg if isinstance(dap_log_arg, str) else dap_log.default_log_path()
+    try:
+        logger = dap_log.DapLogger(path)
+    except OSError as er:
+        raise CommandError(f"--dap-log could not open {path!r}: {er}") from None
+    try:
+        proxy = dap_log.DapProxy(handshake["host"], handshake["port"], logger, bind_port=bind_port)
+    except OSError as er:
+        logger.close()
+        raise CommandError(f"--dap-log could not bind a proxy port: {er}") from None
+    proxy.start()
+    print(f"logging DAP traffic to {path!r}", flush=True)
+    reported = dict(handshake, host=proxy.host, port=proxy.port)
+    return proxy, reported
+
+
+def _dap_log_ports(port, dap_log_arg):
+    """Split a single `--port` between the device and the `--dap-log` proxy.
+
+    Without `--dap-log`, `port` is what the device binds, unchanged. With
+    it, `--port` names the endpoint a client connects to (so a launch.json
+    pinning a port still goes through the logger): the device gets a freshly
+    reserved port of its own, and the requested port becomes the proxy's
+    bind port instead of an OS-assigned one. Returns (device_port,
+    proxy_bind_port).
+
+    With no `--port`, the device is still moved off its own default rather
+    than left there: otherwise it stays reachable on the conventional port
+    while the proxy sits somewhere else, and a client aimed at that
+    conventional port connects straight to the device and is logged nowhere.
+    Moving it means such a client fails to connect instead - loudly wrong
+    rather than quietly unlogged - and the endpoint to use is the one
+    reported.
+    """
+    if not dap_log_arg:
+        return port, 0
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        device_port = s.getsockname()[1]
+    return device_port, (port or 0)
+
+
 def _resolve_unix_binary(resolved):
     env_path = os.environ.get("MPY_DEBUG_FIRMWARE")
     if env_path:
@@ -742,7 +792,8 @@ def _reap(proc):
 _UNIX_EOF_MARKER = "\x00mpremote-debug-unix-eof\x00"  # never appears in real program output
 
 
-def _do_debug_unix(resolved, module, method, port, timeout):
+def _do_debug_unix(resolved, module, method, port, timeout, dap_log_arg, dap_log_bind_port):
+    proxy = None  # set once the handshake is in, if --dap-log was given
     try:
         # The non-blocking fd handling below is POSIX-only, unlike the rest of
         # mpremote, which supports Windows.
@@ -787,6 +838,8 @@ def _do_debug_unix(resolved, module, method, port, timeout):
             old_handler = None  # not called from the main thread
         try:
             _reap(proc)
+            if proxy is not None:
+                proxy.close()
             shutil.rmtree(tmpdir, ignore_errors=True)
         finally:
             if old_handler is not None:
@@ -863,7 +916,12 @@ def _do_debug_unix(resolved, module, method, port, timeout):
             # come back the temp file has already been fully read and is no
             # longer needed.
             shutil.rmtree(tmpdir, ignore_errors=True)
-            _report_debug_result(handshake)
+
+            if dap_log_arg:
+                proxy, reported = _start_dap_log(dap_log_arg, handshake, dap_log_bind_port)
+            else:
+                reported = handshake
+            _report_debug_result(reported)
 
             # Unlike the serial/network paths, where the firmware runs
             # independently of the host tool, mpremote owns this child: stay
@@ -893,10 +951,12 @@ def _do_debug_unix(resolved, module, method, port, timeout):
             cleanup()
             raise
 
+        if proxy is not None:
+            proxy.close()
         _reap(proc)
         if proc.returncode:
             sys.exit(proc.returncode)
-        return handshake
+        return reported
     finally:
         for _sig, _old in old_handlers.items():
             signal.signal(_sig, _old)
@@ -910,8 +970,6 @@ def do_debug(state, args):
         program_spec = (resolved.program if resolved is not None else None) or "target:main"
     module, method = _parse_program_spec(program_spec)
 
-    if args.dap_log:
-        raise CommandError("--dap-log is not implemented yet")
     # Both checked here rather than after a full raw-REPL round trip.
     if args.port == 0:
         raise CommandError(
@@ -922,12 +980,22 @@ def do_debug(state, args):
     if args.port is not None and not 1 <= args.port <= 65535:
         raise CommandError(f"--port must be between 1 and 65535, got {args.port}")
 
+    if args.dap_log_file is not None and not args.dap_log:
+        raise CommandError("--dap-log-file requires --dap-log")
+    # False (no logging), True (log to the default path), or an explicit path.
+    dap_log_arg = (args.dap_log_file or True) if args.dap_log else False
+    # With --dap-log, --port pins the proxy's (client-facing) port instead of
+    # the device's; the device gets a freshly reserved port of its own.
+    device_port, dap_log_bind_port = _dap_log_ports(args.port, dap_log_arg)
+
     is_unix = resolved.kind == "unix" if resolved is not None else args.target == "unix"
     if is_unix:
         state.did_action()
         # Reports the endpoint and supervises the child itself (unlike the
         # serial/network path below, mpremote owns this process).
-        return _do_debug_unix(resolved, module, method, args.port, args.timeout)
+        return _do_debug_unix(
+            resolved, module, method, device_port, args.timeout, dap_log_arg, dap_log_bind_port
+        )
 
     if resolved is None:
         # No mpdebug.toml matched (or none exists): args.target is a literal
@@ -951,7 +1019,7 @@ def do_debug(state, args):
     state.did_action()
 
     try:
-        state.transport.exec_raw_no_follow(_debug_boot_script(module, method, args.port))
+        state.transport.exec_raw_no_follow(_debug_boot_script(module, method, device_port))
         print("waiting for the device to report its debug-server endpoint...", flush=True)
         # A pty peer is a local process by construction (a unix build or QEMU
         # behind a pty pair), so a wildcard bind on it is reachable at the
@@ -967,7 +1035,56 @@ def do_debug(state, args):
         sys.exit(1)
 
     _check_requires(resolved, handshake["caps"])
-    return _report_debug_result(handshake)
+
+    if not dap_log_arg:
+        return _report_debug_result(handshake)
+
+    # Unlike the plain report-and-return above: the device runs independently
+    # of mpremote on this path, but the proxy --dap-log inserts does not, so
+    # returning now would tear down the very thing the client is about to
+    # connect to. Stay attached until the one client session it serves ends,
+    # or the user/environment ends it first.
+    proxy, reported = _start_dap_log(dap_log_arg, handshake, dap_log_bind_port)
+    _report_debug_result(reported)
+    print("staying attached to run the --dap-log proxy; Ctrl-C ends it", flush=True)
+
+    def cleanup():
+        try:
+            old_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        except ValueError:
+            old_handler = None  # not called from the main thread
+        try:
+            proxy.close()
+        finally:
+            if old_handler is not None:
+                signal.signal(signal.SIGINT, old_handler)
+
+    # Same reap-on-every-exit-path ladder as _do_debug_unix's child, applied
+    # to the proxy instead of a subprocess.
+    _reaping_signals = [signal.SIGTERM]
+    if hasattr(signal, "SIGHUP"):
+        _reaping_signals.append(signal.SIGHUP)
+    old_handlers = {}
+    for _sig in _reaping_signals:
+        try:
+            old_handlers[_sig] = signal.signal(_sig, lambda *_a: sys.exit(1))
+        except ValueError:
+            pass  # not called from the main thread
+    try:
+        try:
+            while not proxy.wait(_POLL_S):
+                pass
+        except KeyboardInterrupt:
+            cleanup()
+            sys.exit(1)
+        except BaseException:
+            cleanup()
+            raise
+        cleanup()
+        return reported
+    finally:
+        for _sig, _old in old_handlers.items():
+            signal.signal(_sig, _old)
 
 
 def do_mount(state, args):
