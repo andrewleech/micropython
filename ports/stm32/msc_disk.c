@@ -27,7 +27,8 @@
 
 #include "py/mpconfig.h"
 
-#if MICROPY_HW_USB_MSC && MICROPY_HW_TINYUSB_STACK
+// Only compile USB Device MSC when device mode is enabled
+#if MICROPY_HW_USB_MSC && MICROPY_HW_TINYUSB_STACK && MICROPY_HW_ENABLE_USBDEV
 
 #include "py/misc.h"
 #include "tusb.h"

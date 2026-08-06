@@ -230,6 +230,25 @@ SECTIONS
   text_end = ORIGIN(m_text) + LENGTH(m_text);
   ASSERT(__DATA_END <= text_end, "region m_text overflowed with text and data")
 
+  /* USB Host RAM section in OCRAM (for EHCI data structures).
+   * Only used when CFG_TUH_MEM_SECTION places data here.
+   * Requires 4KB alignment for EHCI periodic frame list. */
+  .usb_host_ram (NOLOAD) :
+  {
+    . = ALIGN(4096);
+    __usb_host_ram_start__ = .;
+    *(.usb_host_ram*)
+    . = ALIGN(4);
+    __usb_host_ram_end__ = .;
+  } > m_ocrm
+
+  /* USB host RAM size limit (can be overridden by board linker script).
+   * Default 64KB is large enough to not trigger on boards without OCRAM constraints. */
+  PROVIDE(_usb_host_ram_max = 0x10000);
+
+  ASSERT((__usb_host_ram_end__ - __usb_host_ram_start__) <= _usb_host_ram_max,
+         ".usb_host_ram section exceeds _usb_host_ram_max - increase reservation")
+
   /* Uninitialized data section */
   .bss :
   {

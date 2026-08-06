@@ -43,10 +43,14 @@ void mp_usbd_task_callback(mp_sched_node_t *node) {
 
 #endif // !MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
 
-// Schedule the TinyUSB task on demand, when there is a new USB device event
+// Schedule the TinyUSB task on demand, when there is a new USB device event.
 TU_ATTR_FAST_FUNC void MICROPY_WRAP_TUD_EVENT_HOOK_CB(tud_event_hook_cb)(uint8_t rhport, uint32_t eventid, bool in_isr) {
     mp_usbd_schedule_task();
-    mp_hal_wake_main_task_from_isr();
+    if (in_isr) {
+        mp_hal_wake_main_task_from_isr();
+    } else {
+        mp_hal_wake_main_task();
+    }
 }
 
 TU_ATTR_FAST_FUNC void mp_usbd_schedule_task(void) {

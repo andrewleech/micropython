@@ -43,7 +43,7 @@
 
 const uint8_t dcd_data[] = { 0x00 };
 
-void usb_phy0_init(uint8_t d_cal, uint8_t txcal45dp, uint8_t txcal45dn);
+static void usb_phy_init(uint8_t usb_id, uint8_t d_cal, uint8_t txcal45dp, uint8_t txcal45dn);
 
 void board_init(void) {
     // Clean and enable cache
@@ -69,8 +69,13 @@ void board_init(void) {
     SysTick_Config(SystemCoreClock / 1000);
     NVIC_SetPriority(SysTick_IRQn, IRQ_PRI_SYSTICK);
 
-    // USB0
-    usb_phy0_init(0b0111, 0b0110, 0b0110);  // Configure nominal values for D_CAL and TXCAL45DP/DN
+    // USB PHY0 (USB_OTG1)
+    usb_phy_init(0, 0b0111, 0b0110, 0b0110);
+
+    // USB PHY1 (USB_OTG2) - needed for dual-port mode on RT1170.
+    #if MICROPY_HW_USB_HOST && MICROPY_HW_ENABLE_USBDEV && defined(USBPHY2)
+    usb_phy_init(1, 0b0111, 0b0110, 0b0110);
+    #endif
 
     // ADC
     machine_adc_init();
@@ -108,36 +113,48 @@ void board_init(void) {
     #endif
 }
 
-void usb_phy0_init(uint8_t d_cal, uint8_t txcal45dp, uint8_t txcal45dn) {
-    #ifdef USBPHY1
-    USBPHY_Type *usb_phy = USBPHY1;
-    #else
-    USBPHY_Type *usb_phy = USBPHY;
-    #endif
+static void usb_phy_init(uint8_t usb_id, uint8_t d_cal, uint8_t txcal45dp, uint8_t txcal45dn) {
+    USBPHY_Type *usb_phy;
 
-    CLOCK_EnableUsbhs0PhyPllClock(kCLOCK_Usbphy480M, BOARD_XTAL0_CLK_HZ);
-    CLOCK_EnableUsbhs0Clock(kCLOCK_Usb480M, BOARD_XTAL0_CLK_HZ);
+    if (usb_id == 0) {
+        #ifdef USBPHY1
+        usb_phy = USBPHY1;
+        #else
+        usb_phy = USBPHY;
+        #endif
+        CLOCK_EnableUsbhs0PhyPllClock(kCLOCK_Usbphy480M, BOARD_XTAL0_CLK_HZ);
+        CLOCK_EnableUsbhs0Clock(kCLOCK_Usb480M, BOARD_XTAL0_CLK_HZ);
+    }
+    #ifdef USBPHY2
+    else if (usb_id == 1) {
+        usb_phy = USBPHY2;
+        CLOCK_EnableUsbhs1PhyPllClock(kCLOCK_Usbphy480M, BOARD_XTAL0_CLK_HZ);
+        CLOCK_EnableUsbhs1Clock(kCLOCK_Usb480M, BOARD_XTAL0_CLK_HZ);
+    }
+    #endif
+    else {
+        return;
+    }
 
     #if defined(MIMXRT117x_SERIES)
     usb_phy->TRIM_OVERRIDE_EN = USBPHY_TRIM_OVERRIDE_EN_TRIM_DIV_SEL_OVERRIDE(1) |
         USBPHY_TRIM_OVERRIDE_EN_TRIM_ENV_TAIL_ADJ_VD_OVERRIDE(1) |
         USBPHY_TRIM_OVERRIDE_EN_TRIM_TX_D_CAL_OVERRIDE(1) |
         USBPHY_TRIM_OVERRIDE_EN_TRIM_TX_CAL45DP_OVERRIDE(1) |
-        USBPHY_TRIM_OVERRIDE_EN_TRIM_TX_CAL45DN_OVERRIDE(1);  // Enable override for D_CAL and TXCAL45DP/DN
+        USBPHY_TRIM_OVERRIDE_EN_TRIM_TX_CAL45DN_OVERRIDE(1);
     #endif
-    usb_phy->PWD = 0U;  // Set all bits in PWD register to normal operation
+    usb_phy->PWD = 0U;
+    usb_phy->CTRL |= USBPHY_CTRL_SET_ENUTMILEVEL2_MASK | USBPHY_CTRL_SET_ENUTMILEVEL3_MASK;
     usb_phy->TX = ((usb_phy->TX & (~(USBPHY_TX_D_CAL_MASK | USBPHY_TX_TXCAL45DM_MASK | USBPHY_TX_TXCAL45DP_MASK))) |
-        (USBPHY_TX_D_CAL(d_cal) | USBPHY_TX_TXCAL45DP(txcal45dp) | USBPHY_TX_TXCAL45DM(txcal45dn)));  // Configure values for D_CAL and TXCAL45DP/DN
+        (USBPHY_TX_D_CAL(d_cal) | USBPHY_TX_TXCAL45DP(txcal45dp) | USBPHY_TX_TXCAL45DM(txcal45dn)));
 }
 
 void USB_OTG1_IRQHandler(void) {
-    tud_int_handler(0);
-    tud_task();
+    tusb_int_handler(0, true);
     __SEV();
 }
 
 void USB_OTG2_IRQHandler(void) {
-    tud_int_handler(1);
-    tud_task();
+    tusb_int_handler(1, true);
     __SEV();
 }

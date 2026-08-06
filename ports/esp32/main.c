@@ -56,6 +56,9 @@
 #include "shared/runtime/pyexec.h"
 #include "shared/timeutils/timeutils.h"
 #include "shared/tinyusb/mp_usbd.h"
+#if MICROPY_HW_USB_HOST
+#include "shared/tinyusb/mp_usbh.h"
+#endif
 #include "mbedtls/platform_time.h"
 
 #include "uart.h"
@@ -207,6 +210,10 @@ soft_reset_exit:
 
     #if MICROPY_HW_ENABLE_USBDEV
     mp_usbd_deinit();
+    #endif
+
+    #if MICROPY_HW_USB_HOST
+    mp_usbh_deinit();
     #endif
 
     gc_sweep_all();

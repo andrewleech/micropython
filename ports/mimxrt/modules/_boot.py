@@ -19,6 +19,19 @@ os.chdir("/flash")
 sys.path.append("/flash")
 sys.path.append("/flash/lib")
 
+# Single-port USB host boards disable USB CDC device mode, so REPL needs
+# UART dupterm. Dual-port boards have both USBHost and USBDevice, keeping
+# USB CDC REPL on the device port.
+import machine
+
+if hasattr(machine, "USBHost") and not hasattr(machine, "USBDevice"):
+    try:
+        from machine import UART
+
+        os.dupterm(UART(0, 115200))
+    except Exception:
+        pass
+
 # do not mount the SD card if SKIPSD exists.
 try:
     os.stat("SKIPSD")
