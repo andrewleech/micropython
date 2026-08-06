@@ -1,7 +1,7 @@
 # Makefile fragment for generating native .mpy files from C source
 # MPY_DIR must be set to the top of the MicroPython source tree
 
-BUILD ?= build
+BUILD ?= build-$(ARCH)
 
 ECHO = @echo
 RM = /bin/rm
@@ -39,7 +39,7 @@ MPY_CROSS_FLAGS += -march=$(ARCH)
 SRC_O += $(addprefix $(BUILD)/, $(patsubst %.c,%.o,$(filter %.c,$(SRC))) $(patsubst %.S,%.o,$(filter %.S,$(SRC))))
 SRC_MPY += $(addprefix $(BUILD)/, $(patsubst %.py,%.mpy,$(filter %.py,$(SRC))))
 
-CLEAN_EXTRA += $(MOD).mpy .mpy_ld_cache
+CLEAN_EXTRA += $(MOD).mpy .mpy_ld_cache-$(ARCH)
 
 ################################################################################
 # Architecture configuration
@@ -237,11 +237,11 @@ $(BUILD)/%.mpy: %.py
 	$(Q)$(MPY_CROSS) $(MPY_CROSS_FLAGS) -o $@ $<
 
 # Build native .mpy from object files
-$(BUILD)/$(MOD).native.mpy: $(SRC_O)
+$(BUILD)/$(MOD).mpy: $(SRC_O)
 	$(ECHO) "LINK $<"
 	$(Q)$(MPY_LD) --arch $(ARCH) --qstrs $(CONFIG_H) $(MPY_LD_FLAGS) -o $@ $^
 
 # Build final .mpy from all intermediate .mpy files
-$(MOD).mpy: $(BUILD)/$(MOD).native.mpy $(SRC_MPY)
+$(MOD).mpy: $(BUILD)/$(MOD).mpy $(SRC_MPY)
 	$(ECHO) "GEN $@"
 	$(Q)$(MPY_TOOL) --merge -o $@ $^

@@ -58,13 +58,20 @@ ifeq ($(DEBUG), 0)
 MICROPY_ROM_TEXT_COMPRESSION ?= 1
 endif
 
-FROZEN_MANIFEST ?= modules/manifest.py
+# Enable asyncio by default and select appropriate manifest.
+MICROPY_PY_ASYNCIO ?= 1
+ifeq ($(MICROPY_PY_ASYNCIO),1)
+FROZEN_MANIFEST ?= boards/manifest.py
+else
+FROZEN_MANIFEST ?= boards/manifest_minimal.py
+endif
+CFLAGS += -DMICROPY_PY_ASYNCIO=$(MICROPY_PY_ASYNCIO)
 
 # include py core make definitions
 include ../../py/py.mk
 include ../../extmod/extmod.mk
 
-GIT_SUBMODULES += lib/nrfx lib/tinyusb
+GIT_SUBMODULES += lib/CMSIS_6 lib/nrfx lib/tinyusb
 
 MICROPY_VFS_FAT ?= 0
 
@@ -73,7 +80,7 @@ CROSS_COMPILE ?= arm-none-eabi-
 INC += -I.
 INC += -I../..
 INC += -I$(BUILD)
-INC += -I./../../lib/cmsis/inc
+INC += -I./../../lib/CMSIS_6/CMSIS/Core/Include
 INC += -I./modules/machine
 INC += -I./modules/ubluepy
 INC += -I./modules/music

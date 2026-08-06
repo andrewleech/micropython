@@ -27,7 +27,7 @@ MPY_CROSS_FLAGS += -march=armv7emdp
 CROSS_COMPILE ?= arm-none-eabi-
 ALIF_DFP_REL_TOP ?= lib/alif_ensemble-cmsis-dfp
 ALIF_DFP_REL_HERE ?= $(TOP)/lib/alif_ensemble-cmsis-dfp
-CMSIS_DIR ?= $(TOP)/lib/cmsis/inc
+CMSIS_DIR ?= $(TOP)/lib/CMSIS_5/CMSIS/Core/Include
 
 MCU_CORE ?= M55_HP
 LD_FILE ?= mcu/ensemble.ld.S
@@ -113,6 +113,7 @@ SRC_C = \
 	alif_flash.c \
 	cyw43_port_spi.c \
 	fatfs_port.c \
+	lptimer_ext.c \
 	machine_pin.c \
 	machine_i2c.c \
 	machine_spi.c \

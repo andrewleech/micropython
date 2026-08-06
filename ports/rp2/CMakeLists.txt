@@ -45,14 +45,25 @@ if(MICROPY_BOARD_VARIANT)
     endif()
 endif()
 
+# Save the cmake-command-line MICROPY_FROZEN_MANIFEST before board config
+# inclusion may overwrite it; resolved back after, so command-line takes
+# precedence over the board's default.
 set(MICROPY_USER_FROZEN_MANIFEST ${MICROPY_FROZEN_MANIFEST})
 
-# Include board config, it may override MICROPY_FROZEN_MANIFEST
+# Include board config, it may set MICROPY_FROZEN_MANIFEST
 include(${MICROPY_BOARD_DIR}/mpconfigboard.cmake)
 if(NOT MICROPY_BOARD_VARIANT)
     include(${MICROPY_BOARD_DIR}/mpconfigvariant.cmake OPTIONAL)
 else()
     include(${MICROPY_BOARD_DIR}/mpconfigvariant_${MICROPY_BOARD_VARIANT}.cmake)
+endif()
+
+# Resolve the frozen manifest now so it's available before py/manifest.cmake
+# runs (via py/usermod.cmake below).
+if(MICROPY_USER_FROZEN_MANIFEST)
+    set(MICROPY_FROZEN_MANIFEST ${MICROPY_USER_FROZEN_MANIFEST})
+elseif(NOT MICROPY_FROZEN_MANIFEST)
+    set(MICROPY_FROZEN_MANIFEST ${MICROPY_PORT_DIR}/boards/manifest.py)
 endif()
 
 # Set the PICO_BOARD if it's not already set (allow a board to override it).
@@ -528,13 +539,6 @@ else()
     set(MICROPY_CROSS_FLAGS "-march=armv6m")
 endif()
 
-# Set the frozen manifest file
-if (MICROPY_USER_FROZEN_MANIFEST)
-    set(MICROPY_FROZEN_MANIFEST ${MICROPY_USER_FROZEN_MANIFEST})
-elseif (NOT MICROPY_FROZEN_MANIFEST)
-    set(MICROPY_FROZEN_MANIFEST ${MICROPY_PORT_DIR}/boards/manifest.py)
-endif()
-
 target_sources(${MICROPY_TARGET} PRIVATE
     ${MICROPY_SOURCE_PY}
     ${MICROPY_SOURCE_EXTMOD}
@@ -565,6 +569,8 @@ target_compile_options(${MICROPY_TARGET} PRIVATE
 target_link_options(${MICROPY_TARGET} PRIVATE
     -Wl,--defsym=__micropy_c_heap_size__=${MICROPY_C_HEAP_SIZE}
     -Wl,--wrap=runtime_init_clocks
+    -Wl,--print-memory-usage
+    -Wl,--cref
 )
 
 if(MICROPY_HW_USB_HOST)
@@ -577,19 +583,27 @@ if(DEFINED PICO_FLASH_SIZE_BYTES)
     target_link_options(${MICROPY_TARGET} PRIVATE
         -Wl,--defsym=__micropy_flash_size__=${PICO_FLASH_SIZE_BYTES}
     )
-elseif(PICO_RP2040)
-    target_link_options(${MICROPY_TARGET} PRIVATE
-        -Wl,--defsym=__micropy_flash_size__=2048k # Default to 2MB
-    )
-elseif(PICO_RP2350)
-    target_link_options(${MICROPY_TARGET} PRIVATE
-        -Wl,--defsym=__micropy_flash_size__=4096k # Default to 4MB
-    )
+else(PICO_RP2040)
+    message(FATAL_ERROR "PICO_FLASH_SIZE_BYTES must be defined")
 endif()
 
 if(PICO_RP2350)
     target_link_options(${MICROPY_TARGET} PRIVATE
         -Wl,--defsym=__micropy_extra_stack__=4096
+    )
+endif()
+
+# MICROPY_HW_FLASH_STORAGE_BYTES is set via board mpconfigboard.cmake or
+# MICROPY_HW_FLASH_STORAGE_BYTES variable.
+# Expose it as a linker symbol so the linker script can assert the firmware
+# doesn't overlap the filesystem and as a compile definition so
+# rp2_flash.c uses the correct storage base address.
+if(DEFINED MICROPY_HW_FLASH_STORAGE_BYTES)
+    target_link_options(${MICROPY_TARGET} PRIVATE
+        -Wl,--defsym=__micropy_flash_storage_bytes__=${MICROPY_HW_FLASH_STORAGE_BYTES}
+    )
+    target_compile_definitions(${MICROPY_TARGET} PRIVATE
+        MICROPY_HW_FLASH_STORAGE_BYTES=${MICROPY_HW_FLASH_STORAGE_BYTES}
     )
 endif()
 
@@ -690,13 +704,6 @@ endif()
 
 pico_add_extra_outputs(${MICROPY_TARGET})
 
-pico_find_compiler_with_triples(PICO_COMPILER_SIZE "${PICO_GCC_TRIPLE}" size)
-
-add_custom_command(TARGET ${MICROPY_TARGET}
-    POST_BUILD
-    COMMAND ${PICO_COMPILER_SIZE} --format=berkeley ${PROJECT_BINARY_DIR}/${MICROPY_TARGET}.elf
-    VERBATIM
-)
 
 # Collect all the include directories and compile definitions for the pico-sdk components.
 foreach(comp ${PICO_SDK_COMPONENTS})
