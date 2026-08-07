@@ -22,6 +22,7 @@ from .romfs import make_romfs, VfsRomWriter
 from .mpdebug_config import find_config, resolve_target, target_hint, warn_if_tty_device
 from . import mpdebug_handshake
 from . import dap_log
+from . import serial_dap
 
 
 class CommandError(Exception):
@@ -666,6 +667,124 @@ def _start_dap_log(dap_log_arg, handshake, bind_port=0):
     return proxy, reported
 
 
+def _maybe_start_serial_dap(resolved, handshake, dap_log_arg, bind_port):
+    """Start the localhost<->serial bridge for a `serial_dap`-capable target.
+
+    None (no bridging - the plain network/handshake path applies) unless the
+    target configures a `dap_device`; one configured without the probe
+    confirming `serial_dap: true` is a hard error, not a silent fallback -
+    STORY-3.3's rule that a claimed capability is never trusted over the
+    runtime probe applies to the caller's own config too.
+
+    `--dap-log`, if given, logs through this bridge rather than through a
+    second proxy stacked in front of it: unlike the network path, there is
+    no device-side TCP endpoint here for a separate `DapProxy` to forward to
+    and log.
+    """
+    device = resolved.dap_device if resolved is not None else None
+    if device is None:
+        return None
+    warn_if_tty_device(device, f"target {resolved.name!r} dap_device")
+    if not handshake["caps"].get("serial_dap"):
+        raise CommandError(
+            f"target {resolved.name!r} configures dap_device {device!r} but the "
+            f"device does not report serial_dap (probed caps: {handshake['caps']})"
+        )
+    try:
+        serial_dap.check_device(device)
+    except OSError as er:
+        raise CommandError(
+            f"target {resolved.name!r} dap_device {device!r} could not be opened: {er}"
+        ) from None
+    if dap_log_arg:
+        path = dap_log_arg if isinstance(dap_log_arg, str) else dap_log.default_log_path()
+        try:
+            logger = dap_log.DapLogger(path)
+        except OSError as er:
+            raise CommandError(f"--dap-log could not open {path!r}: {er}") from None
+        log_msg = f"logging DAP traffic to {path!r}"
+    else:
+        logger = dap_log.NullLogger()
+        log_msg = None
+    try:
+        proxy = serial_dap.SerialDapBridge(device, logger, bind_port=bind_port)
+    except OSError as er:
+        logger.close()
+        raise CommandError(f"could not bind a DAP bridge port: {er}") from None
+    proxy.start()
+    if log_msg:
+        print(log_msg, flush=True)
+    reported = dict(handshake, host=proxy.host, port=proxy.port)
+    return proxy, reported
+
+
+def _serial_dap_lost(device, cause):
+    """Raise for a dead serial DAP bridge.
+
+    A board reset always ends the session with this error rather than
+    reconnecting. The rebooted device runs a fresh `debugpy` with no memory
+    of the session the client still believes it is in - no breakpoints, no
+    frames, no sequence numbers - so a revived byte pump would hand the
+    client a peer that never received its `initialize`. Ending and saying so
+    is the only answer that leaves the two ends agreeing about what exists;
+    the next `mpremote debug` builds both from scratch. (ampremote's
+    `do_reconnect(state)`, present when this file is composed onto its tree
+    per STORY-8.1, restores only the primary REPL connection in any case.)
+    """
+    raise CommandError(
+        f"the serial DAP connection to {device!r} was lost (board reset?); "
+        "reset the device and run 'mpremote debug' again"
+    ) from cause
+
+
+def _stay_attached(proxy, message):
+    """Block until `proxy`'s one client session ends, reaping it on every exit path.
+
+    Shared by `--dap-log`'s own proxy and a `serial_dap` bridge - both are a
+    `dap_log.PumpingProxy` mpremote must stay alive for, since unlike the
+    plain network path nothing else keeps the client's real endpoint
+    listening once this process exits.
+    """
+    print(message, flush=True)
+
+    def cleanup():
+        try:
+            old_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        except ValueError:
+            old_handler = None  # not called from the main thread
+        try:
+            proxy.close()
+        finally:
+            if old_handler is not None:
+                signal.signal(signal.SIGINT, old_handler)
+
+    # Same reap-on-every-exit-path ladder as _do_debug_unix's child, applied
+    # to the proxy instead of a subprocess.
+    _reaping_signals = [signal.SIGTERM]
+    if hasattr(signal, "SIGHUP"):
+        _reaping_signals.append(signal.SIGHUP)
+    old_handlers = {}
+    for _sig in _reaping_signals:
+        try:
+            old_handlers[_sig] = signal.signal(_sig, lambda *_a: sys.exit(1))
+        except ValueError:
+            pass  # not called from the main thread
+    try:
+        try:
+            while not proxy.wait(_POLL_S):
+                pass
+        except KeyboardInterrupt:
+            cleanup()
+            sys.exit(1)
+        except BaseException:
+            cleanup()
+            raise
+        cleanup()
+    finally:
+        for _sig, _old in old_handlers.items():
+            signal.signal(_sig, _old)
+
+
 def _dap_log_ports(port, dap_log_arg):
     """Split a single `--port` between the device and the `--dap-log` proxy.
 
@@ -1036,6 +1155,20 @@ def do_debug(state, args):
 
     _check_requires(resolved, handshake["caps"])
 
+    # A dap_device target puts the whole DAP channel through mpremote (there
+    # is no device-side TCP endpoint to report at all), so this always stays
+    # attached, with or without --dap-log; the plain network path below only
+    # does that when --dap-log adds its own proxy in front of the device.
+    serial_bind_port = dap_log_bind_port if dap_log_arg else (args.port or 0)
+    serial_bridge = _maybe_start_serial_dap(resolved, handshake, dap_log_arg, serial_bind_port)
+    if serial_bridge is not None:
+        proxy, reported = serial_bridge
+        _report_debug_result(reported)
+        _stay_attached(proxy, "staying attached to run the serial DAP bridge; Ctrl-C ends it")
+        if proxy.target_error is not None:
+            _serial_dap_lost(resolved.dap_device, proxy.target_error)
+        return reported
+
     if not dap_log_arg:
         return _report_debug_result(handshake)
 
@@ -1046,45 +1179,8 @@ def do_debug(state, args):
     # or the user/environment ends it first.
     proxy, reported = _start_dap_log(dap_log_arg, handshake, dap_log_bind_port)
     _report_debug_result(reported)
-    print("staying attached to run the --dap-log proxy; Ctrl-C ends it", flush=True)
-
-    def cleanup():
-        try:
-            old_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
-        except ValueError:
-            old_handler = None  # not called from the main thread
-        try:
-            proxy.close()
-        finally:
-            if old_handler is not None:
-                signal.signal(signal.SIGINT, old_handler)
-
-    # Same reap-on-every-exit-path ladder as _do_debug_unix's child, applied
-    # to the proxy instead of a subprocess.
-    _reaping_signals = [signal.SIGTERM]
-    if hasattr(signal, "SIGHUP"):
-        _reaping_signals.append(signal.SIGHUP)
-    old_handlers = {}
-    for _sig in _reaping_signals:
-        try:
-            old_handlers[_sig] = signal.signal(_sig, lambda *_a: sys.exit(1))
-        except ValueError:
-            pass  # not called from the main thread
-    try:
-        try:
-            while not proxy.wait(_POLL_S):
-                pass
-        except KeyboardInterrupt:
-            cleanup()
-            sys.exit(1)
-        except BaseException:
-            cleanup()
-            raise
-        cleanup()
-        return reported
-    finally:
-        for _sig, _old in old_handlers.items():
-            signal.signal(_sig, _old)
+    _stay_attached(proxy, "staying attached to run the --dap-log proxy; Ctrl-C ends it")
+    return reported
 
 
 def do_mount(state, args):

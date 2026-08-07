@@ -21,6 +21,10 @@ Tooling parses that one line rather than any of the human-readable banner
 text around it. `wait_for_client()` (not a fixed sleep) blocks until the DAP
 client has finished configuring breakpoints, so breakpoints set before then
 are already applied by the time the target starts running.
+
+On a board `_detect_dap_stream()` finds a dedicated DAP CDC interface on,
+the session runs over that stream instead of TCP (`host`/`port` in the
+handshake become `"serial"`/`0`, and the `port` argument is unused).
 """
 
 import json
@@ -55,6 +59,20 @@ def _detect_host():
     if not addr or addr == "0.0.0.0":
         return "0.0.0.0"
     return addr
+
+
+def _detect_dap_stream():
+    """Return an open reader/writer stream for a dedicated DAP CDC interface, if any.
+
+    No port implements the board-specific second-CDC detection this needs
+    yet (matching `DebugSession._probe_serial_dap()`, which is why `caps`
+    always reports `serial_dap: false` today), so this always returns
+    `None` and `_run()` falls back to `debugpy.listen()` over TCP. Once a
+    board-specific check lands here, returning a stream is what switches
+    that board to `listen_stream()` instead - `caps` and this function
+    report the same thing so they can never disagree.
+    """
+    return None
 
 
 def _parse_args():
@@ -92,8 +110,13 @@ def _run():
         )
         return
 
-    host = _detect_host()
-    actual_host, actual_port = debugpy.listen(host=host, port=port)
+    stream = _detect_dap_stream()
+    if stream is not None:
+        debugpy.listen_stream(stream)
+        actual_host, actual_port = "serial", 0
+    else:
+        host = _detect_host()
+        actual_host, actual_port = debugpy.listen(host=host, port=port)
     print(f"Debug server listening on {actual_host}:{actual_port}")
 
     caps = debugpy.get_capabilities()

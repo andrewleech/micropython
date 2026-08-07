@@ -21,6 +21,10 @@ caller's job, not this module's. `program` is a "module[:method]" default.
 the MPDBG-READY handshake can report, so a typo is caught before any device
 is touched; matching them against what a specific device actually probes
 happens later, once `do_debug` has a handshake to check it against.
+`dap_device` is a second by-id connect string, the board's dedicated DAP
+serial interface, used only when the handshake also reports `serial_dap:
+true`; without it `do_debug` always uses the network transport, whatever a
+device's own probe says it has.
 
 Unknown keys in a target table are ignored, not rejected, so a front-end can
 store its own metadata (icons, ordering, ...) alongside these.
@@ -48,6 +52,14 @@ def _command_error(msg):
 # The caps keys the MPDBG-READY handshake reports (see debugpy's
 # probe_capabilities()); keep in step with the probe. A target's `requires`
 # is checked against this tuple.
+#
+# `serial_dap` is deliberately not here even though the probe reports it
+# (currently always `False` - board-specific second-CDC detection isn't
+# implemented for any port yet): it names a specific `dap_device` wiring
+# rather than a general interpreter feature, so `dap_device` targets check
+# it directly, in do_debug, instead of through a target's `requires`. `caps`
+# itself has no allowlist (mpdebug_handshake._validate only checks types),
+# so this key is read fine regardless of this tuple.
 KNOWN_CAPABILITIES = ("settrace", "save_names", "set_local", "f_back")
 
 _KINDS = ("unix", "serial", "network")
@@ -58,13 +70,22 @@ _KINDS = ("unix", "serial", "network")
 # "auto"/"list" device strings, "unix", the "a0"/"u0"/"c0"-style port
 # shorthands, and the "id:"/"port:" connect-string prefixes.
 class Target:
-    def __init__(self, name, kind, device=None, firmware=None, program=None, requires=()):
+    def __init__(
+        self, name, kind, device=None, firmware=None, program=None, requires=(), dap_device=None
+    ):
         self.name = name
         self.kind = kind
         self.device = device
         self.firmware = firmware
         self.program = program
         self.requires = requires
+        # The second CDC interface's connect string, for boards where DAP
+        # rides its own serial device node instead of the network (`serial_dap`
+        # in caps) - by-id, like `device`. None means "this target has no
+        # dedicated DAP interface configured"; `do_debug` then always uses
+        # the network transport, even if the device's own probe says it has
+        # one, since there is no path to reach it without this.
+        self.dap_device = dap_device
 
 
 def find_config(start_dir=None):
@@ -151,7 +172,7 @@ def _load_targets(path):
                 f"{', '.join(KNOWN_CAPABILITIES)}"
             )
 
-        for key in ("device", "program", "firmware"):
+        for key in ("device", "program", "firmware", "dap_device"):
             value = spec.get(key)
             if value is not None and not isinstance(value, str):
                 _command_error(f"{path}: target '{name}' {key} must be a string")
@@ -163,6 +184,10 @@ def _load_targets(path):
             # Distinct from an absent device, which means "let mpremote choose".
             _command_error(f"{path}: target '{name}' has an empty 'device'")
 
+        dap_device = spec.get("dap_device")
+        if dap_device == "":
+            _command_error(f"{path}: target '{name}' has an empty 'dap_device'")
+
         targets[name] = Target(
             name=name,
             kind=kind,
@@ -170,6 +195,7 @@ def _load_targets(path):
             firmware=spec.get("firmware"),
             program=spec.get("program"),
             requires=requires,
+            dap_device=dap_device,
         )
     return targets
 
