@@ -539,17 +539,25 @@ def _parse_program_spec(spec):
     return module, method
 
 
-def _debug_boot_script(module, method, port):
+def _debug_boot_script(module, method, port, dap_stream=None):
     # Raw REPL exec has no OS argv, so sys.argv is injected here to preserve
-    # mpy_launch_debugpy.py's own argv contract ([module] [method] [port]).
+    # mpy_launch_debugpy.py's own argv contract ([module] [method] [port]
+    # [dap_stream]).
     # sys.argv is rebound in place (not reassigned): the `sys` module dict is
     # read-only on MicroPython, so `sys.argv = [...]` raises AttributeError.
     # port=None omits the argv element so the device applies its own default
-    # port instead of the host choosing one.
+    # port instead of the host choosing one - unless a dap_stream follows it,
+    # since argv is positional. The placeholder is harmless: the stream path
+    # never binds a port, and a device that cannot produce the requested
+    # stream raises instead of falling back to TCP.
     script = pkgutil.get_data(__package__, "mpy_launch_debugpy.py").decode()
     argv = ["mpy_launch_debugpy.py", module, method]
     if port is not None:
         argv.append(str(port))
+    elif dap_stream is not None:
+        argv.append("0")
+    if dap_stream is not None:
+        argv.append(dap_stream)
     preamble = "import sys\nsys.argv[:] = [{}]\n".format(", ".join(repr(a) for a in argv))
     return preamble + script
 
@@ -1137,8 +1145,19 @@ def do_debug(state, args):
     state.ensure_raw_repl()
     state.did_action()
 
+    # A `dap_device` target is asking for DAP over the board's own dedicated
+    # interface, so the device is told to take that channel rather than
+    # binding a port. It is told "board", not the host's path: the host names
+    # the interface by tty node, the device by runtime object, and only the
+    # device can map one to the other. Without this the two ends disagree by
+    # construction - the device would report a TCP endpoint while the bridge
+    # below waits on a stream that never carries anything.
+    dap_stream = "board" if (resolved is not None and resolved.dap_device) else None
+
     try:
-        state.transport.exec_raw_no_follow(_debug_boot_script(module, method, device_port))
+        state.transport.exec_raw_no_follow(
+            _debug_boot_script(module, method, device_port, dap_stream)
+        )
         print("waiting for the device to report its debug-server endpoint...", flush=True)
         # A pty peer is a local process by construction (a unix build or QEMU
         # behind a pty pair), so a wildcard bind on it is reachable at the

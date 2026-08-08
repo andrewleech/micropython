@@ -53,13 +53,14 @@ def _command_error(msg):
 # probe_capabilities()); keep in step with the probe. A target's `requires`
 # is checked against this tuple.
 #
-# `serial_dap` is deliberately not here even though the probe reports it
-# (currently always `False` - board-specific second-CDC detection isn't
-# implemented for any port yet): it names a specific `dap_device` wiring
-# rather than a general interpreter feature, so `dap_device` targets check
-# it directly, in do_debug, instead of through a target's `requires`. `caps`
-# itself has no allowlist (mpdebug_handshake._validate only checks types),
-# so this key is read fine regardless of this tuple.
+# `serial_dap` is deliberately not here even though the probe reports it: it
+# is not an interpreter feature at all but a report of which channel the
+# session took, so it is only ever `True` on a run that already asked for a
+# stream. Putting it in `requires` would make every target that names it fail
+# before the run that could satisfy it. `dap_device` targets check it
+# directly, in do_debug, against the handshake of the run they just started.
+# `caps` itself has no allowlist (mpdebug_handshake._validate only checks
+# types), so this key is read fine regardless of this tuple.
 KNOWN_CAPABILITIES = ("settrace", "save_names", "set_local", "f_back")
 
 _KINDS = ("unix", "serial", "network")
