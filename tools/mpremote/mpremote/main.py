@@ -182,7 +182,7 @@ def argparse_debug():
     cmd_parser = argparse.ArgumentParser(
         description="debug a MicroPython script with a DAP client",
         epilog="as with any other mpremote option, --port/--timeout/--dap-log/"
-        "--dap-log-file/--source must come before target/program",
+        "--dap-log-file/--source/--loop must come before target/program",
     )
     cmd_parser.add_argument(
         "target",
@@ -243,6 +243,15 @@ def argparse_debug():
         "whatever copy is already on the device; overrides the target's 'source' in "
         "mpdebug.toml; rejected for a unix target, which already runs from the host "
         "filesystem",
+    )
+    _bool_flag(
+        cmd_parser,
+        "loop",
+        "l",
+        False,
+        "keep the session alive across re-runs: the client's restart request "
+        "evicts what the program imported and imports it again, so an edit "
+        "takes effect with no upload and no reset",
     )
     return cmd_parser
 
