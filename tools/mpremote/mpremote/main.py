@@ -236,6 +236,16 @@ def argparse_debug():
         default=None,
         help="path for --dap-log's JSONL output; requires --dap-log",
     )
+    cmd_parser.add_argument(
+        "--source",
+        metavar="PATH",
+        default=None,
+        help="host directory to mount at the device's remote-fs mount point before "
+        "running the program, so it debugs a live view of this directory instead of "
+        "whatever copy is already on the device; overrides the target's 'source' in "
+        "mpdebug.toml; rejected for a unix target, which already runs from the host "
+        "filesystem",
+    )
     return cmd_parser
 
 
