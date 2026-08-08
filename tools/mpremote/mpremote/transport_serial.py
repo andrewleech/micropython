@@ -1073,6 +1073,17 @@ class SerialIntercept:
     def fd(self):
         return self.orig_serial.fd
 
+    # Stands in for the serial object everywhere the transport reads or
+    # writes, so `read_until`'s save/restore of the read timeout has to reach
+    # the real port through it.
+    @property
+    def timeout(self):
+        return self.orig_serial.timeout
+
+    @timeout.setter
+    def timeout(self, value):
+        self.orig_serial.timeout = value
+
     def close(self):
         self.orig_serial.close()
 
