@@ -14,13 +14,13 @@ def trace_handler(frame, event, arg):
     if frame.f_globals.get("__name__", "").find("importlib") != -1:
         return trace_handler
 
-    if frame.f_code.co_name.startswith('test_'):
+    if frame.f_code.co_name.startswith("test_"):
         locals_dict = frame.f_locals
         # Check if f_locals returns a dict
         print(f"{event}:{frame.f_code.co_name} f_locals_type={type(locals_dict).__name__}")
 
         # Count local variables in scope
-        if hasattr(locals_dict, 'keys'):
+        if hasattr(locals_dict, "keys"):
             local_keys = sorted(locals_dict.keys())
             print(f"  local_vars={len(local_keys)}")
 
@@ -51,7 +51,7 @@ def test_none_values():
 def test_complex_types():
     """Function with complex data types."""
     lst = [1, 2, 3]
-    dct = {'key': 'value'}
+    dct = {"key": "value"}
     tpl = (1, 2, 3)
 
 
