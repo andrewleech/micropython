@@ -19,8 +19,8 @@ try:
 except ImportError:
     _PACKAGED_MPY_CROSS = None
 
-_MARKER_PATH = "/lib/.debugpy-install.json"
-_DEFAULT_DEVICE_DIR = "/lib/debugpy"
+_MARKER_NAME = ".debugpy-install.json"
+_PACKAGE_SUBDIR = "debugpy"
 _DEFAULT_MPY_CROSS_FLAGS = ("-O2",)
 _CACHE_KEY_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -69,6 +69,25 @@ def _mpy_cross_emitted_version(mpy_cross_version):
 def _device_mpy_version(transport):
     transport.exec("import sys")
     return transport.eval("getattr(sys.implementation, '_mpy', 0) & 0xFF")
+
+
+def _device_lib_dir(transport):
+    # The target's own library directory, read from its sys.path. A hardcoded
+    # "/lib" assumes the filesystem is mounted at the root, which is not true
+    # of boards that mount theirs at /flash: there mkdir("/lib") fails with
+    # ENODEV, and anything written under /lib would not be importable anyway.
+    # Frozen-in /rom entries are skipped because they are read-only.
+    # This is the same resolution `mpremote mip` uses to pick an install target.
+    transport.exec("import sys")
+    lib_paths = [
+        p for p in transport.eval("sys.path") if not p.startswith("/rom") and p.endswith("/lib")
+    ]
+    if not lib_paths or not lib_paths[0]:
+        raise CommandError(
+            "debugpy install: no lib directory in the target's sys.path; "
+            "pass device_dir and marker_path to choose one"
+        )
+    return lib_paths[0].rstrip("/")
 
 
 def _source_files(package_dir):
@@ -231,8 +250,8 @@ def ensure_debugpy_installed(
     mpy_cross=None,
     mpy_cross_flags=_DEFAULT_MPY_CROSS_FLAGS,
     cache_dir=None,
-    device_dir=_DEFAULT_DEVICE_DIR,
-    marker_path=_MARKER_PATH,
+    device_dir=None,
+    marker_path=None,
 ):
     # Cross-compile package_dir to .mpy (host-cached, keyed by a hash of the
     # sources, mpy-cross's version/flags and the target's .mpy version) and
@@ -242,9 +261,20 @@ def ensure_debugpy_installed(
     # forces a full reinstall rather than raising - only a transfer failure
     # (hash mismatch during write) is an error.
     #
+    # device_dir and marker_path default to the target's own lib directory
+    # (see _device_lib_dir), which differs per board, so they are resolved
+    # from the connected device rather than fixed at import time.
+    #
     # Raises if the target has no .mpy support or its .mpy version doesn't
     # match what mpy_cross emits. Returns True if anything was installed,
     # False if the device was already up to date.
+    if device_dir is None or marker_path is None:
+        lib_dir = _device_lib_dir(transport)
+        if device_dir is None:
+            device_dir = lib_dir + "/" + _PACKAGE_SUBDIR
+        if marker_path is None:
+            marker_path = lib_dir + "/" + _MARKER_NAME
+
     # device_dir is swept of everything this run didn't write, so refuse a
     # path whose sweep would reach beyond the package - the filesystem root,
     # or a parent of the marker.
@@ -333,7 +363,7 @@ def ensure_debugpy_installed(
     # (see _sweep_device_dir).
     _sweep_device_dir(transport, device_dir, set(device_files))
 
-    # /lib already exists from the invalidation write above.
+    # The marker's directory already exists from the invalidation write above.
     marker = json.dumps({"key": key, "device_dir": device_dir, "files": device_files}).encode()
     transport.fs_writefile(marker_path, marker, verify_hash=True)
     return True
