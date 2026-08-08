@@ -181,8 +181,8 @@ def argparse_run():
 def argparse_debug():
     cmd_parser = argparse.ArgumentParser(
         description="debug a MicroPython script with a DAP client",
-        epilog="--port/--timeout/--dap-log/--dap-log-file must come before "
-        "target/program, as with any other mpremote option",
+        epilog="as with any other mpremote option, --port/--timeout/--dap-log/"
+        "--dap-log-file/--source must come before target/program",
     )
     cmd_parser.add_argument(
         "target",
@@ -233,6 +233,16 @@ def argparse_debug():
         metavar="FILE",
         default=None,
         help="path for --dap-log's JSONL output; requires --dap-log",
+    )
+    cmd_parser.add_argument(
+        "--source",
+        metavar="PATH",
+        default=None,
+        help="host directory to mount at the device's remote-fs mount point before "
+        "running the program, so it debugs a live view of this directory instead of "
+        "whatever copy is already on the device; overrides the target's 'source' in "
+        "mpdebug.toml; rejected for a unix target, which already runs from the host "
+        "filesystem",
     )
     return cmd_parser
 
