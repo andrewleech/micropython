@@ -4,7 +4,7 @@
 # routine reformat in either repo can't silently break the copies apart.
 """Single parameterised boot script for MicroPython debugpy sessions.
 
-Usage: mpy_launch_debugpy.py [target_module] [target_method] [port]
+Usage: mpy_launch_debugpy.py [target_module] [target_method] [port] [dap_device]
 
 The bind address is probed at runtime rather than passed in: boards with a
 `network` module report their own address, everything else binds all
@@ -22,9 +22,11 @@ text around it. `wait_for_client()` (not a fixed sleep) blocks until the DAP
 client has finished configuring breakpoints, so breakpoints set before then
 are already applied by the time the target starts running.
 
-On a board `_detect_dap_stream()` finds a dedicated DAP CDC interface on,
-the session runs over that stream instead of TCP (`host`/`port` in the
-handshake become `"serial"`/`0`, and the `port` argument is unused).
+On a board `_detect_dap_stream()` finds a dedicated DAP CDC interface on, or
+when `dap_device` names a path this runtime can open directly, the session
+runs over that stream instead of TCP (`host`/`port` in the handshake become
+`"serial"`/`0`, and the `port` argument is unused). `caps["serial_dap"]`
+reports which of the two actually happened, not a board guess.
 """
 
 import json
@@ -61,17 +63,24 @@ def _detect_host():
     return addr
 
 
-def _detect_dap_stream():
+def _detect_dap_stream(device=None):
     """Return an open reader/writer stream for a dedicated DAP CDC interface, if any.
 
-    No port implements the board-specific second-CDC detection this needs
-    yet (matching `DebugSession._probe_serial_dap()`, which is why `caps`
-    always reports `serial_dap: false` today), so this always returns
-    `None` and `_run()` falls back to `debugpy.listen()` over TCP. Once a
-    board-specific check lands here, returning a stream is what switches
-    that board to `listen_stream()` instead - `caps` and this function
-    report the same thing so they can never disagree.
+    `device`, when given, is a device path this runtime can open directly.
+    Only the unix port has one to give: a real board's DAP interface is a
+    runtime object (e.g. rp2's second `machine.USBDevice` CDC), not a path
+    the host can name, so board-specific second-CDC detection still has no
+    implementation here and `device` stays unused there. With no `device`,
+    this always returns `None` and `_run()` falls back to
+    `debugpy.listen()` over TCP. `caps["serial_dap"]` is derived from which
+    channel `_run()` actually picked (see `debugpy.get_capabilities()`),
+    never guessed here, so the two can't disagree.
     """
+    if device is not None:
+        try:
+            return open(device, "r+b")
+        except OSError as er:
+            raise OSError(f"dap_device {device!r} could not be opened: {er}")
     return None
 
 
@@ -82,12 +91,13 @@ def _parse_args():
     target_module = args[0] if len(args) > 0 else "target"
     target_method = args[1] if len(args) > 1 else "main"
     port = int(args[2]) if len(args) > 2 else debugpy.DEFAULT_PORT
-    if len(args) > 3:
+    dap_device = args[3] if len(args) > 3 else None
+    if len(args) > 4:
         raise ValueError(
             "Too many arguments. Usage: mpy_launch_debugpy.py "
-            "[target_module] [target_method] [port]"
+            "[target_module] [target_method] [port] [dap_device]"
         )
-    return target_module, target_method, port
+    return target_module, target_method, port, dap_device
 
 
 def _run():
@@ -96,10 +106,10 @@ def _run():
 
     print(_banner)
     print("MicroPython VS Code Debugging")
-    print("Usage: mpy_launch_debugpy.py [target_module] [target_method] [port]")
+    print("Usage: mpy_launch_debugpy.py [target_module] [target_method] [port] [dap_device]")
     print("==================================")
 
-    target_module, target_method, port = _parse_args()
+    target_module, target_method, port, dap_device = _parse_args()
     print(f"Target module: {target_module}")
     print(f"Target method: {target_method}")
     print("==================================")
@@ -110,7 +120,7 @@ def _run():
         )
         return
 
-    stream = _detect_dap_stream()
+    stream = _detect_dap_stream(dap_device)
     if stream is not None:
         debugpy.listen_stream(stream)
         actual_host, actual_port = "serial", 0
