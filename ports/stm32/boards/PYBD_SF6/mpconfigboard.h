@@ -52,6 +52,12 @@
 #ifndef MICROPY_PY_SYS_SETTRACE_LOCALNAMES
 #define MICROPY_PY_SYS_SETTRACE_LOCALNAMES (1)
 #endif
+// A second CDC interface, so a debug session can carry its DAP channel over
+// USB without taking over the REPL stream or needing the board on a network.
+// pyb.USB_VCP(1) is the device-side handle; the host sees a second tty.
+#ifndef MICROPY_HW_USB_CDC_NUM
+#define MICROPY_HW_USB_CDC_NUM (2)
+#endif
 
 // ROMFS config
 #define MICROPY_HW_ROMFS_ENABLE_EXTERNAL_QSPI (1)
