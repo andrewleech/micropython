@@ -133,13 +133,29 @@ class SerialTransport(Transport):
         self.serial.close()
 
     def read_until(
-        self, min_num_bytes, ending, timeout=10, data_consumer=None, timeout_overall=None
+        self,
+        min_num_bytes,
+        ending,
+        timeout=10,
+        data_consumer=None,
+        timeout_overall=None,
+        timeout_overall_strict=False,
     ):
         """
         min_num_bytes: Obsolete.
         ending: Return if 'ending' matches.
         timeout [s]: Return if timeout between characters. None: Infinite timeout.
         timeout_overall [s]: Return not later than timeout_overall. None: Infinite timeout.
+        timeout_overall_strict: When False (the default, and every pre-existing
+            caller's behaviour), timeout_overall is only consulted once the peer
+            goes quiet - a peer that keeps producing bytes right up to the
+            deadline and past it is not cut off, which is what a verbose
+            board's boot-time printing relies on. When True, timeout_overall
+            is consulted every iteration regardless of how much data is still
+            arriving, so a caller that genuinely needs a hard wall-clock bound
+            (a mounted transport's filesystem RPC pump, the debug handshake
+            scan - both read from a peer that may stream continuously for the
+            whole session) gets one.
         data_consumer: Use callback for incoming characters.
             If data_consumer is used then data is not accumulated and the ending must be 1 byte long
 
@@ -163,6 +179,12 @@ class SerialTransport(Transport):
             while True:
                 if data.endswith(ending):
                     break
+                if (
+                    timeout_overall_strict
+                    and timeout_overall is not None
+                    and time.monotonic() >= begin_overall_s + timeout_overall
+                ):
+                    break
                 new_data = None
                 if self.is_pty or self.serial.inWaiting() > 0:
                     new_data = self.serial.read(1)
@@ -176,18 +198,13 @@ class SerialTransport(Transport):
                 else:
                     if timeout is not None and time.monotonic() >= begin_char_s + timeout:
                         break
-                    if (
-                        timeout_overall is not None
-                        and time.monotonic() >= begin_overall_s + timeout_overall
-                    ):
-                        break
                     time.sleep(0.01)
             return data
         finally:
             if self.is_pty:
                 self.serial.timeout = saved_timeout
 
-    def enter_raw_repl(self, soft_reset=True, timeout_overall=10):
+    def enter_raw_repl(self, soft_reset=True, timeout_overall=10, timeout_overall_strict=False):
         self.serial.write(b"\r\x03")  # ctrl-C: interrupt any running program
 
         # flush input (without relying on serial.flushInput())
@@ -200,7 +217,10 @@ class SerialTransport(Transport):
 
         if soft_reset:
             data = self.read_until(
-                1, b"raw REPL; CTRL-B to exit\r\n>", timeout_overall=timeout_overall
+                1,
+                b"raw REPL; CTRL-B to exit\r\n>",
+                timeout_overall=timeout_overall,
+                timeout_overall_strict=timeout_overall_strict,
             )
             if not data.endswith(b"raw REPL; CTRL-B to exit\r\n>"):
                 print(data)
@@ -211,12 +231,22 @@ class SerialTransport(Transport):
             # Waiting for "soft reboot" independently to "raw REPL" (done below)
             # allows boot.py to print, which will show up after "soft reboot"
             # and before "raw REPL".
-            data = self.read_until(1, b"soft reboot\r\n", timeout_overall=timeout_overall)
+            data = self.read_until(
+                1,
+                b"soft reboot\r\n",
+                timeout_overall=timeout_overall,
+                timeout_overall_strict=timeout_overall_strict,
+            )
             if not data.endswith(b"soft reboot\r\n"):
                 print(data)
                 raise TransportError("could not enter raw repl")
 
-        data = self.read_until(1, b"raw REPL; CTRL-B to exit\r\n", timeout_overall=timeout_overall)
+        data = self.read_until(
+            1,
+            b"raw REPL; CTRL-B to exit\r\n",
+            timeout_overall=timeout_overall,
+            timeout_overall_strict=timeout_overall_strict,
+        )
         if not data.endswith(b"raw REPL; CTRL-B to exit\r\n"):
             print(data)
             raise TransportError("could not enter raw repl")
@@ -227,15 +257,30 @@ class SerialTransport(Transport):
         self.serial.write(b"\r\x02")  # ctrl-B: enter friendly REPL
         self.in_raw_repl = False
 
-    def follow(self, timeout, data_consumer=None):
+    def follow(
+        self, timeout, data_consumer=None, timeout_overall=None, timeout_overall_strict=False
+    ):
         # wait for normal output
-        data = self.read_until(1, b"\x04", timeout=timeout, data_consumer=data_consumer)
+        data = self.read_until(
+            1,
+            b"\x04",
+            timeout=timeout,
+            data_consumer=data_consumer,
+            timeout_overall=timeout_overall,
+            timeout_overall_strict=timeout_overall_strict,
+        )
         if not data.endswith(b"\x04"):
             raise TransportError("timeout waiting for first EOF reception")
         data = data[:-1]
 
         # wait for error output
-        data_err = self.read_until(1, b"\x04", timeout=timeout)
+        data_err = self.read_until(
+            1,
+            b"\x04",
+            timeout=timeout,
+            timeout_overall=timeout_overall,
+            timeout_overall_strict=timeout_overall_strict,
+        )
         if not data_err.endswith(b"\x04"):
             raise TransportError("timeout waiting for second EOF reception")
         data_err = data_err[:-1]
@@ -278,14 +323,16 @@ class SerialTransport(Transport):
         if not data.endswith(b"\x04"):
             raise TransportError("could not complete raw paste: {}".format(data))
 
-    def exec_raw_no_follow(self, command):
+    def exec_raw_no_follow(self, command, timeout_overall=None, timeout_overall_strict=False):
         if isinstance(command, bytes):
             command_bytes = command
         else:
             command_bytes = bytes(command, encoding="utf8")
 
         # check we have a prompt
-        data = self.read_until(1, b">")
+        data = self.read_until(
+            1, b">", timeout_overall=timeout_overall, timeout_overall_strict=timeout_overall_strict
+        )
         if not data.endswith(b">"):
             raise TransportError("could not enter raw repl")
 
@@ -301,7 +348,12 @@ class SerialTransport(Transport):
                 return self.raw_paste_write(command_bytes)
             else:
                 # Device doesn't support raw-paste, fall back to normal raw REPL.
-                data = self.read_until(1, b"w REPL; CTRL-B to exit\r\n>")
+                data = self.read_until(
+                    1,
+                    b"w REPL; CTRL-B to exit\r\n>",
+                    timeout_overall=timeout_overall,
+                    timeout_overall_strict=timeout_overall_strict,
+                )
                 if not data.endswith(b"w REPL; CTRL-B to exit\r\n>"):
                     print(data)
                     raise TransportError("could not enter raw repl")
@@ -319,9 +371,23 @@ class SerialTransport(Transport):
         if data != b"OK":
             raise TransportError("could not exec command (response: %r)" % data)
 
-    def exec_raw(self, command, timeout=10, data_consumer=None):
-        self.exec_raw_no_follow(command)
-        return self.follow(timeout, data_consumer)
+    def exec_raw(
+        self,
+        command,
+        timeout=10,
+        data_consumer=None,
+        timeout_overall=None,
+        timeout_overall_strict=False,
+    ):
+        self.exec_raw_no_follow(
+            command, timeout_overall=timeout_overall, timeout_overall_strict=timeout_overall_strict
+        )
+        return self.follow(
+            timeout,
+            data_consumer,
+            timeout_overall=timeout_overall,
+            timeout_overall_strict=timeout_overall_strict,
+        )
 
     def eval(self, expression, parse=True):
         if parse:
@@ -333,8 +399,15 @@ class SerialTransport(Transport):
             ret = ret.strip()
             return ret
 
-    def exec(self, command, data_consumer=None):
-        ret, ret_err = self.exec_raw(command, data_consumer=data_consumer)
+    def exec(
+        self, command, data_consumer=None, timeout_overall=None, timeout_overall_strict=False
+    ):
+        ret, ret_err = self.exec_raw(
+            command,
+            data_consumer=data_consumer,
+            timeout_overall=timeout_overall,
+            timeout_overall_strict=timeout_overall_strict,
+        )
         if ret_err:
             raise TransportExecError(ret, ret_err.decode())
         return ret
@@ -442,11 +515,20 @@ class SerialTransport(Transport):
         out_callback(prompt)
         self.serial = SerialIntercept(self.serial, self.cmd)
 
-    def umount_local(self):
+    def umount_local(self, timeout_overall=None, timeout_overall_strict=False):
         if self.mounted:
-            self.exec(f'os.umount("{self.fs_hook_mount}")')
+            self.exec(
+                f'os.umount("{self.fs_hook_mount}")',
+                timeout_overall=timeout_overall,
+                timeout_overall_strict=timeout_overall_strict,
+            )
             self.mounted = False
-            self.serial = self.serial.orig_serial
+            # getattr, not a plain attribute access: `mounted` is set True
+            # before `self.serial` is swapped for a `SerialIntercept` (see
+            # mount_local), so an interruption landing in that narrow window
+            # leaves `self.serial` as the plain wrapped port, with no
+            # `orig_serial` of its own to unwrap.
+            self.serial = getattr(self.serial, "orig_serial", self.serial)
 
 
 fs_hook_cmds = {
@@ -831,22 +913,43 @@ class PyboardCommand:
         self.data_files = []
         self.unsafe_links = unsafe_links
 
+    def _rd_exact(self, n):
+        """Read exactly n bytes from the device side of the RPC channel.
+
+        `self.fin.read(n)` is a plain pyserial read: it can return fewer
+        than `n` bytes once the port's timeout elapses, which happens for
+        an ordinary slow trickle of bytes as well as for a device that has
+        stopped responding mid-command. Looping here treats the former
+        correctly instead of handing a short buffer to `struct.unpack` and
+        raising a `struct.error` that names no cause; the latter still ends
+        the loop, via `TransportError`, since a `read()` call returning
+        nothing at all means the port's own timeout was reached waiting for
+        the very first byte of what should still be coming.
+        """
+        buf = bytearray()
+        while len(buf) < n:
+            chunk = self.fin.read(n - len(buf))
+            if not chunk:
+                raise TransportError("mount filesystem RPC: device stopped responding mid-command")
+            buf += chunk
+        return bytes(buf)
+
     def rd_s8(self):
-        return struct.unpack("<b", self.fin.read(1))[0]
+        return struct.unpack("<b", self._rd_exact(1))[0]
 
     def rd_s32(self):
-        return struct.unpack("<i", self.fin.read(4))[0]
+        return struct.unpack("<i", self._rd_exact(4))[0]
 
     def rd_bytes(self):
         n = self.rd_s32()
-        return self.fin.read(n)
+        return self._rd_exact(n)
 
     def rd_str(self):
         n = self.rd_s32()
         if n == 0:
             return ""
         else:
-            return str(self.fin.read(n), "utf8", errors="backslashreplace")
+            return str(self._rd_exact(n), "utf8", errors="backslashreplace")
 
     def wr_s8(self, i):
         self.fout.write(struct.pack("<b", i))
@@ -1052,22 +1155,38 @@ class SerialIntercept:
         self.orig_serial.timeout = 5.0
 
     def _check_input(self, blocking):
-        if blocking or self.orig_serial.inWaiting() > 0:
-            c = self.orig_serial.read(1)
-            if c == b"\x18":
-                # a special command
-                c = self.orig_serial.read(1)[0]
-                self.orig_serial.write(b"\x18")  # Acknowledge command
-                PyboardCommand.cmd_table[c](self.cmd)
-            elif not VT_ENABLED and c == b"\x1b":
-                # ESC code, ignore these on windows
-                esctype = self.orig_serial.read(1)
-                if esctype == b"[":  # CSI
-                    while not (0x40 < self.orig_serial.read(1)[0] < 0x7E):
-                        # Looking for "final byte" of escape sequence
-                        pass
-            else:
-                self.buf += c
+        """Service one byte of the wrapped serial connection.
+
+        Returns True if a byte was consumed - buffered as console output, or
+        handled as filesystem RPC or an escape sequence - False if a blocking
+        read reached the wrapped port's own timeout with nothing to show for
+        it, and None if `blocking` is False and there was nothing waiting to
+        check at all. `read` below relies on False meaning "the peer has been
+        quiet for a whole timeout period" to return a short read instead of
+        looping forever; `orig_serial.read(1)` already honours the wrapped
+        port's `timeout` and returns `b""` on expiry, same as any ordinary
+        pyserial read.
+        """
+        if not (blocking or self.orig_serial.inWaiting() > 0):
+            return None
+        c = self.orig_serial.read(1)
+        if c == b"":
+            return False
+        if c == b"\x18":
+            # a special command
+            c = self.orig_serial.read(1)[0]
+            self.orig_serial.write(b"\x18")  # Acknowledge command
+            PyboardCommand.cmd_table[c](self.cmd)
+        elif not VT_ENABLED and c == b"\x1b":
+            # ESC code, ignore these on windows
+            esctype = self.orig_serial.read(1)
+            if esctype == b"[":  # CSI
+                while not (0x40 < self.orig_serial.read(1)[0] < 0x7E):
+                    # Looking for "final byte" of escape sequence
+                    pass
+        else:
+            self.buf += c
+        return True
 
     @property
     def fd(self):
@@ -1093,7 +1212,8 @@ class SerialIntercept:
 
     def read(self, n):
         while len(self.buf) < n:
-            self._check_input(True)
+            if self._check_input(True) is False:
+                break  # the wrapped port timed out with nothing new: return short, like pyserial
         out = self.buf[:n]
         self.buf = self.buf[n:]
         return out
