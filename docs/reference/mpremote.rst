@@ -281,6 +281,13 @@ The full list of supported commands are:
   device paths in the DAP frames, so breakpoints can be set in source the
   board does not have on its filesystem.
 
+  ``--loop`` keeps the process and the DAP session alive across re-runs: the
+  DAP ``restart`` request is honoured, and each restart drops whatever the
+  program imported and imports it again, so an edit under ``--source`` takes
+  effect with no upload and no reset. Each re-run announces itself with a
+  ``MPDBG-RESTART {"iteration": N, "evicted": [...]}`` line, which is
+  deliberately not another ``MPDBG-READY``: the endpoint has not changed.
+
   ``--dap-log`` records every DAP message (timestamp, direction, decoded
   JSON) as JSONL. mpremote never sits in the data path a plain ``debug``
   reports, so logging works by interposing a local proxy, bound to
