@@ -282,6 +282,11 @@ The full list of supported commands are:
   currently binds it. ``--timeout`` sets how long to wait for the device's
   report; it does not bound anything after that.
 
+  ``--source PATH`` mounts a host directory on the device for the session and
+  emits the ``pathMappings`` a client needs to match its own files to the
+  device paths in the DAP frames, so breakpoints can be set in source the
+  board does not have on its filesystem.
+
   ``--dap-log`` records every DAP message (timestamp, direction, decoded
   JSON) as JSONL. mpremote never sits in the data path a plain ``debug``
   reports, so logging works by interposing a local proxy, bound to
@@ -298,12 +303,12 @@ The full list of supported commands are:
   ``--dap-log`` is also given); omitted, it defaults to a timestamped file in
   the current directory.
 
-  Two things keep the command attached instead of reporting and returning: a
-  ``unix`` target, whose subprocess it supervises, and ``--dap-log``, whose
-  proxy has to keep running for the client to reach the device through it.
-  While attached, the command drains and prints the board's console: a
-  console held open but never read back-pressures into the device until the
-  program stops.
+  Three things keep the command attached instead of reporting and returning:
+  a ``unix`` target, whose subprocess it supervises; ``--dap-log``, whose
+  proxy has to keep running for the client to reach the device through it;
+  and ``--source``, whose mount needs its filesystem RPC serviced. While
+  attached, the command drains and prints the board's console: a console held
+  open but never read back-pressures into the device until the program stops.
 
   A project-level ``mpdebug.toml``, discovered by searching the current
   directory and its parents (stopping at a ``.git`` directory or ``$HOME``),
@@ -324,7 +329,8 @@ The full list of supported commands are:
   the debug endpoint itself is always reported by the device, never written
   here); prefer a stable ``/dev/serial/by-id/...`` path over ``/dev/ttyACMn``,
   which can renumber on replug (using one prints a warning but still works).
-  ``program`` is this target's ``module[:method]`` default.
+  ``program`` is this target's ``module[:method]`` default and ``source`` its
+  ``--source`` default; the command-line flags override both.
 
   ``firmware`` applies to a ``unix`` target only, and is either a path to a
   built ``micropython`` binary (a relative one is resolved against the
