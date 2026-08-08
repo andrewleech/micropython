@@ -246,6 +246,15 @@ def argparse_debug():
         "mpdebug.toml; rejected for a unix target, which already runs from the host "
         "filesystem",
     )
+    _bool_flag(
+        cmd_parser,
+        "loop",
+        "l",
+        False,
+        "keep the session alive across re-runs: the client's restart request "
+        "evicts what the program imported and imports it again, so an edit "
+        "takes effect with no upload and no reset",
+    )
     return cmd_parser
 
 
