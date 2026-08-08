@@ -23,7 +23,7 @@
 # THE SOFTWARE.
 """Single parameterised boot script for MicroPython debugpy sessions.
 
-Usage: mpy_launch_debugpy.py [target_module] [target_method] [port]
+Usage: mpy_launch_debugpy.py [target_module] [target_method] [port] [dap_stream]
 
 The bind address is probed at runtime rather than passed in: boards with a
 `network` module report their own address, everything else binds all
@@ -40,6 +40,12 @@ Tooling parses that one line rather than any of the human-readable banner
 text around it. `wait_for_client()` (not a fixed sleep) blocks until the DAP
 client has finished configuring breakpoints, so breakpoints set before then
 are already applied by the time the target starts running.
+
+When `dap_stream` names a path this runtime can open, the session runs over
+that stream instead of TCP (`host`/`port` in the handshake become
+`"serial"`/`0`, and the `port` argument is unused). A caller that asks for a
+stream and does not get one is told so rather than quietly given a TCP
+endpoint it has no client for.
 """
 
 import json
@@ -89,6 +95,23 @@ def _detect_host():
     return "0.0.0.0"
 
 
+def _detect_dap_stream(spec=None):
+    """Return an open reader/writer stream for the DAP channel, or None for TCP.
+
+    `spec`, when given, is a path this runtime can open directly - what the
+    unix port has instead of a USB interface. With no `spec` this returns
+    `None` and `_run()` falls back to `debugpy.listen()` over TCP. Failing to
+    produce a stream that was asked for raises rather than returning None, so
+    the caller never gets a TCP endpoint it has no client for.
+    """
+    if spec is None:
+        return None
+    try:
+        return open(spec, "r+b")
+    except OSError as er:
+        raise OSError(f"dap_stream {spec!r} could not be opened: {er}")
+
+
 def _parse_args():
     import debugpy
 
@@ -96,12 +119,13 @@ def _parse_args():
     target_module = args[0] if len(args) > 0 else "target"
     target_method = args[1] if len(args) > 1 else "main"
     port = int(args[2]) if len(args) > 2 else debugpy.DEFAULT_PORT
-    if len(args) > 3:
+    dap_stream = args[3] if len(args) > 3 else None
+    if len(args) > 4:
         raise ValueError(
             "Too many arguments. Usage: mpy_launch_debugpy.py "
-            "[target_module] [target_method] [port]"
+            "[target_module] [target_method] [port] [dap_stream]"
         )
-    return target_module, target_method, port
+    return target_module, target_method, port, dap_stream
 
 
 def _run():
@@ -118,7 +142,7 @@ def _run():
 
     import debugpy
 
-    target_module, target_method, port = _parse_args()
+    target_module, target_method, port, dap_stream = _parse_args()
     print(f"Target module: {target_module}")
     print(f"Target method: {target_method}")
 
@@ -128,8 +152,13 @@ def _run():
         )
         return
 
-    host = _detect_host()
-    actual_host, actual_port = debugpy.listen(host=host, port=port)
+    stream = _detect_dap_stream(dap_stream)
+    if stream is not None:
+        debugpy.listen_stream(stream)
+        actual_host, actual_port = "serial", 0
+    else:
+        host = _detect_host()
+        actual_host, actual_port = debugpy.listen(host=host, port=port)
     print(f"Debug server listening on {actual_host}:{actual_port}")
 
     caps = debugpy.get_capabilities()
