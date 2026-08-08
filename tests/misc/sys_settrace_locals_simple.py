@@ -16,7 +16,7 @@ def trace_handler(frame, event, arg):
         return trace_handler
 
     # Only trace our test functions
-    if frame.f_code.co_name.startswith('test_'):
+    if frame.f_code.co_name.startswith("test_"):
         locals_dict = frame.f_locals
         local_keys = sorted(locals_dict.keys())
         if local_keys:

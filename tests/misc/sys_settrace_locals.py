@@ -22,10 +22,10 @@ def trace_handler(frame, event, arg):
 
     # Record the event and local variables
     event_data = {
-        'event': event,
-        'function': frame.f_code.co_name,
-        'lineno': frame.f_lineno,
-        'locals': dict(frame.f_locals),
+        "event": event,
+        "function": frame.f_code.co_name,
+        "lineno": frame.f_lineno,
+        "locals": dict(frame.f_locals),
     }
     trace_events.append(event_data)
 
@@ -51,10 +51,10 @@ def test_basic_locals():
 
     # Find the call event for simple_func
     call_events = [
-        e for e in trace_events if e['event'] == 'call' and e['function'] == 'simple_func'
+        e for e in trace_events if e["event"] == "call" and e["function"] == "simple_func"
     ]
     line_events = [
-        e for e in trace_events if e['event'] == 'line' and e['function'] == 'simple_func'
+        e for e in trace_events if e["event"] == "line" and e["function"] == "simple_func"
     ]
 
     print("test_basic_locals:")
@@ -65,7 +65,7 @@ def test_basic_locals():
     # Check that we captured local variables
     if line_events:
         last_line_event = line_events[-1]
-        locals_dict = last_line_event['locals']
+        locals_dict = last_line_event["locals"]
         local_keys = sorted(locals_dict.keys())
         print(f"  Local variables found: {local_keys}")
 
@@ -99,18 +99,18 @@ def test_nested_function_locals():
     print(f"  Function returned: {result}")
 
     # Analyze events for both functions
-    outer_events = [e for e in trace_events if e['function'] == 'outer_func']
-    inner_events = [e for e in trace_events if e['function'] == 'inner_func']
+    outer_events = [e for e in trace_events if e["function"] == "outer_func"]
+    inner_events = [e for e in trace_events if e["function"] == "inner_func"]
 
     print(f"  Outer function events: {len(outer_events)}")
     print(f"  Inner function events: {len(inner_events)}")
 
     # Check locals in each function
-    for func_name, events in [('outer_func', outer_events), ('inner_func', inner_events)]:
-        line_events = [e for e in events if e['event'] == 'line']
+    for func_name, events in [("outer_func", outer_events), ("inner_func", inner_events)]:
+        line_events = [e for e in events if e["event"] == "line"]
         if line_events:
             last_event = line_events[-1]
-            locals_dict = last_event['locals']
+            locals_dict = last_event["locals"]
             local_keys = sorted(locals_dict.keys())
             print(f"  {func_name} locals: {local_keys}")
             for key in local_keys:
@@ -143,14 +143,14 @@ def test_loop_locals():
 
     # Find line events in the loop
     loop_events = [
-        e for e in trace_events if e['function'] == 'loop_func' and e['event'] == 'line'
+        e for e in trace_events if e["function"] == "loop_func" and e["event"] == "line"
     ]
 
     print(f"  Line events in loop: {len(loop_events)}")
 
     # Check locals evolution through loop iterations
     for i, event in enumerate(loop_events[-3:]):  # Last few events
-        locals_dict = event['locals']
+        locals_dict = event["locals"]
         local_keys = sorted(locals_dict.keys())
         print(f"  Event {i} (line {event['lineno']}) locals: {local_keys}")
         for key in local_keys:
@@ -182,15 +182,15 @@ def test_exception_locals():
     print(f"  Function returned: {result}")
 
     # Find exception-related events
-    exception_events = [e for e in trace_events if e['function'] == 'exception_func']
-    line_events = [e for e in exception_events if e['event'] == 'line']
+    exception_events = [e for e in trace_events if e["function"] == "exception_func"]
+    line_events = [e for e in exception_events if e["event"] == "line"]
 
     print(f"  Events in exception function: {len(exception_events)}")
 
     # Check locals in exception handling
     if line_events:
         last_event = line_events[-1]
-        locals_dict = last_event['locals']
+        locals_dict = last_event["locals"]
         local_keys = sorted(locals_dict.keys())
         print(f"  Final locals: {local_keys}")
         for key in local_keys:
@@ -216,13 +216,13 @@ def test_parameter_locals():
     print(f"  Function returned: {result}")
 
     # Find events for the function
-    func_events = [e for e in trace_events if e['function'] == 'param_func']
-    line_events = [e for e in func_events if e['event'] == 'line']
+    func_events = [e for e in trace_events if e["function"] == "param_func"]
+    line_events = [e for e in func_events if e["event"] == "line"]
 
     if line_events:
         # Check locals after parameter setup
         first_line_event = line_events[0]
-        locals_dict = first_line_event['locals']
+        locals_dict = first_line_event["locals"]
         local_keys = sorted(locals_dict.keys())
         print(f"  Locals with parameters: {local_keys}")
         for key in local_keys:
