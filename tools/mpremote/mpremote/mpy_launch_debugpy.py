@@ -4,7 +4,11 @@
 # routine reformat in either repo can't silently break the copies apart.
 """Single parameterised boot script for MicroPython debugpy sessions.
 
-Usage: mpy_launch_debugpy.py [target_module] [target_method] [port] [dap_stream]
+Usage: mpy_launch_debugpy.py [target_module] [target_method] [port] [dap_stream] [loop]
+
+Every argument is positional, so one that is not given but is followed by one
+that is has to be passed as the empty string; an empty `port` or `dap_stream`
+reads the same as leaving it off the end.
 
 The bind address is probed at runtime rather than passed in: boards with a
 `network` module report their own address, everything else binds all
@@ -30,6 +34,18 @@ handshake become `"serial"`/`0` and the `port` argument goes unused.
 guess. A caller that asks for a stream and does not get one is told so: this
 never falls back to TCP behind the caller's back, because the caller has a
 bridge waiting on the stream and nothing listening on a port.
+
+`loop`, when the literal `"loop"`, keeps the process and the DAP session alive
+across re-runs of the target: the DAP `restart` request is advertised and
+honoured, and each restart evicts whatever the target imported from
+`sys.modules` and imports it again, so a source edit takes effect with no
+upload and no reset. Each re-run announces itself with
+
+    MPDBG-RESTART {"iteration": N, "evicted": [...]}
+
+which is deliberately not another MPDBG-READY: the endpoint has not changed.
+That line goes to the client's debug console as well as to stdout, because a
+mounted serial session's host never sees anything the device prints.
 """
 
 import json
@@ -130,14 +146,82 @@ def _parse_args():
     args = sys.argv[1:]
     target_module = args[0] if len(args) > 0 else "target"
     target_method = args[1] if len(args) > 1 else "main"
-    port = int(args[2]) if len(args) > 2 else debugpy.DEFAULT_PORT
+    # Empty reads as "not given" for both of these, which is how a caller
+    # passes over one of them to reach a later positional argument.
+    port = int(args[2]) if len(args) > 2 and args[2] else debugpy.DEFAULT_PORT
     dap_stream = args[3] if len(args) > 3 else None
-    if len(args) > 4:
+    # Anything other than the literal "loop" is refused rather than quietly
+    # read as false.
+    loop = args[4] if len(args) > 4 else ""
+    if loop not in ("", "loop"):
+        raise ValueError(f"loop argument must be 'loop' or empty, not {loop!r}")
+    if len(args) > 5:
         raise ValueError(
             "Too many arguments. Usage: mpy_launch_debugpy.py "
-            "[target_module] [target_method] [port] [dap_stream]"
+            "[target_module] [target_method] [port] [dap_stream] [loop]"
         )
-    return target_module, target_method, port, dap_stream
+    return target_module, target_method, port, dap_stream or None, loop == "loop"
+
+
+def _evict_target_modules(baseline):
+    """Drop from sys.modules everything the target's imports added.
+
+    The eviction set is defined by what the target pulled in, not by a list of
+    names to spare, so the debugger cannot be evicted out from under itself:
+    every module debugpy needs was imported before `baseline` was taken. It also
+    means a submodule of the target that changed is re-read along with it, which
+    a target-module-only eviction would miss.
+
+    Returns the evicted names, sorted, for the restart marker.
+    """
+    evicted = []
+    for name in list(sys.modules):
+        if name not in baseline:
+            del sys.modules[name]
+            evicted.append(name)
+    evicted.sort()
+    return evicted
+
+
+def _report(line, debugpy):
+    """Print a marker line to stdout and show it in the client's debug console.
+
+    Both, because neither reaches everyone on its own: a mounted serial session
+    discards everything the device prints, and a caller reading stdout may have
+    no DAP client of its own. The text is identical on both channels, so there
+    is one format to parse rather than two.
+    """
+    print(line)
+    debugpy.console(line + "\n")
+
+
+def _tracing_survived_unwind():
+    """True if sys.settrace still calls back after the unwind that just ran.
+
+    A firmware whose profiling hook leaves its recursion guard set when a trace
+    callback raises never invokes another callback, while sys.settrace() and
+    sys.gettrace() go on reporting success - so installing one and watching is
+    the only way to tell. Silence about that would mean every run after the
+    first restart binds no breakpoints at all, with nothing to see.
+
+    Only safe to call after an unwind: on an affected firmware tracing is
+    already gone by then, and on a sound one this leaves nothing behind.
+    """
+    calls = []
+
+    def _count(frame, event, arg):
+        calls.append(event)
+        return _count
+
+    def _probe():
+        return 1
+
+    sys.settrace(_count)
+    try:
+        _probe()
+    finally:
+        sys.settrace(None)
+    return bool(calls)
 
 
 def _run():
@@ -145,10 +229,12 @@ def _run():
 
     print(_banner)
     print("MicroPython VS Code Debugging")
-    print("Usage: mpy_launch_debugpy.py [target_module] [target_method] [port] [dap_stream]")
+    print(
+        "Usage: mpy_launch_debugpy.py [target_module] [target_method] [port] [dap_stream] [loop]"
+    )
     print("==================================")
 
-    target_module, target_method, port, dap_stream = _parse_args()
+    target_module, target_method, port, dap_stream, loop = _parse_args()
     print(f"Target module: {target_module}")
     print(f"Target method: {target_method}")
     print("==================================")
@@ -158,6 +244,10 @@ def _run():
             "sys.settrace is not available. You need a firmware compiled with debugging features."
         )
         return
+
+    if loop:
+        # Before wait_for_client(), which is where `initialize` is answered.
+        debugpy.enable_restart()
 
     stream = _detect_dap_stream(dap_stream)
     if stream is not None:
@@ -181,30 +271,77 @@ def _run():
         debugpy.disconnect()
         return
 
-    debugpy.debug_this_thread()
+    # Everything the debugger needs is imported by now, so nothing captured here
+    # is ever a candidate for eviction on a restart.
+    baseline_modules = set(sys.modules)
 
-    # Imported only once a client is configured: the module's top-level code
-    # runs on import, and it should run under the debugger with the client's
-    # breakpoints already in place, not before the session exists.
-    try:
-        target = __import__(target_module, None, None, ("*",))
-    except ImportError as e:
-        print(f"Error importing target module '{target_module}': {e}")
-        return
+    iteration = 0
+    while True:
+        iteration += 1
+        if iteration > 1:
+            evicted = _evict_target_modules(baseline_modules)
+            # A restart is NOT another MPDBG-READY: the endpoint has not
+            # changed and a caller that re-parsed one would think a second
+            # session had started.
+            _report(
+                "MPDBG-RESTART " + json.dumps({"iteration": iteration, "evicted": evicted}),
+                debugpy,
+            )
+            if not _tracing_survived_unwind():
+                _report(
+                    "MPDBG-DEGRADED sys.settrace stopped calling back after the unwind; "
+                    "this run has no breakpoints. The firmware needs the fix that clears "
+                    "the profiling recursion guard when a trace callback raises.",
+                    debugpy,
+                )
 
-    method = getattr(target, target_method, None)
-    if method is None:
-        print(f"Method '{target_method}' not found in module '{target_module}'")
-        return
+        # Traced from here to the end of the run and no further: the loop's own
+        # code must not be traced, or a restart handled while it waits below
+        # would unwind the loop itself. The unwind also drops the trace
+        # function (sys.settrace semantics), so this re-arms it each iteration.
+        debugpy.debug_this_thread()
+        restarting = False
+        try:
+            # Imported only once a client is configured: the module's top-level
+            # code runs on import, and it should run under the debugger with the
+            # client's breakpoints already in place, not before the session
+            # exists. On a later iteration the eviction above is what makes this
+            # re-read the file rather than hand back the cached module.
+            try:
+                target = __import__(target_module, None, None, ("*",))
+            except ImportError as e:
+                print(f"Error importing target module '{target_module}': {e}")
+                return
 
-    result = method()
+            method = getattr(target, target_method, None)
+            if method is None:
+                print(f"Method '{target_method}' not found in module '{target_module}'")
+                return
 
-    print("Target completed successfully!")
-    if result is None:
-        print("No result returned from target method")
-    else:
-        print("Result type:", type(result))
-        print("Result:", result)
+            result = method()
+        except debugpy.RestartRequest:
+            # The target was unwound part-way through on purpose; it has no
+            # result, and the next iteration is already asked for.
+            print("Target restarting")
+            restarting = True
+        finally:
+            sys.settrace(None)
+
+        if not restarting:
+            print("Target completed successfully!")
+            if result is None:
+                print("No result returned from target method")
+            else:
+                print("Result type:", type(result))
+                print("Result:", result)
+
+        if not loop:
+            return
+        if not restarting and not debugpy.wait_for_restart():
+            # No client left to restart for. Ending here rather than looping
+            # keeps a session whose client went away from spinning forever.
+            print("Debug client gone; not waiting for another restart")
+            return
 
 
 # Guarded so importing this module does not run device boot code: it ships as
