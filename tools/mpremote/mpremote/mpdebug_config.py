@@ -26,6 +26,22 @@ serial interface, used only when the handshake also reports `serial_dap:
 true`; without it `do_debug` always uses the network transport, whatever a
 device's own probe says it has.
 
+`source` names a host directory that `do_debug` mounts at the device's
+remote-fs mount point before running the debugged program, so the program
+executes from a live view of the host filesystem rather than whatever copy
+already sits on the device. A relative path is resolved against the
+directory holding this `mpdebug.toml`; the value stored on `Target` is
+always an absolute, symlink-resolved path, checked for existence when
+`do_debug` actually uses it rather than here, so one target's stale source
+doesn't break every other target in the file. Its absence means the module
+already lives on the device's own filesystem - the hardware-in-the-loop
+targets that run `/flash/target.py` want exactly this - so nothing is
+mounted and `do_debug` behaves as it did before this key existed. Valid only
+on a "serial" or "network" target: a "unix" target already runs the program
+straight from the host filesystem, so there is nothing to mount. A
+`--source PATH` command-line option overrides this key without needing an
+`mpdebug.toml` entry at all.
+
 Unknown keys in a target table are ignored, not rejected, so a front-end can
 store its own metadata (icons, ordering, ...) alongside these.
 
@@ -72,7 +88,15 @@ _KINDS = ("unix", "serial", "network")
 # shorthands, and the "id:"/"port:" connect-string prefixes.
 class Target:
     def __init__(
-        self, name, kind, device=None, firmware=None, program=None, requires=(), dap_device=None
+        self,
+        name,
+        kind,
+        device=None,
+        firmware=None,
+        program=None,
+        requires=(),
+        dap_device=None,
+        source=None,
     ):
         self.name = name
         self.kind = kind
@@ -87,6 +111,11 @@ class Target:
         # the network transport, even if the device's own probe says it has
         # one, since there is no path to reach it without this.
         self.dap_device = dap_device
+        # Absolute, symlink-resolved host directory `do_debug` mounts at the
+        # device's remote-fs mount point before running the program. None
+        # means the program's module already lives on the device's own
+        # filesystem, so `do_debug` mounts nothing.
+        self.source = source
 
 
 def find_config(start_dir=None):
@@ -173,7 +202,7 @@ def _load_targets(path):
                 f"{', '.join(KNOWN_CAPABILITIES)}"
             )
 
-        for key in ("device", "program", "firmware", "dap_device"):
+        for key in ("device", "program", "firmware", "dap_device", "source"):
             value = spec.get(key)
             if value is not None and not isinstance(value, str):
                 _command_error(f"{path}: target '{name}' {key} must be a string")
@@ -189,6 +218,24 @@ def _load_targets(path):
         if dap_device == "":
             _command_error(f"{path}: target '{name}' has an empty 'dap_device'")
 
+        source = spec.get("source")
+        if source == "":
+            _command_error(f"{path}: target '{name}' has an empty 'source'")
+        if source is not None:
+            if kind == "unix":
+                _command_error(
+                    f"{path}: target '{name}' is kind 'unix' and has a 'source'; a "
+                    "unix target already runs the program straight from the host "
+                    "filesystem, there is nothing to mount"
+                )
+            if not os.path.isabs(source):
+                source = os.path.join(os.path.dirname(path), source)
+            source = os.path.realpath(source)
+            # Existence is checked at the point of use (do_debug), not here:
+            # an isdir check at load time would fail every target in the
+            # file the moment any one of them names a source root that
+            # doesn't (yet) exist, not just the one actually being run.
+
         targets[name] = Target(
             name=name,
             kind=kind,
@@ -197,6 +244,7 @@ def _load_targets(path):
             program=spec.get("program"),
             requires=requires,
             dap_device=dap_device,
+            source=source,
         )
     return targets
 
