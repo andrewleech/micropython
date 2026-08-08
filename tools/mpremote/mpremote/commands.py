@@ -542,25 +542,34 @@ def _parse_program_spec(spec):
     return module, method
 
 
-def _debug_boot_script(module, method, port, dap_stream=None, mount_point=None):
+def _debug_argv(module, method, port, dap_stream=None, loop=False):
+    """mpy_launch_debugpy.py's arguments, in its own positional order.
+
+    Its contract is `[module] [method] [port] [dap_stream] [loop]`, all
+    positional, so an argument that is not given but is followed by one that is
+    has to be passed as the empty string - which the launcher reads as "not
+    given" (its own default port, and the TCP channel rather than a stream).
+    Trailing empties are dropped so the common cases produce the shortest argv.
+    """
+    argv = [
+        module,
+        method,
+        "" if port is None else str(port),
+        dap_stream or "",
+        "loop" if loop else "",
+    ]
+    while argv and argv[-1] == "":
+        argv.pop()
+    return argv
+
+
+def _debug_boot_script(module, method, port, dap_stream=None, mount_point=None, loop=False):
     # Raw REPL exec has no OS argv, so sys.argv is injected here to preserve
-    # mpy_launch_debugpy.py's own argv contract ([module] [method] [port]
-    # [dap_stream]).
+    # mpy_launch_debugpy.py's own argv contract (see _debug_argv).
     # sys.argv is rebound in place (not reassigned): the `sys` module dict is
     # read-only on MicroPython, so `sys.argv = [...]` raises AttributeError.
-    # port=None omits the argv element so the device applies its own default
-    # port instead of the host choosing one - unless a dap_stream follows it,
-    # since argv is positional. The placeholder is harmless: the stream path
-    # never binds a port, and a device that cannot produce the requested
-    # stream raises instead of falling back to TCP.
     script = pkgutil.get_data(__package__, "mpy_launch_debugpy.py").decode()
-    argv = ["mpy_launch_debugpy.py", module, method]
-    if port is not None:
-        argv.append(str(port))
-    elif dap_stream is not None:
-        argv.append("0")
-    if dap_stream is not None:
-        argv.append(dap_stream)
+    argv = ["mpy_launch_debugpy.py"] + _debug_argv(module, method, port, dap_stream, loop)
     preamble = "import sys\nsys.argv[:] = [{}]\n".format(", ".join(repr(a) for a in argv))
     if mount_point is not None:
         # The fs hook os.chdir()s into the mount point, so plain __import__
@@ -1082,7 +1091,7 @@ def _reap(proc):
 _UNIX_EOF_MARKER = "\x00mpremote-debug-unix-eof\x00"  # never appears in real program output
 
 
-def _do_debug_unix(resolved, module, method, port, timeout, dap_log_arg, dap_log_bind_port):
+def _do_debug_unix(resolved, module, method, port, timeout, dap_log_arg, dap_log_bind_port, loop):
     proxy = None  # set once the handshake is in, if --dap-log was given
     try:
         # The non-blocking fd handling below is POSIX-only, unlike the rest of
@@ -1107,9 +1116,9 @@ def _do_debug_unix(resolved, module, method, port, timeout, dap_log_arg, dap_log
         shutil.rmtree(tmpdir, ignore_errors=True)
         raise
 
-    argv = [binary, script_path, module, method]
-    if port is not None:
-        argv.append(str(port))
+    # No dap_stream: a unix target's DAP channel is TCP on the loopback
+    # interface, which needs no second interface to carry it.
+    argv = [binary, script_path] + _debug_argv(module, method, port, loop=loop)
 
     try:
         proc = subprocess.Popen(
@@ -1338,7 +1347,14 @@ def do_debug(state, args):
         # Reports the endpoint and supervises the child itself (unlike the
         # serial/network path below, mpremote owns this process).
         return _do_debug_unix(
-            resolved, module, method, device_port, args.timeout, dap_log_arg, dap_log_bind_port
+            resolved,
+            module,
+            method,
+            device_port,
+            args.timeout,
+            dap_log_arg,
+            dap_log_bind_port,
+            args.loop,
         )
 
     if resolved is None:
@@ -1406,6 +1422,7 @@ def do_debug(state, args):
                         device_port,
                         dap_stream,
                         mount_point=SerialTransport.fs_hook_mount if mounted else None,
+                        loop=args.loop,
                     )
                 )
                 print("waiting for the device to report its debug-server endpoint...", flush=True)
