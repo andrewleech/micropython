@@ -367,3 +367,40 @@ def ensure_debugpy_installed(
     marker = json.dumps({"key": key, "device_dir": device_dir, "files": device_files}).encode()
     transport.fs_writefile(marker_path, marker, verify_hash=True)
     return True
+
+
+def do_debugpy_install(state, args):
+    # The command layer over ensure_debugpy_installed: mpremote has no copy of
+    # the debugpy package and no way to guess where one is, so the host
+    # directory is named on the command line.
+    package_dir = os.path.realpath(args.package_dir[0])
+    if not os.path.isdir(package_dir):
+        raise CommandError(f"debugpy install: {package_dir} is not a directory")
+    if not os.path.isfile(os.path.join(package_dir, "__init__.py")):
+        # The likely mistake is naming micropython-lib's package *folder*
+        # rather than the package itself, so say which one was meant.
+        inner = os.path.join(package_dir, _PACKAGE_SUBDIR)
+        hint = (
+            f"; did you mean {inner}?"
+            if os.path.isfile(os.path.join(inner, "__init__.py"))
+            else ""
+        )
+        raise CommandError(
+            f"debugpy install: {package_dir} has no __init__.py, so it is not "
+            f"the debugpy package directory{hint}"
+        )
+
+    state.ensure_raw_repl()
+    state.did_action()
+
+    installed = ensure_debugpy_installed(state.transport, package_dir, mpy_cross=args.mpy_cross)
+    if installed:
+        print(f"debugpy installed from {package_dir}")
+        # Nothing here resets the device, matching `mip install`. It matters
+        # more for this package than for most: a debug session imports
+        # debugpy, and an import that happened before this write keeps the
+        # old module. Chaining `+ soft-reset` covers a single invocation; a
+        # separate one soft-resets on its first command anyway.
+        print("soft-reset the device before debugging if it has already imported debugpy")
+    else:
+        print(f"debugpy already up to date from {package_dir}")
