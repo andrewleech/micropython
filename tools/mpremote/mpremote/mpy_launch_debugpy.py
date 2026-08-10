@@ -96,7 +96,8 @@ def _board_dap_stream():
 
     `isconnected()` is deliberately not the test either: the host opens the
     interface only after reading the handshake that this feeds, so it is
-    False here on every run that goes on to succeed.
+    False here on every run that goes on to succeed. It is what
+    `_dap_stream_liveness` reads later, once there is a session to lose.
     """
     try:
         import pyb
@@ -138,6 +139,21 @@ def _detect_dap_stream(spec=None):
         return open(spec, "r+b")
     except OSError as er:
         raise OSError(f"dap_stream {spec!r} could not be opened: {er}")
+
+
+def _dap_stream_liveness(stream):
+    """How `stream` reports that the host has gone, or None if it cannot.
+
+    A USB CDC interface has no EOF: an idle one and one nobody is holding
+    both read as no bytes, so a session whose host disappears - the editor
+    killed, the terminal closed - would leave the target stopped at its
+    breakpoint until the board is power-cycled. `isconnected()` is that
+    interface's DTR line, which the host raises when it opens the port and
+    the kernel drops when the last opener goes away, so it is the signal a
+    CDC stream has instead of EOF. A stream that does reach EOF - the file
+    the unix port opens - has no `isconnected` and needs none.
+    """
+    return getattr(stream, "isconnected", None)
 
 
 def _parse_args():
@@ -251,7 +267,7 @@ def _run():
 
     stream = _detect_dap_stream(dap_stream)
     if stream is not None:
-        debugpy.listen_stream(stream)
+        debugpy.listen_stream(stream, is_connected=_dap_stream_liveness(stream))
         actual_host, actual_port = "serial", 0
     else:
         host = _detect_host()
