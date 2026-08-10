@@ -26,6 +26,14 @@ serial interface, used only when the handshake also reports `serial_dap:
 true`; without it `do_debug` always uses the network transport, whatever a
 device's own probe says it has.
 
+`dap_repl` is the answer for a board that has neither - one UART, no network:
+`true` puts the DAP channel on the stream already carrying the REPL, framed
+so the two are told apart without inspecting content. It is mutually
+exclusive with `dap_device` (a board with a second interface has no reason to
+share one) and meaningless on a "unix" target, which reaches its debug
+channel over the loopback interface. What it costs the REPL during a session
+is in `docs/debugging.md`.
+
 `source` names a host directory that `do_debug` mounts at the device's
 remote-fs mount point before running the debugged program, so the program
 executes from a live view of the host filesystem rather than whatever copy
@@ -69,14 +77,15 @@ def _command_error(msg):
 # probe_capabilities()); keep in step with the probe. A target's `requires`
 # is checked against this tuple.
 #
-# `serial_dap` is deliberately not here even though the probe reports it: it
-# is not an interpreter feature at all but a report of which channel the
-# session took, so it is only ever `True` on a run that already asked for a
-# stream. Putting it in `requires` would make every target that names it fail
-# before the run that could satisfy it. `dap_device` targets check it
-# directly, in do_debug, against the handshake of the run they just started.
-# `caps` itself has no allowlist (mpdebug_handshake._validate only checks
-# types), so this key is read fine regardless of this tuple.
+# `serial_dap` and `repl_dap` are deliberately not here even though the probe
+# reports them: neither is an interpreter feature at all, they are a report of
+# which channel the session took, so each is only ever `True` on a run that
+# already asked for that channel. Putting either in `requires` would make every
+# target that names it fail before the run that could satisfy it. `dap_device`
+# and `dap_repl` targets check the matching key directly, in do_debug, against
+# the handshake of the run they just started. `caps` itself has no allowlist
+# (mpdebug_handshake._validate only checks types), so these keys are read fine
+# regardless of this tuple.
 #
 # `second_cdc` is here despite also not being an interpreter feature, because
 # unlike `serial_dap` it describes the build rather than the run: it is True on
@@ -102,6 +111,7 @@ class Target:
         requires=(),
         dap_device=None,
         source=None,
+        dap_repl=False,
     ):
         self.name = name
         self.kind = kind
@@ -116,6 +126,10 @@ class Target:
         # the network transport, even if the device's own probe says it has
         # one, since there is no path to reach it without this.
         self.dap_device = dap_device
+        # True when DAP shares the REPL's own stream instead of getting an
+        # interface to itself. The single-UART, no-network channel; mutually
+        # exclusive with `dap_device`.
+        self.dap_repl = dap_repl
         # Absolute, symlink-resolved host directory `do_debug` mounts at the
         # device's remote-fs mount point before running the program. None
         # means the program's module already lives on the device's own
@@ -223,6 +237,20 @@ def _load_targets(path):
         if dap_device == "":
             _command_error(f"{path}: target '{name}' has an empty 'dap_device'")
 
+        dap_repl = spec.get("dap_repl", False)
+        if not isinstance(dap_repl, bool):
+            _command_error(f"{path}: target '{name}' dap_repl must be true or false")
+        if dap_repl and dap_device is not None:
+            _command_error(
+                f"{path}: target '{name}' sets both 'dap_repl' and 'dap_device'; "
+                "a board with a dedicated DAP interface has no reason to share the REPL's"
+            )
+        if dap_repl and kind == "unix":
+            _command_error(
+                f"{path}: target '{name}' is kind 'unix' and sets 'dap_repl'; a unix "
+                "target reaches its debug channel over the loopback interface"
+            )
+
         source = spec.get("source")
         if source == "":
             _command_error(f"{path}: target '{name}' has an empty 'source'")
@@ -250,6 +278,7 @@ def _load_targets(path):
             requires=requires,
             dap_device=dap_device,
             source=source,
+            dap_repl=dap_repl,
         )
     return targets
 
