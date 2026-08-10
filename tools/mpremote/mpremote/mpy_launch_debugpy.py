@@ -34,6 +34,9 @@ handshake become `"serial"`/`0` and the `port` argument goes unused.
 guess. A caller that asks for a stream and does not get one is told so: this
 never falls back to TCP behind the caller's back, because the caller has a
 bridge waiting on the stream and nothing listening on a port.
+`caps["second_cdc"]` is the other half of that answer and is a build
+property rather than a session one: whether this firmware has a second CDC
+interface for `"board"` to select at all.
 
 `loop`, when the literal `"loop"`, keeps the process and the DAP session alive
 across re-runs of the target: the DAP `restart` request is advertised and
@@ -113,6 +116,40 @@ def _board_dap_stream():
         return pyb.USB_VCP(1)
     except ValueError:
         return None  # firmware built with a single CDC; usb_mode lied
+
+
+def _probe_second_cdc():
+    """True when this build has a second CDC interface DAP could run over.
+
+    The build's maximum, which is a different question from either of the
+    two next to it and can answer differently on the same run:
+    `pyb.USB_VCP(id)` constructs for every `id` below
+    `MICROPY_HW_USB_CDC_NUM`, a compile-time constant, so this stays True on
+    a board booted `VCP+MSC` with a single interface enumerated, and it is
+    True before any host has opened the interface. `_board_dap_stream()`
+    asks the narrower question - is there an interface here on this boot -
+    and reads `usb_mode` for it; `isconnected()` asks the narrowest, whether
+    a host is holding it. The three are meant to be able to disagree.
+
+    Only stm32 defines the flag, so every other port reports False. That is
+    the right answer for the current firmware variants - rp2 and esp32 build
+    TinyUSB with `CFG_TUD_CDC (1)`, and the unix port has no USB device
+    peripheral - but it is False by ignorance rather than by measurement, so
+    a port that gains a second CDC has to be taught to this probe before a
+    manifest may claim it.
+
+    The expected failures are `ImportError` (no `pyb`), `AttributeError` (a
+    `pyb` with no USB) and `ValueError` (a single-CDC build), but anything at
+    all reads as False, for the same reason `_detect_host()` swallows its own
+    probe: a capability report is not worth aborting a launch over.
+    """
+    try:
+        import pyb
+
+        pyb.USB_VCP(1)
+    except Exception:
+        return False
+    return True
 
 
 def _detect_dap_stream(spec=None):
@@ -274,7 +311,11 @@ def _run():
         actual_host, actual_port = debugpy.listen(host=host, port=port)
     print(f"Debug server listening on {actual_host}:{actual_port}")
 
-    caps = debugpy.get_capabilities()
+    # `.copy()` first: with a session live `get_capabilities()` hands back the
+    # session's own dict, and the second CDC is not the debug server's to
+    # report - it is USB topology, which only the boot script can see.
+    caps = debugpy.get_capabilities().copy()
+    caps["second_cdc"] = _probe_second_cdc()
     # Exactly one MPDBG-READY line, valid JSON, nothing else on this line.
     print("MPDBG-READY " + json.dumps({"host": actual_host, "port": actual_port, "caps": caps}))
 
