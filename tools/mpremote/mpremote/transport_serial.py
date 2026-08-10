@@ -38,7 +38,7 @@
 import ast, io, os, re, stat, struct, sys, time
 import serial
 import serial.tools.list_ports
-from errno import EPERM, ENOTTY
+from errno import EPERM
 from .console import VT_ENABLED
 from .transport import TransportError, TransportExecError, Transport
 
@@ -124,12 +124,13 @@ class SerialTransport(Transport):
         try:
             self.serial.rts = False
             self.serial.dtr = False
-        except OSError as er:
-            if er.errno == ENOTTY:
-                # Some devices (like QEMU pts) don't support RTS/DTR control
-                pass
-            else:
-                raise er
+        except OSError:
+            # Clearing the signals is best-effort. Some devices don't implement
+            # them at all (a QEMU pts gives ENOTTY), and a device that has gone
+            # away while the command was running - unplugged, or reset by its
+            # own firmware - fails the ioctl outright (EIO). Neither leaves a
+            # signal worth clearing, and the port below still has to be closed.
+            pass
         self.serial.close()
 
     def read_until(
