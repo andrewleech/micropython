@@ -176,6 +176,19 @@
     } \
 } while(0)
 
+// A line event fires when the executing instruction's source line differs from
+// the one last reported, so a loop whose body is on the loop header's own line
+// would report that line once for the whole loop. A backward jump re-enters
+// code that has already been reported, which is exactly where a repeat is
+// wanted, so it invalidates the record and lets the destination report itself
+// again. Forward jumps must not: they leave the line behind rather than
+// returning to it.
+#define TRACE_JUMP_BACK(offset) do { \
+    if ((ptrdiff_t)(offset) < 0 && code_state->frame) { \
+        code_state->frame->lineno = 0; \
+    } \
+} while (0)
+
 #define TRACE_TICK(current_ip, current_sp, is_exception) do { \
     assert(code_state != code_state->prev_state); \
     assert(MP_STATE_THREAD(current_code_state) == code_state); \
@@ -193,6 +206,7 @@
 #define FRAME_LEAVE()
 #define FRAME_UPDATE()
 #define TRACE_TICK(current_ip, current_sp, is_exception)
+#define TRACE_JUMP_BACK(offset)
 #endif // MICROPY_PY_SYS_SETTRACE
 
 #if MICROPY_PY_BUILTINS_SLICE
@@ -572,6 +586,7 @@ dispatch_loop:
                 ENTRY(MP_BC_JUMP): {
                     DECODE_SLABEL;
                     ip += slab;
+                    TRACE_JUMP_BACK(slab);
                     DISPATCH_WITH_PEND_EXC_CHECK();
                 }
 
@@ -579,6 +594,7 @@ dispatch_loop:
                     DECODE_SLABEL;
                     if (mp_obj_is_true(POP())) {
                         ip += slab;
+                        TRACE_JUMP_BACK(slab);
                     }
                     DISPATCH_WITH_PEND_EXC_CHECK();
                 }
@@ -587,6 +603,7 @@ dispatch_loop:
                     DECODE_SLABEL;
                     if (!mp_obj_is_true(POP())) {
                         ip += slab;
+                        TRACE_JUMP_BACK(slab);
                     }
                     DISPATCH_WITH_PEND_EXC_CHECK();
                 }
@@ -713,7 +730,9 @@ unwind_jump:;
                         }
                         POP_EXC_BLOCK();
                     }
-                    ip = (const byte*)MP_OBJ_TO_PTR(POP()); // pop destination ip for jump
+                    const byte *unwind_dest = (const byte *)MP_OBJ_TO_PTR(POP()); // pop destination ip for jump
+                    TRACE_JUMP_BACK(unwind_dest - ip);
+                    ip = unwind_dest;
                     if (unum != 0) {
                         // pop the exhausted iterator
                         sp -= MP_OBJ_ITER_BUF_NSLOTS;
@@ -800,12 +819,6 @@ unwind_jump:;
                         ip += ulab; // jump to after for-block
                     } else {
                         PUSH(value); // push the next iteration value
-                        #if MICROPY_PY_SYS_SETTRACE
-                        // LINE event should trigger for every iteration so invalidate last trigger
-                        if (code_state->frame) {
-                            code_state->frame->lineno = 0;
-                        }
-                        #endif
                     }
                     DISPATCH();
                 }
