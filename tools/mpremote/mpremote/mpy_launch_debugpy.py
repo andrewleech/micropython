@@ -27,16 +27,20 @@ client has finished configuring breakpoints, so breakpoints set before then
 are already applied by the time the target starts running.
 
 `dap_stream`, when given, moves the DAP channel off TCP and onto a byte
-stream: `"board"` selects the board's own dedicated DAP interface, anything
-else is a path this runtime can open. Either way `host`/`port` in the
-handshake become `"serial"`/`0` and the `port` argument goes unused.
-`caps["serial_dap"]` reports which channel was actually taken, not a board
-guess. A caller that asks for a stream and does not get one is told so: this
-never falls back to TCP behind the caller's back, because the caller has a
-bridge waiting on the stream and nothing listening on a port.
-`caps["second_cdc"]` is the other half of that answer and is a build
-property rather than a session one: whether this firmware has a second CDC
-interface for `"board"` to select at all.
+stream: `"board"` selects the board's own dedicated DAP interface, `"repl"`
+shares the stream this script was launched over, and anything else is a path
+this runtime can open. Either way `host`/`port` in the handshake become
+`"serial"`/`0` and the `port` argument goes unused. `caps["serial_dap"]`
+reports which channel was actually taken, not a board guess. A caller that
+asks for a stream and does not get one is told so: this never falls back to
+TCP behind the caller's back, because the caller has a bridge waiting on the
+stream and nothing listening on a port. `caps["second_cdc"]` is the other
+half of that answer and is a build property rather than a session one:
+whether this firmware has a second CDC interface for `"board"` to select at
+all. `caps["repl_dap"]` is a session property again: whether this run split
+the REPL stream, which is the channel a board with one UART and no network
+has and the only one that changes what the REPL itself can do while a
+session is live (see `docs/debugging.md`).
 
 `loop`, when the literal `"loop"`, keeps the process and the DAP session alive
 across re-runs of the target: the DAP `restart` request is advertised and
@@ -152,14 +156,83 @@ def _probe_second_cdc():
     return True
 
 
+# The dupterm slot the REPL occupies on the ports that put it in one. stm32
+# fixes it at 1 (`pyb_usb_vcp_init0`), and no other port currently has enough
+# slots for it to be anything else; a port that arrives with a different
+# arrangement has to be taught this rather than discovering it, since reading
+# every slot to find the busy one would displace whichever came first.
+_REPL_DUPTERM_SLOT = 1
+
+# Holds the one `ReplMux` for the length of a run that split the REPL stream,
+# empty otherwise. Two things read it: the handshake, for `caps["repl_dap"]`,
+# and the release at exit, which has to put the REPL back.
+_repl_mux = []
+
+
+def _repl_dap_stream():
+    """Split the REPL's own stream and return the DAP half.
+
+    The channel a board with one UART and no network has. What makes it
+    possible is that on some ports the runtime's console is a Python object in
+    a `dupterm` slot, so replacing it with a framing wrapper puts DAP on the
+    same wire and leaves program output on it too, marked apart. Where the
+    slot is empty the runtime writes to its console directly and no Python
+    object can intercept it, so this refuses rather than handing back a stream
+    that would carry nothing: rp2 and esp32 build one slot and the REPL is not
+    in it, and the unix port has no `dupterm` at all.
+
+    The REPL is displaced for the length of the session. On stm32, installing
+    anything in the slot detaches the interface from the REPL
+    (`usb_vcp_attach_to_repl(vcp, false)`), which stops the interrupt
+    character being scanned, so Ctrl-C reaches the target as data instead of
+    raising `KeyboardInterrupt`. `docs/debugging.md` states that trade-off.
+    """
+    import os
+
+    from debugpy.common import repl_mux
+
+    mux = repl_mux.ReplMux()
+    try:
+        previous = os.dupterm(mux.console, _REPL_DUPTERM_SLOT)
+    except (AttributeError, ValueError, OSError) as er:
+        raise OSError(f"this runtime cannot share the REPL stream: {er}")
+    if previous is None:
+        # An empty slot is not the REPL, and installing into it would have
+        # diverted nothing; put it back the way it was found.
+        os.dupterm(None, _REPL_DUPTERM_SLOT)
+        raise OSError(f"no REPL stream in dupterm slot {_REPL_DUPTERM_SLOT} to share")
+    mux.attach(previous)
+    _repl_mux.append(mux)
+    return mux.dap
+
+
+def _release_repl_stream():
+    """Put the REPL back, if this run took it. Safe to call when it did not.
+
+    Runs on every exit path, including a failed one: a board left with the
+    framing wrapper in the slot answers a plain REPL with escaped bytes, and
+    nothing short of a reset would clear it.
+    """
+    import os
+
+    while _repl_mux:
+        mux = _repl_mux.pop()
+        try:
+            port = mux.detach()
+            os.dupterm(port, _REPL_DUPTERM_SLOT)
+        except Exception:
+            pass
+
+
 def _detect_dap_stream(spec=None):
     """Return an open reader/writer stream for the DAP channel, or None for TCP.
 
     `spec` is the caller's choice of channel: `None` for TCP, `"board"` for
-    the board's dedicated DAP interface, or a path this runtime can open
-    directly (what the unix port has instead of a USB interface). Failing to
-    produce the requested stream raises rather than returning None, so the
-    caller never gets a TCP endpoint it has no client for.
+    the board's dedicated DAP interface, `"repl"` for a share of the stream
+    this script was launched over, or a path this runtime can open directly
+    (what the unix port has instead of a USB interface). Failing to produce
+    the requested stream raises rather than returning None, so the caller
+    never gets a TCP endpoint it has no client for.
 
     `caps["serial_dap"]` is derived from which channel `_run()` actually
     picked (see `debugpy.get_capabilities()`), never guessed here, so the two
@@ -172,6 +245,8 @@ def _detect_dap_stream(spec=None):
         if stream is None:
             raise OSError("no dedicated DAP interface on this board")
         return stream
+    if spec == "repl":
+        return _repl_dap_stream()
     try:
         return open(spec, "r+b")
     except OSError as er:
@@ -316,6 +391,7 @@ def _run():
     # report - it is USB topology, which only the boot script can see.
     caps = debugpy.get_capabilities().copy()
     caps["second_cdc"] = _probe_second_cdc()
+    caps["repl_dap"] = bool(_repl_mux)
     # Exactly one MPDBG-READY line, valid JSON, nothing else on this line.
     print("MPDBG-READY " + json.dumps({"host": actual_host, "port": actual_port, "caps": caps}))
 
@@ -413,4 +489,8 @@ if __name__ == "__main__":
         print("\nTest interrupted by user")
     except Exception as e:
         print(f"Error: {e}")
+    finally:
+        # Last, and after the prints above, so anything they said still goes
+        # out through the framing the host is still reading.
+        _release_repl_stream()
 # fmt: on

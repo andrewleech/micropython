@@ -24,6 +24,7 @@ from .romfs import make_romfs, VfsRomWriter
 from .mpdebug_config import find_config, resolve_target, target_hint, warn_if_tty_device
 from . import mpdebug_handshake
 from . import dap_log
+from . import repl_dap
 from . import serial_dap
 
 
@@ -790,6 +791,74 @@ def _maybe_start_serial_dap(resolved, handshake, dap_log_arg, bind_port):
     return proxy, reported
 
 
+def _start_repl_dap(state, handshake, dap_log_arg, bind_port):
+    """Split the REPL's own stream and bridge a DAP client onto its framed half.
+
+    The single-UART channel: there is no second interface and no network, so
+    the debug traffic rides the stream `mpremote` is already holding, marked
+    apart from the program's output by `repl_dap`'s framing. The device's own
+    `caps["repl_dap"]` is checked rather than trusted from the request - the
+    same rule `dap_device` targets follow, that a claimed capability never
+    outranks the runtime probe.
+
+    From here on nothing else may read `state.transport`: the channel's reader
+    thread owns the port for the length of the session, and a second reader
+    would take bytes out of the middle of a frame.
+    """
+    if not handshake["caps"].get("repl_dap"):
+        raise CommandError(
+            f"the device did not take the REPL stream for DAP (probed caps: {handshake['caps']})"
+        )
+    if dap_log_arg:
+        path = dap_log_arg if isinstance(dap_log_arg, str) else dap_log.default_log_path()
+        try:
+            logger = dap_log.DapLogger(path)
+        except OSError as er:
+            raise CommandError(f"--dap-log could not open {path!r}: {er}") from None
+        log_msg = f"logging DAP traffic to {path!r}"
+    else:
+        logger = dap_log.NullLogger()
+        log_msg = None
+    channel = repl_dap.ReplDapChannel(state.transport.serial)
+    channel.start()
+    try:
+        proxy = repl_dap.ReplDapBridge(channel, logger, bind_port=bind_port)
+    except OSError as er:
+        channel.close()
+        logger.close()
+        raise CommandError(f"could not bind a DAP bridge port: {er}") from None
+    proxy.start()
+    if log_msg:
+        print(log_msg, flush=True)
+    reported = dict(handshake, host=proxy.host, port=proxy.port)
+    return channel, proxy, reported
+
+
+def _repl_dap_lost(channel):
+    """Raise for a REPL-stream DAP channel that stopped being readable.
+
+    Same rule as `_serial_dap_lost`: a reset device runs a fresh `debugpy`
+    with no memory of the session the client still believes it is in, so the
+    session ends rather than silently reconnecting to a peer that never saw
+    its `initialize`.
+
+    A code the demux has no handler for is reported as its own failure. On a
+    shared stream that means the two ends disagree about the framing - most
+    likely a device running an older boot script - and every byte after it is
+    suspect, which is worse than a lost connection, not better.
+    """
+    if channel.unknown_code is not None:
+        raise CommandError(
+            f"the device sent framing code {channel.unknown_code} on the REPL "
+            "stream, which this mpremote has no handler for; the two ends "
+            "disagree about the protocol, so the session cannot be trusted"
+        )
+    raise CommandError(
+        "the DAP channel sharing the REPL stream was lost (board reset?); "
+        "reset the device and run 'mpremote debug' again"
+    ) from channel.error
+
+
 def _serial_dap_lost(device, cause):
     """Raise for a dead serial DAP bridge.
 
@@ -841,7 +910,7 @@ def _exit_on_signal(exit_code=1):
             signal.signal(sig, old)
 
 
-def _stay_attached(proxy, message, pump_failed=None):
+def _stay_attached(proxy, message, pump_failed=None, device_gone=None):
     """Block until `proxy`'s one client session ends, reaping it on every exit path.
 
     Shared by `--dap-log`'s own proxy and a `serial_dap` bridge - both are a
@@ -857,6 +926,12 @@ def _stay_attached(proxy, message, pump_failed=None):
     mount_local's docstring) independently of whatever the proxy itself
     still reports, so this stops waiting on the proxy's own end-of-session
     signal.
+
+    `device_gone` is a third: a callable reporting that the device's end of
+    the channel is over. The proxy's own end-of-session signal needs a client
+    to have connected first, so without this a device that finishes while
+    nothing is attached - a run whose client never arrived - would leave this
+    waiting for one that is not coming.
     """
     print(message, flush=True)
 
@@ -875,6 +950,8 @@ def _stay_attached(proxy, message, pump_failed=None):
         try:
             while not proxy.wait(_POLL_S):
                 if pump_failed is not None and pump_failed.is_set():
+                    break
+                if device_gone is not None and device_gone():
                     break
         except KeyboardInterrupt:
             cleanup()
@@ -1387,6 +1464,26 @@ def do_debug(state, args):
     # target's own 'source' has already been resolved to an absolute path by
     # mpdebug.toml loading; a literal --source has not, so it gets the same
     # treatment here.
+    # --dap-repl on the command line overrides a target's configured
+    # 'dap_repl'; either one asks for the DAP channel to share the stream
+    # carrying the REPL, which is what a board with one UART and no network
+    # has. A target that also configures a dedicated DAP interface is
+    # rejected at config load, but the flag can reach one, so the same
+    # conflict is refused here rather than one of the two silently winning.
+    dap_repl = args.dap_repl or (resolved.dap_repl if resolved is not None else False)
+    if dap_repl:
+        if is_unix:
+            raise CommandError(
+                "--dap-repl is not valid for a unix target: it reaches its debug "
+                "channel over the loopback interface, with no stream to share"
+            )
+        if resolved is not None and resolved.dap_device:
+            raise CommandError(
+                f"--dap-repl conflicts with target {resolved.name!r}'s dap_device "
+                f"{resolved.dap_device!r}: a board with a dedicated DAP interface "
+                "has no reason to share the REPL's stream"
+            )
+
     if args.source is not None:
         if is_unix:
             raise CommandError(
@@ -1396,6 +1493,26 @@ def do_debug(state, args):
         source_root = os.path.realpath(args.source)
     else:
         source_root = resolved.source if resolved is not None else None
+
+    # A mount and a REPL-stream DAP session are two protocols wanting the same
+    # marker byte on the same wire, and each end of each one assumes it is the
+    # only demux point. Making them coexist is a follow-up story (the framing
+    # is chosen so it can be: mount's codes 1..13 are untouched and DAP sits
+    # at 14); until then the combination is refused rather than run into a
+    # desync that only a power cycle clears.
+    if dap_repl and source_root is not None:
+        origin = (
+            f"--source {args.source!r}"
+            if args.source is not None
+            else f"target {resolved.name!r} source {source_root!r}"
+        )
+        raise CommandError(
+            f"{origin} cannot be combined with --dap-repl: mounting and the "
+            "REPL-stream DAP channel both frame the same stream, and running "
+            "them together would desync it. Put the program on the device's "
+            "own filesystem for this session, or use a target with a network "
+            "or dedicated DAP interface"
+        )
 
     # Both checks below depend only on host state - the source root and the
     # module name - so they run before the device is touched at all: a
@@ -1460,7 +1577,15 @@ def do_debug(state, args):
     # device can map one to the other. Without this the two ends disagree by
     # construction - the device would report a TCP endpoint while the bridge
     # below waits on a stream that never carries anything.
-    dap_stream = "board" if (resolved is not None and resolved.dap_device) else None
+    # "repl" is the same kind of instruction for the stream mpremote is
+    # already holding: the device splits it rather than binding a port, and
+    # the bridge below reads the DAP half back out of it.
+    if resolved is not None and resolved.dap_device:
+        dap_stream = "board"
+    elif dap_repl:
+        dap_stream = "repl"
+    else:
+        dap_stream = None
 
     # Everything from here on that touches a mounted device - establishing
     # it, running the boot script, staying attached, tearing it down - has
@@ -1564,6 +1689,35 @@ def do_debug(state, args):
             # its own proxy in front of the device, or when a mount needs
             # pumping.
             serial_bind_port = dap_log_bind_port if dap_log_arg else (args.port or 0)
+
+            if dap_repl:
+                # Like the dap_device path below, the whole DAP channel runs
+                # through mpremote, so this always stays attached. Unlike it,
+                # the channel is the transport's own port, so it is closed
+                # before returning rather than left to the transport's own
+                # teardown: the reader thread has to stop touching the port
+                # while this function still owns it.
+                channel, proxy, reported = _start_repl_dap(
+                    state, handshake, dap_log_arg, serial_bind_port
+                )
+                try:
+                    _report_debug_result(reported, path_mappings)
+                    _stay_attached(
+                        proxy,
+                        "staying attached to run the REPL-stream DAP bridge; Ctrl-C ends it",
+                        pump_failed=pump_failed,
+                        device_gone=lambda: channel.finished,
+                    )
+                finally:
+                    channel.close()
+                if (
+                    channel.unknown_code is not None
+                    or channel.error is not None
+                    or proxy.target_error is not None
+                ):
+                    _repl_dap_lost(channel)
+                return reported
+
             serial_bridge = _maybe_start_serial_dap(
                 resolved, handshake, dap_log_arg, serial_bind_port
             )

@@ -183,7 +183,7 @@ def argparse_debug():
     cmd_parser = argparse.ArgumentParser(
         description="debug a MicroPython script with a DAP client",
         epilog="as with any other mpremote option, --port/--timeout/--dap-log/"
-        "--dap-log-file/--source/--loop must come before target/program",
+        "--dap-log-file/--source/--loop/--dap-repl must come before target/program",
     )
     cmd_parser.add_argument(
         "target",
@@ -253,6 +253,16 @@ def argparse_debug():
         "keep the session alive across re-runs: the client's restart request "
         "evicts what the program imported and imports it again, so an edit "
         "takes effect with no upload and no reset",
+    )
+    _bool_flag(
+        cmd_parser,
+        "dap-repl",
+        "r",
+        False,
+        "put the DAP channel on the stream already carrying the REPL, for a "
+        "board with one UART and no network; overrides the target's "
+        "'dap_repl'. The REPL is not usable for anything else while the "
+        "session runs - see docs/debugging.md",
     )
     return cmd_parser
 
