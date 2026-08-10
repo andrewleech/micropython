@@ -77,7 +77,12 @@ def _command_error(msg):
 # directly, in do_debug, against the handshake of the run they just started.
 # `caps` itself has no allowlist (mpdebug_handshake._validate only checks
 # types), so this key is read fine regardless of this tuple.
-KNOWN_CAPABILITIES = ("settrace", "save_names", "set_local", "f_back")
+#
+# `second_cdc` is here despite also not being an interpreter feature, because
+# unlike `serial_dap` it describes the build rather than the run: it is True on
+# a board that has the interface whether or not this session took it, so a
+# target naming it in `requires` gets the answer it asked for on any run.
+KNOWN_CAPABILITIES = ("settrace", "save_names", "set_local", "f_back", "second_cdc")
 
 _KINDS = ("unix", "serial", "network")
 
