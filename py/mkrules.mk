@@ -250,7 +250,7 @@ ifneq ($(PROG),)
 # Windows, i.e. msvc or mingw builds, but not when using msys or cygwin's gcc.
 COMPILER_TARGET := $(shell $(CC) -dumpmachine)
 ifneq (,$(findstring mingw,$(COMPILER_TARGET)))
-PROG := $(PROG).exe
+override PROG := $(PROG).exe
 endif
 
 all: $(BUILD)/$(PROG)
