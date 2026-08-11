@@ -44,6 +44,8 @@ INC += -I.
 INC += -I$(TOP)
 INC += -I$(BUILD)
 INC += -I$(VARIANT_DIR)
+# romfs_trailer.h lives in variants/common/ (out-of-tree, PICOLET_RUNTIME_ROOT).
+INC += -I$(PICOLET_RUNTIME_ROOT)/variants/common
 
 # compiler settings
 CFLAGS += $(INC) -Wall -Wpointer-arith -Wdouble-promotion -Werror -std=gnu99 -DUNIX -D__USE_MINGW_ANSI_STDIO=1 $(COPT) $(CFLAGS_EXTRA)
@@ -76,7 +78,13 @@ SRC_C = \
 	realpath.c \
 	init.c \
 	fmode.c \
+	vfs_rom_ioctl.c \
 	$(wildcard $(VARIANT_DIR)/*.c)
+
+# romfs_trailer.c lives in variants/common/ (out-of-tree).
+# SRC_C uses plain = above so variant .mk SRC_C += lines are discarded.
+# We append explicitly here, after SRC_C is set, so it always lands in the build.
+SRC_C += $(PICOLET_RUNTIME_ROOT)/variants/common/romfs_trailer.c
 
 SHARED_SRC_C += $(addprefix shared/,\
 	$(SHARED_SRC_C_EXTRA) \
@@ -111,9 +119,26 @@ ifeq ($(shell $(CC) -dumpmachine),i686-w64-mingw32)
 CFLAGS += -msse -mfpmath=sse -march=pentium4
 endif
 
+# Build with embedded romfs by linking the binary directly
+# Usage: make ROMFS_IMG=romfs.img
+ifdef ROMFS_IMG
+CFLAGS += -DMICROPY_ROMFS_EMBEDDED=1
+OBJ += $(BUILD)/romfs_data.o
+endif
+
 include $(TOP)/py/mkrules.mk
 
-.PHONY: test test_full
+# Rule to build romfs_data.o from romfs.img (must be after mkrules.mk for OBJCOPY)
+ifdef ROMFS_IMG
+$(BUILD)/romfs_data.o: $(ROMFS_IMG) | $(BUILD)
+	$(Q)$(OBJCOPY) -I binary -O pe-x86-64 -B i386:x86-64 \
+		--rename-section .data=.rodata,alloc,load,readonly,data,contents \
+		--redefine-sym _binary_$(subst .,_,$(subst /,_,$(ROMFS_IMG)))_start=romfs_embedded_data \
+		--redefine-sym _binary_$(subst .,_,$(subst /,_,$(ROMFS_IMG)))_end=romfs_embedded_end \
+		$< $@
+endif
+
+.PHONY: test test_full romfs
 
 # Note for recent gcc versions like 13.2:
 # - mingw64-x86_64 gcc builds will pass the math_domain_special test
@@ -133,3 +158,15 @@ $(BUILD)/$(PROG): $(BUILD)/micropython.res
 $(BUILD)/%.res: %.rc
 	$(ECHO) "WINDRES $<"
 	$(Q)$(WINDRES) $< -O coff -o $@
+
+# Build a romfs image from a directory
+# Usage: make romfs ROMFS_DIR=path/to/directory
+# Creates romfs.img in the current directory
+romfs:
+	@if [ -z "$(ROMFS_DIR)" ]; then \
+		echo "Error: ROMFS_DIR not specified"; \
+		echo "Usage: make romfs ROMFS_DIR=path/to/directory"; \
+		exit 1; \
+	fi
+	$(PYTHON) -m mpremote romfs build $(ROMFS_DIR)
+	mv $(notdir $(ROMFS_DIR)).romfs romfs.img
