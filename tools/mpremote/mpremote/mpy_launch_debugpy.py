@@ -186,6 +186,12 @@ def _repl_dap_stream():
     (`usb_vcp_attach_to_repl(vcp, false)`), which stops the interrupt
     character being scanned, so Ctrl-C reaches the target as data instead of
     raising `KeyboardInterrupt`. `docs/debugging.md` states that trade-off.
+
+    Which is why the stream must be able to say when the host has let go. On
+    every other channel a session that waits forever costs nothing the user
+    cannot walk away from; on this one it holds the console the board is
+    reached by, and Ctrl-C cannot end it. A stream with no `isconnected` is
+    refused here rather than taken and never given back.
     """
     import os
 
@@ -201,6 +207,9 @@ def _repl_dap_stream():
         # diverted nothing; put it back the way it was found.
         os.dupterm(None, _REPL_DUPTERM_SLOT)
         raise OSError(f"no REPL stream in dupterm slot {_REPL_DUPTERM_SLOT} to share")
+    if getattr(previous, "isconnected", None) is None:
+        os.dupterm(previous, _REPL_DUPTERM_SLOT)
+        raise OSError("the REPL stream cannot report the host letting go of it")
     mux.attach(previous)
     _repl_mux.append(mux)
     return mux.dap
