@@ -81,6 +81,25 @@ Functions
 
        gc.threshold(-1)
 
+.. function:: add_heap(nbytes)
+
+   Allocate *nbytes* of memory from the system and add it as a new heap
+   segment for the garbage collector. This allows expanding the available
+   heap at runtime beyond the initial allocation.
+
+   The minimum size is 4096 bytes. Returns the new total heap size after
+   adding the segment.
+
+   Raises :exc:`ValueError` if *nbytes* is too small, or :exc:`MemoryError`
+   if the system cannot allocate the requested memory.
+
+   Availability: Unix and Windows ports.
+
+   .. admonition:: Difference to CPython
+      :class: attention
+
+      This function is a MicroPython extension.
+
 Example
 -------
 

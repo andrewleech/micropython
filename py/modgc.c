@@ -24,9 +24,12 @@
  * THE SOFTWARE.
  */
 
+#include <stdlib.h>
+
 #include "py/mpstate.h"
 #include "py/obj.h"
 #include "py/gc.h"
+#include "py/runtime.h"
 
 #if MICROPY_PY_GC && MICROPY_ENABLE_GC
 
@@ -100,6 +103,34 @@ static mp_obj_t gc_threshold(size_t n_args, const mp_obj_t *args) {
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(gc_threshold_obj, 0, 1, gc_threshold);
 #endif
 
+#if MICROPY_GC_SPLIT_HEAP_ADD
+// add_heap(nbytes): allocate and add a new heap segment of the given size
+// Returns the actual size added (may be slightly less due to overhead)
+static mp_obj_t gc_add_heap(mp_obj_t nbytes_obj) {
+    size_t nbytes = mp_obj_get_int(nbytes_obj);
+
+    // Minimum useful heap size (need space for area struct + tables + some blocks)
+    if (nbytes < 4096) {
+        mp_raise_ValueError(MP_ERROR_TEXT("heap size too small"));
+    }
+
+    // Allocate memory from the system
+    void *heap = MP_PLAT_ALLOC_HEAP(nbytes);
+    if (heap == NULL) {
+        mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("can't allocate heap"));
+    }
+
+    // Add to the GC
+    gc_add(heap, (void *)((uintptr_t)heap + nbytes));
+
+    // Return the actual usable size (approximate - tables take some overhead)
+    gc_info_t info;
+    gc_info(&info);
+    return mp_obj_new_int(info.total);
+}
+MP_DEFINE_CONST_FUN_OBJ_1(gc_add_heap_obj, gc_add_heap);
+#endif
+
 static const mp_rom_map_elem_t mp_module_gc_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_gc) },
     { MP_ROM_QSTR(MP_QSTR_collect), MP_ROM_PTR(&gc_collect_obj) },
@@ -110,6 +141,9 @@ static const mp_rom_map_elem_t mp_module_gc_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_mem_alloc), MP_ROM_PTR(&gc_mem_alloc_obj) },
     #if MICROPY_GC_ALLOC_THRESHOLD
     { MP_ROM_QSTR(MP_QSTR_threshold), MP_ROM_PTR(&gc_threshold_obj) },
+    #endif
+    #if MICROPY_GC_SPLIT_HEAP_ADD
+    { MP_ROM_QSTR(MP_QSTR_add_heap), MP_ROM_PTR(&gc_add_heap_obj) },
     #endif
 };
 
