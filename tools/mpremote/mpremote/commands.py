@@ -593,6 +593,7 @@ def _debug_boot_script(module, method, port, dap_stream=None, mount_point=None, 
 
 _POLL_S = 0.2  # read_until() poll cadence for both the handshake scan and the error drain below
 _MOUNT_TEARDOWN_TIMEOUT_S = 10  # bounds each of the two round trips in _teardown_mount
+_CONSOLE_POLL_S = 0.05  # how often _pump_console looks again at an idle console
 
 
 def _one_line(value):
@@ -906,7 +907,7 @@ def _exit_on_signal(exit_code=1):
             signal.signal(sig, old)
 
 
-def _stay_attached(proxy, message, pump_failed=None, device_gone=None):
+def _stay_attached(proxy, message, pump_failed=None, device_gone=None, console=None):
     """Block until `proxy`'s one client session ends, reaping it on every exit path.
 
     Shared by `--dap-log`'s own proxy and a `serial_dap` bridge - both are a
@@ -928,10 +929,21 @@ def _stay_attached(proxy, message, pump_failed=None, device_gone=None):
     to have connected first, so without this a device that finishes while
     nothing is attached - a run whose client never arrived - would leave this
     waiting for one that is not coming.
+
+    `console` is the transport whose primary connection this process is
+    holding open with nothing else reading it, and it is drained for exactly
+    as long as this waits - see `_pump_console` for what an unread console
+    does to the board. A caller passes None when something already reads that
+    connection: a mount's own RPC pump, or a `repl_dap` channel, whose reader
+    owns the port and would lose frames to a second one.
     """
     print(message, flush=True)
+    console_stop = threading.Event()
+    if console is not None:
+        threading.Thread(target=_pump_console, args=(console, console_stop), daemon=True).start()
 
     def cleanup():
+        console_stop.set()
         try:
             old_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
         except ValueError:
@@ -1002,8 +1014,10 @@ def _pump_mount(transport, stop_event, failed_event):
     calling read on it, an RPC request the device makes on its next
     filesystem access would sit unanswered and the device would block on it
     indefinitely. Ordinary console bytes collected between RPC commands are
-    discarded, matching every other "stay attached" path here: none of them
-    surface the primary connection's console output while attached.
+    discarded rather than printed, unlike `_pump_console`: this loop reads
+    the RPC framing itself, so what is left over is whatever fell between
+    two commands rather than a clean stream of the program's output. Both
+    keep the console emptied, which is what the device needs of them.
 
     A read raising while `stop_event` is not set means the device stopped
     answering an RPC command mid-exchange, not that the caller asked this
@@ -1036,6 +1050,41 @@ def _pump_mount(transport, stop_event, failed_event):
                 )
                 failed_event.set()
             return
+
+
+def _pump_console(transport, stop_event):
+    """Background thread: keep the board's console drained while attached.
+
+    A console this process holds open but never reads back-pressures all the
+    way into the device. The tty's line discipline stops accepting once its
+    own buffer fills, the board's transmit buffer fills behind it, and
+    `print` then waits for room - on a stm32 USB CDC, up to 500ms for each
+    byte it cannot place. The debugged program stops making progress, and so
+    does the DAP channel, while the board's networking keeps acknowledging
+    from interrupt context: it looks like a link that has gone quiet rather
+    than like a console nobody is emptying.
+
+    So every path that stays attached and owns the primary connection reads
+    it. The bytes go to stdout rather than being discarded, because they are
+    the debugged program's own output and this process holds the only port
+    they can arrive on.
+
+    Reads only what has already arrived: the port is opened blocking, so
+    asking for a fixed count would wait for bytes that a program between
+    prints has no reason to send, and `stop_event` would not be looked at
+    again until they came.
+    """
+    while not stop_event.is_set():
+        try:
+            waiting = transport.serial.in_waiting
+            data = transport.serial.read(waiting) if waiting else b""
+        except Exception:
+            return
+        if data:
+            sys.stdout.write(data.decode("utf-8", "replace"))
+            sys.stdout.flush()
+        else:
+            stop_event.wait(_CONSOLE_POLL_S)
 
 
 def _teardown_mount(transport):
@@ -1724,6 +1773,7 @@ def do_debug(state, args):
                     proxy,
                     "staying attached to run the serial DAP bridge; Ctrl-C ends it",
                     pump_failed=pump_failed,
+                    console=None if mounted else state.transport,
                 )
                 if proxy.target_error is not None:
                     _serial_dap_lost(resolved.dap_device, proxy.target_error)
@@ -1750,6 +1800,7 @@ def do_debug(state, args):
                 proxy,
                 "staying attached to run the --dap-log proxy; Ctrl-C ends it",
                 pump_failed=pump_failed,
+                console=None if mounted else state.transport,
             )
             return reported
         finally:
