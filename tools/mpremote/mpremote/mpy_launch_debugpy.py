@@ -33,8 +33,10 @@ the handshake become `"serial"`/`0` and the `port` argument goes unused. A
 caller that asks for a stream and does not get one is told so: this never
 falls back to TCP behind the caller's back, because the caller has a bridge
 waiting on the stream and nothing listening on a port. `caps["repl_dap"]`
-reports whether this run split the REPL stream, which is the channel a board
-with one UART and no network has (see `docs/debugging.md`).
+reports whether this run split the REPL stream - a property of the session
+rather than of the build, and the channel a board with one UART and no
+network has. It is the only one that changes what the REPL itself can do
+while a session is live (see `docs/debugging.md`).
 
 `loop`, when the literal `"loop"`, keeps the process and the DAP session alive
 across re-runs of the target: the DAP `restart` request is advertised and

@@ -1,6 +1,6 @@
 """`--dap-log`: a localhost proxy that records DAP traffic to JSONL.
 
-Neither `debug` transport puts the byte stream through mpremote - the
+Neither TCP `debug` transport puts the byte stream through mpremote - the
 command reports an endpoint and the DAP client connects to the device
 directly. Logging therefore means interposing a proxy: bind an ephemeral
 port, accept the one client connection, connect through to the device's
@@ -8,6 +8,12 @@ real endpoint, and pump both directions while handing each complete frame
 to a `DapLogger`. The caller substitutes the proxy's host/port for the
 device's in whatever it reports, so the client attaches to the logger
 instead of bypassing it.
+
+`PumpingProxy`, the accept/pump/close machinery below `DapProxy`, is generic
+in what it forwards to (`_connect_target()`); `repl_dap.py`'s bridge is the
+other subclass, forwarding to the framed half of the REPL's own stream
+instead of a TCP endpoint - that path *does* always put the byte stream
+through mpremote, since there is no device-side TCP listener to bypass to.
 """
 
 import json
@@ -106,20 +112,38 @@ def default_log_path():
     return "mpremote-dap-{}-{}.jsonl".format(time.strftime("%Y%m%dT%H%M%S"), os.getpid())
 
 
-class DapProxy:
-    """Localhost proxy: one client, forwarded to (target_host, target_port).
+class NullLogger:
+    """A `DapLogger` that discards everything - the no-`--dap-log` case."""
+
+    def log(self, direction, frame):
+        pass
+
+    def close(self):
+        pass
+
+
+class PumpingProxy:
+    """Localhost proxy: one client, forwarded to a target `_connect_target()` opens.
 
     Binds its port immediately (`host`/`port` are set once `__init__`
     returns); the accept and both pump directions run on background threads
     started by `start()`, so construction and reporting the substituted
     endpoint never block on a client actually connecting. `bind_port`
     defaults to 0 (OS-assigned); a caller pinning the client-facing endpoint
-    (`--port` alongside `--dap-log`) passes the requested port instead.
+    passes the requested port instead.
+
+    A subclass supplies `_connect_target()`, called once a client has
+    connected, returning the object the client is bridged to - a
+    `socket.socket` (`DapProxy`, forwarding to another TCP endpoint) or
+    anything else duck-typing `recv`/`sendall`/`shutdown`/`close`
+    (`repl_dap.py`'s duplex over the REPL stream's framed half). The pump
+    code below only ever
+    calls those four methods, on either side, so it never has to know which
+    kind of target it is forwarding to.
     """
 
-    def __init__(self, target_host, target_port, logger, bind_host="127.0.0.1", bind_port=0):
+    def __init__(self, logger, bind_host="127.0.0.1", bind_port=0):
         self.host = bind_host
-        self._target = (target_host, target_port)
         self._logger = logger
         self._listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -131,6 +155,15 @@ class DapProxy:
         self._pumps = []
         self._done = threading.Event()
         self._closed = False
+        # Set when the *target* side (not the client) ends abnormally - an
+        # exception out of `_connect_target()` or out of a read on the
+        # target - as opposed to a clean EOF, which leaves this None. A
+        # caller uses this to tell "session ended" from "target connection
+        # was lost" (e.g. a board reset behind a serial bridge).
+        self.target_error = None
+
+    def _connect_target(self):
+        raise NotImplementedError
 
     def start(self):
         threading.Thread(target=self._accept, name="dap-proxy-accept", daemon=True).start()
@@ -142,8 +175,9 @@ class DapProxy:
             self._done.set()
             return
         try:
-            self._server = socket.create_connection(self._target)
-        except OSError:
+            self._server = self._connect_target()
+        except OSError as er:
+            self.target_error = er
             self._client.close()
             self._done.set()
             return
@@ -161,14 +195,29 @@ class DapProxy:
         self._done.set()
 
     def _pump(self, src, dst, direction):
-        # `direction` names where the frame came from, not where it's going.
+        # `direction` names where the frame came from, not where it's going -
+        # it has nothing to do with which endpoint is `self._server` (the
+        # target), so `target_error` is keyed on endpoint identity (`src is
+        # self._server` / `dst is self._server`), not on `direction`: each
+        # pump thread reads one endpoint and writes the other, so a failure
+        # on either side of either thread can be a target failure.
         parser = FrameParser()
         try:
             while True:
-                chunk = src.recv(4096)
+                try:
+                    chunk = src.recv(4096)
+                except OSError as er:
+                    if src is self._server:
+                        self.target_error = er
+                    break
                 if not chunk:
                     break
-                dst.sendall(chunk)
+                try:
+                    dst.sendall(chunk)
+                except OSError as er:
+                    if dst is self._server:
+                        self.target_error = er
+                    break
                 # Forwarding must survive a logging fault - non-DAP bytes on
                 # the socket (an HTTP probe, console output) or anything else
                 # that trips the parser or writer must not tear down the pump.
@@ -181,8 +230,6 @@ class DapProxy:
                         self._logger.log(direction, frame)
                     except Exception:
                         pass
-        except OSError:
-            pass
         finally:
             # Half-closing only tells the peer we are done writing; if it
             # never closes its own side, the opposite pump stays blocked in
@@ -213,3 +260,14 @@ class DapProxy:
         for t in self._pumps:
             t.join(timeout=2)
         self._logger.close()
+
+
+class DapProxy(PumpingProxy):
+    """`PumpingProxy` forwarding to (target_host, target_port) over TCP."""
+
+    def __init__(self, target_host, target_port, logger, bind_host="127.0.0.1", bind_port=0):
+        super().__init__(logger, bind_host, bind_port)
+        self._target = (target_host, target_port)
+
+    def _connect_target(self):
+        return socket.create_connection(self._target)
