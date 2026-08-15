@@ -1,5 +1,6 @@
 import binascii
 import codecs
+import collections
 import contextlib
 import errno
 import hashlib
@@ -593,6 +594,7 @@ def _debug_boot_script(module, method, port, dap_stream=None, mount_point=None, 
 _POLL_S = 0.2  # read_until() poll cadence for both the handshake scan and the error drain below
 _MOUNT_TEARDOWN_TIMEOUT_S = 10  # bounds each of the two round trips in _teardown_mount
 _CONSOLE_POLL_S = 0.05  # how often _pump_console looks again at an idle console
+_CONSOLE_BUFFER_BYTES = 256 * 1024  # what _pump_console holds for a stalled consumer
 
 
 def _one_line(value):
@@ -999,22 +1001,68 @@ def _pump_console(transport, stop_event):
     the debugged program's own output and this process holds the only port
     they can arrive on.
 
+    Reading and printing are separate threads on purpose. Writing to a stdout
+    nobody is reading blocks once the pipe fills, and a reader that blocks is
+    a console that is not being emptied - the same fault one level up, with
+    64 kB of pipe instead of 4 kB of tty in front of it. The reader therefore
+    only ever hands bytes to a bounded buffer, which drops the oldest when a
+    stalled consumer lets it fill. Losing console output is a cost; stopping
+    the board being debugged is a defect.
+
     Reads only what has already arrived: the port is opened blocking, so
     asking for a fixed count would wait for bytes that a program between
     prints has no reason to send, and `stop_event` would not be looked at
     again until they came.
     """
+    buffered = collections.deque()
+    buffered_bytes = [0]
+    dropped = [0]
+    lock = threading.Lock()
+
+    def emit():
+        while True:
+            with lock:
+                chunk = buffered.popleft() if buffered else None
+                if chunk is not None:
+                    buffered_bytes[0] -= len(chunk)
+            if chunk is None:
+                if stop_event.is_set():
+                    return
+                stop_event.wait(_CONSOLE_POLL_S)
+                continue
+            try:
+                sys.stdout.write(chunk.decode("utf-8", "replace"))
+                sys.stdout.flush()
+            except Exception:
+                return  # a consumer that closed the pipe, not a device problem
+
+    writer = threading.Thread(target=emit, daemon=True)
+    writer.start()
+
     while not stop_event.is_set():
         try:
             waiting = transport.serial.in_waiting
             data = transport.serial.read(waiting) if waiting else b""
         except Exception:
-            return
-        if data:
-            sys.stdout.write(data.decode("utf-8", "replace"))
-            sys.stdout.flush()
-        else:
+            break
+        if not data:
             stop_event.wait(_CONSOLE_POLL_S)
+            continue
+        with lock:
+            buffered.append(data)
+            buffered_bytes[0] += len(data)
+            while buffered_bytes[0] > _CONSOLE_BUFFER_BYTES and len(buffered) > 1:
+                dropped[0] += len(buffered[0])
+                buffered_bytes[0] -= len(buffered.popleft())
+
+    stop_event.set()
+    writer.join(timeout=1)
+    if dropped[0]:
+        print(
+            f"warning: dropped {dropped[0]} bytes of the board's console output; "
+            "whatever is reading this command's output did not keep up",
+            file=sys.stderr,
+        )
 
 
 def _teardown_mount(transport):
@@ -1539,9 +1587,11 @@ def do_debug(state, args):
     state.ensure_raw_repl()
     state.did_action()
 
-    # "repl" tells the device to split the stream mpremote is already
-    # holding rather than bind a port, and the bridge below reads the DAP
-    # half back out of it.
+    # "repl" tells the device to split the stream mpremote is already holding
+    # rather than bind a port, and the bridge below reads the DAP half back
+    # out of it. The device is told which channel to take, never a host path:
+    # the host names an interface by tty node and the device by runtime
+    # object, and only the device can map one to the other.
     dap_stream = "repl" if dap_repl else None
 
     # Everything from here on that touches a mounted device - establishing
@@ -1622,9 +1672,9 @@ def do_debug(state, args):
             if mounted:
                 # Nothing else reads state.transport once the boot script is
                 # running - the client's DAP traffic rides a separate TCP
-                # endpoint - so a background thread has to
-                # pump it for as long as this function stays attached below,
-                # whichever of the three shapes that takes. `pump_failed` is
+                # endpoint - so a background thread has to pump it for as
+                # long as this function stays attached below, whichever
+                # shape that takes. `pump_failed` is
                 # set by the thread itself if it ever stops for a reason
                 # other than the `pump_stop` this function requests, so the
                 # "stay attached" call below can tell an unrecoverably wedged
@@ -1640,17 +1690,20 @@ def do_debug(state, args):
                 pump_thread.start()
 
             # The client-facing port for a bridge this process runs itself.
-            serial_bind_port = dap_log_bind_port if dap_log_arg else (args.port or 0)
+            dap_bind_port = dap_log_bind_port if dap_log_arg else (args.port or 0)
 
             if dap_repl:
-                # The whole DAP channel runs through mpremote here, so this
-                # always stays attached. The channel is the transport's own
-                # port, so it is closed
+                # The whole DAP channel runs through mpremote here - there is
+                # no device-side TCP endpoint to report at all - so this
+                # always stays attached, with or without --dap-log, where the
+                # plain network path below only does that when --dap-log adds
+                # its own proxy or when a mount needs pumping. The channel is
+                # the transport's own port, so it is closed
                 # before returning rather than left to the transport's own
                 # teardown: the reader thread has to stop touching the port
                 # while this function still owns it.
                 channel, proxy, reported = _start_repl_dap(
-                    state, handshake, dap_log_arg, serial_bind_port
+                    state, handshake, dap_log_arg, dap_bind_port
                 )
                 try:
                     _report_debug_result(reported, path_mappings)
