@@ -21,18 +21,11 @@ caller's job, not this module's. `program` is a "module[:method]" default.
 the MPDBG-READY handshake can report, so a typo is caught before any device
 is touched; matching them against what a specific device actually probes
 happens later, once `do_debug` has a handshake to check it against.
-`dap_device` is a second by-id connect string, the board's dedicated DAP
-serial interface, used only when the handshake also reports `serial_dap:
-true`; without it `do_debug` always uses the network transport, whatever a
-device's own probe says it has.
-
-`dap_repl` is the answer for a board that has neither - one UART, no network:
-`true` puts the DAP channel on the stream already carrying the REPL, framed
-so the two are told apart without inspecting content. It is mutually
-exclusive with `dap_device` (a board with a second interface has no reason to
-share one) and meaningless on a "unix" target, which reaches its debug
-channel over the loopback interface. What it costs the REPL during a session
-is in `docs/debugging.md`.
+`dap_repl` is the answer for a board with one UART and no network: `true`
+puts the DAP channel on the stream already carrying the REPL, framed so the
+two are told apart without inspecting content. It is meaningless on a "unix"
+target, which reaches its debug channel over the loopback interface. What it
+costs the REPL during a session is in `docs/debugging.md`.
 
 `source` names a host directory that `do_debug` mounts at the device's
 remote-fs mount point before running the debugged program, so the program
@@ -77,21 +70,15 @@ def _command_error(msg):
 # probe_capabilities()); keep in step with the probe. A target's `requires`
 # is checked against this tuple.
 #
-# `serial_dap` and `repl_dap` are deliberately not here even though the probe
-# reports them: neither is an interpreter feature at all, they are a report of
-# which channel the session took, so each is only ever `True` on a run that
-# already asked for that channel. Putting either in `requires` would make every
-# target that names it fail before the run that could satisfy it. `dap_device`
-# and `dap_repl` targets check the matching key directly, in do_debug, against
-# the handshake of the run they just started. `caps` itself has no allowlist
-# (mpdebug_handshake._validate only checks types), so these keys are read fine
-# regardless of this tuple.
-#
-# `second_cdc` is here despite also not being an interpreter feature, because
-# unlike `serial_dap` it describes the build rather than the run: it is True on
-# a board that has the interface whether or not this session took it, so a
-# target naming it in `requires` gets the answer it asked for on any run.
-KNOWN_CAPABILITIES = ("settrace", "save_names", "set_local", "f_back", "second_cdc")
+# `repl_dap` is deliberately not here even though the probe reports it: it is
+# not an interpreter feature at all, it is a report of which channel the
+# session took, so it is only ever `True` on a run that already asked for that
+# channel. Putting it in `requires` would make every target that names it fail
+# before the run that could satisfy it. A `dap_repl` target checks the key
+# directly, in do_debug, against the handshake of the run it just started.
+# `caps` itself has no allowlist (mpdebug_handshake._validate only checks
+# types), so the key is read fine regardless of this tuple.
+KNOWN_CAPABILITIES = ("settrace", "save_names", "set_local", "f_back")
 
 _KINDS = ("unix", "serial", "network")
 
@@ -109,7 +96,6 @@ class Target:
         firmware=None,
         program=None,
         requires=(),
-        dap_device=None,
         source=None,
         dap_repl=False,
     ):
@@ -119,16 +105,8 @@ class Target:
         self.firmware = firmware
         self.program = program
         self.requires = requires
-        # The second CDC interface's connect string, for boards where DAP
-        # rides its own serial device node instead of the network (`serial_dap`
-        # in caps) - by-id, like `device`. None means "this target has no
-        # dedicated DAP interface configured"; `do_debug` then always uses
-        # the network transport, even if the device's own probe says it has
-        # one, since there is no path to reach it without this.
-        self.dap_device = dap_device
-        # True when DAP shares the REPL's own stream instead of getting an
-        # interface to itself. The single-UART, no-network channel; mutually
-        # exclusive with `dap_device`.
+        # True when DAP shares the REPL's own stream instead of reaching the
+        # device over the network. The single-UART, no-network channel.
         self.dap_repl = dap_repl
         # Absolute, symlink-resolved host directory `do_debug` mounts at the
         # device's remote-fs mount point before running the program. None
@@ -221,7 +199,7 @@ def _load_targets(path):
                 f"{', '.join(KNOWN_CAPABILITIES)}"
             )
 
-        for key in ("device", "program", "firmware", "dap_device", "source"):
+        for key in ("device", "program", "firmware", "source"):
             value = spec.get(key)
             if value is not None and not isinstance(value, str):
                 _command_error(f"{path}: target '{name}' {key} must be a string")
@@ -233,18 +211,9 @@ def _load_targets(path):
             # Distinct from an absent device, which means "let mpremote choose".
             _command_error(f"{path}: target '{name}' has an empty 'device'")
 
-        dap_device = spec.get("dap_device")
-        if dap_device == "":
-            _command_error(f"{path}: target '{name}' has an empty 'dap_device'")
-
         dap_repl = spec.get("dap_repl", False)
         if not isinstance(dap_repl, bool):
             _command_error(f"{path}: target '{name}' dap_repl must be true or false")
-        if dap_repl and dap_device is not None:
-            _command_error(
-                f"{path}: target '{name}' sets both 'dap_repl' and 'dap_device'; "
-                "a board with a dedicated DAP interface has no reason to share the REPL's"
-            )
         if dap_repl and kind == "unix":
             _command_error(
                 f"{path}: target '{name}' is kind 'unix' and sets 'dap_repl'; a unix "
@@ -276,7 +245,6 @@ def _load_targets(path):
             firmware=spec.get("firmware"),
             program=spec.get("program"),
             requires=requires,
-            dap_device=dap_device,
             source=source,
             dap_repl=dap_repl,
         )

@@ -10,8 +10,8 @@ device's in whatever it reports, so the client attaches to the logger
 instead of bypassing it.
 
 `PumpingProxy`, the accept/pump/close machinery below `DapProxy`, is generic
-in what it forwards to (`_connect_target()`); `serial_dap.py`'s
-`SerialDapBridge` is the other subclass, forwarding to a serial device
+in what it forwards to (`_connect_target()`); `repl_dap.py`'s bridge is the
+other subclass, forwarding to the framed half of the REPL's own stream
 instead of a TCP endpoint - that path *does* always put the byte stream
 through mpremote, since there is no device-side TCP listener to bypass to.
 """
@@ -136,7 +136,8 @@ class PumpingProxy:
     connected, returning the object the client is bridged to - a
     `socket.socket` (`DapProxy`, forwarding to another TCP endpoint) or
     anything else duck-typing `recv`/`sendall`/`shutdown`/`close`
-    (`SerialDapBridge`'s `_SerialDuplex`). The pump code below only ever
+    (`repl_dap.py`'s duplex over the REPL stream's framed half). The pump
+    code below only ever
     calls those four methods, on either side, so it never has to know which
     kind of target it is forwarding to.
     """

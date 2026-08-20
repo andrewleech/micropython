@@ -326,7 +326,7 @@ class _ChannelDuplex:
 class ReplDapBridge(PumpingProxy):
     """Bridges a localhost DAP client onto the REPL stream's framed channel.
 
-    Same shape as `SerialDapBridge`: a client attaches over plain TCP and never
+    A client attaches over plain TCP and never
     learns that the other side is a serial port. The difference is that the
     port is not a second device node but the one `mpremote` is already holding,
     so the channel is opened by the caller and outlives this bridge.

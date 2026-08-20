@@ -27,20 +27,16 @@ client has finished configuring breakpoints, so breakpoints set before then
 are already applied by the time the target starts running.
 
 `dap_stream`, when given, moves the DAP channel off TCP and onto a byte
-stream: `"board"` selects the board's own dedicated DAP interface, `"repl"`
-shares the stream this script was launched over, and anything else is a path
-this runtime can open. Either way `host`/`port` in the handshake become
-`"serial"`/`0` and the `port` argument goes unused. `caps["serial_dap"]`
-reports which channel was actually taken, not a board guess. A caller that
-asks for a stream and does not get one is told so: this never falls back to
-TCP behind the caller's back, because the caller has a bridge waiting on the
-stream and nothing listening on a port. `caps["second_cdc"]` is the other
-half of that answer and is a build property rather than a session one:
-whether this firmware has a second CDC interface for `"board"` to select at
-all. `caps["repl_dap"]` is a session property again: whether this run split
-the REPL stream, which is the channel a board with one UART and no network
-has and the only one that changes what the REPL itself can do while a
-session is live (see `docs/debugging.md`).
+stream: `"repl"` shares the stream this script was launched over, and
+anything else is a path this runtime can open. Either way `host`/`port` in
+the handshake become `"serial"`/`0` and the `port` argument goes unused. A
+caller that asks for a stream and does not get one is told so: this never
+falls back to TCP behind the caller's back, because the caller has a bridge
+waiting on the stream and nothing listening on a port. `caps["repl_dap"]`
+reports whether this run split the REPL stream - a property of the session
+rather than of the build, and the channel a board with one UART and no
+network has. It is the only one that changes what the REPL itself can do
+while a session is live (see `docs/debugging.md`).
 
 `loop`, when the literal `"loop"`, keeps the process and the DAP session alive
 across re-runs of the target: the DAP `restart` request is advertised and
@@ -87,73 +83,6 @@ def _detect_host():
     if not addr or addr == "0.0.0.0":
         return "0.0.0.0"
     return addr
-
-
-def _board_dap_stream():
-    """Return this board's dedicated DAP interface, or None if it has none.
-
-    stm32 is the only port with an implementation: `pyb.USB_VCP(1)` is the
-    second CDC interface, and `pyb.USB_VCP(0)` is the one carrying the REPL
-    this script was launched over. The constructor is not the test for
-    whether that interface exists - it answers from
-    `MICROPY_HW_USB_CDC_NUM`, which is a build-time maximum. Which
-    interfaces are really enumerated is decided at boot by `usb_mode`, whose
-    name carries the count (`VCP+MSC` for one, `2xVCP+MSC` for two), so that
-    is what this reads.
-
-    `isconnected()` is deliberately not the test either: the host opens the
-    interface only after reading the handshake that this feeds, so it is
-    False here on every run that goes on to succeed. It is what
-    `_dap_stream_liveness` reads later, once there is a session to lose.
-    """
-    try:
-        import pyb
-    except ImportError:
-        return None  # no other port implements a dedicated DAP interface yet
-    try:
-        mode = pyb.usb_mode()
-    except AttributeError:
-        return None  # a pyb without USB at all
-    if not mode or "xVCP" not in mode:
-        return None  # at most one CDC interface, and the REPL is on it
-    try:
-        return pyb.USB_VCP(1)
-    except ValueError:
-        return None  # firmware built with a single CDC; usb_mode lied
-
-
-def _probe_second_cdc():
-    """True when this build has a second CDC interface DAP could run over.
-
-    The build's maximum, which is a different question from either of the
-    two next to it and can answer differently on the same run:
-    `pyb.USB_VCP(id)` constructs for every `id` below
-    `MICROPY_HW_USB_CDC_NUM`, a compile-time constant, so this stays True on
-    a board booted `VCP+MSC` with a single interface enumerated, and it is
-    True before any host has opened the interface. `_board_dap_stream()`
-    asks the narrower question - is there an interface here on this boot -
-    and reads `usb_mode` for it; `isconnected()` asks the narrowest, whether
-    a host is holding it. The three are meant to be able to disagree.
-
-    Only stm32 defines the flag, so every other port reports False. That is
-    the right answer for the current firmware variants - rp2 and esp32 build
-    TinyUSB with `CFG_TUD_CDC (1)`, and the unix port has no USB device
-    peripheral - but it is False by ignorance rather than by measurement, so
-    a port that gains a second CDC has to be taught to this probe before a
-    manifest may claim it.
-
-    The expected failures are `ImportError` (no `pyb`), `AttributeError` (a
-    `pyb` with no USB) and `ValueError` (a single-CDC build), but anything at
-    all reads as False, for the same reason `_detect_host()` swallows its own
-    probe: a capability report is not worth aborting a launch over.
-    """
-    try:
-        import pyb
-
-        pyb.USB_VCP(1)
-    except Exception:
-        return False
-    return True
 
 
 # The dupterm slot the REPL occupies on the ports that put it in one. stm32
@@ -236,24 +165,19 @@ def _release_repl_stream():
 def _detect_dap_stream(spec=None):
     """Return an open reader/writer stream for the DAP channel, or None for TCP.
 
-    `spec` is the caller's choice of channel: `None` for TCP, `"board"` for
-    the board's dedicated DAP interface, `"repl"` for a share of the stream
-    this script was launched over, or a path this runtime can open directly
-    (what the unix port has instead of a USB interface). Failing to produce
-    the requested stream raises rather than returning None, so the caller
-    never gets a TCP endpoint it has no client for.
+    `spec` is the caller's choice of channel: `None` for TCP, `"repl"` for
+    a share of the stream this script was launched over, or a path this
+    runtime can open directly (what the unix port has instead of a USB
+    interface). Failing to produce the requested stream raises rather than
+    returning None, so the caller never gets a TCP endpoint it has no client
+    for.
 
-    `caps["serial_dap"]` is derived from which channel `_run()` actually
-    picked (see `debugpy.get_capabilities()`), never guessed here, so the two
-    cannot disagree.
+    `caps["repl_dap"]` is derived from which channel `_run()` actually picked
+    (see `debugpy.get_capabilities()`), never guessed here, so the two cannot
+    disagree.
     """
     if spec is None:
         return None
-    if spec == "board":
-        stream = _board_dap_stream()
-        if stream is None:
-            raise OSError("no dedicated DAP interface on this board")
-        return stream
     if spec == "repl":
         return _repl_dap_stream()
     try:
@@ -399,7 +323,6 @@ def _run():
     # session's own dict, and the second CDC is not the debug server's to
     # report - it is USB topology, which only the boot script can see.
     caps = debugpy.get_capabilities().copy()
-    caps["second_cdc"] = _probe_second_cdc()
     caps["repl_dap"] = bool(_repl_mux)
     # Exactly one MPDBG-READY line, valid JSON, nothing else on this line.
     print("MPDBG-READY " + json.dumps({"host": actual_host, "port": actual_port, "caps": caps}))
