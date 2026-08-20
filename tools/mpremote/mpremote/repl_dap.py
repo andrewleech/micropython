@@ -208,8 +208,7 @@ class ReplDapChannel:
                 # whatever else is already buffered without waiting for more:
                 # asking for a fixed count up front would pay the whole
                 # timeout on every read, since a frame is essentially never
-                # exactly that many bytes. `_SerialDuplex.recv` reads the same
-                # way and for the same reason.
+                # exactly that many bytes.
                 chunk = self._serial.read(1)
                 if chunk:
                     chunk += self._serial.read(self._serial.in_waiting)
