@@ -13,6 +13,7 @@ MicroPython device over a serial connection.  Commands supported are:
     mpremote eval <string>           -- evaluate and print the string
     mpremote exec <string>           -- execute the string
     mpremote run <script>            -- run the given local script
+    mpremote debug <target> [prog]   -- debug the given script with a DAP client
     mpremote fs <command> <args...>  -- execute filesystem commands on the device
     mpremote repl                    -- enter REPL
 """
@@ -27,6 +28,7 @@ import platformdirs
 from .commands import (
     CommandError,
     do_connect,
+    do_debug,
     do_disconnect,
     do_edit,
     do_filesystem,
@@ -173,6 +175,94 @@ def argparse_run():
         cmd_parser, "follow", "f", True, "follow output until the script completes (default)"
     )
     cmd_parser.add_argument("path", nargs=1, help="path to script to execute")
+    return cmd_parser
+
+
+def argparse_debug():
+    cmd_parser = argparse.ArgumentParser(
+        description="debug a MicroPython script with a DAP client",
+        epilog="as with any other mpremote option, --port/--timeout/--dap-log/"
+        "--dap-log-file/--source/--loop/--dap-repl must come before target/program",
+    )
+    cmd_parser.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        help="name of a target in mpdebug.toml, 'unix' to debug a local unix-port "
+        "build, or a connect string as accepted by 'mpremote connect'; omit to use "
+        "the file's sole target, or list the available names if it defines several",
+    )
+    cmd_parser.add_argument(
+        "program",
+        nargs="?",
+        default=None,
+        help="module[:method] to run under the debugger (default: the target's own "
+        "'program', or 'target:main'); put '+' before a chained command so it "
+        "isn't read as this argument",
+    )
+    # No port in this tree binds socket.getsockname(), so the device cannot
+    # report a system-assigned port and listen(port=0) raises there. Leaving
+    # --port unset omits it from the boot script's argv, so the device applies
+    # its own default rather than the host choosing one.
+    cmd_parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="TCP port for the debug server to listen on (default: the "
+        "device's own default); 0 is rejected, since a device that cannot "
+        "report the system-assigned port has no endpoint to advertise",
+    )
+    cmd_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=60,
+        help="seconds to wait for the device to bind its debug-server socket "
+        "and report the endpoint (default: 60)",
+    )
+    _bool_flag(
+        cmd_parser,
+        "dap-log",
+        "d",
+        False,
+        "log DAP traffic as JSONL via a local proxy inserted between the "
+        "client and the device (default file: a timestamped file in the "
+        "current directory; name one with --dap-log-file)",
+    )
+    cmd_parser.add_argument(
+        "--dap-log-file",
+        metavar="FILE",
+        default=None,
+        help="path for --dap-log's JSONL output; requires --dap-log",
+    )
+    cmd_parser.add_argument(
+        "--source",
+        metavar="PATH",
+        default=None,
+        help="host directory to mount at the device's remote-fs mount point before "
+        "running the program, so it debugs a live view of this directory instead of "
+        "whatever copy is already on the device; overrides the target's 'source' in "
+        "mpdebug.toml; rejected for a unix target, which already runs from the host "
+        "filesystem",
+    )
+    _bool_flag(
+        cmd_parser,
+        "loop",
+        "l",
+        False,
+        "keep the session alive across re-runs: the client's restart request "
+        "evicts what the program imported and imports it again, so an edit "
+        "takes effect with no upload and no reset",
+    )
+    _bool_flag(
+        cmd_parser,
+        "dap-repl",
+        "r",
+        False,
+        "put the DAP channel on the stream already carrying the REPL, for a "
+        "board with one UART and no network; overrides the target's "
+        "'dap_repl'. The REPL is not usable for anything else while the "
+        "session runs - see docs/debugging.md",
+    )
     return cmd_parser
 
 
@@ -330,6 +420,10 @@ _COMMANDS = {
     "run": (
         do_run,
         argparse_run,
+    ),
+    "debug": (
+        do_debug,
+        argparse_debug,
     ),
     "rtc": (
         do_rtc,
