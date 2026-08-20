@@ -320,8 +320,8 @@ def _run():
     print(f"Debug server listening on {actual_host}:{actual_port}")
 
     # `.copy()` first: with a session live `get_capabilities()` hands back the
-    # session's own dict, and the second CDC is not the debug server's to
-    # report - it is USB topology, which only the boot script can see.
+    # session's own dict, and which channel this run took is not the debug
+    # server's to report - only the boot script knows it split the REPL.
     caps = debugpy.get_capabilities().copy()
     caps["repl_dap"] = bool(_repl_mux)
     # Exactly one MPDBG-READY line, valid JSON, nothing else on this line.

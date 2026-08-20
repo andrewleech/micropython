@@ -1,6 +1,5 @@
 import binascii
 import codecs
-import collections
 import contextlib
 import errno
 import hashlib
@@ -942,14 +941,13 @@ def _pump_mount(transport, stop_event, failed_event):
     answers `\\x18`-prefixed filesystem RPC from any read of the wrapped
     serial object, but nothing else reads this particular connection once
     the boot script is running - the DAP traffic the client drives rides a
-    separate TCP endpoint. Without something to keep
-    calling read on it, an RPC request the device makes on its next
-    filesystem access would sit unanswered and the device would block on it
-    indefinitely. Ordinary console bytes collected between RPC commands are
-    discarded rather than printed, unlike `_pump_console`: this loop reads
-    the RPC framing itself, so what is left over is whatever fell between
-    two commands rather than a clean stream of the program's output. Both
-    keep the console emptied, which is what the device needs of them.
+    separate TCP endpoint. Without something to keep calling read on it, an
+    RPC request the device makes on its next filesystem access would sit
+    unanswered and the device would block on it indefinitely. Ordinary console
+    bytes collected between RPC commands are discarded rather than printed:
+    this loop reads the RPC framing itself, so what is left over is whatever
+    fell between two commands rather than a clean stream of the program's
+    output. Emptying the console is what the device needs of it either way.
 
     A read raising while `stop_event` is not set means the device stopped
     answering an RPC command mid-exchange, not that the caller asked this
@@ -1014,24 +1012,28 @@ def _pump_console(transport, stop_event):
     prints has no reason to send, and `stop_event` would not be looked at
     again until they came.
     """
-    buffered = collections.deque()
-    buffered_bytes = [0]
-    dropped = [0]
-    lock = threading.Lock()
+    buffered = bytearray()
+    dropped = 0
+    ready = threading.Condition()
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
 
     def emit():
         while True:
-            with lock:
-                chunk = buffered.popleft() if buffered else None
-                if chunk is not None:
-                    buffered_bytes[0] -= len(chunk)
-            if chunk is None:
+            with ready:
+                while not buffered and not stop_event.is_set():
+                    ready.wait(_CONSOLE_POLL_S)
+                chunk = bytes(buffered)
+                del buffered[:]
+            if not chunk:
                 if stop_event.is_set():
                     return
-                stop_event.wait(_CONSOLE_POLL_S)
                 continue
             try:
-                sys.stdout.write(chunk.decode("utf-8", "replace"))
+                # Decoded incrementally: a read ends wherever the port had
+                # bytes, so a multi-byte character routinely straddles two of
+                # them and decoding each in isolation would mint replacement
+                # characters at every boundary.
+                sys.stdout.write(decoder.decode(chunk))
                 sys.stdout.flush()
             except Exception:
                 return  # a consumer that closed the pipe, not a device problem
@@ -1048,18 +1050,21 @@ def _pump_console(transport, stop_event):
         if not data:
             stop_event.wait(_CONSOLE_POLL_S)
             continue
-        with lock:
-            buffered.append(data)
-            buffered_bytes[0] += len(data)
-            while buffered_bytes[0] > _CONSOLE_BUFFER_BYTES and len(buffered) > 1:
-                dropped[0] += len(buffered[0])
-                buffered_bytes[0] -= len(buffered.popleft())
+        with ready:
+            buffered += data
+            excess = len(buffered) - _CONSOLE_BUFFER_BYTES
+            if excess > 0:
+                del buffered[:excess]
+                dropped += excess
+            ready.notify()
 
     stop_event.set()
+    with ready:
+        ready.notify()
     writer.join(timeout=1)
-    if dropped[0]:
+    if dropped:
         print(
-            f"warning: dropped {dropped[0]} bytes of the board's console output; "
+            f"warning: dropped {dropped} bytes of the board's console output; "
             "whatever is reading this command's output did not keep up",
             file=sys.stderr,
         )
@@ -1490,16 +1495,13 @@ def do_debug(state, args):
     # --dap-repl on the command line overrides a target's configured
     # 'dap_repl'; either one asks for the DAP channel to share the stream
     # carrying the REPL, which is what a board with one UART and no network
-    # has. A target that also configures a dedicated DAP interface is
-    # rejected at config load, but the flag can reach one, so the same
-    # conflict is refused here rather than one of the two silently winning.
+    # has.
     dap_repl = args.dap_repl or (resolved.dap_repl if resolved is not None else False)
-    if dap_repl:
-        if is_unix:
-            raise CommandError(
-                "--dap-repl is not valid for a unix target: it reaches its debug "
-                "channel over the loopback interface, with no stream to share"
-            )
+    if dap_repl and is_unix:
+        raise CommandError(
+            "--dap-repl is not valid for a unix target: it reaches its debug "
+            "channel over the loopback interface, with no stream to share"
+        )
 
     if args.source is not None:
         if is_unix:
@@ -1527,8 +1529,7 @@ def do_debug(state, args):
             f"{origin} cannot be combined with --dap-repl: mounting and the "
             "REPL-stream DAP channel both frame the same stream, and running "
             "them together would desync it. Put the program on the device's "
-            "own filesystem for this session, or use a target with a network "
-            "or dedicated DAP interface"
+            "own filesystem for this session, or use a target with a network"
         )
 
     # Both checks below depend only on host state - the source root and the
