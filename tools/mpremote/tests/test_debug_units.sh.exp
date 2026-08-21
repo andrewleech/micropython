@@ -1,0 +1,12 @@
+ok read_handshake takes a real address
+ok read_handshake keeps the reported port
+ok read_handshake reports the channel kind
+ok read_handshake resolves a wildcard for unix
+ok read_handshake tolerates output around the line
+ok read_handshake refuses to guess an address
+ok demux passes plain bytes
+ok demux unescapes a literal marker
+ok demux reassembles a frame
+ok demux resumes across reads (plain)
+ok demux resumes across reads (framed)
+ok demux records an unknown code
