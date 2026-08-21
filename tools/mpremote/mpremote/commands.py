@@ -20,7 +20,7 @@ import zlib
 
 import serial.tools.list_ports
 
-from .transport import TransportError, TransportExecError, stdout_write_bytes
+from .transport import ConsoleSink, TransportError, TransportExecError, stdout_write_bytes
 from .transport_serial import SerialTransport
 from .romfs import make_romfs, VfsRomWriter
 from .mpdebug_config import find_config, resolve_target, target_hint, warn_if_tty_device
@@ -658,6 +658,9 @@ def _debug_boot_script(module, method, port, dap_stream=None, mount_point=None, 
 
 _POLL_S = 0.2  # read_until() poll cadence for both the handshake scan and the error drain below
 _MOUNT_TEARDOWN_TIMEOUT_S = 10  # bounds each of the two round trips in _teardown_mount
+_CONSOLE_POLL_S = 0.05  # how often _pump_console looks again at an idle console
+_CONSOLE_BUFFER_BYTES = 256 * 1024  # what _pump_console holds for a stalled consumer
+_CONSOLE_JOIN_TIMEOUT_S = 2  # how long cleanup() waits for the console reader to stop
 
 
 def _one_line(value):
@@ -833,7 +836,7 @@ def _exit_on_signal(exit_code=1):
             signal.signal(sig, old)
 
 
-def _stay_attached(proxy, message, pump_failed=None):
+def _stay_attached(proxy, message, pump_failed=None, console=None):
     """Block until `proxy`'s one client session ends, reaping it on every exit path.
 
     Used by `--dap-log`'s own proxy, which is a
@@ -849,10 +852,37 @@ def _stay_attached(proxy, message, pump_failed=None):
     mount_local's docstring) independently of whatever the proxy itself
     still reports, so this stops waiting on the proxy's own end-of-session
     signal.
+
+    `console` is the transport whose primary connection this process is
+    holding open with nothing else reading it, and it is drained for exactly
+    as long as this waits - see `_pump_console` for what an unread console
+    does to the board. A caller passes None when something already reads that
+    connection: a mount's own RPC pump, whose reader owns the port and
+    would lose frames to a second one.
     """
     print(message, flush=True)
+    console_stop = threading.Event()
+    console_thread = None
+    if console is not None:
+        console_thread = threading.Thread(
+            target=_pump_console, args=(console, console_stop), daemon=True
+        )
+        console_thread.start()
 
     def cleanup():
+        console_stop.set()
+        if console_thread is not None:
+            # The pump reads the same port the caller goes on to tear a mount
+            # down over, or to close. Letting it run past here would put a
+            # second reader on that port at exactly the wrong moment. It polls
+            # rather than blocking, so this returns promptly.
+            console_thread.join(_CONSOLE_JOIN_TIMEOUT_S)
+            if console_thread.is_alive():
+                print(
+                    "warning: the console reader did not stop in time; "
+                    "output from here on may be interleaved",
+                    file=sys.stderr,
+                )
         try:
             old_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
         except ValueError:
@@ -921,12 +951,13 @@ def _pump_mount(transport, stop_event, failed_event):
     answers `\\x18`-prefixed filesystem RPC from any read of the wrapped
     serial object, but nothing else reads this particular connection once
     the boot script is running - the DAP traffic the client drives rides a
-    separate TCP endpoint. Without something to keep
-    calling read on it, an RPC request the device makes on its next
-    filesystem access would sit unanswered and the device would block on it
-    indefinitely. Ordinary console bytes collected between RPC commands are
-    discarded, matching every other "stay attached" path here: none of them
-    surface the primary connection's console output while attached.
+    separate TCP endpoint. Without something to keep calling read on it, an
+    RPC request the device makes on its next filesystem access would sit
+    unanswered and the device would block on it indefinitely. Ordinary console
+    bytes collected between RPC commands are discarded rather than printed:
+    this loop reads the RPC framing itself, so what is left over is whatever
+    fell between two commands rather than a clean stream of the program's
+    output. Emptying the console is what the device needs of it either way.
 
     A read raising while `stop_event` is not set means the device stopped
     answering an RPC command mid-exchange, not that the caller asked this
@@ -964,6 +995,55 @@ def _pump_mount(transport, stop_event, failed_event):
                 )
                 failed_event.set()
             return
+
+
+def _pump_console(transport, stop_event):
+    """Background thread: keep the board's console drained while attached.
+
+    A console this process holds open but never reads back-pressures all the
+    way into the device. The tty's line discipline stops accepting once its
+    own buffer fills, the board's transmit buffer fills behind it, and
+    `print` then waits for room - on a stm32 USB CDC, up to 500ms for each
+    byte it cannot place. The debugged program stops making progress, and so
+    does the DAP channel, while the board's networking keeps acknowledging
+    from interrupt context: it looks like a link that has gone quiet rather
+    than like a console nobody is emptying.
+
+    So every path that stays attached and owns the primary connection reads
+    it. The bytes go to stdout rather than being discarded, because they are
+    the debugged program's own output and this process holds the only port
+    they can arrive on.
+
+    Printing happens on `ConsoleSink`'s own thread rather than this one: a
+    stdout nobody is reading blocks once the pipe fills, and a reader that
+    blocks is a console that is not being emptied - the same fault one level
+    up, with 64 kB of pipe instead of 4 kB of tty in front of it.
+
+    Reads only what has already arrived: the port is opened blocking, so
+    asking for a fixed count would wait for bytes that a program between
+    prints has no reason to send, and `stop_event` would not be looked at
+    again until they came.
+    """
+    sink = ConsoleSink(limit=_CONSOLE_BUFFER_BYTES, poll=_CONSOLE_POLL_S)
+    try:
+        while not stop_event.is_set():
+            try:
+                waiting = transport.serial.in_waiting
+                data = transport.serial.read(waiting) if waiting else b""
+            except Exception:
+                break
+            if data:
+                sink.write(data)
+            else:
+                stop_event.wait(_CONSOLE_POLL_S)
+    finally:
+        dropped = sink.close()
+        if dropped:
+            print(
+                f"warning: dropped {dropped} bytes of the board's console output; "
+                "whatever is reading this command's output did not keep up",
+                file=sys.stderr,
+            )
 
 
 def _teardown_mount(transport):
@@ -1537,9 +1617,9 @@ def do_debug(state, args):
             if mounted:
                 # Nothing else reads state.transport once the boot script is
                 # running - the client's DAP traffic rides a separate TCP
-                # endpoint - so a background thread has to
-                # pump it for as long as this function stays attached below,
-                # whichever of the three shapes that takes. `pump_failed` is
+                # endpoint - so a background thread has to pump it for as
+                # long as this function stays attached below, whichever
+                # shape that takes. `pump_failed` is
                 # set by the thread itself if it ever stops for a reason
                 # other than the `pump_stop` this function requests, so the
                 # "stay attached" call below can tell an unrecoverably wedged
@@ -1575,6 +1655,7 @@ def do_debug(state, args):
                 proxy,
                 "staying attached to run the --dap-log proxy; Ctrl-C ends it",
                 pump_failed=pump_failed,
+                console=None if mounted else state.transport,
             )
             return reported
         finally:
