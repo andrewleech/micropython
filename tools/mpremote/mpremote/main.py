@@ -255,6 +255,16 @@ def argparse_debug():
         "evicts what the program imported and imports it again, so an edit "
         "takes effect with no upload and no reset",
     )
+    _bool_flag(
+        cmd_parser,
+        "dap-repl",
+        "r",
+        False,
+        "put the DAP channel on the stream already carrying the REPL, for a "
+        "board that has only that one stream and no network - a single "
+        "USB-CDC interface or a UART; overrides the target's 'dap_repl'. "
+        "The REPL is not usable for anything else while the session runs",
+    )
     return cmd_parser
 
 
