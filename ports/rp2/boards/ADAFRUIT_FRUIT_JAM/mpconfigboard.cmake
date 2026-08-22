@@ -1,0 +1,16 @@
+# cmake file for Adafruit Fruit Jam
+
+set(PICO_PLATFORM "rp2350")
+set(PICO_NUM_GPIOS 48)
+
+list(APPEND MICROPY_SOURCE_BOARD ${MICROPY_BOARD_DIR}/board_init.c)
+
+set(MICROPY_FROZEN_MANIFEST ${MICROPY_BOARD_DIR}/manifest.py)
+
+if(NOT DEFINED MICROPY_HW_FLASH_STORAGE_BYTES)
+    set(MICROPY_HW_FLASH_STORAGE_BYTES 14680064)  # 16MB flash - 2MB reserved for firmware growth
+endif()
+
+# 8MB PSRAM on GPIO47.
+set(MICROPY_HW_ENABLE_PSRAM 1)
+set(MICROPY_HW_PSRAM_CS_PIN 47)
