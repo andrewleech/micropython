@@ -11,3 +11,5 @@ signalled survives a drained token ok
 fd wake without ready ok
 fd wake with ready ok
 worker thread wake ok
+threadsafeflag declares signal source ok
+threadsafeflag cross thread wake ok

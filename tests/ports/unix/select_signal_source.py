@@ -344,3 +344,64 @@ if r and dt < 500 and pc <= IDLE_POLL_COUNT_MAX:
     print("worker thread wake ok")
 else:
     print("worker thread wake FAIL:", r, dt, pc)
+
+# _asyncio._ThreadSafeFlag (extmod/modasyncio.c) is the production consumer of the
+# SOURCE_SIGNAL path this file otherwise exercises through the synthetic stream. It
+# exposes no poll_count() of its own, so its declaration is checked by pairing it with
+# SelectSignalStream in one poll() set: a single entry with no wake source drags the
+# whole set down to the sweep cadence (see "bare entry forces sweep" above), so the
+# probe's own poll_count staying at or below the deadline-block bound is only possible
+# if the flag's entry also declared a real wake source.
+try:
+    import _asyncio
+
+    _asyncio._ThreadSafeFlag
+except (ImportError, AttributeError):
+    print("SKIP")
+    raise SystemExit
+
+probe = SelectSignalStream()
+flag = _asyncio._ThreadSafeFlag()
+p = select.poll()
+p.register(probe, select.POLLIN)
+p.register(flag, select.POLLIN)
+p.poll(80)
+pc = probe.poll_count()
+p.unregister(flag)
+p.unregister(probe)
+if pc_matches_block_cadence(pc):
+    print("threadsafeflag declares signal source ok")
+else:
+    print("threadsafeflag declares signal source FAIL:", pc)
+
+# A set() called from another thread must reach the same registered callback as a
+# same-thread set(), ending a blocking poll() promptly instead of only being found on
+# the next period-capped sweep. The poll() stays on the main thread (paired with
+# SelectSignalStream again, as above) rather than a worker thread, since only the main
+# thread is entitled to the deadline block that pc_matches_block_cadence() checks for
+# (see poll_set_signal_wake_is_reliable() in extmod/modselect.c); what this test needs
+# from the worker thread is only that set() called there reaches the callback safely,
+# which the main thread's own poll_count() already reveals.
+flag = _asyncio._ThreadSafeFlag()
+probe = SelectSignalStream()
+p = select.poll()
+p.register(probe, select.POLLIN)
+p.register(flag, select.POLLIN)
+
+
+def set_after(ms):
+    time.sleep_ms(ms)
+    flag.set()
+
+
+_thread.start_new_thread(set_after, (50,))
+t0 = time.ticks_ms()
+r = p.poll(2000)
+dt = time.ticks_diff(time.ticks_ms(), t0)
+pc = probe.poll_count()
+p.unregister(flag)
+p.unregister(probe)
+if r and dt < 500 and pc_matches_block_cadence(pc) and flag.is_set():
+    print("threadsafeflag cross thread wake ok")
+else:
+    print("threadsafeflag cross thread wake FAIL:", r, dt, pc)
