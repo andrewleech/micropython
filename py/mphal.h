@@ -120,4 +120,32 @@ uint64_t mp_hal_time_ns(void);
 #define mp_hal_signal_event() (void)0
 #endif
 
+#if MICROPY_PY_SELECT_EVENT_SOURCE
+
+// Monotonic count of mp_event_signal() calls, safe from a hard ISR, a second
+// core, or a non-MicroPython RTOS task, on the same terms as
+// mp_hal_signal_event(). A waiter compares a snapshot of this against the
+// current value to learn whether a SOURCE_SIGNAL entry may have readied
+// since the snapshot was taken; it is never read-and-cleared, so a raise is
+// visible to every waiter rather than only the first to notice it. Wrap is
+// harmless because every use is an inequality test against a snapshot taken
+// before the raises being detected.
+extern volatile uint32_t mp_event_signal_count;
+
+// The external wake-source entry point: bumps mp_event_signal_count and
+// then calls mp_hal_signal_event() to end a blocking wait. Distinct from
+// calling mp_hal_signal_event() directly, which the scheduler's own
+// queued-work hooks do without touching the count; routing a plain
+// "runnable work exists" wake through here would make every scheduled
+// callback trigger a sweep of every registered SOURCE_SIGNAL entry.
+void mp_event_signal(void);
+
+#else
+
+// The count does not exist when the feature is off, so a driver's call site
+// stays portable: this collapses to exactly mp_hal_signal_event().
+#define mp_event_signal() mp_hal_signal_event()
+
+#endif
+
 #endif // MICROPY_INCLUDED_PY_MPHAL_H

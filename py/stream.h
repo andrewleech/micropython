@@ -99,11 +99,14 @@ struct mp_stream_seek_t {
 //                  readiness sweep and immediately before the block. Must
 //                  only update fd_events; must not touch cb/ctx, and must
 //                  not register or unregister any entry in the poll set.
-//   OP_UNREGISTER: called before the entry is released, with cb == NULL. A
-//                  stream that declares SOURCE_SIGNAL can be registered into
-//                  more than one poll set while sharing this one cb/ctx
-//                  pair, so it must count its registrations and disarm only
-//                  once the count reaches zero, not on every Unregister.
+//   OP_UNREGISTER: called only for an entry that declared SOURCE_SIGNAL,
+//                  before it is released from the poll set, with cb == NULL.
+//                  Like Refresh, must not register or unregister any entry
+//                  in the poll set. A stream that declares SOURCE_SIGNAL can
+//                  be registered into more than one poll set while sharing
+//                  this one cb/ctx pair, so it must count its registrations
+//                  and disarm only once the count reaches zero, not on
+//                  every Unregister.
 typedef struct _mp_stream_event_source_t {
     // In: supplied by the caller. The stream stores these if it declares
     // SOURCE_SIGNAL, and calls cb(ctx) when its readiness may have changed.
