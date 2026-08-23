@@ -168,6 +168,16 @@ typedef long mp_off_t;
 
 #define MICROPY_PY_SOCKET_LISTEN_BACKLOG_DEFAULT (SOMAXCONN < 128 ? SOMAXCONN : 128)
 
+// Raises reach mp_event_signal() from other threads and from POSIX signal handlers, so two
+// can interleave and a plain increment would lose one. Release/acquire rather than relaxed:
+// a waiter that observes movement must also observe the driver's state write that preceded
+// the raise, and pairing it here rather than leaning on the write() to the wake descriptor
+// keeps that guarantee attached to the counter the waiter actually reads (py/mphal.h).
+#define MICROPY_EVENT_SIGNAL_COUNT_INC() \
+    __atomic_fetch_add(&mp_event_signal_count, 1, __ATOMIC_RELEASE)
+#define MICROPY_EVENT_SIGNAL_COUNT_GET() \
+    __atomic_load_n(&mp_event_signal_count, __ATOMIC_ACQUIRE)
+
 // Per-thread wake objects (py/mphal.h), implemented in unix_mphal.c. Declared here
 // rather than in mphalport.h: ports/windows/windows_mphal.h includes that header
 // wholesale while ports/windows/Makefile compiles windows_mphal.c instead of

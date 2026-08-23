@@ -194,11 +194,41 @@ int mp_hal_wake_obj_posix_fd(mp_hal_wake_obj_t *w);
 // A port whose raise primitive carries no release semantics of its own must supply one,
 // since this variable's declaration alone does not provide it.
 //
-// A raise that interleaves with the increment can coalesce two raises into one bump, but
-// the stored value still differs from any snapshot taken before either raise, so movement
-// is never lost; coalescing is harmless because a waiter re-derives readiness from the
-// source's own ioctl rather than from the count itself.
+// Movement here is the only thing that tells a waiter to re-ask a SOURCE_SIGNAL entry
+// whose own descriptor did not fire, so a lost increment is a missed wake rather than a
+// missed optimisation. MICROPY_EVENT_SIGNAL_COUNT_INC() below is what makes it lossless.
 extern volatile uint32_t mp_event_signal_count;
+
+// PORT OBLIGATION, two parts. The default of each is enough only where raises cannot
+// preempt one another; a port whose raises can (threads, or an ISR interrupting a raise)
+// must override both.
+//
+// Lossless. Two raisers must not coalesce into one bump: were the second to land between
+// the first's load and store, a waiter snapshotting the intermediate value would then see
+// the first's store leave the count where that snapshot already sits, hiding the second
+// raise from every later pass.
+//
+// Ordered. The increment must be a release and the read an acquire, so that a waiter
+// observing movement also observes the driver's state write that preceded it. Not because
+// the count carries data, but because it is the sole trigger for re-asking an entry, and
+// the ioctl that ask performs reads exactly that state. Release/acquire puts the guarantee
+// on the object the reader actually consults. A port could instead lean on its raise
+// primitive, whose syscall or barrier happens to order these anyway, but that guarantee
+// lives in an unrelated object and disappears the day two apparently independent lines are
+// reordered; the pairing here has to keep being satisfied to compile as written.
+// Deliberately no default. The obvious one, a plain read-modify-write and a plain read,
+// satisfies neither obligation above: on a single-core MCU `++count` is load/add/store, so a
+// raise from an ISR landing between the load and the store drops an increment, which is a
+// missed wake. A default that silently fails the contract stated directly above it is worse
+// than a compile error naming it, and enabling this feature is exactly the moment a port
+// should be made to decide.
+//
+// A port whose raises genuinely cannot preempt one another - no ISR raises, no second core,
+// no threads - may define these as the plain operations, but must say so rather than
+// inherit it by absence.
+#if !defined(MICROPY_EVENT_SIGNAL_COUNT_INC) || !defined(MICROPY_EVENT_SIGNAL_COUNT_GET)
+#error "MICROPY_PY_SELECT_EVENT_SOURCE requires the port to define both MICROPY_EVENT_SIGNAL_COUNT_INC() and MICROPY_EVENT_SIGNAL_COUNT_GET(); see py/mphal.h for the lossless and ordered obligations they carry"
+#endif
 
 // The external wake-source entry point: bumps mp_event_signal_count and
 // then calls mp_hal_signal_event() to end a blocking wait. Distinct from

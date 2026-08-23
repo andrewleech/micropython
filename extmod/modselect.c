@@ -252,11 +252,23 @@ static bool poll_obj_should_be_asked(poll_obj_t *poll_obj, bool signalled) {
 
 #if MICROPY_PY_SELECT_EVENT_SOURCE
 // Whether any SOURCE_SIGNAL entry's readiness may have changed since this poll set last
+// took a snapshot, without refreshing that snapshot. Used where an observation cannot act
+// on a raise it sees (poll_set_resolve_readiness() runs after poll() has already been
+// asked for this pass), so a raise noticed only here must still be re-asked on this set's
+// next pre-block ask rather than being discharged by an observation that could not use it.
+static bool poll_set_peek_signal(poll_set_t *poll_set) {
+    return MICROPY_EVENT_SIGNAL_COUNT_GET() != poll_set->signal_seen;
+}
+
+// Whether any SOURCE_SIGNAL entry's readiness may have changed since this poll set last
 // asked. Reads mp_event_signal_count once and refreshes this set's own snapshot, so the
 // answer reflects every raise since this set's own last check, not since any other poll
 // set's; two sets calling this concurrently each get a true answer, never only one of them.
+// Call only where the result actually drives the pre-block ask that can act on it
+// (poll_set_poll_until_ready_or_timeout()'s loop head): refreshing anywhere else discharges
+// the movement without anything having asked on its behalf.
 static bool poll_set_take_signal(poll_set_t *poll_set) {
-    uint32_t seen = mp_event_signal_count;
+    uint32_t seen = MICROPY_EVENT_SIGNAL_COUNT_GET();
     bool moved = seen != poll_set->signal_seen;
     poll_set->signal_seen = seen;
     return moved;
@@ -728,7 +740,12 @@ static mp_uint_t poll_set_resolve_pre_block(poll_set_t *poll_set, bool first_pas
 static mp_uint_t poll_set_resolve_readiness(poll_set_t *poll_set) {
     mp_uint_t n_ready = 0;
     #if MICROPY_PY_SELECT_EVENT_SOURCE
-    bool signalled = poll_set_take_signal(poll_set);
+    // Peek, not take: this call runs after poll() for the current pass, so a raise it
+    // learns of here has already missed this pass's own pre-block ask and must wait for
+    // the next one, which reads the same movement again via poll_set_take_signal() at the
+    // top of the loop. Refreshing the snapshot here as well would discharge that movement
+    // on an observation that never asked anything on its behalf.
+    bool signalled = poll_set_peek_signal(poll_set);
     #else
     bool signalled = false;
     #endif

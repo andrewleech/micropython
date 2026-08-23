@@ -56,7 +56,7 @@ volatile uint32_t mp_event_signal_count;
 // pre-block sweep and into the block itself still learns of the raise on
 // its next pass, rather than only from the transport's own wake.
 void mp_event_signal(void) {
-    ++mp_event_signal_count;
+    MICROPY_EVENT_SIGNAL_COUNT_INC();
     mp_hal_signal_event();
 }
 #endif
