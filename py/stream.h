@@ -83,26 +83,39 @@ struct mp_stream_seek_t {
 #define MP_STREAM_EVENT_FD_IS_READINESS  (0x04) // fd revents ARE readiness; skip my POLL
 #define MP_STREAM_EVENT_FD_DYNAMIC       (0x08) // re-query .fd_events every cycle
 
+// Cadences for MP_STREAM_SET_EVENT_SOURCE, distinguished by .op. cb == NULL
+// is not sufficient to tell Refresh and Unregister apart, since Refresh also
+// passes cb == NULL to avoid disturbing an existing arm.
+#define MP_STREAM_EVENT_OP_REGISTER   (0) // entering the poll set
+#define MP_STREAM_EVENT_OP_REFRESH    (1) // re-querying fd_events before a block
+#define MP_STREAM_EVENT_OP_UNREGISTER (2) // leaving the poll set
+
 // Argument structure for MP_STREAM_SET_EVENT_SOURCE, passed as a pointer via
-// the ioctl's uintptr_t arg. The caller uses it for three cadences:
-//   Register:   called once when the object enters the poll set. Installs
-//               cb/ctx and learns fd/fd_events/flags, which are static for
-//               the life of the registration.
-//   Refresh:    called only for entries that declared FD_DYNAMIC, after the
-//               readiness sweep and immediately before the block. Must only
-//               update fd_events; must not re-arm or tear down cb/ctx, and
-//               must not register or unregister any entry in the poll set.
-//   Unregister: called with cb == NULL before the entry is released, so the
-//               stream never holds a stale callback.
+// the ioctl's uintptr_t arg. .op selects one of three cadences:
+//   OP_REGISTER:   called once when the object enters the poll set. Installs
+//                  cb/ctx and learns fd/fd_events/flags, which are static for
+//                  the life of the registration.
+//   OP_REFRESH:    called only for entries that declared FD_DYNAMIC, after the
+//                  readiness sweep and immediately before the block. Must
+//                  only update fd_events; must not touch cb/ctx, and must
+//                  not register or unregister any entry in the poll set.
+//   OP_UNREGISTER: called before the entry is released, with cb == NULL. A
+//                  stream that declares SOURCE_SIGNAL can be registered into
+//                  more than one poll set while sharing this one cb/ctx
+//                  pair, so it must count its registrations and disarm only
+//                  once the count reaches zero, not on every Unregister.
 typedef struct _mp_stream_event_source_t {
     // In: supplied by the caller. The stream stores these if it declares
     // SOURCE_SIGNAL, and calls cb(ctx) when its readiness may have changed.
-    // cb == NULL means disarm. ctx is opaque and must never be a pointer
-    // into caller-owned memory that can move (e.g. a poll set entry).
+    // ctx is opaque and must never be a pointer into caller-owned memory
+    // that can move (e.g. a poll set entry). Meaningful only on
+    // OP_REGISTER; NULL on OP_REFRESH and OP_UNREGISTER.
     void (*cb)(void *ctx);
     void *ctx;
     // In: the event mask the caller is waiting for.
     uint16_t events;
+    // In: which of the three cadences above this call is.
+    uint8_t op;
     // Out: filled in by the stream.
     int fd;             // -1 if none
     uint16_t fd_events; // direction to watch on fd, if SOURCE_FD is set
