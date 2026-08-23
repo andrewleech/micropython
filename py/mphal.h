@@ -120,16 +120,84 @@ uint64_t mp_hal_time_ns(void);
 #define mp_hal_signal_event() (void)0
 #endif
 
+// Per-thread wake objects. A polling thread that has claimed one waits on that object
+// instead of on a single process-wide primitive, so a raise reaches it directly and no
+// other thread can consume the same token first. Distinct from mp_hal_signal_event(),
+// which pokes one primitive shared by every waiter: that one has exactly one legitimate
+// consumer, whichever waiter reads it first, and is not reliable for a thread that is not
+// entitled to it.
+#ifndef MICROPY_HAL_HAS_WAKE_OBJ
+#define MICROPY_HAL_HAS_WAKE_OBJ (0)
+#endif
+
+#if MICROPY_HAL_HAS_WAKE_OBJ
+
+// Opaque; the port defines the struct in its own mphalport.h. Storage belongs to the port
+// and outlives every caller, so nothing outside the port ever holds a pointer into caller
+// memory.
+typedef struct _mp_hal_wake_obj_t mp_hal_wake_obj_t;
+
+// This thread's wake object, claimed on the first call and held until the thread ends.
+// NULL if the port has none left to give, which is a supported answer, not a failure: the
+// caller falls back to whatever bounded-wait cadence it used without one. Claiming once
+// per thread rather than once per wait means nothing has to be released when a wait
+// returns, including when an exception unwinds out of it, and a nested wait on the same
+// thread shares the one object rather than needing a second.
+mp_hal_wake_obj_t *mp_hal_wake_obj_this_thread(void);
+
+// Consumes the object's raised state. Call only after a wait on it has reported it
+// raised: the backing latches, so draining ahead of a wait discards the raise and leaves
+// that wait with nothing to end it.
+void mp_hal_wake_obj_drain(mp_hal_wake_obj_t *w);
+
+// Raises every currently claimed object. Must be safe to call from anywhere
+// mp_hal_signal_event() itself is safe to call: a hard ISR, a second core, a
+// non-MicroPython RTOS task, or a POSIX signal handler.
+void mp_hal_wake_obj_signal_all(void);
+
+#else
+
+#define mp_hal_wake_obj_signal_all() (void)0
+
+#endif
+
+// How a waiter composes its own object with everything else it is waiting on has no
+// port-neutral spelling, so it is deliberately not part of the contract above. Each port
+// that adopts wake objects exports whatever composition primitive it has behind its own
+// capability macro, and core code that uses one is guarded to match. The descriptor below
+// is the only such primitive today.
+#ifndef MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
+#define MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD (0)
+#endif
+
+#if MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
+// A descriptor that polls readable while the object is raised, for a caller running its
+// own poll()/select() set. Negative once the HAL has been torn down. Deliberately not
+// part of the generic contract above: a port whose wake object is not descriptor-backed
+// leaves MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD at 0 and never declares this.
+int mp_hal_wake_obj_posix_fd(mp_hal_wake_obj_t *w);
+#endif
+
 #if MICROPY_PY_SELECT_EVENT_SOURCE
 
-// Monotonic count of mp_event_signal() calls, safe from a hard ISR, a second
-// core, or a non-MicroPython RTOS task, on the same terms as
-// mp_hal_signal_event(). A waiter compares a snapshot of this against the
-// current value to learn whether a SOURCE_SIGNAL entry may have readied
-// since the snapshot was taken; it is never read-and-cleared, so a raise is
-// visible to every waiter rather than only the first to notice it. Wrap is
-// harmless because every use is an inequality test against a snapshot taken
-// before the raises being detected.
+// Monotonic count of mp_event_signal() calls. A waiter compares a snapshot of this
+// against the current value to learn whether a SOURCE_SIGNAL entry may have readied
+// since the snapshot was taken; it is never read-and-cleared, so a raise is visible to
+// every waiter rather than only the first to notice it. Wrap is harmless because every
+// use is an inequality test against a snapshot taken before the raises being detected.
+//
+// The count is bumped before mp_event_signal() invokes the port's raise primitive
+// (mp_hal_signal_event()), and that primitive is the ordering point a waiter's own wait
+// call pairs with: on unix, the write() to the wake descriptor, ordered against the
+// waiter's read() of it. A driver calling mp_event_signal() must complete its own state
+// write before the call, which the SOURCE_SIGNAL contract already requires (py/stream.h).
+// A port whose raise primitive carries no release semantics of its own must supply one,
+// since this variable's declaration alone does not provide it.
+//
+// A raise that interleaves with the increment can coalesce two raises into one bump, but
+// the stored value still differs from any snapshot taken before either raise, so movement
+// is never lost; coalescing is harmless because a waiter re-derives readiness from the
+// source's own ioctl rather than from the count itself.
 extern volatile uint32_t mp_event_signal_count;
 
 // The external wake-source entry point: bumps mp_event_signal_count and

@@ -65,31 +65,97 @@ static int set_cloexec_nonblock(int fd) {
 }
 #endif
 
-void mp_hal_wake_event_init(void) {
+// Opens one wake primitive: a Linux eventfd (rd == wr) or a self-pipe elsewhere. Exits
+// the process on failure: a HAL that cannot allocate its own wake descriptors cannot run
+// correctly regardless of what fails next, which is why the shared wake event has always
+// failed this way and every wake object shares the rule.
+static void open_wake_fds(int *rd_out, int *wr_out) {
+    int rd = -1;
+    int wr = -1;
     #ifdef __linux__
-    wake_event_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
-    wake_event_wr_fd = wake_event_fd;
+    rd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    wr = rd;
     #else
     int fds[2];
     if (pipe(fds) == 0) {
         if (set_cloexec_nonblock(fds[0]) == 0 && set_cloexec_nonblock(fds[1]) == 0) {
-            wake_event_fd = fds[0];
-            wake_event_wr_fd = fds[1];
+            rd = fds[0];
+            wr = fds[1];
         } else {
             close(fds[0]);
             close(fds[1]);
         }
     }
     #endif
-    if (wake_event_fd < 0) {
+    if (rd < 0) {
         fprintf(stderr, "FATAL: cannot create wake event: %s\n", strerror(errno));
         exit(1);
     }
-    if (wake_event_fd >= FD_SETSIZE) {
+    if (rd >= FD_SETSIZE) {
         // Waiting on it uses select(), and FD_SET() is undefined from here up.
-        fprintf(stderr, "FATAL: wake event fd %d exceeds FD_SETSIZE\n", wake_event_fd);
+        fprintf(stderr, "FATAL: wake event fd %d exceeds FD_SETSIZE\n", rd);
         exit(1);
     }
+    *rd_out = rd;
+    *wr_out = wr;
+}
+
+static void wake_event_drain(int fd) {
+    // Empty it fully or the next wait returns at once: an eventfd reads its
+    // counter in one go, a self-pipe holds a byte per raise.
+    char buf[64];
+    while (read(fd, buf, sizeof(buf)) > 0) {
+    }
+}
+
+static void wake_fd_raise(int fd) {
+    if (fd < 0) {
+        return;
+    }
+    // Reachable from a signal handler, so no allocation, and errno is
+    // preserved.  A failed write means the event is already raised.
+    int errno_save = errno;
+    wake_event_token_t token = 1;
+    ssize_t ret = write(fd, &token, sizeof(token));
+    (void)ret;
+    errno = errno_save;
+}
+
+#if MICROPY_HAL_HAS_WAKE_OBJ
+
+// A thread's claimed wake object. Every descriptor in wake_obj_pool is opened once in
+// mp_hal_wake_event_init(), before any thread but the main one exists, and closed once in
+// mp_hal_wake_event_deinit(); .claimed alone tracks whether a thread currently owns the
+// slot. A raiser observing claimed == true therefore always reads a descriptor that has
+// been open since before any thread existed, so no publication barrier is needed between
+// "descriptor is valid" and "slot is claimed".
+struct _mp_hal_wake_obj_t {
+    volatile bool claimed;
+    volatile int rd_fd;
+    volatile int wr_fd; // the same descriptor as rd_fd for an eventfd
+};
+
+static mp_hal_wake_obj_t wake_obj_pool[MICROPY_HAL_WAKE_OBJ_MAX];
+
+// This thread's claimed slot, cached after the first claim so every later wait finds it
+// with no atomic section and no scan. NULL both before the first claim and when the pool
+// was exhausted at that first call; either way the thread keeps re-trying the scan below
+// on every subsequent call, which is harmless since a pool that was full may free up.
+static __thread mp_hal_wake_obj_t *tls_wake_obj;
+
+#endif
+
+void mp_hal_wake_event_init(void) {
+    open_wake_fds(&wake_event_fd, &wake_event_wr_fd);
+    #if MICROPY_HAL_HAS_WAKE_OBJ
+    for (int i = 0; i < MICROPY_HAL_WAKE_OBJ_MAX; i++) {
+        int rd, wr;
+        open_wake_fds(&rd, &wr);
+        wake_obj_pool[i].rd_fd = rd;
+        wake_obj_pool[i].wr_fd = wr;
+        wake_obj_pool[i].claimed = false;
+    }
+    #endif
 }
 
 void mp_hal_wake_event_deinit(void) {
@@ -103,48 +169,143 @@ void mp_hal_wake_event_deinit(void) {
         close(wr);
     }
     close(rd);
-}
-
-static void wake_event_drain(int fd) {
-    // Empty it fully or the next wait returns at once: an eventfd reads its
-    // counter in one go, a self-pipe holds a byte per raise.
-    char buf[64];
-    while (read(fd, buf, sizeof(buf)) > 0) {
+    #if MICROPY_HAL_HAS_WAKE_OBJ
+    for (int i = 0; i < MICROPY_HAL_WAKE_OBJ_MAX; i++) {
+        // Same invalidate-before-close ordering as the shared event above, and for the
+        // same reason: a thread that outlives this call must never write() into, or be
+        // told to select() on, a descriptor that has already been handed back to the OS.
+        wake_obj_pool[i].claimed = false;
+        rd = wake_obj_pool[i].rd_fd;
+        wr = wake_obj_pool[i].wr_fd;
+        wake_obj_pool[i].rd_fd = -1;
+        wake_obj_pool[i].wr_fd = -1;
+        if (wr != rd) {
+            close(wr);
+        }
+        close(rd);
     }
+    #endif
 }
 
 void mp_hal_signal_event(void) {
-    int fd = wake_event_wr_fd;
-    if (fd < 0) {
+    wake_fd_raise(wake_event_wr_fd);
+    // Every thread that has claimed a wake object needs this raise too: it may carry a
+    // scheduled exception or other queued work that thread must act on, and it may be the
+    // only notice a SOURCE_SIGNAL entry that thread is polling gets. See
+    // mp_hal_wake_obj_signal_all()'s own doc comment for why this is safe to call
+    // unconditionally from here.
+    mp_hal_wake_obj_signal_all();
+}
+
+#if MICROPY_HAL_HAS_WAKE_OBJ
+
+mp_hal_wake_obj_t *mp_hal_wake_obj_this_thread(void) {
+    if (tls_wake_obj != NULL) {
+        return tls_wake_obj;
+    }
+    // Claiming happens once per thread, on its first blocking wait, never once per wait,
+    // so this atomic section is never on the poll loop's hot path.
+    mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
+    mp_hal_wake_obj_t *w = NULL;
+    for (int i = 0; i < MICROPY_HAL_WAKE_OBJ_MAX; i++) {
+        if (!wake_obj_pool[i].claimed) {
+            wake_obj_pool[i].claimed = true;
+            w = &wake_obj_pool[i];
+            break;
+        }
+    }
+    MICROPY_END_ATOMIC_SECTION(atomic_state);
+    tls_wake_obj = w;
+    return w;
+}
+
+void mp_hal_wake_obj_release_this_thread(void) {
+    if (tls_wake_obj == NULL) {
         return;
     }
-    // Reachable from a signal handler, so no allocation, and errno is
-    // preserved.  A failed write means the event is already raised.
+    mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
+    tls_wake_obj->claimed = false;
+    MICROPY_END_ATOMIC_SECTION(atomic_state);
+    tls_wake_obj = NULL;
+}
+
+void mp_hal_wake_obj_drain(mp_hal_wake_obj_t *w) {
+    int fd = w->rd_fd;
+    if (fd >= 0) {
+        wake_event_drain(fd);
+    }
+}
+
+// Raises every currently claimed object. Called from mp_hal_signal_event(), so it must be
+// exactly as safe to call as that already is: reachable from a hard ISR, a second core, a
+// non-MicroPython RTOS task or a POSIX signal handler. It allocates nothing, takes no
+// lock and no atomic section (mutation of .claimed is confined to claim and release,
+// neither of which this function performs), and dereferences no caller-supplied pointer,
+// only the fixed pool array. errno is saved and restored once for the whole walk rather
+// than once per write(), since every write() shares the same failure mode (the event is
+// already raised) and none of them needs to be told apart from the others.
+void mp_hal_wake_obj_signal_all(void) {
     int errno_save = errno;
-    wake_event_token_t token = 1;
-    ssize_t ret = write(fd, &token, sizeof(token));
-    (void)ret;
+    for (int i = 0; i < MICROPY_HAL_WAKE_OBJ_MAX; i++) {
+        if (!wake_obj_pool[i].claimed) {
+            continue;
+        }
+        wake_fd_raise(wake_obj_pool[i].wr_fd);
+    }
     errno = errno_save;
 }
 
+#if MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
+int mp_hal_wake_obj_posix_fd(mp_hal_wake_obj_t *w) {
+    // Re-read for the same reason mp_hal_wake_event_fd() does: a thread outliving
+    // mp_hal_wake_event_deinit() can reach this with no descriptor to give.
+    return w->rd_fd;
+}
+#endif
+
+#endif // MICROPY_HAL_HAS_WAKE_OBJ
+
 int mp_hal_wake_event_wait_tv(struct timeval *tv) {
-    // Only the thread that runs scheduled callbacks may consume the event: one
-    // taken by another thread is one the thread that can act on it never sees.
-    // Other threads just wait out the timeout.
-    int fd = wake_event_fd;
-    if (fd < 0 || !mp_sched_thread_can_run_callbacks()) {
-        return select(0, NULL, NULL, NULL, tv);
+    // The thread that runs scheduled callbacks waits on the shared wake event: draining
+    // it is also how that thread learns queued work exists, so it must be the one to
+    // consume it. Any other thread waits on its own claimed object instead of sharing
+    // that token, so a raise ends its wait without depending on being the one thread
+    // entitled to the shared descriptor.
+    if (mp_sched_thread_can_run_callbacks() && wake_event_fd >= 0) {
+        int fd = wake_event_fd;
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(fd, &rfds);
+        int ret = select(fd + 1, &rfds, NULL, NULL, tv);
+        if (ret > 0) {
+            wake_event_drain(fd);
+            errno = EINTR;
+            return -1;
+        }
+        return ret;
     }
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    FD_SET(fd, &rfds);
-    int ret = select(fd + 1, &rfds, NULL, NULL, tv);
-    if (ret > 0) {
-        wake_event_drain(fd);
-        errno = EINTR;
-        return -1;
+    #if MICROPY_HAL_HAS_WAKE_OBJ
+    mp_hal_wake_obj_t *w = mp_hal_wake_obj_this_thread();
+    if (w != NULL) {
+        int fd = w->rd_fd;
+        if (fd >= 0) {
+            fd_set rfds;
+            FD_ZERO(&rfds);
+            FD_SET(fd, &rfds);
+            int ret = select(fd + 1, &rfds, NULL, NULL, tv);
+            if (ret > 0) {
+                mp_hal_wake_obj_drain(w);
+                errno = EINTR;
+                return -1;
+            }
+            return ret;
+        }
     }
-    return ret;
+    #endif
+    // No object of its own either: this is the fallback of last resort, and it cannot be
+    // woken early. Kept only for a port build with MICROPY_HAL_HAS_WAKE_OBJ off, or a
+    // pool exhausted by more concurrently-polling threads than it was sized for.
+    return select(0, NULL, NULL, NULL, tv);
 }
 
 int mp_hal_wake_event_fd(void) {

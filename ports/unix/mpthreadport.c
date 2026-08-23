@@ -29,6 +29,7 @@
 #include <errno.h>
 
 #include "py/runtime.h"
+#include "py/mphal.h"
 #include "py/mpthread.h"
 #include "py/gc.h"
 #include "stack_size.h"
@@ -322,6 +323,11 @@ void mp_thread_finish(void) {
         prev = th;
     }
     mp_thread_unix_end_atomic_section();
+    #if MICROPY_HAL_HAS_WAKE_OBJ
+    // Give this thread's wake object, if it claimed one, back to the pool. Outside the
+    // atomic section above: mp_hal_wake_obj_release_this_thread() takes its own.
+    mp_hal_wake_obj_release_this_thread();
+    #endif
 }
 
 void mp_thread_mutex_init(mp_thread_mutex_t *mutex) {

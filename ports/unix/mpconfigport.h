@@ -168,6 +168,25 @@ typedef long mp_off_t;
 
 #define MICROPY_PY_SOCKET_LISTEN_BACKLOG_DEFAULT (SOMAXCONN < 128 ? SOMAXCONN : 128)
 
+// Per-thread wake objects (py/mphal.h), implemented in unix_mphal.c. Declared here
+// rather than in mphalport.h: ports/windows/windows_mphal.h includes that header
+// wholesale while ports/windows/Makefile compiles windows_mphal.c instead of
+// unix_mphal.c, so a capability declared in mphalport.h would make core code call a
+// symbol windows does not link. windows never includes this file.
+//
+// Gated on MICROPY_PY_THREAD: with a single thread, the shared wake event already has
+// exactly one possible consumer, so a dedicated pool of descriptors per thread buys
+// nothing and only costs open file descriptors.
+#define MICROPY_HAL_HAS_WAKE_OBJ (MICROPY_PY_THREAD)
+#define MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD (MICROPY_PY_THREAD)
+
+// How many threads can hold a wake object at once. Past it,
+// mp_hal_wake_obj_this_thread() answers NULL and that thread falls back to the shared
+// wake event and its entitlement-gated, period-capped sweep.
+#ifndef MICROPY_HAL_WAKE_OBJ_MAX
+#define MICROPY_HAL_WAKE_OBJ_MAX (4)
+#endif
+
 // Bare-metal ports don't have stderr. Printing debug to stderr may give tests
 // which check stdout a chance to pass, etc.
 extern const struct _mp_print_t mp_stderr_print;
