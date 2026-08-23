@@ -1,0 +1,13 @@
+lifecycle ok
+shared arm count ok
+pending ready ok
+full timeout ok
+cross thread wake ok
+unregister leaves sibling set ok
+mixed set ok
+bare entry forces sweep ok
+hybrid cross thread wake ok
+signalled survives a drained token ok
+fd wake without ready ok
+fd wake with ready ok
+worker thread sweep ok
