@@ -82,11 +82,12 @@ typedef struct _poll_obj_t {
 
     #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
     // If non-NULL, points into poll_set_t::pollfds and gives this object something the
-    // kernel can sleep on. pollfd->events carries the fd-level direction to watch; today
-    // that always mirrors `events` above (see poll_obj_set_events), because every fd-backed
-    // object is currently also authoritative for its own readiness. pollfd->revents is raw
-    // kernel output: read directly by poll_obj_get_revents() for such an object, and never
-    // written by anything but poll() itself.
+    // kernel can sleep on. pollfd->events carries the fd-level direction to watch: `events`
+    // above for a fd-authoritative object (poll_obj_fd_is_readiness() true, the only case
+    // before MICROPY_PY_SELECT_EVENT_SOURCE existed), or event_fd_events below for a
+    // composed one, which the caller's requested mask has no bearing on. pollfd->revents is
+    // raw kernel output: read directly by poll_obj_get_revents() for a fd-authoritative
+    // object, and never written by anything but poll() itself.
     struct pollfd *pollfd;
 
     #if MICROPY_PY_SELECT_EVENT_SOURCE
@@ -95,7 +96,11 @@ typedef struct _poll_obj_t {
     // py/stream.h). All zero if the object does not implement the ioctl, which is the
     // compatibility path: such an object is handled exactly as it would be without this
     // config, keyed only off GET_FILENO. event_flags is read by poll_obj_fd_is_readiness()
-    // and poll_set_all_have_wake_sources(); event_fd_events by poll_set_refresh_fd_events().
+    // and poll_set_all_have_wake_sources(). event_fd_events seeds pollfd->events for a
+    // composed entry at registration (poll_set_add_obj()) and is what
+    // poll_obj_fd_level_events() restores whenever such an entry's requested mask returns
+    // to non-zero; for one that also declares FD_DYNAMIC it is additionally re-read and
+    // re-applied before every block by poll_set_refresh_fd_events().
     // The cb/ctx passed to the stream at Register are not stored here: every SOURCE_SIGNAL
     // entry is armed with the same (poll_signal_cb, NULL) pair (see poll_set_add_obj), so
     // there is no per-entry value to remember, and the stream itself is what holds onto
@@ -178,16 +183,6 @@ static mp_uint_t poll_obj_get_events(poll_obj_t *poll_obj) {
     return poll_obj->events;
 }
 
-static void poll_obj_set_events(poll_obj_t *poll_obj, mp_uint_t events) {
-    poll_obj->events = events;
-    if (poll_obj->pollfd != NULL) {
-        // Legacy fd-authoritative path: the fd-level direction to watch is exactly the
-        // requested mask. A wake-source-only fd (not authoritative for readiness) would
-        // resolve fd_events independently instead of mirroring this write.
-        poll_obj->pollfd->events = events;
-    }
-}
-
 // Whether this entry's readiness is exactly its fd's kernel revents, as opposed to being
 // resolved by its own MP_STREAM_POLL ioctl. An entry with no fd at all can never be
 // fd-authoritative.
@@ -204,6 +199,41 @@ static bool poll_obj_fd_is_readiness(poll_obj_t *poll_obj) {
     // implement MP_STREAM_SET_EVENT_SOURCE): every fd-backed object is authoritative for
     // its own readiness, exactly as every fd-backed object was before this ioctl existed.
     return true;
+}
+
+// The fd-level direction to watch for an entry, which is not the caller's requested mask
+// unless the fd is authoritative for readiness. For a composed entry it is the direction
+// the driver declared, because what kernel activity should end a block is the driver's
+// call and not the caller's: an SSL read waits on a writable socket.
+//
+// A requested mask of zero is the exception, and is not a direction at all. It is
+// modify(obj, 0), an exhausted ONESHOT or register(obj, 0) saying stop reporting this
+// entry, and an entry nothing will be reported for must not keep waking the poll: left
+// armed against a persistently ready fd it returns from poll() every pass while the
+// entry's own ioctl, asked for nothing, answers nothing, which is a spin with no sleep in
+// it. Note this does not buy the POSIX "report errors only" behaviour a zero mask gives a
+// fd-authoritative entry: a composed entry's readiness is its ioctl's answer, so
+// POLLERR/POLLHUP/POLLNVAL on its descriptor never reach the caller either way.
+//
+// Every write to pollfd->events goes through here, so arming and disarming cannot drift
+// apart: a mask that returns to non-zero restores the declared direction by construction
+// rather than by a second special case.
+static mp_uint_t poll_obj_fd_level_events(poll_obj_t *poll_obj, mp_uint_t events) {
+    if (poll_obj_fd_is_readiness(poll_obj)) {
+        return events;
+    }
+    #if MICROPY_PY_SELECT_EVENT_SOURCE
+    return events == 0 ? 0 : poll_obj->event_fd_events;
+    #else
+    return events;
+    #endif
+}
+
+static void poll_obj_set_events(poll_obj_t *poll_obj, mp_uint_t events) {
+    poll_obj->events = events;
+    if (poll_obj->pollfd != NULL) {
+        poll_obj->pollfd->events = poll_obj_fd_level_events(poll_obj, events);
+    }
 }
 
 #if MICROPY_PY_SELECT_EVENT_SOURCE
@@ -412,8 +442,9 @@ static bool poll_set_signal_wake_is_reliable(void) {
 // FD_IS_READINESS), readiness resolved by its own MP_STREAM_POLL ioctl -- qualifies for the
 // same deadline block as a fully authoritative one, given two things elsewhere in this loop
 // that make it safe: its own fd is already in poll_set->pollfds regardless of authoritative-
-// ness (poll_obj_set_events() puts it there unconditionally), so new kernel activity on it
-// wakes poll() directly, and its readiness can only change as the result of this loop's own
+// ness (poll_set_add_obj() adds it via poll_set_add_fd() and seeds pollfd->events from its
+// own declared fd_events), so new kernel activity on it wakes poll() directly, and its
+// readiness can only change as the result of this loop's own
 // ioctl call -- never spontaneously while nothing is polling it -- so there is nothing for a
 // deadline block to miss between one wake and the next. What it cannot do on its own is
 // surface readiness that already existed *before* this wait began (e.g. a TLS record larger
@@ -540,6 +571,14 @@ static void poll_set_add_obj(poll_set_t *poll_set, const mp_obj_t *obj, mp_uint_
             if (fd >= 0) {
                 // Object has a file descriptor so add it to pollfds.
                 poll_obj->pollfd = poll_set_add_fd(poll_set, fd);
+                #if MICROPY_PY_SELECT_EVENT_SOURCE
+                if (!poll_obj_fd_is_readiness(poll_obj)) {
+                    // Composed entry: this fd is a wake source only, not authoritative for
+                    // readiness, so its own declared fd_events, not the caller's requested
+                    // mask below, decides what kernel activity should end a poll() block.
+                    poll_obj->pollfd->events = poll_obj_fd_level_events(poll_obj, poll_obj->events);
+                }
+                #endif
             } else {
                 // Object doesn't have a file descriptor.
                 poll_obj->pollfd = NULL;
@@ -635,6 +674,14 @@ static void poll_set_refresh_fd_events(poll_set_t *poll_set) {
 
         poll_obj_t *poll_obj = MP_OBJ_TO_PTR(poll_set->map.table[i].value);
         if (poll_obj->pollfd == NULL || !(poll_obj->event_flags & MP_STREAM_EVENT_FD_DYNAMIC)) {
+            continue;
+        }
+        if (poll_obj->events == 0) {
+            // Disarmed, so do not ask: a driver is entitled to keep naming a direction
+            // regardless of what it was asked with (modtls_mbedtls.c latches a poll_mask
+            // across calls), and honouring that here would re-arm the descriptor behind
+            // poll_obj_set_events()'s back.
+            poll_obj->pollfd->events = 0;
             continue;
         }
 
