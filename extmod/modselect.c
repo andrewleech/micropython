@@ -239,7 +239,12 @@ static struct pollfd *poll_set_add_fd(poll_set_t *poll_set, int fd) {
                         continue;
                     }
 
-                    poll_obj->pollfd = new_fds + (poll_obj->pollfd - poll_set->pollfds);
+                    // An entry with no fd at all has poll_obj->pollfd == NULL; rebasing
+                    // that against the old allocation's base would compute a wild pointer
+                    // and hand it to an object that is not supposed to have a pollfd.
+                    if (poll_obj->pollfd != NULL) {
+                        poll_obj->pollfd = new_fds + (poll_obj->pollfd - poll_set->pollfds);
+                    }
                 }
 
                 // Delete the old allocation.
