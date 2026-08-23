@@ -525,6 +525,30 @@ static void poll_set_refresh_fd_events(poll_set_t *poll_set) {
 // exists to close, because should_be_asked() answers "did the fd fire", not "is there
 // leftover readiness from before this wait" -- the two coincide for a wake, never for a
 // pre-existing state, which is the entire case this function is for.
+// Clears every registered entry's resolved readiness back to "nothing known yet this
+// call". Called once, before the pre-block ask below has a chance to return without ever
+// running poll(): without this, an entry whose readiness this call never touches before
+// that early return (a fd_is_readiness entry, resolved only by the poll() syscall further
+// down this same loop and so not yet run this call, or a fd-less entry that
+// poll_set_resolve_composed_pre_block() below does not ask) would still carry whatever
+// non-zero value poll() left in it from a previous, unrelated call to this same poll set.
+// The caller then walks every registered entry and collects every non-zero one into a
+// list sized for the n_ready this function returned, so a stale non-zero here is a
+// mismatched count, not just a wrong answer -- one entry too many for the list's
+// allocation.
+static void poll_set_reset_revents(poll_set_t *poll_set) {
+    for (mp_uint_t i = 0; i < poll_set->map.alloc; ++i) {
+        if (!mp_map_slot_is_filled(&poll_set->map, i)) {
+            continue;
+        }
+        poll_obj_t *poll_obj = MP_OBJ_TO_PTR(poll_set->map.table[i].value);
+        if (poll_obj->pollfd != NULL) {
+            poll_obj->pollfd->revents = 0;
+        }
+        poll_obj_set_revents(poll_obj, 0);
+    }
+}
+
 static mp_uint_t poll_set_resolve_composed_pre_block(poll_set_t *poll_set) {
     mp_uint_t n_ready = 0;
     for (mp_uint_t i = 0; i < poll_set->map.alloc; ++i) {
@@ -619,6 +643,7 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
         poll_set_refresh_fd_events(poll_set);
 
         if (first_pass) {
+            poll_set_reset_revents(poll_set);
             mp_uint_t n_ready = poll_set_resolve_composed_pre_block(poll_set);
             if (n_ready > 0) {
                 return n_ready;
