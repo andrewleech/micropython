@@ -83,6 +83,12 @@ struct mp_stream_seek_t {
 #define MP_STREAM_EVENT_FD_IS_READINESS  (0x04) // fd revents ARE readiness; skip my POLL
 #define MP_STREAM_EVENT_FD_DYNAMIC       (0x08) // re-query .fd_events every cycle
 
+// FD_IS_READINESS together with SOURCE_SIGNAL is not a useful combination: an entry whose
+// readiness comes straight from its own fd (FD_IS_READINESS) never has its MP_STREAM_POLL
+// ioctl consulted by the wait loop, so a callback armed through SOURCE_SIGNAL on the same
+// registration is never the thing that ends up reporting readiness for it. A driver should
+// declare one or the other, not both.
+
 // Cadences for MP_STREAM_SET_EVENT_SOURCE, distinguished by .op. cb == NULL
 // is not sufficient to tell Refresh and Unregister apart, since Refresh also
 // passes cb == NULL to avoid disturbing an existing arm.
