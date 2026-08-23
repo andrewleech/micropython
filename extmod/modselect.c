@@ -385,7 +385,8 @@ static void poll_set_add_obj(poll_set_t *poll_set, const mp_obj_t *obj, mp_uint_
                 // recognise; caught here for the same reason, so an unadapted stream
                 // never crashes registration.
                 mp_stream_event_source_t source = {
-                    .cb = NULL, .ctx = NULL, .events = events, .fd = -1, .fd_events = 0, .flags = 0,
+                    .cb = NULL, .ctx = NULL, .events = events, .op = MP_STREAM_EVENT_OP_REGISTER,
+                    .fd = -1, .fd_events = 0, .flags = 0,
                 };
                 nlr_buf_t nlr;
                 if (nlr_push(&nlr) == 0) {
@@ -494,7 +495,8 @@ static void poll_set_refresh_fd_events(poll_set_t *poll_set) {
         }
 
         mp_stream_event_source_t source = {
-            .cb = NULL, .ctx = NULL, .events = poll_obj->events, .fd = -1, .fd_events = 0, .flags = 0,
+            .cb = NULL, .ctx = NULL, .events = poll_obj->events, .op = MP_STREAM_EVENT_OP_REFRESH,
+            .fd = -1, .fd_events = 0, .flags = 0,
         };
         int errcode;
         mp_uint_t res = poll_obj->ioctl(poll_obj->obj, MP_STREAM_SET_EVENT_SOURCE, (uintptr_t)&source, &errcode);
