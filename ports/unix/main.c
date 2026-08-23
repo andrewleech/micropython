@@ -573,6 +573,12 @@ MP_NOINLINE int main_(int argc, char **argv) {
         MP_DECLARE_CONST_FUN_OBJ_0(extra_cpp_coverage_obj);
         mp_store_global(MP_QSTR_extra_coverage, MP_OBJ_FROM_PTR(&extra_coverage_obj));
         mp_store_global(MP_QSTR_extra_cpp_coverage, MP_OBJ_FROM_PTR(&extra_cpp_coverage_obj));
+        #if MICROPY_PY_SELECT_EVENT_SOURCE
+        // A synthetic stream driving MP_STREAM_SET_EVENT_SOURCE itself (see coverage.c),
+        // so the SOURCE_SIGNAL wake path has coverage on unix without real hardware.
+        extern const mp_obj_type_t mp_type_signal_stream;
+        mp_store_global(MP_QSTR_SelectSignalStream, MP_OBJ_FROM_PTR(&mp_type_signal_stream));
+        #endif
     }
     #endif
 
