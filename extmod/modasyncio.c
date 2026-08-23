@@ -28,6 +28,7 @@
 #include "py/smallint.h"
 #include "py/pairheap.h"
 #include "py/mphal.h"
+#include "py/stream.h"
 
 #if MICROPY_PY_ASYNCIO
 
@@ -317,12 +318,142 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     );
 
 /******************************************************************************/
+// ThreadSafeFlag class
+
+#if MICROPY_PY_ASYNCIO_THREADSAFEFLAG
+
+// A single-bit flag settable from any thread, ISR, or the scheduler, and awaited from the
+// asyncio loop. Declares SOURCE_SIGNAL to the "select" module (py/stream.h) so a set()
+// call ends a blocked poll() directly, rather than the loop discovering the flag only on
+// its next period-capped sweep; a flag that is never polled costs nothing beyond the plain
+// flag write, since cb stays NULL until something registers it.
+//
+// Arming is sticky: cb/ctx are installed on the first Register and never cleared on
+// Unregister, matching the recommended contract in py/stream.h. A select.poll() object has
+// no finaliser, so a caller that drops one without unregistering leaves this flag armed
+// for the rest of its life; that is harmless; it just means every future set() also pokes
+// mp_event_signal() once, which a stream with nothing registered anywhere would not do.
+//
+// wait() lives in the Python subclass (extmod/asyncio/event.py), since a generator cannot
+// be constructed from C; it reaches this object only through is_set()/clear(), never by
+// storing an attribute. This type defines no custom attr handler, so a Python subclass
+// that wrote to an attribute would land in the subclass instance's own members dict
+// without touching this struct at all, silently shadowing the flag rather than setting
+// it: set()/clear()/is_set() are the only supported way to reach the state.
+typedef struct _mp_obj_threadsafeflag_t {
+    mp_obj_base_t base;
+    volatile uint8_t state; // 0=unset, 1=set
+    void (*cb)(void *ctx);
+    void *ctx;
+} mp_obj_threadsafeflag_t;
+
+static const mp_obj_type_t mp_type_threadsafeflag;
+
+static mp_obj_t threadsafeflag_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+    mp_arg_check_num(n_args, n_kw, 0, 0, false);
+    mp_obj_threadsafeflag_t *self = mp_obj_malloc(mp_obj_threadsafeflag_t, type);
+    self->state = 0;
+    self->cb = NULL;
+    self->ctx = NULL;
+    return MP_OBJ_FROM_PTR(self);
+}
+
+static mp_obj_t threadsafeflag_set(mp_obj_t self_in) {
+    mp_obj_threadsafeflag_t *self = MP_OBJ_TO_PTR(self_in);
+    self->state = 1;
+    if (self->cb != NULL) {
+        self->cb(self->ctx);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(threadsafeflag_set_obj, threadsafeflag_set);
+
+static mp_obj_t threadsafeflag_clear(mp_obj_t self_in) {
+    mp_obj_threadsafeflag_t *self = MP_OBJ_TO_PTR(self_in);
+    self->state = 0;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(threadsafeflag_clear_obj, threadsafeflag_clear);
+
+static mp_obj_t threadsafeflag_is_set(mp_obj_t self_in) {
+    mp_obj_threadsafeflag_t *self = MP_OBJ_TO_PTR(self_in);
+    return mp_obj_new_bool(self->state != 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(threadsafeflag_is_set_obj, threadsafeflag_is_set);
+
+static mp_uint_t threadsafeflag_ioctl(mp_obj_t self_in, mp_uint_t request, uintptr_t arg, int *errcode) {
+    // select.poll() and the "select" module's own MP_STREAM_SET_EVENT_SOURCE probe reach
+    // this ioctl through the stream protocol slot (py/stream.h's mp_get_stream()), which
+    // is resolved from self_in's type and calls straight through with whatever self_in the
+    // caller supplied. Unlike a locals_dict method call, that path never substitutes
+    // subobj[0] for self_in: for a Python subclass instance (extmod/asyncio/event.py's
+    // ThreadSafeFlag), self_in here is the wrapping mp_obj_instance_t, not this struct, and
+    // casting it directly would read and write past the wrapper's own members map. Cast
+    // back to the native object this ioctl actually belongs to before touching it; a
+    // direct instance of _ThreadSafeFlag itself is returned unchanged.
+    self_in = mp_obj_cast_to_native_base(self_in, MP_OBJ_FROM_PTR(&mp_type_threadsafeflag));
+    assert(self_in != MP_OBJ_NULL);
+    mp_obj_threadsafeflag_t *self = MP_OBJ_TO_PTR(self_in);
+    switch (request) {
+        case MP_STREAM_POLL:
+            return self->state ? (arg & MP_STREAM_POLL_RD) : 0;
+
+        case MP_STREAM_SET_EVENT_SOURCE: {
+            mp_stream_event_source_t *source = (mp_stream_event_source_t *)arg;
+            if (source->op == MP_STREAM_EVENT_OP_REGISTER) {
+                // Idempotent: every caller supplies the identical (poll_signal_cb, NULL)
+                // pair (extmod/modselect.c's poll_set_add_obj), so overwriting on a second
+                // Register changes nothing.
+                self->cb = source->cb;
+                self->ctx = source->ctx;
+                source->fd = -1;
+                source->fd_events = 0;
+                source->flags = MP_STREAM_EVENT_SOURCE_SIGNAL;
+            }
+            // Refresh and Unregister are both no-ops: this flag declares no fd to
+            // re-query, and staying armed for the rest of its life is the correct answer
+            // to Unregister (see this type's doc comment).
+            return 0;
+        }
+
+        default:
+            *errcode = MP_EINVAL;
+            return MP_STREAM_ERROR;
+    }
+}
+
+static const mp_stream_p_t threadsafeflag_stream_p = {
+    .ioctl = threadsafeflag_ioctl,
+};
+
+static const mp_rom_map_elem_t threadsafeflag_locals_dict_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_set), MP_ROM_PTR(&threadsafeflag_set_obj) },
+    { MP_ROM_QSTR(MP_QSTR_clear), MP_ROM_PTR(&threadsafeflag_clear_obj) },
+    { MP_ROM_QSTR(MP_QSTR_is_set), MP_ROM_PTR(&threadsafeflag_is_set_obj) },
+};
+static MP_DEFINE_CONST_DICT(threadsafeflag_locals_dict, threadsafeflag_locals_dict_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    mp_type_threadsafeflag,
+    MP_QSTR__ThreadSafeFlag,
+    MP_TYPE_FLAG_NONE,
+    make_new, threadsafeflag_make_new,
+    protocol, &threadsafeflag_stream_p,
+    locals_dict, &threadsafeflag_locals_dict
+    );
+
+#endif // MICROPY_PY_ASYNCIO_THREADSAFEFLAG
+
+/******************************************************************************/
 // C-level asyncio module
 
 static const mp_rom_map_elem_t mp_module_asyncio_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR__asyncio) },
     { MP_ROM_QSTR(MP_QSTR_TaskQueue), MP_ROM_PTR(&task_queue_type) },
     { MP_ROM_QSTR(MP_QSTR_Task), MP_ROM_PTR(&task_type) },
+    #if MICROPY_PY_ASYNCIO_THREADSAFEFLAG
+    { MP_ROM_QSTR(MP_QSTR__ThreadSafeFlag), MP_ROM_PTR(&mp_type_threadsafeflag) },
+    #endif
 };
 static MP_DEFINE_CONST_DICT(mp_module_asyncio_globals, mp_module_asyncio_globals_table);
 

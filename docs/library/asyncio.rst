@@ -161,6 +161,10 @@ class ThreadSafeFlag
     Clear the flag. This may be used to ensure that a possibly previously-set
     flag is clear before waiting for it.
 
+.. method:: ThreadSafeFlag.is_set()
+
+    Returns ``True`` if the flag is set, ``False`` otherwise.
+
 .. method:: ThreadSafeFlag.wait()
 
     Wait for the flag to be set.  If the flag is already set then it returns
