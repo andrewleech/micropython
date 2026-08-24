@@ -24,13 +24,85 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import ast, errno, hashlib, os, re, sys
+import ast, codecs, errno, hashlib, os, re, sys, threading
 from collections import namedtuple
 from .mp_errno import MP_ERRNO_TABLE
 
 
 # Buffer for accumulating bytes that may be split UTF-8 sequences
 _stdout_buffer = b""
+
+
+class ConsoleSink:
+    """A bounded, non-blocking sink for bytes read from a device's console.
+
+    Whatever reads a device's console is usually the only thing draining its
+    port, so writing straight to stdout from that reader hands the board's
+    flow control to whoever is reading this command's output: a stalled
+    consumer stops the reader, the port stops being drained, and the board
+    ends up blocked in `print`. Buffering here and writing from a second
+    thread keeps the reader free. Once the buffer is full the oldest bytes
+    go - losing console output is a cost, stopping the board is a defect -
+    and `dropped` counts them so the caller can say so.
+
+    Decoding is incremental: a read ends wherever the port happened to have
+    bytes, so a multi-byte character routinely straddles two of them and
+    decoding each in isolation would mint a replacement character at every
+    boundary.
+
+    Not to be mixed with `stdout_write_bytes` on the same stream: that keeps
+    its own partial-sequence buffer in module state, which this does not
+    share and cannot see.
+    """
+
+    def __init__(self, limit=256 * 1024, poll=0.05):
+        self.dropped = 0
+        self._limit = limit
+        self._poll = poll
+        self._buffered = bytearray()
+        self._ready = threading.Condition()
+        self._closed = False
+        self._thread = threading.Thread(target=self._emit, name="console-sink", daemon=True)
+        self._thread.start()
+
+    def write(self, data):
+        """Queue `data`, dropping the oldest bytes if that overflows the bound."""
+        if not data:
+            return
+        with self._ready:
+            self._buffered += data
+            excess = len(self._buffered) - self._limit
+            if excess > 0:
+                del self._buffered[:excess]
+                self.dropped += excess
+            self._ready.notify()
+
+    def close(self, timeout=1):
+        """Stop the writer thread and return how many bytes were dropped."""
+        with self._ready:
+            self._closed = True
+            self._ready.notify()
+        self._thread.join(timeout)
+        return self.dropped
+
+    def _emit(self):
+        decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        while True:
+            with self._ready:
+                while not self._buffered and not self._closed:
+                    self._ready.wait(self._poll)
+                chunk = bytes(self._buffered)
+                del self._buffered[:]
+                closed = self._closed
+            if not chunk:
+                if closed:
+                    return
+                continue
+            try:
+                sys.stdout.write(decoder.decode(chunk))
+                sys.stdout.flush()
+            except Exception:
+                return  # a consumer that closed the pipe, not a device problem
 
 
 def stdout_write_bytes(b: bytes):

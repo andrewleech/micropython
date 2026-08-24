@@ -1,0 +1,5 @@
+ok read_until quiet honours timeout_overall
+ok read_until strict is bounded while data still arrives
+ok SerialIntercept applies the RPC floor
+ok SerialIntercept.timeout reaches the port
+ok SerialIntercept.timeout reads back
