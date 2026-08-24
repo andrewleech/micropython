@@ -15,7 +15,6 @@ import tempfile
 import threading
 import time
 import zlib
-import time
 
 import serial.tools.list_ports
 

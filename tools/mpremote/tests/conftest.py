@@ -89,7 +89,7 @@ def device_scenario():
     return _SCENARIO
 
 
-@pytest.fixture(scope="session") 
+@pytest.fixture(scope="session")
 def device():
     """Fixture that provides the MPREMOTE_DEVICE value."""
     return _DEVICE

@@ -73,10 +73,10 @@ def stdout_write_bytes(b: bytes):
                 pass
             elif e.start > 0:
                 # Write valid prefix, keep incomplete/invalid suffix
-                valid_bytes = _stdout_buffer[:e.start]
+                valid_bytes = _stdout_buffer[: e.start]
                 sys.stdout.buffer.write(valid_bytes)
                 sys.stdout.buffer.flush()
-                _stdout_buffer = _stdout_buffer[e.start:]
+                _stdout_buffer = _stdout_buffer[e.start :]
                 # If remaining is just incomplete trailing bytes, keep them
                 # If it's invalid, write with replacement
                 if len(_stdout_buffer) > 4:  # Max UTF-8 sequence is 4 bytes

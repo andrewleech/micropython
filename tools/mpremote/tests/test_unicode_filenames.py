@@ -31,6 +31,7 @@ from shared_utils import get_mpremote_path, run_mpremote  # type: ignore
 
 DESTINATION_DIR = "./remote_data"
 
+
 class TestUnicodeFilenames:
     """
     Regression tests for Issue #1: mpremote cp fails with UnicodeEncodeError.
@@ -83,7 +84,9 @@ class TestUnicodeFilenames:
         UNICODE_FILENAMES,
         ids=[f[1] for f in UNICODE_FILENAMES],
     )
-    def test_cp_unicode_filename(self, device, scenario, tmp_path, filename, description, fails_cp1252):
+    def test_cp_unicode_filename(
+        self, device, scenario, tmp_path, filename, description, fails_cp1252
+    ):
         """
         Test copying files with Unicode characters in filenames.
 
@@ -124,7 +127,9 @@ class TestUnicodeFilenames:
         UNICODE_FILENAMES,
         ids=[f[1] for f in UNICODE_FILENAMES],
     )
-    def test_cp_recursive_unicode(self, device, scenario, tmp_path, filename, description, fails_cp1252):
+    def test_cp_recursive_unicode(
+        self, device, scenario, tmp_path, filename, description, fails_cp1252
+    ):
         """
         Test recursive copy with Unicode filenames (verbose output).
 
@@ -154,7 +159,7 @@ class TestUnicodeFilenames:
         assert "charmap" not in combined_output.lower(), (
             f"Issue #1: Encoding error in recursive copy for '{filename}': {combined_output}"
         )
-        
+
         # Note: We don't assert returncode == 0 because some devices may have
         # permission issues or filesystem limitations unrelated to Issue #1
 
@@ -294,7 +299,9 @@ class TestUnicodeEncodingSimulation:
         ],
         ids=["cyrillic", "cjk", "emoji"],
     )
-    def test_cp_with_simulated_legacy_encoding(self, device, scenario, tmp_path, filename, description):
+    def test_cp_with_simulated_legacy_encoding(
+        self, device, scenario, tmp_path, filename, description
+    ):
         """
         Test copy operation with simulated legacy console encoding.
 

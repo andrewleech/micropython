@@ -23,6 +23,7 @@ import sys
 if sys.platform == "win32":
     # if needed, apply Unicode fix before other imports that might print
     from .console import configure_unicode_output
+
     configure_unicode_output()
 
 import argparse

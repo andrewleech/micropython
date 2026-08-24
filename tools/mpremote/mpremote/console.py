@@ -114,6 +114,7 @@ class ConsoleWindows:
             # Ensure console interprets output as UTF-8
             try:
                 import ctypes
+
                 ctypes.windll.kernel32.SetConsoleOutputCP(65001)
             except Exception:
                 pass
@@ -249,7 +250,6 @@ else:
         VT_ENABLED = False
 
 
-
 def configure_unicode_output():
     """
     Configure stdout/stderr for Unicode support on Windows legacy consoles.
@@ -264,6 +264,7 @@ def configure_unicode_output():
     # Set console output code page to UTF-8 for raw byte output
     try:
         import ctypes
+
         ctypes.windll.kernel32.SetConsoleOutputCP(65001)
     except Exception:
         pass
