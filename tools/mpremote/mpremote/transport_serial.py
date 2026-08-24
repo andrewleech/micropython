@@ -110,13 +110,13 @@ class SerialTransport(Transport):
     @staticmethod
     def _is_pty_device(device):
         """Detect if device is a PTY (pseudo-terminal), e.g. used by QEMU."""
-        if device.startswith("/dev/pts/"):
-            try:
+        try:
+            if device.startswith("/dev/pts/"):
                 st = os.stat(device)
                 if stat.S_ISCHR(st.st_mode) and os.major(st.st_rdev) == 136:
                     return True
-            except (OSError, AttributeError):
-                pass
+        except (OSError, AttributeError):
+            pass
         return False
 
     def close(self):
@@ -581,7 +581,7 @@ class RemoteCommand:
 
     def wr_bytes(self, b):
         if isinstance(b, str):
-            b = bytes(b, "utf8")
+            b = bytes(b, 'utf8')
         self.wr_s32(self.buffer_nbytes(b))
         self.fout.write(b)
 
@@ -1095,6 +1095,10 @@ class SerialIntercept:
     def inWaiting(self):
         self._check_input(False)
         return len(self.buf)
+
+    @property
+    def in_waiting(self):
+        return self.inWaiting()
 
     def read(self, n):
         while len(self.buf) < n:
