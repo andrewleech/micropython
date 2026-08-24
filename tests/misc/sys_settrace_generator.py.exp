@@ -47,6 +47,9 @@
  0:   @__main__:make_gen => sys_settrace_generator.py:44
  1:   @__main__:test_generator => sys_settrace_generator.py:54
  2:   @__main__:<module> => sys_settrace_generator.py:67
+### trace_handler::main event: line
+ 0:   @__main__:test_generator => sys_settrace_generator.py:54
+ 1:   @__main__:<module> => sys_settrace_generator.py:67
 ### trace_handler::main event: call
  0:   @__main__:make_gen => sys_settrace_generator.py:44
  1:   @__main__:test_generator => sys_settrace_generator.py:54
@@ -63,6 +66,9 @@
  0:   @__main__:make_gen => sys_settrace_generator.py:45
  1:   @__main__:test_generator => sys_settrace_generator.py:54
  2:   @__main__:<module> => sys_settrace_generator.py:67
+### trace_handler::main event: line
+ 0:   @__main__:test_generator => sys_settrace_generator.py:54
+ 1:   @__main__:<module> => sys_settrace_generator.py:67
 ### trace_handler::main event: call
  0:   @__main__:make_gen => sys_settrace_generator.py:45
  1:   @__main__:test_generator => sys_settrace_generator.py:54
@@ -111,9 +117,6 @@ test_generator 7 8
  1:   @__main__:test_generator => sys_settrace_generator.py:61
  2:   @__main__:<module> => sys_settrace_generator.py:67
 ### trace_handler::main event: line
- 0:   @__main__:test_generator => sys_settrace_generator.py:61
- 1:   @__main__:<module> => sys_settrace_generator.py:67
-### trace_handler::main event: line
  0:   @__main__:test_generator => sys_settrace_generator.py:62
  1:   @__main__:<module> => sys_settrace_generator.py:67
 ### trace_handler::main event: line
@@ -136,9 +139,6 @@ test_generator 7 8
  1:   @__main__:test_generator => sys_settrace_generator.py:61
  2:   @__main__:<module> => sys_settrace_generator.py:67
 ### trace_handler::main event: line
- 0:   @__main__:test_generator => sys_settrace_generator.py:61
- 1:   @__main__:<module> => sys_settrace_generator.py:67
-### trace_handler::main event: line
  0:   @__main__:test_generator => sys_settrace_generator.py:62
  1:   @__main__:<module> => sys_settrace_generator.py:67
 ### trace_handler::main event: line
@@ -160,9 +160,6 @@ test_generator 7 8
  0:   @__main__:make_gen => sys_settrace_generator.py:45
  1:   @__main__:test_generator => sys_settrace_generator.py:61
  2:   @__main__:<module> => sys_settrace_generator.py:67
-### trace_handler::main event: line
- 0:   @__main__:test_generator => sys_settrace_generator.py:61
- 1:   @__main__:<module> => sys_settrace_generator.py:67
 ### trace_handler::main event: line
  0:   @__main__:test_generator => sys_settrace_generator.py:62
  1:   @__main__:<module> => sys_settrace_generator.py:67
@@ -192,4 +189,4 @@ test_generator 7 8
 ### trace_handler::main event: return
  0:   @__main__:test_generator => sys_settrace_generator.py:63
  1:   @__main__:<module> => sys_settrace_generator.py:67
-Total traces executed:  54
+Total traces executed:  53
