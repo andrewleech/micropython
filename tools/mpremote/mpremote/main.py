@@ -49,6 +49,7 @@ from .commands import (
     do_soft_reset,
     do_romfs,
 )
+from .debugpy_install import do_debugpy_install
 from .mip import do_mip
 from .repl import do_repl
 
@@ -260,6 +261,30 @@ def argparse_mip():
     return cmd_parser
 
 
+def argparse_debugpy_install():
+    cmd_parser = argparse.ArgumentParser(
+        description="install the debugpy DAP server package on the device",
+        epilog="the package is cross-compiled with mpy-cross and written only when the "
+        "device's copy differs, so re-running it on an up-to-date device transfers "
+        "nothing; the device is not reset, so chain '+ soft-reset' before debugging a "
+        "target that has already imported debugpy",
+    )
+    cmd_parser.add_argument(
+        "--mpy-cross",
+        metavar="PATH",
+        default=None,
+        help="mpy-cross to compile with; the default takes $MPY_CROSS, then the "
+        "mpy_cross package, then PATH",
+    )
+    cmd_parser.add_argument(
+        "package_dir",
+        nargs=1,
+        help="host directory holding the debugpy package itself (the one containing "
+        "__init__.py), e.g. micropython-lib/python-ecosys/debugpy/debugpy",
+    )
+    return cmd_parser
+
+
 def argparse_romfs():
     cmd_parser = argparse.ArgumentParser(description="manage ROM partitions")
     _bool_flag(
@@ -351,6 +376,10 @@ _COMMANDS = {
     "mip": (
         do_mip,
         argparse_mip,
+    ),
+    "debugpy-install": (
+        do_debugpy_install,
+        argparse_debugpy_install,
     ),
     "help": (
         do_help,
