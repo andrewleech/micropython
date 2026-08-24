@@ -123,39 +123,40 @@ static void wake_fd_raise(int fd) {
 
 #if MICROPY_HAL_HAS_WAKE_OBJ
 
-// A thread's claimed wake object. Every descriptor in wake_obj_pool is opened once in
-// mp_hal_wake_event_init(), before any thread but the main one exists, and closed once in
-// mp_hal_wake_event_deinit(); .claimed alone tracks whether a thread currently owns the
-// slot. A raiser observing claimed == true therefore always reads a descriptor that has
-// been open since before any thread existed, so no publication barrier is needed between
-// "descriptor is valid" and "slot is claimed".
+// A thread's claimed wake object. Nodes are allocated on demand by
+// mp_hal_wake_obj_this_thread() and never freed or unlinked: they form an append-only
+// list so mp_hal_wake_obj_signal_all() can walk it from a signal handler, with no lock
+// and nothing that could vanish or move underneath it. Thread exit only clears .claimed
+// (mp_hal_wake_obj_release_this_thread()), returning the node for the next thread to
+// claim rather than closing its descriptors; see mp_hal_wake_event_deinit() for where
+// they are actually closed.
 struct _mp_hal_wake_obj_t {
+    int rd_fd;
+    int wr_fd; // the same descriptor as rd_fd for an eventfd
     volatile bool claimed;
-    volatile int rd_fd;
-    volatile int wr_fd; // the same descriptor as rd_fd for an eventfd
+    mp_hal_wake_obj_t *next;
 };
 
-static mp_hal_wake_obj_t wake_obj_pool[MICROPY_HAL_WAKE_OBJ_MAX];
+// Head of the append-only wake object list. A push publishes a fully-initialised node
+// with a release store here, and every read, whether walking from the head to claim a
+// returned node or to broadcast a raise, pairs it with an acquire load: the object is
+// reachable from another thread or a signal handler with no mutex in between (a handler
+// cannot take one), so the ordering has to come from this variable itself on every hop,
+// not from incidentally being inside the atomic section below.
+static mp_hal_wake_obj_t *wake_obj_list_head;
 
-// This thread's claimed slot, cached after the first claim so every later wait finds it
-// with no atomic section and no scan. NULL both before the first claim and when the pool
-// was exhausted at that first call; either way the thread keeps re-trying the scan below
-// on every subsequent call, which is harmless since a pool that was full may free up.
+// This thread's claimed node, cached after the first claim so every later wait finds it
+// with no atomic section and no scan.
 static __thread mp_hal_wake_obj_t *tls_wake_obj;
 
 #endif
 
 void mp_hal_wake_event_init(void) {
     open_wake_fds(&wake_event_fd, &wake_event_wr_fd);
-    #if MICROPY_HAL_HAS_WAKE_OBJ
-    for (int i = 0; i < MICROPY_HAL_WAKE_OBJ_MAX; i++) {
-        int rd, wr;
-        open_wake_fds(&rd, &wr);
-        wake_obj_pool[i].rd_fd = rd;
-        wake_obj_pool[i].wr_fd = wr;
-        wake_obj_pool[i].claimed = false;
-    }
-    #endif
+    // Wake objects are not opened here: mp_hal_wake_obj_this_thread() opens each one
+    // lazily, on the thread's first blocking wait, so the FD_SETSIZE check inside
+    // open_wake_fds() only ever aborts a thread that is actually about to exceed it,
+    // rather than up front for a fixed count this process may never reach.
 }
 
 void mp_hal_wake_event_deinit(void) {
@@ -170,15 +171,18 @@ void mp_hal_wake_event_deinit(void) {
     }
     close(rd);
     #if MICROPY_HAL_HAS_WAKE_OBJ
-    for (int i = 0; i < MICROPY_HAL_WAKE_OBJ_MAX; i++) {
-        // Same invalidate-before-close ordering as the shared event above, and for the
-        // same reason: a thread that outlives this call must never write() into, or be
-        // told to select() on, a descriptor that has already been handed back to the OS.
-        wake_obj_pool[i].claimed = false;
-        rd = wake_obj_pool[i].rd_fd;
-        wr = wake_obj_pool[i].wr_fd;
-        wake_obj_pool[i].rd_fd = -1;
-        wake_obj_pool[i].wr_fd = -1;
+    // The only place a wake object's descriptors are closed: a thread that claimed one
+    // never closes it at exit, only returns it (mp_hal_wake_obj_release_this_thread()),
+    // so every node ever pushed is still open right up to this walk. A raise racing this
+    // teardown is the same clear-before-close race accepted for the shared event above,
+    // occurring at most once for the whole process rather than once per thread exit,
+    // since nothing exits a thread past this point.
+    for (mp_hal_wake_obj_t *w = __atomic_load_n(&wake_obj_list_head, __ATOMIC_ACQUIRE); w != NULL; w = w->next) {
+        w->claimed = false;
+        rd = w->rd_fd;
+        wr = w->wr_fd;
+        w->rd_fd = -1;
+        w->wr_fd = -1;
         if (wr != rd) {
             close(wr);
         }
@@ -204,16 +208,44 @@ mp_hal_wake_obj_t *mp_hal_wake_obj_this_thread(void) {
         return tls_wake_obj;
     }
     // Claiming happens once per thread, on its first blocking wait, never once per wait,
-    // so this atomic section is never on the poll loop's hot path.
+    // so this atomic section is never on the poll loop's hot path. It serialises this
+    // scan and push against every other claim, release and push (writer-versus-writer),
+    // but a raise reaches this list from a signal handler that cannot take it, which is
+    // why the head pointer itself still goes through an explicit acquire/release below
+    // rather than relying on the section's mutex for that.
     mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
     mp_hal_wake_obj_t *w = NULL;
-    for (int i = 0; i < MICROPY_HAL_WAKE_OBJ_MAX; i++) {
-        if (!wake_obj_pool[i].claimed) {
-            wake_obj_pool[i].claimed = true;
-            w = &wake_obj_pool[i];
+    for (mp_hal_wake_obj_t *n = __atomic_load_n(&wake_obj_list_head, __ATOMIC_ACQUIRE); n != NULL; n = n->next) {
+        if (!n->claimed) {
+            n->claimed = true;
+            w = n;
             break;
         }
     }
+    if (w == NULL) {
+        // No returned node to reuse: allocate one. Never freed and never unlinked, so
+        // storage grows to the peak number of concurrently-blocking threads and stops
+        // there; a thread that later exits returns its node instead of shrinking this.
+        w = malloc(sizeof(mp_hal_wake_obj_t));
+        if (w == NULL) {
+            fprintf(stderr, "FATAL: cannot allocate wake object: %s\n", strerror(errno));
+            exit(1);
+        }
+        open_wake_fds(&w->rd_fd, &w->wr_fd);
+        w->claimed = true;
+        w->next = __atomic_load_n(&wake_obj_list_head, __ATOMIC_ACQUIRE);
+        __atomic_store_n(&wake_obj_list_head, w, __ATOMIC_RELEASE);
+    }
+    // Latch it before returning, whether this claim just reused a returned node or
+    // published a freshly allocated one: a raise landing between the claim taking effect
+    // and this thread's first wait would otherwise find a claimed object with nothing
+    // written to it, and be lost, since mp_hal_wake_obj_signal_all() only ever writes to
+    // what it finds already claimed. For a freshly allocated node this also closes the
+    // narrower window between the node existing and its claim becoming visible from
+    // wake_obj_list_head. Seeding costs one spurious wake on this thread's first block,
+    // absorbed by its condition recheck, rather than widening every future raise into a
+    // walk-and-write-all to close this window on every claim.
+    wake_fd_raise(w->wr_fd);
     MICROPY_END_ATOMIC_SECTION(atomic_state);
     tls_wake_obj = w;
     return w;
@@ -240,17 +272,21 @@ void mp_hal_wake_obj_drain(mp_hal_wake_obj_t *w) {
 // exactly as safe to call as that already is: reachable from a hard ISR, a second core, a
 // non-MicroPython RTOS task or a POSIX signal handler. It allocates nothing, takes no
 // lock and no atomic section (mutation of .claimed is confined to claim and release,
-// neither of which this function performs), and dereferences no caller-supplied pointer,
-// only the fixed pool array. errno is saved and restored once for the whole walk rather
-// than once per write(), since every write() shares the same failure mode (the event is
-// already raised) and none of them needs to be told apart from the others.
+// neither of which this function performs), and dereferences no caller-supplied pointer.
+// The list itself is safe to walk unlocked because it is append-only: nothing is ever
+// unlinked, and the acquire load pairs with the release store that publishes each node
+// (mp_hal_wake_obj_this_thread()), so every field of a node this walk reaches is the
+// value its owning thread set before publishing it, never a partial write in progress.
+// errno is saved and restored once for the whole walk rather than once per write(),
+// since every write() shares the same failure mode (the event is already raised) and
+// none of them needs to be told apart from the others.
 void mp_hal_wake_obj_signal_all(void) {
     int errno_save = errno;
-    for (int i = 0; i < MICROPY_HAL_WAKE_OBJ_MAX; i++) {
-        if (!wake_obj_pool[i].claimed) {
+    for (mp_hal_wake_obj_t *w = __atomic_load_n(&wake_obj_list_head, __ATOMIC_ACQUIRE); w != NULL; w = w->next) {
+        if (!w->claimed) {
             continue;
         }
-        wake_fd_raise(wake_obj_pool[i].wr_fd);
+        wake_fd_raise(w->wr_fd);
     }
     errno = errno_save;
 }

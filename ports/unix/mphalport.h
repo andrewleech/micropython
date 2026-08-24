@@ -47,9 +47,9 @@
     } while (0)
 
 #if MICROPY_HAL_HAS_WAKE_OBJ
-// Gives this thread's claimed wake object, if any, back to the pool. Called from
-// mp_thread_finish(); never from a wait, since a wake object is held for a thread's
-// whole lifetime rather than borrowed per wait.
+// Returns this thread's claimed wake object, if any, for another thread to claim.
+// Called from mp_thread_finish(); never from a wait, since a wake object is held for a
+// thread's whole lifetime rather than borrowed per wait.
 void mp_hal_wake_obj_release_this_thread(void);
 #endif
 

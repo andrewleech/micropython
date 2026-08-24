@@ -185,17 +185,10 @@ typedef long mp_off_t;
 // symbol windows does not link. windows never includes this file.
 //
 // Gated on MICROPY_PY_THREAD: with a single thread, the shared wake event already has
-// exactly one possible consumer, so a dedicated pool of descriptors per thread buys
-// nothing and only costs open file descriptors.
+// exactly one possible consumer, so a dedicated object per thread buys nothing and only
+// costs open file descriptors.
 #define MICROPY_HAL_HAS_WAKE_OBJ (MICROPY_PY_THREAD)
 #define MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD (MICROPY_PY_THREAD)
-
-// How many threads can hold a wake object at once. Past it,
-// mp_hal_wake_obj_this_thread() answers NULL and that thread falls back to the shared
-// wake event and its entitlement-gated, period-capped sweep.
-#ifndef MICROPY_HAL_WAKE_OBJ_MAX
-#define MICROPY_HAL_WAKE_OBJ_MAX (4)
-#endif
 
 // Bare-metal ports don't have stderr. Printing debug to stderr may give tests
 // which check stdout a chance to pass, etc.
