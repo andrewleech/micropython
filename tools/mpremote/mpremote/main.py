@@ -37,7 +37,6 @@ from .commands import (
     do_exec,
     do_eval,
     do_run,
-    do_resume,
     do_rtc,
     do_soft_reset,
     do_romfs,
@@ -301,10 +300,6 @@ _COMMANDS = {
         do_edit,
         argparse_edit,
     ),
-    "resume": (
-        do_resume,
-        argparse_none("resume a previous mpremote session (will not auto soft-reset)"),
-    ),
     "once": (
         do_once_cmd,
         argparse_none("disable automatic reconnection on disconnect"),
@@ -539,7 +534,7 @@ class State:
     def __init__(self, config=None):
         self.transport = None
         self._did_action = False
-        self._auto_soft_reset = True
+        self._auto_soft_reset = False
 
         # Read reconnect default from config, env var, or hardcoded default
         # Priority: env var > config file > default (True)

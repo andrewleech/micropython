@@ -149,7 +149,6 @@ def do_disconnect(state, _args=None):
         pass
     state.transport.close()
     state.transport = None
-    state._auto_soft_reset = True
 
 
 def show_progress_bar(size, total_size, op="copying"):
@@ -586,11 +585,6 @@ def do_mount(state, args):
 def do_umount(state, path):
     state.ensure_raw_repl()
     state.transport.umount_local()
-
-
-def do_resume(state, _args=None):
-    state._auto_soft_reset = False
-    state.was_resumed = True
 
 
 def do_once_cmd(state, _args=None):
