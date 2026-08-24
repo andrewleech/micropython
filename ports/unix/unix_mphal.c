@@ -192,13 +192,21 @@ void mp_hal_wake_event_deinit(void) {
 }
 
 void mp_hal_signal_event(void) {
-    wake_fd_raise(wake_event_wr_fd);
-    // Every thread that has claimed a wake object needs this raise too: it may carry a
-    // scheduled exception or other queued work that thread must act on, and it may be the
-    // only notice a SOURCE_SIGNAL entry that thread is polling gets. See
-    // mp_hal_wake_obj_signal_all()'s own doc comment for why this is safe to call
-    // unconditionally from here.
+    #if MICROPY_HAL_HAS_WAKE_OBJ
+    // Every thread that has claimed a wake object needs this: it may carry a scheduled
+    // exception or other queued work that thread must act on, and it may be the only
+    // notice a SOURCE_SIGNAL entry that thread is polling gets. No separate raise to the
+    // shared wake event: every thread with a stake in one claims its own object instead
+    // (mp_hal_wake_event_wait_tv()), so that descriptor has no reader left to wake here.
+    // See mp_hal_wake_obj_signal_all()'s own doc comment for why this is safe to call
+    // unconditionally from anywhere this function itself may be called.
     mp_hal_wake_obj_signal_all();
+    #else
+    // No per-thread objects on this build (MICROPY_PY_THREAD is off): the shared wake
+    // event is this process's only thread, so it is also that thread's only consumer,
+    // and remains the mechanism.
+    wake_fd_raise(wake_event_wr_fd);
+    #endif
 }
 
 #if MICROPY_HAL_HAS_WAKE_OBJ
@@ -302,27 +310,17 @@ int mp_hal_wake_obj_posix_fd(mp_hal_wake_obj_t *w) {
 #endif // MICROPY_HAL_HAS_WAKE_OBJ
 
 int mp_hal_wake_event_wait_tv(struct timeval *tv) {
-    // The thread that runs scheduled callbacks waits on the shared wake event: draining
-    // it is also how that thread learns queued work exists, so it must be the one to
-    // consume it. Any other thread waits on its own claimed object instead of sharing
-    // that token, so a raise ends its wait without depending on being the one thread
-    // entitled to the shared descriptor.
-    if (mp_sched_thread_can_run_callbacks() && wake_event_fd >= 0) {
-        int fd = wake_event_fd;
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(fd, &rfds);
-        int ret = select(fd + 1, &rfds, NULL, NULL, tv);
-        if (ret > 0) {
-            wake_event_drain(fd);
-            errno = EINTR;
-            return -1;
-        }
-        return ret;
-    }
+    // Only the thread entitled to run scheduled callbacks has a stake in a live wake
+    // source here: draining it is how that thread learns queued work exists, so nothing
+    // else may claim credit for the same raise. A sleeper never registers a poll entry,
+    // so no other thread's wait depends on this call being woken early either; reaching
+    // this point with no such entitlement, a thread falls through to the bare select()
+    // below and runs for its full duration regardless of an unrelated raise, even though
+    // that raise reaches every *claimed* wake object (mp_hal_wake_obj_signal_all()) --
+    // such a thread simply never claims one here.
     #if MICROPY_HAL_HAS_WAKE_OBJ
-    mp_hal_wake_obj_t *w = mp_hal_wake_obj_this_thread();
-    if (w != NULL) {
+    if (mp_sched_thread_can_run_callbacks()) {
+        mp_hal_wake_obj_t *w = mp_hal_wake_obj_this_thread();
         int fd = w->rd_fd;
         if (fd >= 0) {
             fd_set rfds;
@@ -337,10 +335,25 @@ int mp_hal_wake_event_wait_tv(struct timeval *tv) {
             return ret;
         }
     }
+    #else
+    // No per-thread objects on this build: the shared wake event is this process's only
+    // thread, so it is also that thread's only consumer.
+    if (mp_sched_thread_can_run_callbacks() && wake_event_fd >= 0) {
+        int fd = wake_event_fd;
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(fd, &rfds);
+        int ret = select(fd + 1, &rfds, NULL, NULL, tv);
+        if (ret > 0) {
+            wake_event_drain(fd);
+            errno = EINTR;
+            return -1;
+        }
+        return ret;
+    }
     #endif
-    // No object of its own either: this is the fallback of last resort, and it cannot be
-    // woken early. Kept only for a port build with MICROPY_HAL_HAS_WAKE_OBJ off, or a
-    // pool exhausted by more concurrently-polling threads than it was sized for.
+    // No entitlement to a live wake source: this is the fallback of last resort, and it
+    // cannot be woken early.
     return select(0, NULL, NULL, NULL, tv);
 }
 

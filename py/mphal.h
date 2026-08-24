@@ -138,8 +138,9 @@ uint64_t mp_hal_time_ns(void);
 typedef struct _mp_hal_wake_obj_t mp_hal_wake_obj_t;
 
 // This thread's wake object, claimed on the first call and held until the thread ends.
-// NULL if the port has none left to give, which is a supported answer, not a failure: the
-// caller falls back to whatever bounded-wait cadence it used without one. Claiming once
+// Always returns a valid object: a port that cannot service a claim must fail some other
+// way (unix, for example, aborts the process on allocation failure) rather than answer
+// NULL here, since core code that uses this contract does not check for it. Claiming once
 // per thread rather than once per wait means nothing has to be released when a wait
 // returns, including when an exception unwinds out of it, and a nested wait on the same
 // thread shares the one object rather than needing a second.
