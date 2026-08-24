@@ -410,24 +410,29 @@ static struct pollfd *poll_set_add_fd(poll_set_t *poll_set, int fd) {
 // nothing left to notice, unlike a period-capped sweep, which just polls again on the next
 // tick regardless.
 //
-// With a per-thread wake object (MICROPY_HAL_HAS_WAKE_OBJ and its POSIX descriptor), every
-// thread that reaches here has its own token: mp_hal_wake_obj_signal_all() raises every
-// claimed object independently, so no other thread's wait can consume this one's. That
-// holds under a GIL build exactly as it does without one, since it depends only on the
-// object being this thread's own, never on which thread is entitled to run scheduled
-// callbacks. Reliable unless the pool has no slot left to give this thread, or the HAL has
-// not handed out a descriptor for it yet.
+// mp_sched_thread_can_run_callbacks() is not a thread test, it asks whether this thread is
+// entitled to act on whatever a broadcast raise carries: on a non-GIL build that is the
+// main thread alone, since scheduled callbacks and pending exceptions must not run on more
+// than one thread at once. A thread with no such entitlement still has a stake in this
+// wake source when the poll set it is calling from holds SOURCE_SIGNAL entries of its own
+// (poll_set->n_signal > 0): nothing else is entitled to the raise those entries are
+// waiting for either, and this thread's own wake object (see the reserved-slot injection
+// below) is the only place that raise can land for it. Reliable when either holds; every
+// claimed wake object receives every raise independently (mp_hal_wake_obj_signal_all()),
+// so this holds identically on GIL and non-GIL builds.
 //
-// Without a wake object, the fallback is the single shared wake event, reliable only for
-// the one thread entitled to drain it: mp_sched_thread_can_run_callbacks() is false for
-// every thread but the main one on a non-GIL build, and true for every thread on a GIL
-// build, where any of them draining it first defeats every other's block. This is the same
-// entitlement mp_hal_wake_event_wait_tv() uses to decide who may wait on it.
-static bool poll_set_signal_wake_is_reliable(void) {
+// Without a per-thread wake object at all (MICROPY_HAL_HAS_WAKE_OBJ off, or its POSIX
+// descriptor unavailable), the reserved slot instead carries the shared wake event (see
+// its injection below), and this thread's stake in it is the same entitlement
+// mp_hal_wake_event_wait_tv() uses to decide who may wait on it: a build with no
+// per-thread objects has exactly one thread able to hold that entitlement
+// (MICROPY_HAL_HAS_WAKE_OBJ tracks MICROPY_PY_THREAD on unix), so no other thread's wait
+// can ever consume this one's token first.
+static bool poll_set_signal_wake_is_reliable(poll_set_t *poll_set) {
     #if MICROPY_HAL_HAS_WAKE_OBJ && MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
-    mp_hal_wake_obj_t *wake_obj = mp_hal_wake_obj_this_thread();
-    return wake_obj != NULL && mp_hal_wake_obj_posix_fd(wake_obj) >= 0;
+    return mp_sched_thread_can_run_callbacks() || poll_set->n_signal > 0;
     #else
+    (void)poll_set;
     return mp_sched_thread_can_run_callbacks() && mp_hal_wake_event_fd() >= 0;
     #endif
 }
@@ -473,7 +478,7 @@ static bool poll_set_all_have_wake_sources(poll_set_t *poll_set) {
     if (poll_set->map.used != (mp_uint_t)(poll_set->used - 1) + poll_set->n_signal_nofd) {
         return false;
     }
-    return poll_set->n_signal == 0 || poll_set_signal_wake_is_reliable();
+    return poll_set->n_signal == 0 || poll_set_signal_wake_is_reliable(poll_set);
     #else
     return poll_set->map.used == poll_set->used;
     #endif
