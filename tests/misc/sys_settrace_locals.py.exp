@@ -1,0 +1,57 @@
+=== Testing sys.settrace frame.f_locals across control-flow constructs ===
+test_basic_locals:
+  Function returned: 50
+  Call events: 1
+  Line events: 4
+  Local variables found: ['a', 'b', 'c']
+    a: 42 (int)
+    b: hello (str)
+    c: [1, 2, 3] (list)
+
+test_nested_function_locals:
+  Function returned: 20
+  Outer function events: 6
+  Inner function events: 4
+  outer_func locals: ['inner_func', 'outer_var', 'result', 'x']
+    inner_func: closure
+    outer_var: 
+    result: int
+    x: int
+  inner_func locals: ['inner_var', 'local_00', 'y']
+    inner_var: int
+    local_00: 
+    y: int
+
+test_loop_locals:
+  Function returned: 6
+  Line events in loop: 13
+  Event 0 (line 129) locals: ['i', 'temp', 'total']
+    i: 2 (int)
+    temp: 2 (int)
+    total: 2 (int)
+  Event 1 (line 130) locals: ['i', 'temp', 'total']
+    i: 2 (int)
+    temp: 4 (int)
+    total: 2 (int)
+  Event 2 (line 131) locals: ['i', 'temp', 'total']
+    i: 2 (int)
+    temp: 4 (int)
+    total: 6 (int)
+
+test_exception_locals:
+  Function returned: -1
+  Events in exception function: 10
+  Final locals: ['error_handled', 'x', 'y']
+    error_handled: True
+    x: 100
+    y: 0
+
+test_parameter_locals:
+  Function returned: 30
+  Locals with parameters: ['arg1', 'arg2', 'args', 'kwargs']
+    arg1: 10 (int)
+    arg2: 20 (int)
+    args: (30,) (tuple)
+    kwargs: {'key': 'value'} (dict)
+
+=== Tests completed ===

@@ -30,6 +30,27 @@
 #ifndef MICROPY_PY_SYS_SETTRACE
 #define MICROPY_PY_SYS_SETTRACE (1)
 #endif
+#ifndef MICROPY_PY_SYS_SETTRACE_LOCALNAMES
+#define MICROPY_PY_SYS_SETTRACE_LOCALNAMES (1)
+#endif
+// Disabled by default: the code-info writer for this feature appends data
+// unconditionally to every function's code-info section without updating the
+// generic code-info line-number reader to skip it, corrupting sys.settrace()
+// line numbers for all compiled code (not just .mpy loading). See
+// py/emitbc.c mp_emit_bc_start_pass() and py/profile.c mp_prof_bytecode_lineno().
+#ifndef MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
+#define MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST (0)
+#endif
+
+// #define MICROPY_DEBUG_VERBOSE              (0)
+
+
+// Disable compiler optimizations for debugging
+// #define MICROPY_COMP_CONST                 (0)
+// #define MICROPY_COMP_MODULE_CONST          (0)
+// #define MICROPY_COMP_DOUBLE_TUPLE_ASSIGN   (0)
+// #define MICROPY_COMP_TRIPLE_TUPLE_ASSIGN   (0)
+
 
 // Enable extra Unix features.
 #include "../mpconfigvariant_common.h"
