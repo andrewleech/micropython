@@ -55,6 +55,51 @@ Functions
    present in pre-built firmware (due to it affecting performance).  The relevant
    configuration option is *MICROPY_PY_SYS_SETTRACE*.
 
+   **Local Variable Access**
+
+   MicroPython's ``settrace`` provides access to local variables through the 
+   ``frame.f_locals`` attribute. By default, local variables are accessed by 
+   index (e.g., ``local_00``, ``local_01``) rather than by name.
+
+   Example basic usage::
+
+      import sys
+
+      def trace_calls(frame, event, arg):
+          if event == 'call':
+              print(f"Calling {frame.f_code.co_name}")
+              print(f"Local variables: {list(frame.f_locals.keys())}")
+          return trace_calls
+
+      def example_function():
+          x = 1
+          y = 2
+          return x + y
+
+      sys.settrace(trace_calls)
+      result = example_function()
+      sys.settrace(None)
+
+   **Local Variable Names (Optional Feature)**
+
+   When ``MICROPY_PY_SYS_SETTRACE_LOCALNAMES`` is enabled, local variables 
+   retain their original names in ``frame.f_locals``, making debugging easier::
+
+      # With local names enabled:
+      # frame.f_locals = {'x': 1, 'y': 2}
+      
+      # Without local names (default):
+      # frame.f_locals = {'local_00': 1, 'local_01': 2}
+
+   **Bytecode Persistence (Advanced Feature)**
+
+   When ``MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST`` is enabled, local 
+   variable names are preserved in compiled .mpy files, enabling debugging 
+   support for pre-compiled modules.
+
+   For detailed implementation information, see the developer documentation
+   at ``docs/develop/sys_settrace_localnames.rst``.
+
 Constants
 ---------
 
