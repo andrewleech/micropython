@@ -146,8 +146,13 @@ int mp_hal_wake_event_wait_tv(struct timeval *tv);
 // Drain it after, and only after, it has polled readable.  It is
 // level-triggered, so it stays readable until drained, and draining before a
 // wait instead discards a raise and leaves that wait with nothing to end it.
+//
+// Declared only where per-thread wake objects are unavailable: with them, a poll set
+// injects this thread's own object instead and these have no caller.
+#if !MICROPY_HAL_HAS_WAKE_OBJ
 int mp_hal_wake_event_fd(void);
 void mp_hal_wake_event_drain(void);
+#endif
 
 #if MICROPY_PY_BLUETOOTH
 enum {

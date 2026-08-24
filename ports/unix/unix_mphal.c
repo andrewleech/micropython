@@ -51,8 +51,12 @@ typedef uint8_t wake_event_token_t;
 // The wake event: a Linux eventfd, or a self-pipe elsewhere.  Reading
 // wake_event_fd drains it, writing wake_event_wr_fd raises it; on Linux both
 // are the same descriptor, and both are negative when not initialised.
+// Only exists where something waits on it; with per-thread wake objects every waiter has
+// its own and this pair has no reader (see mp_hal_wake_event_init()).
+#if !MICROPY_HAL_HAS_WAKE_OBJ
 static int wake_event_fd = -1;
 static int wake_event_wr_fd = -1;
+#endif
 
 #ifndef __linux__
 static int set_cloexec_nonblock(int fd) {
@@ -152,14 +156,35 @@ static __thread mp_hal_wake_obj_t *tls_wake_obj;
 #endif
 
 void mp_hal_wake_event_init(void) {
+    #if !MICROPY_HAL_HAS_WAKE_OBJ
+    // Only opened where something waits on it. With per-thread wake objects every waiter
+    // has its own, so both the raise in mp_hal_signal_event() and the wait in
+    // mp_hal_wake_event_wait_tv() take their wake-object branch and this descriptor would
+    // sit open for the life of the process with no reader.
     open_wake_fds(&wake_event_fd, &wake_event_wr_fd);
-    // Wake objects are not opened here: mp_hal_wake_obj_this_thread() opens each one
-    // lazily, on the thread's first blocking wait, so the FD_SETSIZE check inside
-    // open_wake_fds() only ever aborts a thread that is actually about to exceed it,
-    // rather than up front for a fixed count this process may never reach.
+    #else
+    // Claims the main thread's wake object here, where no user code has run and so no file
+    // descriptor of the caller's choosing has ever existed. That property is categorical:
+    // the number this object is handed cannot be one a poll set still holds a stale
+    // registration for, because there has been nothing to register. Claimed after user
+    // code starts, it gets whatever number the kernel hands out then, which can be one a
+    // closed-but-still-registered fd used to hold, and poll() resolves that stale entry
+    // against this object instead of reporting POLLNVAL for it.
+    //
+    // Only the main thread can have that property, so every other thread claims on its
+    // first blocking wait instead. Claiming earlier in such a thread's life is
+    // monotonically safer, fewer intervening closes meaning fewer numbers to collide
+    // with, but only marginally: the descriptor churn that creates the hazard happens
+    // before the thread exists, so an earlier claim buys a smaller window and never the
+    // guarantee. The price would be an eventfd per thread whether or not it ever blocks,
+    // each one bounded by FD_SETSIZE because mp_hal_wake_event_wait_tv() waits with
+    // select().
+    mp_hal_wake_obj_this_thread();
+    #endif
 }
 
 void mp_hal_wake_event_deinit(void) {
+    #if !MICROPY_HAL_HAS_WAKE_OBJ
     // Cleared before closing, so a concurrent raise is dropped rather than
     // written to a reused descriptor.
     int rd = wake_event_fd;
@@ -170,7 +195,7 @@ void mp_hal_wake_event_deinit(void) {
         close(wr);
     }
     close(rd);
-    #if MICROPY_HAL_HAS_WAKE_OBJ
+    #else
     // The only place a wake object's descriptors are closed: a thread that claimed one
     // never closes it at exit, only returns it (mp_hal_wake_obj_release_this_thread()),
     // so every node ever pushed is still open right up to this walk. A raise racing this
@@ -179,8 +204,8 @@ void mp_hal_wake_event_deinit(void) {
     // since nothing exits a thread past this point.
     for (mp_hal_wake_obj_t *w = __atomic_load_n(&wake_obj_list_head, __ATOMIC_ACQUIRE); w != NULL; w = w->next) {
         w->claimed = false;
-        rd = w->rd_fd;
-        wr = w->wr_fd;
+        int rd = w->rd_fd;
+        int wr = w->wr_fd;
         w->rd_fd = -1;
         w->wr_fd = -1;
         if (wr != rd) {
@@ -215,12 +240,13 @@ mp_hal_wake_obj_t *mp_hal_wake_obj_this_thread(void) {
     if (tls_wake_obj != NULL) {
         return tls_wake_obj;
     }
-    // Claiming happens once per thread, on its first blocking wait, never once per wait,
-    // so this atomic section is never on the poll loop's hot path. It serialises this
-    // scan and push against every other claim, release and push (writer-versus-writer),
-    // but a raise reaches this list from a signal handler that cannot take it, which is
-    // why the head pointer itself still goes through an explicit acquire/release below
-    // rather than relying on the section's mutex for that.
+    // Claiming happens once per thread, never once per wait, so this atomic section is
+    // never on the poll loop's hot path. The main thread claims from
+    // mp_hal_wake_event_init(); every other thread reaches here on its first blocking
+    // wait. It serialises this scan and push against every other claim, release and push
+    // (writer-versus-writer), but a raise reaches this list from a signal handler that
+    // cannot take it, which is why the head pointer itself still goes through an explicit
+    // acquire/release below rather than relying on the section's mutex for that.
     mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
     mp_hal_wake_obj_t *w = NULL;
     for (mp_hal_wake_obj_t *n = __atomic_load_n(&wake_obj_list_head, __ATOMIC_ACQUIRE); n != NULL; n = n->next) {
@@ -357,6 +383,10 @@ int mp_hal_wake_event_wait_tv(struct timeval *tv) {
     return select(0, NULL, NULL, NULL, tv);
 }
 
+#if !MICROPY_HAL_HAS_WAKE_OBJ
+// The shared event's descriptor, for a poll set to sleep on alongside its own entries.
+// Only where per-thread wake objects are unavailable: with them, extmod/modselect.c
+// injects this thread's own object instead and these have no caller.
 int mp_hal_wake_event_fd(void) {
     // Re-read for the same reason the wait does: a thread outliving the main one
     // can reach this after deinitialisation, when there is no descriptor to give.
@@ -369,6 +399,7 @@ void mp_hal_wake_event_drain(void) {
         wake_event_drain(fd);
     }
 }
+#endif
 
 void mp_hal_wake_event_wait_ms(mp_uint_t timeout_ms) {
     if (timeout_ms == MP_HAL_WAKE_EVENT_FOREVER) {
