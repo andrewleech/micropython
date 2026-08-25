@@ -1,0 +1,3 @@
+degraded indefinite raises ok
+degraded finite still returns ok
+degraded without signal sources ok
