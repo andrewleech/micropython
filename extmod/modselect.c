@@ -443,20 +443,20 @@ static bool poll_set_signal_wake_is_reliable(poll_set_t *poll_set) {
 // can block on: either a pollfd, or (with MICROPY_PY_SELECT_EVENT_SOURCE) a declared
 // SOURCE_SIGNAL callback whose wake token this thread is entitled to rely on.
 //
-// A composed entry -- fd-backed but not fd-authoritative (e.g. SSL: SOURCE_FD without
-// FD_IS_READINESS), readiness resolved by its own MP_STREAM_POLL ioctl -- qualifies for the
+// A composed entry, fd-backed but not fd-authoritative (e.g. SSL: SOURCE_FD without
+// FD_IS_READINESS), readiness resolved by its own MP_STREAM_POLL ioctl, qualifies for the
 // same deadline block as a fully authoritative one, given two things elsewhere in this loop
 // that make it safe: its own fd is already in poll_set->pollfds regardless of authoritative-
 // ness (poll_set_add_obj() adds it via poll_set_add_fd() and seeds pollfd->events from its
 // own declared fd_events), so new kernel activity on it wakes poll() directly, and its
 // readiness can only change as the result of this loop's own
-// ioctl call -- never spontaneously while nothing is polling it -- so there is nothing for a
+// ioctl call, never spontaneously while nothing is polling it, so there is nothing for a
 // deadline block to miss between one wake and the next. What it cannot do on its own is
 // surface readiness that already existed *before* this wait began (e.g. a TLS record larger
 // than the caller's last read() left a remainder decrypted-but-unread, with nothing new at
 // the fd level to signal it): that has no fd signal to wake a block on, which is exactly why
 // poll_set_poll_until_ready_or_timeout() below asks every composed entry once, unconditionally,
-// before ever computing this gate's timeout -- not only after poll() returns.
+// before ever computing this gate's timeout, not only after poll() returns.
 //
 // A SOURCE_SIGNAL entry, fd-backed or not, qualifies once poll_set_signal_wake_is_reliable()
 // is true: its readiness can change at arbitrary times from an ISR or another thread, with
@@ -713,7 +713,7 @@ static void poll_set_refresh_fd_events(poll_set_t *poll_set) {
 // value poll() left in it from a previous, unrelated call to this same poll set. The
 // caller then walks every registered entry and collects every non-zero one into a list
 // sized for the n_ready this function returned, so a stale non-zero here is a mismatched
-// count, not just a wrong answer -- one entry too many for the list's allocation.
+// count, not just a wrong answer; one entry too many for the list's allocation.
 static void poll_set_reset_revents(poll_set_t *poll_set) {
     for (mp_uint_t i = 0; i < poll_set->map.alloc; ++i) {
         if (!mp_map_slot_is_filled(&poll_set->map, i)) {
