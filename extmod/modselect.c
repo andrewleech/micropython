@@ -903,6 +903,31 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
         #endif
         poll_set->pollfds[0].events = POLLIN;
         poll_set->pollfds[0].revents = 0;
+
+        #if MICROPY_HAL_HAS_WAKE_OBJ && MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
+        // A wake object the port could not back has no descriptor to inject, so nothing in
+        // the set below can be woken by a raise. Every way of reaching poll() from here
+        // absorbs that except one: a zero timeout returns immediately, a finite one is
+        // bounded by what the caller already asked for, and a set with no SOURCE_SIGNAL
+        // entries never depended on the slot at all. An indefinite wait holding entries
+        // whose only wake source is a raise has nothing left able to end it, so it raises
+        // here instead of blocking forever.
+        //
+        // This also raises where the set holds fd-backed entries that could have satisfied
+        // the poll on their own, which is deliberate. Proceeding would run the poll with
+        // its signal half inoperative: returning when a descriptor happened to fire, and
+        // hanging when only a raise would have, which is a lost wakeup presenting as a hang
+        // triggered by unrelated traffic. Failing where we know part of what was asked for
+        // cannot be honoured is the behaviour that stays diagnosable.
+        //
+        // Checked with the GIL still held, since it raises, and before the timeout is
+        // computed below, where all four of its inputs are already settled.
+        if (poll_set->pollfds[0].fd < 0 && poll_set->n_signal > 0
+            && timeout == (mp_uint_t)-1 && !pre_block_ready
+            && poll_set_all_have_wake_sources(poll_set)) {
+            mp_raise_OSError(MP_EMFILE);
+        }
+        #endif
         #endif
 
         MP_THREAD_GIL_EXIT();
