@@ -385,6 +385,17 @@ static const mp_rom_map_elem_t signal_stream_locals_dict_table[] = {
 };
 static MP_DEFINE_CONST_DICT(signal_stream_locals_dict, signal_stream_locals_dict_table);
 
+// Makes this port report that it cannot create a wake primitive, so a thread claiming one
+// from here on is handed the backing-less object instead. Exposed only so a test can reach
+// the degraded path deliberately: the real trigger is descriptor or memory exhaustion,
+// which a test cannot produce without taking the harness around it down too.
+static mp_obj_t signal_stream_force_wake_obj_failure(mp_obj_t enable_in) {
+    extern bool mp_hal_wake_obj_force_open_failure;
+    mp_hal_wake_obj_force_open_failure = mp_obj_is_true(enable_in);
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mp_select_force_wake_obj_failure_obj, signal_stream_force_wake_obj_failure);
+
 static const mp_stream_p_t signal_stream_p = {
     .ioctl = signal_stream_ioctl,
 };
