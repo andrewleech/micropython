@@ -361,22 +361,30 @@ static struct pollfd *poll_set_add_fd(poll_set_t *poll_set, int fd) {
 }
 
 #if MICROPY_PY_SELECT_EVENT_SOURCE
-// Whether the calling thread is the sole possible consumer of the shared wake event's
-// token, and that token exists. A SOURCE_SIGNAL entry's deadline block depends on the
-// token surviving from the raise that fires it to the poll() that is woken by it; if any
-// other thread could drain the same token first, that block can miss the wake it was
-// waiting for with nothing left to notice, unlike a period-capped sweep, which just polls
-// again on the next tick regardless.
+// Whether the calling thread is the sole possible consumer of whatever wake token its
+// deadline block depends on. A SOURCE_SIGNAL entry's block depends on that token surviving
+// from the raise that fires it to the poll() that is woken by it; if any other thread
+// could drain the same token first, the block can miss the wake it was waiting for with
+// nothing left to notice, unlike a period-capped sweep, which just polls again on the next
+// tick regardless.
 //
-// False unconditionally under a GIL build: every thread there drains the same wake event
-// (see MICROPY_PY_THREAD_GIL's effect on mp_sched_thread_can_run_callbacks()), so a token
-// raised for this thread's block can be taken by another thread's time.sleep() or its own
-// select.poll() first. Otherwise true only for the thread that actually owns the wake
-// event: mp_sched_thread_can_run_callbacks() is false for every thread but the main one,
-// and mp_hal_wake_event_fd() can be unavailable regardless (e.g. before HAL init).
+// With a per-thread wake object (MICROPY_HAL_HAS_WAKE_OBJ and its POSIX descriptor), every
+// thread that reaches here has its own token: mp_hal_wake_obj_signal_all() raises every
+// claimed object independently, so no other thread's wait can consume this one's. That
+// holds under a GIL build exactly as it does without one, since it depends only on the
+// object being this thread's own, never on which thread is entitled to run scheduled
+// callbacks. Reliable unless the pool has no slot left to give this thread, or the HAL has
+// not handed out a descriptor for it yet.
+//
+// Without a wake object, the fallback is the single shared wake event, reliable only for
+// the one thread entitled to drain it: mp_sched_thread_can_run_callbacks() is false for
+// every thread but the main one on a non-GIL build, and true for every thread on a GIL
+// build, where any of them draining it first defeats every other's block. This is the same
+// entitlement mp_hal_wake_event_wait_tv() uses to decide who may wait on it.
 static bool poll_set_signal_wake_is_reliable(void) {
-    #if MICROPY_PY_THREAD && MICROPY_PY_THREAD_GIL
-    return false;
+    #if MICROPY_HAL_HAS_WAKE_OBJ && MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
+    mp_hal_wake_obj_t *wake_obj = mp_hal_wake_obj_this_thread();
+    return wake_obj != NULL && mp_hal_wake_obj_posix_fd(wake_obj) >= 0;
     #else
     return mp_sched_thread_can_run_callbacks() && mp_hal_wake_event_fd() >= 0;
     #endif
@@ -806,22 +814,26 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
 
         #if MICROPY_PY_SELECT_EVENT_SOURCE
         // Refresh the reserved slot immediately before poll() blocks on it. -1 when this
-        // thread may not act on the wake event (mp_sched_thread_can_run_callbacks(), see the
-        // caveat at its definition): registering the real fd here on a thread that will
-        // never drain it would be a lost wakeup for whichever thread actually needed it, so
-        // this thread's poll() falls back to the periodic sweep below instead.
+        // thread may not act on the fd it would otherwise use, whether that is its own
+        // wake object (pool exhausted, or none handed out yet) or the shared wake event
+        // (mp_sched_thread_can_run_callbacks(), see the caveat at its definition):
+        // registering the real fd here on a thread that will never drain it would be a
+        // lost wakeup for whichever thread actually needed it, so this thread's poll()
+        // falls back to the periodic sweep below instead.
         //
-        // On a GIL build, mp_sched_thread_can_run_callbacks() returns true for every thread,
-        // not just the one that owns this wait, so two threads each running their own
-        // select.poll() with the wake fd both injected race to drain it, and whichever loses
-        // sees no wakeup from this fd on that pass. This is exactly the race
-        // poll_set_signal_wake_is_reliable() is false for on every GIL build: a SOURCE_SIGNAL
-        // entry never depends on this fd surviving to end a deadline block, since
-        // poll_set_all_have_wake_sources() falls back to the period-capped sweep below
-        // whenever the set holds one, bounding a lost drain to one sweep period rather than
-        // the full timeout. A purely fd-backed or composed entry is unaffected either way, as
-        // neither relies on this reserved slot for its own readiness.
+        // A per-thread wake object (see poll_set_signal_wake_is_reliable()) belongs to no
+        // other thread, so injecting it here carries none of the shared wake event's
+        // cross-thread drain race; a SOURCE_SIGNAL entry only ever depends on this slot to
+        // end a deadline block when poll_set_signal_wake_is_reliable() is true for it, and
+        // otherwise falls back to the period-capped sweep below regardless of what this
+        // slot is wired to. A purely fd-backed or composed entry is unaffected either way,
+        // as neither relies on this reserved slot for its own readiness.
+        #if MICROPY_HAL_HAS_WAKE_OBJ && MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
+        mp_hal_wake_obj_t *wake_obj = mp_hal_wake_obj_this_thread();
+        poll_set->pollfds[0].fd = wake_obj != NULL ? mp_hal_wake_obj_posix_fd(wake_obj) : -1;
+        #else
         poll_set->pollfds[0].fd = mp_sched_thread_can_run_callbacks() ? mp_hal_wake_event_fd() : -1;
+        #endif
         poll_set->pollfds[0].events = POLLIN;
         poll_set->pollfds[0].revents = 0;
         #endif
@@ -868,11 +880,17 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
         }
 
         #if MICROPY_PY_SELECT_EVENT_SOURCE
-        // Drain only after polling readable, never before: the event is level-triggered and
-        // counting, so draining ahead of the wait it was meant to end discards the raise and
-        // leaves that wait with nothing to wake it (mp_hal_wake_event_fd()'s contract).
+        // Drain only after polling readable, never before: the reserved slot's fd is
+        // level-triggered and counting, so draining ahead of the wait it was meant to end
+        // discards the raise and leaves that wait with nothing to wake it.
         if (poll_set->pollfds[0].revents != 0) {
+            #if MICROPY_HAL_HAS_WAKE_OBJ && MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
+            if (wake_obj != NULL) {
+                mp_hal_wake_obj_drain(wake_obj);
+            }
+            #else
             mp_hal_wake_event_drain();
+            #endif
         }
         #endif
 

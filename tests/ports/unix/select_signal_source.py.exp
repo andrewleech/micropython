@@ -10,4 +10,4 @@ hybrid cross thread wake ok
 signalled survives a drained token ok
 fd wake without ready ok
 fd wake with ready ok
-worker thread sweep ok
+worker thread wake ok

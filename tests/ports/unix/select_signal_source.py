@@ -313,15 +313,13 @@ if r and dt < 200 and first == 1 and second == 0 and pc <= IDLE_POLL_COUNT_MAX:
 else:
     print("fd wake with ready FAIL:", r, dt, first, second, pc)
 
-# poll() called from a worker thread cannot rely on the deadline-block gate:
-# poll_set_signal_wake_is_reliable() only trusts the thread mp_sched_thread_can_run_
-# callbacks() names as the wake event's owner, which on the default unix build
-# (MICROPY_PY_THREAD=1, MICROPY_PY_THREAD_GIL=0) is the main thread only. A poll() from
-# any other thread therefore always falls back to the period-capped sweep, even for a
-# signal-only entry that would qualify for a deadline block if polled from the main
-# thread. A signal raised mid-wait must still be found by that sweep, and the sweep's
-# per-tick MP_STREAM_POLL calls give it a poll_count() far above the deadline-block cases
-# above.
+# poll() called from a worker thread gets the same deadline block as the main thread:
+# each thread claims its own wake object on first blocking wait
+# (mp_hal_wake_obj_this_thread(), ports/unix/unix_mphal.c), and poll_set_signal_wake_
+# is_reliable() trusts that object unconditionally, since no other thread can claim or
+# drain it. A signal raised mid-wait must still end the block promptly, with a
+# poll_count() as low as the main-thread deadline-block cases above, not the sweep's
+# per-tick cadence.
 s = SelectSignalStream()
 result = []
 
@@ -342,7 +340,7 @@ s.signal(select.POLLIN)
 while not result:
     time.sleep_ms(10)
 r, dt, pc = result[0]
-if r and dt < 500 and pc > IDLE_POLL_COUNT_MAX:
-    print("worker thread sweep ok")
+if r and dt < 500 and pc <= IDLE_POLL_COUNT_MAX:
+    print("worker thread wake ok")
 else:
-    print("worker thread sweep FAIL:", r, dt, pc)
+    print("worker thread wake FAIL:", r, dt, pc)
