@@ -51,6 +51,13 @@
 // Called from mp_thread_finish(); never from a wait, since a wake object is held for a
 // thread's whole lifetime rather than borrowed per wait.
 void mp_hal_wake_obj_release_this_thread(void);
+
+#if defined(MICROPY_UNIX_COVERAGE)
+// Test hook: while set, this port reports that it cannot create a wake primitive, so the
+// degraded claim is reachable without exhausting the process's real descriptors. Declared
+// here rather than as a local extern in coverage.c so both sides are type-checked.
+extern bool mp_hal_wake_obj_force_open_failure;
+#endif
 #endif
 
 // The port provides `mp_hal_stdio_mode_raw()` and `mp_hal_stdio_mode_orig()`.

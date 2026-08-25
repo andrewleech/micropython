@@ -171,6 +171,10 @@ void mp_hal_wake_obj_signal_all(void);
 #define MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD (0)
 #endif
 
+#if MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD && !MICROPY_HAL_HAS_WAKE_OBJ
+#error "MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD describes a wake object, so it requires MICROPY_HAL_HAS_WAKE_OBJ"
+#endif
+
 #if MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
 // A descriptor that polls readable while the object is raised, for a caller running its
 // own poll()/select() set. Negative once the HAL has been torn down. Deliberately not

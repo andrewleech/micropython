@@ -17,8 +17,6 @@ except (ImportError, AttributeError, NameError):
     raise SystemExit
 
 _MP_STREAM_POLL = const(3)
-_MP_STREAM_GET_FILENO = const(10)
-_MP_STREAM_SET_EVENT_SOURCE = const(13)
 
 # Below this bound, a wait is presumed to have blocked to its deadline (or been woken)
 # rather than repeatedly re-checking readiness; at or above it, the wait is presumed to
@@ -26,26 +24,12 @@ _MP_STREAM_SET_EVENT_SOURCE = const(13)
 # (tens of ms at ~1ms cadence) and assert well above this bound, so there is no overlap.
 IDLE_POLL_COUNT_MAX = 5
 
-# Whether a main-thread poll() on a signal-only entry actually gets the deadline block
-# poll_set_signal_wake_is_reliable() is meant to grant it, probed at runtime rather than
-# assumed from build config: it is false unconditionally on a GIL build (see its doc
-# comment in extmod/modselect.c), and possibly false for other reasons this test does not
-# need to enumerate. A fd-less entry with nothing ready or signalling it takes the
-# deadline block when the entitlement holds, so its poll_count() over a short wait stays
-# at or below IDLE_POLL_COUNT_MAX; otherwise it takes the period-capped sweep instead and
-# poll_count() comes back well above that bound.
-_probe = SelectSignalStream()
-_pp = select.poll()
-_pp.register(_probe, select.POLLIN)
-_pp.poll(80)
-SIGNAL_DEADLINE_BLOCK = _probe.poll_count() <= IDLE_POLL_COUNT_MAX
-_pp.unregister(_probe)
-
-
-def pc_matches_block_cadence(pc):
-    if SIGNAL_DEADLINE_BLOCK:
-        return pc <= IDLE_POLL_COUNT_MAX
-    return pc > IDLE_POLL_COUNT_MAX
+# A signal-only entry gets the deadline block on every build this file runs on: the import
+# guard above skips without _thread, and unix ties MICROPY_HAL_HAS_WAKE_OBJ to
+# MICROPY_PY_THREAD, so a per-thread wake object always exists here and
+# poll_set_signal_wake_is_reliable() grants the block on GIL and non-GIL alike. Asserted
+# directly rather than probed: deriving the expected cadence by measuring it would let this
+# file pass with the mechanism it is testing removed.
 
 
 # Registering a fd-less stream installs its callback and counts the registration; the
@@ -110,7 +94,7 @@ r = p.poll(150)
 dt = time.ticks_diff(time.ticks_ms(), t0)
 pc = s.poll_count()
 p.unregister(s)
-if r == [] and 150 <= dt < 500 and pc_matches_block_cadence(pc):
+if r == [] and 150 <= dt < 500 and pc <= IDLE_POLL_COUNT_MAX:
     print("full timeout ok")
 else:
     print("full timeout FAIL:", r, dt, pc)
@@ -122,18 +106,20 @@ p = select.poll()
 p.register(s, select.POLLIN)
 
 
-def raise_after(ms, mask):
+# Takes the stream rather than reading the module global: the main thread rebinds that
+# name several times below, and this runs on a worker after a delay.
+def raise_after(stream, ms, mask):
     time.sleep_ms(ms)
-    s.signal(mask)
+    stream.signal(mask)
 
 
-_thread.start_new_thread(raise_after, (50, select.POLLIN))
+_thread.start_new_thread(raise_after, (s, 50, select.POLLIN))
 t0 = time.ticks_ms()
 r = p.poll(2000)
 dt = time.ticks_diff(time.ticks_ms(), t0)
 pc = s.poll_count()
 p.unregister(s)
-if r and dt < 500 and pc_matches_block_cadence(pc):
+if r and dt < 500 and pc <= IDLE_POLL_COUNT_MAX:
     print("cross thread wake ok")
 else:
     print("cross thread wake FAIL:", r, dt, pc)
@@ -149,12 +135,7 @@ p2.register(s, select.POLLIN)
 p1.unregister(s)
 
 
-def raise_after2(ms, mask):
-    time.sleep_ms(ms)
-    s.signal(mask)
-
-
-_thread.start_new_thread(raise_after2, (50, select.POLLIN))
+_thread.start_new_thread(raise_after, (s, 50, select.POLLIN))
 t0 = time.ticks_ms()
 r = p2.poll(2000)
 dt = time.ticks_diff(time.ticks_ms(), t0)
@@ -217,19 +198,14 @@ p = select.poll()
 p.register(s, select.POLLIN)
 
 
-def raise_after3(ms, mask):
-    time.sleep_ms(ms)
-    s.signal(mask)
-
-
-_thread.start_new_thread(raise_after3, (50, select.POLLIN))
+_thread.start_new_thread(raise_after, (s, 50, select.POLLIN))
 t0 = time.ticks_ms()
 r = p.poll(2000)
 dt = time.ticks_diff(time.ticks_ms(), t0)
 pc = s.poll_count()
 p.unregister(s)
 s.close()
-if r and dt < 500 and pc_matches_block_cadence(pc):
+if r and dt < 500 and pc <= IDLE_POLL_COUNT_MAX:
     print("hybrid cross thread wake ok")
 else:
     print("hybrid cross thread wake FAIL:", r, dt, pc)
@@ -288,7 +264,7 @@ pc = s.poll_count()
 drained = s.drain_fd()
 p.unregister(s)
 s.close()
-if r == [] and 150 <= dt < 500 and drained == 0 and pc_matches_block_cadence(pc):
+if r == [] and 150 <= dt < 500 and drained == 0 and pc <= IDLE_POLL_COUNT_MAX:
     print("fd wake without ready ok")
 else:
     print("fd wake without ready FAIL:", r, dt, drained, pc)
@@ -369,7 +345,7 @@ p.poll(80)
 pc = probe.poll_count()
 p.unregister(flag)
 p.unregister(probe)
-if pc_matches_block_cadence(pc):
+if pc <= IDLE_POLL_COUNT_MAX:
     print("threadsafeflag declares signal source ok")
 else:
     print("threadsafeflag declares signal source FAIL:", pc)
@@ -378,7 +354,7 @@ else:
 # same-thread set(), ending a blocking poll() promptly instead of only being found on
 # the next period-capped sweep. The poll() stays on the main thread (paired with
 # SelectSignalStream again, as above) rather than a worker thread, since only the main
-# thread is entitled to the deadline block that pc_matches_block_cadence() checks for
+# thread is entitled to the deadline block the poll_count bound below checks for
 # (see poll_set_signal_wake_is_reliable() in extmod/modselect.c); what this test needs
 # from the worker thread is only that set() called there reaches the callback safely,
 # which the main thread's own poll_count() already reveals.
@@ -401,7 +377,7 @@ dt = time.ticks_diff(time.ticks_ms(), t0)
 pc = probe.poll_count()
 p.unregister(flag)
 p.unregister(probe)
-if r and dt < 500 and pc_matches_block_cadence(pc) and flag.is_set():
+if r and dt < 500 and pc <= IDLE_POLL_COUNT_MAX and flag.is_set():
     print("threadsafeflag cross thread wake ok")
 else:
     print("threadsafeflag cross thread wake FAIL:", r, dt, pc)

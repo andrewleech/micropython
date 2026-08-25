@@ -390,7 +390,6 @@ static MP_DEFINE_CONST_DICT(signal_stream_locals_dict, signal_stream_locals_dict
 // the degraded path deliberately: the real trigger is descriptor or memory exhaustion,
 // which a test cannot produce without taking the harness around it down too.
 static mp_obj_t signal_stream_force_wake_obj_failure(mp_obj_t enable_in) {
-    extern bool mp_hal_wake_obj_force_open_failure;
     mp_hal_wake_obj_force_open_failure = mp_obj_is_true(enable_in);
     return mp_const_none;
 }

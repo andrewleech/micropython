@@ -428,11 +428,14 @@ static struct pollfd *poll_set_add_fd(poll_set_t *poll_set, int fd) {
 // per-thread objects has exactly one thread able to hold that entitlement
 // (MICROPY_HAL_HAS_WAKE_OBJ tracks MICROPY_PY_THREAD on unix), so no other thread's wait
 // can ever consume this one's token first.
-static bool poll_set_signal_wake_is_reliable(poll_set_t *poll_set) {
-    #if MICROPY_HAL_HAS_WAKE_OBJ && MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
-    return mp_sched_thread_can_run_callbacks() || poll_set->n_signal > 0;
+// Only ever consulted for a set that holds SOURCE_SIGNAL entries, so with per-thread wake
+// objects the answer is unconditionally yes: this thread's stake in the raise is exactly
+// those entries, and its own object is where the raise lands. Callback entitlement does not
+// enter into it, which is the whole point of the object being per-thread.
+static bool poll_set_signal_wake_is_reliable(void) {
+    #if MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
+    return true;
     #else
-    (void)poll_set;
     return mp_sched_thread_can_run_callbacks() && mp_hal_wake_event_fd() >= 0;
     #endif
 }
@@ -478,7 +481,7 @@ static bool poll_set_all_have_wake_sources(poll_set_t *poll_set) {
     if (poll_set->map.used != (mp_uint_t)(poll_set->used - 1) + poll_set->n_signal_nofd) {
         return false;
     }
-    return poll_set->n_signal == 0 || poll_set_signal_wake_is_reliable(poll_set);
+    return poll_set->n_signal == 0 || poll_set_signal_wake_is_reliable();
     #else
     return poll_set->map.used == poll_set->used;
     #endif
@@ -860,6 +863,14 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
     bool first_pass = true;
     #endif
 
+    #if MICROPY_PY_SELECT_EVENT_SOURCE && MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
+    // Claimed once for the whole call rather than per pass. A thread holds the same object
+    // for its lifetime, so re-asking each pass answers the same thing; it matters because a
+    // claim the port could not service is deliberately not cached, and re-asking would
+    // repeat its failed allocation on every pass of the sweep.
+    mp_hal_wake_obj_t *wake_obj = mp_hal_wake_obj_this_thread();
+    #endif
+
     for (;;) {
         #if MICROPY_PY_SELECT_EVENT_SOURCE
         poll_set_refresh_fd_events(poll_set);
@@ -872,16 +883,19 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
         // here and forced into the timeout below instead, so poll() still runs, non-blocking,
         // and poll_set_resolve_readiness() after it resolves every entry in one place.
         bool pre_block_ready = false;
-        bool signalled = poll_set_take_signal(poll_set);
+        // mp_event_signal() is process-wide, so the count moves for raises aimed at other
+        // poll sets too. A set holding no SOURCE_SIGNAL entry has nothing that could have
+        // been readied by one, so it skips the snapshot entirely rather than resolving every
+        // entry again on each unrelated raise. Leaving its snapshot stale is safe: a later
+        // registration just sees movement it cannot attribute and does one extra ask.
+        bool signalled = poll_set->n_signal > 0 && poll_set_take_signal(poll_set);
         if (first_pass || signalled) {
             if (first_pass) {
                 poll_set_reset_revents(poll_set);
             }
             pre_block_ready = poll_set_resolve_pre_block(poll_set, first_pass, signalled) > 0;
         }
-        #endif
 
-        #if MICROPY_PY_SELECT_EVENT_SOURCE
         // Refresh the reserved slot immediately before poll() blocks on it, with this
         // thread's own wake object where the port has one: it belongs to no other thread,
         // so a raise reaching it is never stolen by another thread's wait the way a single
@@ -890,8 +904,7 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
         // and otherwise falls back to the period-capped sweep below regardless of what
         // this slot is wired to. A purely fd-backed or composed entry is unaffected either
         // way, as neither relies on this reserved slot for its own readiness.
-        #if MICROPY_HAL_HAS_WAKE_OBJ && MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
-        mp_hal_wake_obj_t *wake_obj = mp_hal_wake_obj_this_thread();
+        #if MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
         poll_set->pollfds[0].fd = mp_hal_wake_obj_posix_fd(wake_obj);
         #else
         // No per-thread wake object on this port or build: the shared wake event is the
@@ -903,8 +916,14 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
         #endif
         poll_set->pollfds[0].events = POLLIN;
         poll_set->pollfds[0].revents = 0;
+        #endif
 
-        #if MICROPY_HAL_HAS_WAKE_OBJ && MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
+        // Whether this pass may block to the caller's deadline rather than falling back to
+        // the period-capped sweep below. Answered once: the unwakeable-wait check and the
+        // timeout computation both need it, and nothing between them can change it.
+        bool can_block_to_deadline = poll_set_all_have_wake_sources(poll_set);
+
+        #if MICROPY_PY_SELECT_EVENT_SOURCE && MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
         // A wake object the port could not back has no descriptor to inject, so nothing in
         // the set below can be woken by a raise. Every way of reaching poll() from here
         // absorbs that except one: a zero timeout returns immediately, a finite one is
@@ -923,11 +942,9 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
         // Checked with the GIL still held, since it raises, and before the timeout is
         // computed below, where all four of its inputs are already settled.
         if (poll_set->pollfds[0].fd < 0 && poll_set->n_signal > 0
-            && timeout == (mp_uint_t)-1 && !pre_block_ready
-            && poll_set_all_have_wake_sources(poll_set)) {
+            && timeout == (mp_uint_t)-1 && !pre_block_ready && can_block_to_deadline) {
             mp_raise_OSError(MP_EMFILE);
         }
-        #endif
         #endif
 
         MP_THREAD_GIL_EXIT();
@@ -942,9 +959,9 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
             t = 0;
         } else
         #endif
-        if (poll_set_all_have_wake_sources(poll_set)) {
-            // All our pollables are file descriptors, so we can use a blocking
-            // poll and let it (the underlying system) handle the timeout.
+        if (can_block_to_deadline) {
+            // Every entry has a wake source, so use a blocking poll and let it (the
+            // underlying system) handle the timeout.
             if (timeout == (mp_uint_t)-1) {
                 t = -1;
             } else {
@@ -975,15 +992,13 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
         // Drain only after polling readable, never before: the reserved slot's fd is
         // level-triggered and counting, so draining ahead of the wait it was meant to end
         // discards the raise and leaves that wait with nothing to wake it.
-        #if MICROPY_HAL_HAS_WAKE_OBJ && MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
         if (poll_set->pollfds[0].revents != 0) {
+            #if MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
             mp_hal_wake_obj_drain(wake_obj);
-        }
-        #else
-        if (poll_set->pollfds[0].revents != 0) {
+            #else
             mp_hal_wake_event_drain();
+            #endif
         }
-        #endif
         #endif
 
         // Resolve readiness for every entry now that poll() has produced fresh state. On the

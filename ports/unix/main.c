@@ -580,7 +580,7 @@ MP_NOINLINE int main_(int argc, char **argv) {
         mp_store_global(MP_QSTR_SelectSignalStream, MP_OBJ_FROM_PTR(&mp_type_signal_stream));
         // Forces the port to report that it cannot create a wake primitive, so a test can
         // reach the degraded claim without exhausting real descriptors (see coverage.c).
-        extern const mp_obj_fun_builtin_fixed_t mp_select_force_wake_obj_failure_obj;
+        MP_DECLARE_CONST_FUN_OBJ_1(mp_select_force_wake_obj_failure_obj);
         mp_store_global(MP_QSTR_select_force_wake_obj_failure, MP_OBJ_FROM_PTR(&mp_select_force_wake_obj_failure_obj));
         #endif
     }

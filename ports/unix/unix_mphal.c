@@ -400,28 +400,17 @@ int mp_hal_wake_event_wait_tv(struct timeval *tv) {
     // below and runs for its full duration regardless of an unrelated raise, even though
     // that raise reaches every *claimed* wake object (mp_hal_wake_obj_signal_all());
     // such a thread simply never claims one here.
-    #if MICROPY_HAL_HAS_WAKE_OBJ
+    int fd = -1;
     if (mp_sched_thread_can_run_callbacks()) {
-        mp_hal_wake_obj_t *w = mp_hal_wake_obj_this_thread();
-        int fd = w->rd_fd;
-        if (fd >= 0) {
-            fd_set rfds;
-            FD_ZERO(&rfds);
-            FD_SET(fd, &rfds);
-            int ret = select(fd + 1, &rfds, NULL, NULL, tv);
-            if (ret > 0) {
-                mp_hal_wake_obj_drain(w);
-                errno = EINTR;
-                return -1;
-            }
-            return ret;
-        }
+        #if MICROPY_HAL_HAS_WAKE_OBJ
+        fd = mp_hal_wake_obj_this_thread()->rd_fd;
+        #else
+        // No per-thread objects on this build: the shared wake event is this process's only
+        // thread, so it is also that thread's only consumer.
+        fd = wake_event_fd;
+        #endif
     }
-    #else
-    // No per-thread objects on this build: the shared wake event is this process's only
-    // thread, so it is also that thread's only consumer.
-    if (mp_sched_thread_can_run_callbacks() && wake_event_fd >= 0) {
-        int fd = wake_event_fd;
+    if (fd >= 0) {
         fd_set rfds;
         FD_ZERO(&rfds);
         FD_SET(fd, &rfds);
@@ -433,7 +422,6 @@ int mp_hal_wake_event_wait_tv(struct timeval *tv) {
         }
         return ret;
     }
-    #endif
     // Reached with no live wake source to wait on, either because this thread has no
     // entitlement to one or because its claim could not be serviced and it holds the
     // backing-less object. Waits out `tv` and cannot be woken early in either case.
