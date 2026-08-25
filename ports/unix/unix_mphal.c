@@ -69,13 +69,26 @@ static int set_cloexec_nonblock(int fd) {
 }
 #endif
 
-// Opens one wake primitive: a Linux eventfd (rd == wr) or a self-pipe elsewhere. Exits
-// the process on failure: a HAL that cannot allocate its own wake descriptors cannot run
-// correctly regardless of what fails next, which is why the shared wake event has always
-// failed this way and every wake object shares the rule.
-static void open_wake_fds(int *rd_out, int *wr_out) {
+#if defined(MICROPY_UNIX_COVERAGE)
+// Test hook: while set, this port reports that it cannot create a wake primitive. It makes
+// the degraded claim below reachable without exhausting the process's real descriptors,
+// which a test cannot do without also breaking the harness around it.
+bool mp_hal_wake_obj_force_open_failure;
+#endif
+
+// Opens one wake primitive: a Linux eventfd (rd == wr) or a self-pipe elsewhere. Returns
+// false with the outputs untouched if none can be created, leaving the caller to decide
+// what that failure means: fatal where it happens before any user code has run, degraded
+// to a backing-less object otherwise (mp_hal_wake_obj_this_thread()).
+static bool open_wake_fds(int *rd_out, int *wr_out) {
     int rd = -1;
     int wr = -1;
+    #if defined(MICROPY_UNIX_COVERAGE)
+    if (mp_hal_wake_obj_force_open_failure) {
+        errno = EMFILE;
+        return false;
+    }
+    #endif
     #ifdef __linux__
     rd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
     wr = rd;
@@ -92,16 +105,21 @@ static void open_wake_fds(int *rd_out, int *wr_out) {
     }
     #endif
     if (rd < 0) {
-        fprintf(stderr, "FATAL: cannot create wake event: %s\n", strerror(errno));
-        exit(1);
+        return false;
     }
     if (rd >= FD_SETSIZE) {
-        // Waiting on it uses select(), and FD_SET() is undefined from here up.
-        fprintf(stderr, "FATAL: wake event fd %d exceeds FD_SETSIZE\n", rd);
-        exit(1);
+        // Waiting on it uses select(), and FD_SET() is undefined from here up. Closed
+        // rather than kept, so a descriptor too high to wait on does not hold a slot that
+        // would let a later, lower-numbered claim succeed.
+        if (wr != rd) {
+            close(wr);
+        }
+        close(rd);
+        return false;
     }
     *rd_out = rd;
     *wr_out = wr;
+    return true;
 }
 
 static void wake_event_drain(int fd) {
@@ -153,6 +171,21 @@ static mp_hal_wake_obj_t *wake_obj_list_head;
 // with no atomic section and no scan.
 static __thread mp_hal_wake_obj_t *tls_wake_obj;
 
+// Handed out when a claim cannot be serviced, so mp_hal_wake_obj_this_thread() keeps its
+// promise of a valid object without one having been created. Static, because the failures
+// it stands in for are exactly no memory and no descriptors. Never linked into the list
+// and never claimed, so mp_hal_wake_obj_signal_all() cannot reach it and no other thread
+// can be handed it. Its negative descriptors make every operation on it degrade through
+// code that already exists: raising hits wake_fd_raise()'s fd < 0 guard, a negative fd in
+// a pollfd is a POSIX-defined no-op with revents zeroed, and mp_hal_wake_event_wait_tv()
+// already falls through to its untimed wait when the descriptor is negative.
+static mp_hal_wake_obj_t wake_obj_degraded = {
+    .rd_fd = -1,
+    .wr_fd = -1,
+    .claimed = false,
+    .next = NULL,
+};
+
 #endif
 
 void mp_hal_wake_event_init(void) {
@@ -161,7 +194,10 @@ void mp_hal_wake_event_init(void) {
     // has its own, so both the raise in mp_hal_signal_event() and the wait in
     // mp_hal_wake_event_wait_tv() take their wake-object branch and this descriptor would
     // sit open for the life of the process with no reader.
-    open_wake_fds(&wake_event_fd, &wake_event_wr_fd);
+    if (!open_wake_fds(&wake_event_fd, &wake_event_wr_fd)) {
+        fprintf(stderr, "FATAL: cannot create wake event: %s\n", strerror(errno));
+        exit(1);
+    }
     #else
     // Claims the main thread's wake object here, where no user code has run and so no file
     // descriptor of the caller's choosing has ever existed. That property is categorical:
@@ -179,7 +215,15 @@ void mp_hal_wake_event_init(void) {
     // guarantee. The price would be an eventfd per thread whether or not it ever blocks,
     // each one bounded by FD_SETSIZE because mp_hal_wake_event_wait_tv() waits with
     // select().
-    mp_hal_wake_obj_this_thread();
+    //
+    // Fatal here, where a claim elsewhere degrades: this runs before any user code, so
+    // there is no caller to report to and no timeout to fall back on, and a main thread
+    // that cannot be woken makes the rest of the process's behaviour undefined rather
+    // than merely late.
+    if (mp_hal_wake_obj_this_thread() == &wake_obj_degraded) {
+        fprintf(stderr, "FATAL: cannot create wake event: %s\n", strerror(errno));
+        exit(1);
+    }
     #endif
 }
 
@@ -261,11 +305,23 @@ mp_hal_wake_obj_t *mp_hal_wake_obj_this_thread(void) {
         // storage grows to the peak number of concurrently-blocking threads and stops
         // there; a thread that later exits returns its node instead of shrinking this.
         w = malloc(sizeof(mp_hal_wake_obj_t));
-        if (w == NULL) {
-            fprintf(stderr, "FATAL: cannot allocate wake object: %s\n", strerror(errno));
-            exit(1);
+        if (w == NULL || !open_wake_fds(&w->rd_fd, &w->wr_fd)) {
+            free(w);
+            MICROPY_END_ATOMIC_SECTION(atomic_state);
+            // Degraded rather than fatal, because what the caller loses depends on what it
+            // is waiting for and only one case cannot absorb it. A wait with a timeout
+            // still returns on that timeout, and a thread whose only stake is running
+            // scheduled callbacks still runs them, late, when its own wait expires. The
+            // one case with nothing left to end it is an indefinite wait a SOURCE_SIGNAL
+            // entry was to have ended, and extmod/modselect.c raises there rather than
+            // blocking forever.
+            //
+            // Not cached in tls_wake_obj: a claim that failed on a transient shortage
+            // succeeds once the shortage passes, and a thread that kept the degraded
+            // object would stay degraded for its whole life instead. The retry costs one
+            // scan and one failed allocation per wait, and only while degraded.
+            return &wake_obj_degraded;
         }
-        open_wake_fds(&w->rd_fd, &w->wr_fd);
         w->claimed = true;
         w->next = __atomic_load_n(&wake_obj_list_head, __ATOMIC_ACQUIRE);
         __atomic_store_n(&wake_obj_list_head, w, __ATOMIC_RELEASE);
@@ -342,7 +398,7 @@ int mp_hal_wake_event_wait_tv(struct timeval *tv) {
     // so no other thread's wait depends on this call being woken early either; reaching
     // this point with no such entitlement, a thread falls through to the bare select()
     // below and runs for its full duration regardless of an unrelated raise, even though
-    // that raise reaches every *claimed* wake object (mp_hal_wake_obj_signal_all()) --
+    // that raise reaches every *claimed* wake object (mp_hal_wake_obj_signal_all());
     // such a thread simply never claims one here.
     #if MICROPY_HAL_HAS_WAKE_OBJ
     if (mp_sched_thread_can_run_callbacks()) {
@@ -378,8 +434,16 @@ int mp_hal_wake_event_wait_tv(struct timeval *tv) {
         return ret;
     }
     #endif
-    // No entitlement to a live wake source: this is the fallback of last resort, and it
-    // cannot be woken early.
+    // Reached with no live wake source to wait on, either because this thread has no
+    // entitlement to one or because its claim could not be serviced and it holds the
+    // backing-less object. Waits out `tv` and cannot be woken early in either case.
+    //
+    // A caller passing NULL therefore waits forever. Every caller on this port passes a
+    // finite `tv`: MP_HAL_WAKE_EVENT_FOREVER reaches here only via
+    // mp_event_wait_indefinite(), which on unix is used by btstack rather than by
+    // time.sleep() or by select.poll(), the latter running its own poll() set and never
+    // reaching this function. That is a pre-existing property of the untimed wait rather
+    // than something the degraded object introduces, and it is fixed in the waiter.
     return select(0, NULL, NULL, NULL, tv);
 }
 
