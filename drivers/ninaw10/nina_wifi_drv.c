@@ -266,18 +266,31 @@ static int nina_read_response(uint32_t cmd, uint32_t nvals, uint32_t width, nina
         goto error_out;
     }
 
-    // Sanity check the number of returned values.
-    // NOTE: This is to handle the special case for the scan command.
-    if (nvals > header[2]) {
-        nvals = header[2];
-    }
+    // The firmware may return more values than the caller asked for (e.g. the
+    // scan command returns one value per network found, which can exceed
+    // NINA_MAX_NETWORK_LIST). Every value must still be read off the wire so
+    // the CMD_END terminator below lines up, so only clamp how many are kept.
+    uint32_t nvals_avail = header[2];
+    uint32_t nvals_read = MIN(nvals, nvals_avail);
 
     // Read return value(s).
-    for (uint32_t i = 0; i < nvals; i++) {
+    for (uint32_t i = 0; i < nvals_avail; i++) {
         // Read return value size.
         uint16_t bytes = nina_bsp_spi_read_byte();
         if (width == ARG_16BITS) {
             bytes = (bytes << 8) | nina_bsp_spi_read_byte();
+        }
+
+        if (i >= nvals_read) {
+            // Discard values beyond what the caller asked for.
+            uint8_t discard[32];
+            for (uint16_t n = 0; n < bytes; n += sizeof(discard)) {
+                if (nina_bsp_spi_transfer(NULL, discard, MIN(bytes - n, sizeof(discard))) != 0) {
+                    goto error_out;
+                }
+            }
+            length += bytes + width;
+            continue;
         }
 
         // Check the val fits the buffer.
