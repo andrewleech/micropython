@@ -14,3 +14,8 @@ endif()
 # 8MB PSRAM on GPIO47.
 set(MICROPY_HW_ENABLE_PSRAM 1)
 set(MICROPY_HW_PSRAM_CS_PIN 47)
+
+# WiFi/Bluetooth via the ESP32-C6 AirLift (nina-fw) co-processor.
+set(MICROPY_PY_BLUETOOTH 1)
+set(MICROPY_BLUETOOTH_NIMBLE 1)
+set(MICROPY_PY_NETWORK_NINAW10 1)
