@@ -190,6 +190,11 @@ typedef long mp_off_t;
 #define MICROPY_HAL_HAS_WAKE_OBJ (MICROPY_PY_THREAD)
 #define MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD (MICROPY_PY_THREAD)
 
+// The shared wake event is opened, and so has a descriptor to offer, only on a build with
+// no per-thread objects; with them every waiter has its own and the shared one has no
+// reader (see mp_hal_wake_event_init()).
+#define MICROPY_HAL_WAKE_EVENT_HAS_POSIX_FD (!MICROPY_HAL_HAS_WAKE_OBJ)
+
 // Bare-metal ports don't have stderr. Printing debug to stderr may give tests
 // which check stdout a chance to pass, etc.
 extern const struct _mp_print_t mp_stderr_print;

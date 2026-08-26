@@ -145,21 +145,8 @@ void mp_hal_wake_event_wait_ms(mp_uint_t timeout_ms);
 // timeout.  Returns 0 on timeout, or -1 with errno EINTR if cut short.
 int mp_hal_wake_event_wait_tv(struct timeval *tv);
 
-// The descriptor the wake event can be waited on, for a caller that runs its own
-// poll set and wants the event in it alongside its own descriptors, or -1 when
-// there is none to give.  Defined only where the wake event is backed by a
-// descriptor, so on this port and not on Windows.
-//
-// Drain it after, and only after, it has polled readable.  It is
-// level-triggered, so it stays readable until drained, and draining before a
-// wait instead discards a raise and leaves that wait with nothing to end it.
-//
-// Declared only where per-thread wake objects are unavailable: with them, a poll set
-// injects this thread's own object instead and these have no caller.
-#if !MICROPY_HAL_HAS_WAKE_OBJ
-int mp_hal_wake_event_fd(void);
-void mp_hal_wake_event_drain(void);
-#endif
+// mp_hal_wake_event_fd() and mp_hal_wake_event_drain() are declared in py/mphal.h, behind
+// MICROPY_HAL_WAKE_EVENT_HAS_POSIX_FD, because extmod/modselect.c calls them.
 
 #if MICROPY_PY_BLUETOOTH
 enum {

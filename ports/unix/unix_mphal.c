@@ -52,7 +52,10 @@ typedef uint8_t wake_event_token_t;
 // wake_event_fd drains it, writing wake_event_wr_fd raises it; on Linux both
 // are the same descriptor, and both are negative when not initialised.
 // Only exists where something waits on it; with per-thread wake objects every waiter has
-// its own and this pair has no reader (see mp_hal_wake_event_init()).
+// its own and this pair has no reader (see mp_hal_wake_event_init()). Keyed on the wake
+// mechanism, not on MICROPY_HAL_WAKE_EVENT_HAS_POSIX_FD: that macro says whether this port hands
+// the descriptor out to extmod, which is a different question from whether the event
+// exists at all.
 #if !MICROPY_HAL_HAS_WAKE_OBJ
 static int wake_event_fd = -1;
 static int wake_event_wr_fd = -1;
@@ -435,7 +438,7 @@ int mp_hal_wake_event_wait_tv(struct timeval *tv) {
     return select(0, NULL, NULL, NULL, tv);
 }
 
-#if !MICROPY_HAL_HAS_WAKE_OBJ
+#if MICROPY_HAL_WAKE_EVENT_HAS_POSIX_FD
 // The shared event's descriptor, for a poll set to sleep on alongside its own entries.
 // Only where per-thread wake objects are unavailable: with them, extmod/modselect.c
 // injects this thread's own object instead and these have no caller.

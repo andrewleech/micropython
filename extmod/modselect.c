@@ -435,8 +435,13 @@ static struct pollfd *poll_set_add_fd(poll_set_t *poll_set, int fd) {
 static bool poll_set_signal_wake_is_reliable(void) {
     #if MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
     return true;
-    #else
+    #elif MICROPY_HAL_WAKE_EVENT_HAS_POSIX_FD
     return mp_sched_thread_can_run_callbacks() && mp_hal_wake_event_fd() >= 0;
+    #else
+    // Neither a per-thread object nor a shared descriptor to put in the set, so nothing
+    // here can end a deadline block early and the period-capped sweep is the only correct
+    // cadence for a signal source.
+    return false;
     #endif
 }
 #endif
@@ -906,13 +911,17 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
         // way, as neither relies on this reserved slot for its own readiness.
         #if MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
         poll_set->pollfds[0].fd = mp_hal_wake_obj_posix_fd(wake_obj);
-        #else
+        #elif MICROPY_HAL_WAKE_EVENT_HAS_POSIX_FD
         // No per-thread wake object on this port or build: the shared wake event is the
         // only mechanism left, safe to inject for the same entitlement
         // poll_set_signal_wake_is_reliable() checks above (at most one thread ever holds
         // it), and -1 for every other thread so its poll() always falls back to the
         // periodic sweep below.
         poll_set->pollfds[0].fd = mp_sched_thread_can_run_callbacks() ? mp_hal_wake_event_fd() : -1;
+        #else
+        // No wake primitive this poll set can be given, so the slot stays empty and every
+        // signal source falls back to the periodic sweep below.
+        poll_set->pollfds[0].fd = -1;
         #endif
         poll_set->pollfds[0].events = POLLIN;
         poll_set->pollfds[0].revents = 0;
@@ -995,7 +1004,7 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
         if (poll_set->pollfds[0].revents != 0) {
             #if MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
             mp_hal_wake_obj_drain(wake_obj);
-            #else
+            #elif MICROPY_HAL_WAKE_EVENT_HAS_POSIX_FD
             mp_hal_wake_event_drain();
             #endif
         }

@@ -165,8 +165,12 @@ void mp_hal_wake_obj_signal_all(void);
 // How a waiter composes its own object with everything else it is waiting on has no
 // port-neutral spelling, so it is deliberately not part of the contract above. Each port
 // that adopts wake objects exports whatever composition primitive it has behind its own
-// capability macro, and core code that uses one is guarded to match. The descriptor below
-// is the only such primitive today.
+// capability macro, and core code that uses one is guarded to match. A POSIX descriptor is
+// the only such primitive today, for either flavour of wake primitive: the one below for a
+// per-thread object, and MICROPY_HAL_WAKE_EVENT_HAS_POSIX_FD further down for a port whose
+// wake primitive is process-wide. Both are consumed only inside
+// MICROPY_PY_SELECT_POSIX_OPTIMISATIONS, since a struct pollfd is the only thing that
+// wants them.
 #ifndef MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD
 #define MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD (0)
 #endif
@@ -181,6 +185,28 @@ void mp_hal_wake_obj_signal_all(void);
 // part of the generic contract above: a port whose wake object is not descriptor-backed
 // leaves MICROPY_HAL_WAKE_OBJ_HAS_POSIX_FD at 0 and never declares this.
 int mp_hal_wake_obj_posix_fd(mp_hal_wake_obj_t *w);
+#endif
+
+// A port with one process-wide wake primitive rather than per-thread objects may still be
+// able to hand its descriptor to a caller running its own poll()/select() set. That
+// primitive has exactly one legitimate consumer, whichever waiter drains it first, so a
+// caller must satisfy itself that this thread is the one entitled to it
+// (mp_sched_thread_can_run_callbacks()) before waiting on the descriptor.
+//
+// Independent of the wake-object capability above rather than its negation: a port may
+// have neither, and core code must then fall back to a bounded re-check instead of
+// blocking on something nothing can end.
+#ifndef MICROPY_HAL_WAKE_EVENT_HAS_POSIX_FD
+#define MICROPY_HAL_WAKE_EVENT_HAS_POSIX_FD (0)
+#endif
+
+#if MICROPY_HAL_WAKE_EVENT_HAS_POSIX_FD
+// The shared wake primitive's descriptor, or negative when there is none to give (the HAL
+// has been torn down). Drain it after, and only after, it has polled readable: it is
+// level-triggered, so draining ahead of a wait discards the raise and leaves that wait
+// with nothing to end it.
+int mp_hal_wake_event_fd(void);
+void mp_hal_wake_event_drain(void);
 #endif
 
 #if MICROPY_PY_SELECT_EVENT_SOURCE
