@@ -28,6 +28,7 @@ if sys.platform == "win32":
 
 import argparse
 import os
+import signal
 import time
 from collections.abc import Mapping
 from textwrap import dedent
@@ -706,6 +707,25 @@ class State:
             self.transport.exit_raw_repl()
 
 
+def _exit_raw_repl_on_terminate():
+    # Make a terminating signal unwind through main()'s `finally` instead of
+    # killing the process outright, so do_disconnect() still gets to leave raw
+    # REPL. A device left in raw mode is not just untidy: where the REPL is
+    # driven by a single-threaded event loop, its raw-mode reader can be left
+    # blocked on input that will never arrive, stalling every other task on the
+    # target until something else writes to its console. SIGINT already unwinds
+    # this way, being delivered as KeyboardInterrupt.
+    # SIGHUP has no Windows equivalent, hence the getattr.
+    for sig in (signal.SIGTERM, getattr(signal, "SIGHUP", None)):
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, lambda *_args: sys.exit(1))
+        except ValueError:
+            # Not called from the main thread, so the signal is not ours to take.
+            pass
+
+
 def main():
     if sys.platform == "win32":
         # Configure stdout/stderr before any imports that might print: on some Windows
@@ -719,6 +739,8 @@ def main():
 
     remaining_args = sys.argv[1:]
     state = State(config)
+
+    _exit_raw_repl_on_terminate()
 
     try:
         while remaining_args:
