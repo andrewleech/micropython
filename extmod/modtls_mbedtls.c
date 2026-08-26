@@ -116,6 +116,7 @@ typedef struct _mp_obj_ssl_socket_t {
 
     uintptr_t poll_mask; // Indicates which read or write operations the protocol needs next
     int last_error; // The last error code, if any
+    bool sock_may_block; // Whether the underlying socket may block (default true)
 
     #ifdef MBEDTLS_SSL_PROTO_DTLS
     mp_uint_t timer_start_ms;
@@ -761,6 +762,11 @@ static mp_obj_t ssl_socket_make_new(mp_obj_ssl_context_t *ssl_context, mp_obj_t 
     o->sock = sock;
     o->poll_mask = 0;
     o->last_error = 0;
+    // Default is conservative: assume the socket may block. There is no portable
+    // way to query a socket's current blocking state, and Python sockets default
+    // to blocking. A socket set non-blocking before being wrapped will not get the
+    // optimisation until setblocking() is called again through the wrapper.
+    o->sock_may_block = true;
 
     int ret;
     uint32_t flags = 0;
@@ -955,7 +961,9 @@ static mp_obj_t socket_setblocking(mp_obj_t self_in, mp_obj_t flag_in) {
     mp_obj_t dest[3];
     mp_load_method(sock, MP_QSTR_setblocking, dest);
     dest[2] = flag_in;
-    return mp_call_method_n_kw(1, 0, dest);
+    mp_obj_t ret = mp_call_method_n_kw(1, 0, dest);
+    o->sock_may_block = mp_obj_is_true(flag_in);
+    return ret;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(socket_setblocking_obj, socket_setblocking);
 
@@ -989,22 +997,130 @@ static mp_uint_t socket_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_t arg, i
         }
 
         // Take into account that the library might have buffered data already
-        int has_pending = 0;
         if (arg & MP_STREAM_POLL_RD) {
-            has_pending = mbedtls_ssl_check_pending(&self->ssl);
-            if (has_pending) {
+            #if MICROPY_PY_SELECT_EVENT_SOURCE
+            // Registered below under MP_STREAM_SET_EVENT_SOURCE, the underlying socket's fd
+            // is only a wake source, not the readiness authority, so an encrypted-but-
+            // undecrypted byte on the wire must not read as ready here on its own. Readiness
+            // is "decrypted application bytes are available" (mbedtls_ssl_get_bytes_avail)
+            // whenever the socket is known non-blocking, so a pump can safely force
+            // decryption; on a socket that may block, readiness falls back to "the library
+            // has some buffered record" (mbedtls_ssl_check_pending) instead, since pumping
+            // there risks a real blocking syscall -- see the sock_may_block branch below.
+            bool has_data = mbedtls_ssl_get_bytes_avail(&self->ssl) > 0;
+            if (!has_data && mbedtls_ssl_check_pending(&self->ssl)) {
+                // A record is buffered but not yet decrypted (a held handshake message, or
+                // a packed handshake record).
+                if (self->sock_may_block) {
+                    // The pump below calls mbedtls_ssl_read, which reaches the underlying
+                    // socket's recv() via the BIO callback. On a blocking socket that recv()
+                    // is a real synchronous syscall -- nothing in mbedtls error codes can
+                    // prevent it. MP_STREAM_POLL is contractually non-blocking (called from
+                    // poll()'s wait loop), so pumping here could make poll(timeout) block
+                    // past its own timeout. When the socket may block, skip the pump and
+                    // report ready on check_pending alone, exactly as the pre-event-source
+                    // code does: a held handshake message polls ready with no progress until
+                    // a real read processes it, the same narrow spin risk that already
+                    // exists without this mechanism. The alternative -- reporting not-ready
+                    // here -- would be a regression: nothing else will ever wake this poll
+                    // for a record that already fully arrived on the wire, so the caller
+                    // would wait out its full timeout instead of spinning.
+                    has_data = true;
+                } else {
+                    // Pump with a zero-length read to force decryption without consuming
+                    // any application bytes -- mbedtls_ssl_read copies min(len, avail), and
+                    // len == 0 copies nothing -- then re-check. A held handshake message is
+                    // processed and yields no application data, so this correctly converges
+                    // to not-ready; a complete application record decrypts and correctly
+                    // becomes ready on the re-check below.
+                    store_active_context(self->ssl_context);
+                    byte dummy;
+                    int pump_ret = mbedtls_ssl_read(&self->ssl, &dummy, 0);
+                    if (pump_ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+                        // As in socket_read: the pump drove a renegotiation step that now
+                        // needs to write. The next MP_STREAM_SET_EVENT_SOURCE refresh reads
+                        // this and switches the fd to watch writability.
+                        self->poll_mask = MP_STREAM_POLL_WR;
+                    } else if (pump_ret < 0 && pump_ret != MBEDTLS_ERR_SSL_WANT_READ
+                               && pump_ret != MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY
+                               #if defined(MBEDTLS_SSL_PROTO_TLS1_3)
+                               && pump_ret != MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET
+                               #endif
+                               ) {
+                        // A genuine failure. Report it exactly as socket_read/write do on a
+                        // fatal error: latch last_error for the next real read or write to
+                        // raise, rather than raising from inside POLL, whose existing
+                        // contract is a flag, never an exception.
+                        self->last_error = pump_ret;
+                        return MP_STREAM_POLL_NVAL;
+                    }
+                    has_data = mbedtls_ssl_get_bytes_avail(&self->ssl) > 0;
+                }
+            }
+            if (has_data) {
                 ret |= MP_STREAM_POLL_RD;
                 if (arg == MP_STREAM_POLL_RD) {
                     // Shortcut if we only need to read and we have buffered data, no need to go to the underlying socket
                     return MP_STREAM_POLL_RD;
                 }
             }
+            #else
+            if (mbedtls_ssl_check_pending(&self->ssl)) {
+                ret |= MP_STREAM_POLL_RD;
+                if (arg == MP_STREAM_POLL_RD) {
+                    // Shortcut if we only need to read and we have buffered data, no need to go to the underlying socket
+                    return MP_STREAM_POLL_RD;
+                }
+            }
+            #endif
         }
     }
     #if MICROPY_STREAMS_DELEGATE_ERROR
     else if (request == MP_STREAM_RAISE_ERROR) {
         // Raise error with detailed error string
         mbedtls_raise_error((int)arg);
+    }
+    #endif
+    #if MICROPY_PY_SELECT_EVENT_SOURCE
+    else if (request == MP_STREAM_GET_FILENO) {
+        if (sock == MP_OBJ_NULL) {
+            // Closed: nothing to forward to. Same answer as an object that never
+            // implemented this ioctl at all (the non-fd, periodically-swept compatibility
+            // path).
+            *errcode = MP_EINVAL;
+            return MP_STREAM_ERROR;
+        }
+        // No extra handling needed: fall through to the delegation below, which forwards
+        // this to the underlying socket exactly as MP_STREAM_CLOSE does. The socket becomes
+        // this entry's wake source (see MP_STREAM_SET_EVENT_SOURCE below); readiness stays
+        // with this object's own MP_STREAM_POLL above.
+    } else if (request == MP_STREAM_SET_EVENT_SOURCE) {
+        mp_stream_event_source_t *source = (mp_stream_event_source_t *)arg;
+        source->cb = NULL;
+        source->ctx = NULL;
+        source->fd = -1;
+        source->fd_events = 0;
+        source->flags = 0;
+        if (sock == MP_OBJ_NULL) {
+            // Closed: no wake source. Same fallback as a stream that never implemented
+            // this ioctl.
+            *errcode = MP_EINVAL;
+            return MP_STREAM_ERROR;
+        }
+        int fd_errcode;
+        mp_uint_t fd = mp_get_stream(sock)->ioctl(sock, MP_STREAM_GET_FILENO, 0, &fd_errcode);
+        if (fd == MP_STREAM_ERROR) {
+            // The underlying socket has no fd either; same fallback.
+            *errcode = MP_EINVAL;
+            return MP_STREAM_ERROR;
+        }
+        // Deliberately not FD_IS_READINESS: the socket is only something to sleep on, not
+        // the readiness authority (see the POLL predicate above). FD_DYNAMIC is what makes
+        // renegotiation work, since poll_mask can flip the direction to watch between reads.
+        source->fd = fd;
+        source->fd_events = self->poll_mask ? self->poll_mask : source->events;
+        source->flags = MP_STREAM_EVENT_SOURCE_FD | MP_STREAM_EVENT_FD_DYNAMIC;
+        return 0;
     }
     #endif
     else {

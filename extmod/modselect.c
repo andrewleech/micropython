@@ -39,6 +39,10 @@
 #error "select.select is not supported with MICROPY_PY_SELECT_POSIX_OPTIMISATIONS"
 #endif
 
+#if MICROPY_PY_SELECT_EVENT_SOURCE && !MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
+#error "MICROPY_PY_SELECT_EVENT_SOURCE requires MICROPY_PY_SELECT_POSIX_OPTIMISATIONS"
+#endif
+
 #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
 
 #include <string.h>
@@ -66,19 +70,38 @@
 typedef struct _poll_obj_t {
     mp_obj_t obj;
     mp_uint_t (*ioctl)(mp_obj_t obj, mp_uint_t request, uintptr_t arg, int *errcode);
-    #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
-    // If the pollable object has an associated file descriptor, then pollfd points to an entry
-    // in poll_set_t::pollfds, and the events/revents fields for this object are stored in the
-    // pollfd entry (and the nonfd_* members are unused).
-    // Otherwise the object is a non-file-descriptor object and pollfd==NULL, and the events/
-    // revents fields are stored in the nonfd_* members (which are named as such so that code
-    // doesn't accidentally mix the use of these members when this optimisation is used).
-    struct pollfd *pollfd;
-    uint16_t nonfd_events;
-    uint16_t nonfd_revents;
-    #else
+
+    // The mask the caller requested via register()/modify(), persistent for the life of the
+    // registration, and the readiness resolved from exactly one authoritative source:
+    // poll_obj->ioctl(MP_STREAM_POLL, ...) for a non-fd or ioctl-authoritative object, or
+    // pollfd->revents when the fd itself is authoritative for readiness (see pollfd below).
+    // Storage distinct from any fd-level mask, so neither can clobber the other.
     mp_uint_t events;
     mp_uint_t revents;
+
+    #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
+    // If non-NULL, points into poll_set_t::pollfds and gives this object something the
+    // kernel can sleep on. pollfd->events carries the fd-level direction to watch; today
+    // that always mirrors `events` above (see poll_obj_set_events), because every fd-backed
+    // object is currently also authoritative for its own readiness. pollfd->revents is raw
+    // kernel output: read directly by poll_obj_get_revents() for such an object, and never
+    // written by anything but poll() itself.
+    struct pollfd *pollfd;
+
+    #if MICROPY_PY_SELECT_EVENT_SOURCE
+    // Wake-source properties declared via MP_STREAM_SET_EVENT_SOURCE, probed once at
+    // registration alongside the MP_STREAM_GET_FILENO probe (the Register cadence; see
+    // py/stream.h). All zero/NULL if the object does not implement the ioctl, which is the
+    // compatibility path: such an object is handled exactly as it would be without this
+    // config, keyed only off GET_FILENO. event_flags is read by poll_obj_fd_is_readiness()
+    // and poll_set_all_are_fds(); event_fd_events by poll_set_refresh_fd_events(). cb/ctx
+    // are not yet consulted anywhere: they serve a callback-based wake source, which is
+    // outside this increment's scope.
+    void (*event_cb)(void *ctx);
+    void *event_ctx;
+    uint16_t event_fd_events;
+    uint8_t event_flags;
+    #endif
     #endif
 } poll_obj_t;
 
@@ -99,10 +122,24 @@ typedef struct _poll_set_t {
 static void poll_set_init(poll_set_t *poll_set, size_t n) {
     mp_map_init(&poll_set->map, n);
     #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
+    #if MICROPY_PY_SELECT_EVENT_SOURCE
+    // pollfds[0] is reserved for ports/unix's wake event, not a registered object, so the
+    // set always has one fd-level entry more than poll_set->map.used. Reserved rather than
+    // added on demand so the blocking-poll gate below can rely on it being present from the
+    // first call, before any object has been registered.
+    poll_set->alloc = 1;
+    poll_set->max_used = 1;
+    poll_set->used = 1;
+    poll_set->pollfds = m_new(struct pollfd, 1);
+    poll_set->pollfds[0].fd = -1;
+    poll_set->pollfds[0].events = POLLIN;
+    poll_set->pollfds[0].revents = 0;
+    #else
     poll_set->alloc = 0;
     poll_set->max_used = 0;
     poll_set->used = 0;
     poll_set->pollfds = NULL;
+    #endif
     #endif
 }
 
@@ -115,32 +152,63 @@ static void poll_set_deinit(poll_set_t *poll_set) {
 #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
 
 static mp_uint_t poll_obj_get_events(poll_obj_t *poll_obj) {
-    assert(poll_obj->pollfd == NULL);
-    return poll_obj->nonfd_events;
+    return poll_obj->events;
 }
 
 static void poll_obj_set_events(poll_obj_t *poll_obj, mp_uint_t events) {
+    poll_obj->events = events;
     if (poll_obj->pollfd != NULL) {
+        // Legacy fd-authoritative path: the fd-level direction to watch is exactly the
+        // requested mask. A wake-source-only fd (not authoritative for readiness) would
+        // resolve fd_events independently instead of mirroring this write.
         poll_obj->pollfd->events = events;
-    } else {
-        poll_obj->nonfd_events = events;
     }
+}
+
+// Whether this entry's readiness is exactly its fd's kernel revents, as opposed to being
+// resolved by its own MP_STREAM_POLL ioctl. An entry with no fd at all can never be
+// fd-authoritative.
+static bool poll_obj_fd_is_readiness(poll_obj_t *poll_obj) {
+    if (poll_obj->pollfd == NULL) {
+        return false;
+    }
+    #if MICROPY_PY_SELECT_EVENT_SOURCE
+    if (poll_obj->event_flags != 0) {
+        return (poll_obj->event_flags & MP_STREAM_EVENT_FD_IS_READINESS) != 0;
+    }
+    #endif
+    // Compatibility default (MICROPY_PY_SELECT_EVENT_SOURCE off, or the stream does not
+    // implement MP_STREAM_SET_EVENT_SOURCE): every fd-backed object is authoritative for
+    // its own readiness, exactly as every fd-backed object was before this ioctl existed.
+    return true;
+}
+
+// Whether poll_set_resolve_readiness() must invoke this entry's MP_STREAM_POLL ioctl on
+// the current pass, for an entry that is not fd-authoritative (poll_obj_fd_is_readiness()
+// false). An entry with a wake-source-only fd (SOURCE_FD without FD_IS_READINESS, e.g.
+// SSL) is asked only when its own fd just fired, since nothing else observable to the
+// loop indicates its readiness may have changed. An entry with no fd at all -- the
+// compatibility path for a stream that does not implement MP_STREAM_SET_EVENT_SOURCE and
+// has no file descriptor either -- has no such signal to filter on and must be asked
+// every pass, matching poll_set_poll_once()'s unconditional sweep on the non-POSIX path.
+static bool poll_obj_should_be_asked(poll_obj_t *poll_obj) {
+    if (poll_obj->pollfd == NULL) {
+        return true;
+    }
+    return poll_obj->pollfd->revents != 0;
 }
 
 static mp_uint_t poll_obj_get_revents(poll_obj_t *poll_obj) {
-    if (poll_obj->pollfd != NULL) {
+    if (poll_obj_fd_is_readiness(poll_obj)) {
         return poll_obj->pollfd->revents;
-    } else {
-        return poll_obj->nonfd_revents;
     }
+    return poll_obj->revents;
 }
 
 static void poll_obj_set_revents(poll_obj_t *poll_obj, mp_uint_t revents) {
-    if (poll_obj->pollfd != NULL) {
-        poll_obj->pollfd->revents = revents;
-    } else {
-        poll_obj->nonfd_revents = revents;
-    }
+    // Always the resolved-readiness field, never pollfd->revents: that storage belongs to
+    // poll() alone, so a subsequent poll() call can never overwrite a value set here.
+    poll_obj->revents = revents;
 }
 
 // How much (in pollfds) to grow the allocation for poll_set->pollfds by.
@@ -175,7 +243,12 @@ static struct pollfd *poll_set_add_fd(poll_set_t *poll_set, int fd) {
                         continue;
                     }
 
-                    poll_obj->pollfd = new_fds + (poll_obj->pollfd - poll_set->pollfds);
+                    // An entry with no fd at all has poll_obj->pollfd == NULL; rebasing
+                    // that against the old allocation's base would compute a wild pointer
+                    // and hand it to an object that is not supposed to have a pollfd.
+                    if (poll_obj->pollfd != NULL) {
+                        poll_obj->pollfd = new_fds + (poll_obj->pollfd - poll_set->pollfds);
+                    }
                 }
 
                 // Delete the old allocation.
@@ -188,7 +261,16 @@ static struct pollfd *poll_set_add_fd(poll_set_t *poll_set, int fd) {
         free_slot = &poll_set->pollfds[poll_set->max_used++];
     } else {
         // There should be a free slot below max_used.
-        for (unsigned int i = 0; i < poll_set->max_used; ++i) {
+        #if MICROPY_PY_SELECT_EVENT_SOURCE
+        // Start at 1: pollfds[0] is the reserved wake-event slot (see poll_set_init), which
+        // sits at fd == -1 whenever the wake event is momentarily unavailable, e.g. before
+        // the first poll() call in this set or while gated off between iterations. Scanning
+        // from 0 would read that as a free slot and hand the reservation to this object.
+        unsigned int start = 1;
+        #else
+        unsigned int start = 0;
+        #endif
+        for (unsigned int i = start; i < poll_set->max_used; ++i) {
             struct pollfd *slot = &poll_set->pollfds[i];
             if (slot->fd == -1) {
                 free_slot = slot;
@@ -204,8 +286,37 @@ static struct pollfd *poll_set_add_fd(poll_set_t *poll_set, int fd) {
     return free_slot;
 }
 
-static inline bool poll_set_all_are_fds(poll_set_t *poll_set) {
+// Whether the wait loop may block on poll() for the full remaining deadline instead of the
+// period-capped sweep below. True when every registered entry has a pollfd: the map/used
+// count comparison below is exactly that, since poll_set_add_fd() is invoked for every
+// registered entry that has any fd at all, composed or fully authoritative.
+//
+// A composed entry -- fd-backed but not fd-authoritative (e.g. SSL: SOURCE_FD without
+// FD_IS_READINESS), readiness resolved by its own MP_STREAM_POLL ioctl -- qualifies for the
+// same deadline block as a fully authoritative one, given two things elsewhere in this loop
+// that make it safe: its own fd is already in poll_set->pollfds regardless of authoritative-
+// ness (poll_obj_set_events() puts it there unconditionally), so new kernel activity on it
+// wakes poll() directly, and its readiness can only change as the result of this loop's own
+// ioctl call -- never spontaneously while nothing is polling it -- so there is nothing for a
+// deadline block to miss between one wake and the next. What it cannot do on its own is
+// surface readiness that already existed *before* this wait began (e.g. a TLS record larger
+// than the caller's last read() left a remainder decrypted-but-unread, with nothing new at
+// the fd level to signal it): that has no fd signal to wake a block on, which is exactly why
+// poll_set_poll_until_ready_or_timeout() below asks every composed entry once, unconditionally,
+// before ever computing this gate's timeout -- not only after poll() returns.
+//
+// An entry with no fd at all still cannot qualify, and does not reach the reasoning above: it
+// has nothing in poll_set->pollfds to wake it in the first place, composed or not, so the
+// count check alone already excludes it.
+static bool poll_set_all_are_fds(poll_set_t *poll_set) {
+    #if MICROPY_PY_SELECT_EVENT_SOURCE
+    // poll_set->used counts the reserved wake-event slot at pollfds[0] (see poll_set_init),
+    // which is not a registered object, so map.used is one less than used whenever every
+    // registered entry also has a pollfd.
+    return poll_set->map.used == (mp_uint_t)(poll_set->used - 1);
+    #else
     return poll_set->map.used == poll_set->used;
+    #endif
 }
 
 #else
@@ -242,6 +353,12 @@ static void poll_set_add_obj(poll_set_t *poll_set, const mp_obj_t *obj, mp_uint_
 
             #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
             int fd = -1;
+            #if MICROPY_PY_SELECT_EVENT_SOURCE
+            poll_obj->event_cb = NULL;
+            poll_obj->event_ctx = NULL;
+            poll_obj->event_fd_events = 0;
+            poll_obj->event_flags = 0;
+            #endif
             if (mp_obj_is_int(obj[i])) {
                 // A file descriptor integer passed in as the object, so use it directly.
                 fd = mp_obj_get_int(obj[i]);
@@ -258,6 +375,31 @@ static void poll_set_add_obj(poll_set_t *poll_set, const mp_obj_t *obj, mp_uint_
                 if (res != MP_STREAM_ERROR) {
                     fd = res;
                 }
+                #if MICROPY_PY_SELECT_EVENT_SOURCE
+                // The Register cadence (py/stream.h): called once, here, alongside the
+                // GET_FILENO probe above. A stream that does not implement the ioctl
+                // returns MP_STREAM_ERROR and poll_obj->event_flags stays 0, which is the
+                // same compatibility path as a stream that never implements it at all.
+                // A Python-level ioctl() (the IOBase trampoline in py/modio.c) can raise
+                // instead of returning MP_STREAM_ERROR for a request it does not
+                // recognise; caught here for the same reason, so an unadapted stream
+                // never crashes registration.
+                mp_stream_event_source_t source = {
+                    .cb = NULL, .ctx = NULL, .events = events, .op = MP_STREAM_EVENT_OP_REGISTER,
+                    .fd = -1, .fd_events = 0, .flags = 0,
+                };
+                nlr_buf_t nlr;
+                if (nlr_push(&nlr) == 0) {
+                    mp_uint_t source_res = stream_p->ioctl(obj[i], MP_STREAM_SET_EVENT_SOURCE, (uintptr_t)&source, &err);
+                    if (source_res != MP_STREAM_ERROR) {
+                        poll_obj->event_cb = source.cb;
+                        poll_obj->event_ctx = source.ctx;
+                        poll_obj->event_fd_events = source.fd_events;
+                        poll_obj->event_flags = source.flags;
+                    }
+                    nlr_pop();
+                }
+                #endif
             }
             if (fd >= 0) {
                 // Object has a file descriptor so add it to pollfds.
@@ -289,7 +431,10 @@ static void poll_set_add_obj(poll_set_t *poll_set, const mp_obj_t *obj, mp_uint_
     }
 }
 
-// For each object in the poll set, poll it once.
+#if !MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
+// For each object in the poll set, poll it once. Only used by the non-POSIX wait loop
+// below; the POSIX-optimised path resolves readiness via poll_set_resolve_readiness()
+// instead, which additionally accounts for objects with a wake-source-only fd.
 static mp_uint_t poll_set_poll_once(poll_set_t *poll_set, size_t *rwx_num) {
     mp_uint_t n_ready = 0;
     for (mp_uint_t i = 0; i < poll_set->map.alloc; ++i) {
@@ -298,13 +443,6 @@ static mp_uint_t poll_set_poll_once(poll_set_t *poll_set, size_t *rwx_num) {
         }
 
         poll_obj_t *poll_obj = MP_OBJ_TO_PTR(poll_set->map.table[i].value);
-
-        #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
-        if (poll_obj->pollfd != NULL) {
-            // Object has file descriptor so will be polled separately by poll().
-            continue;
-        }
-        #endif
 
         int errcode;
         mp_int_t ret = poll_obj->ioctl(poll_obj->obj, MP_STREAM_POLL, poll_obj_get_events(poll_obj), &errcode);
@@ -337,6 +475,154 @@ static mp_uint_t poll_set_poll_once(poll_set_t *poll_set, size_t *rwx_num) {
     }
     return n_ready;
 }
+#endif // !MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
+
+#if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS && MICROPY_PY_SELECT_EVENT_SOURCE
+// The Refresh cadence (py/stream.h): re-queries fd_events for every entry that declared
+// FD_DYNAMIC, immediately before the poll() call that can block on it. Only fd_events is
+// consulted; cb/ctx are never touched here, per the ioctl's Refresh contract. Writes
+// pollfd->events only when the direction actually changed, matching libev/libuv/Zephyr,
+// since FD_DYNAMIC re-queries every cycle and the answer is usually identical.
+static void poll_set_refresh_fd_events(poll_set_t *poll_set) {
+    for (mp_uint_t i = 0; i < poll_set->map.alloc; ++i) {
+        if (!mp_map_slot_is_filled(&poll_set->map, i)) {
+            continue;
+        }
+
+        poll_obj_t *poll_obj = MP_OBJ_TO_PTR(poll_set->map.table[i].value);
+        if (poll_obj->pollfd == NULL || !(poll_obj->event_flags & MP_STREAM_EVENT_FD_DYNAMIC)) {
+            continue;
+        }
+
+        mp_stream_event_source_t source = {
+            .cb = NULL, .ctx = NULL, .events = poll_obj->events, .op = MP_STREAM_EVENT_OP_REFRESH,
+            .fd = -1, .fd_events = 0, .flags = 0,
+        };
+        int errcode;
+        mp_uint_t res = poll_obj->ioctl(poll_obj->obj, MP_STREAM_SET_EVENT_SOURCE, (uintptr_t)&source, &errcode);
+        if (res != MP_STREAM_ERROR && poll_obj->pollfd->events != source.fd_events) {
+            poll_obj->pollfd->events = source.fd_events;
+        }
+    }
+}
+#endif
+
+#if MICROPY_PY_SELECT_EVENT_SOURCE
+// Ask every composed entry (fd-backed but not fd-authoritative, e.g. SSL) once,
+// unconditionally, before poll_set_poll_until_ready_or_timeout() computes its first
+// timeout -- not gated on poll_obj_should_be_asked(), because a readiness left over from
+// before this call has no fd signal to filter on (e.g. a TLS record larger than the
+// caller's last read() left a remainder decrypted-but-unread). See poll_set_all_are_fds()'s
+// doc comment for why this ask has to happen before the deadline-sleep gate is consulted,
+// not only after poll() returns.
+//
+// An entry with no fd at all is not this function's concern: poll_set_all_are_fds()'s count
+// check already excludes it from the deadline-sleep gate whenever it is registered, so there
+// is no block for it to be stranded behind, and poll_set_resolve_readiness() already asks it
+// unconditionally on every pass regardless.
+//
+// Once per poll_set_poll_until_ready_or_timeout() call is sufficient, and not merely
+// convenient: within a single call, no caller read happens until this function has already
+// returned, so no new leftover readiness can appear between this ask and the poll() that
+// follows it. The only source of leftover readiness is a read the caller made *before*
+// calling in, which precedes this call and so is already covered by the one unconditional
+// ask. Gating this on poll_obj_should_be_asked() like poll_set_resolve_readiness() does would
+// look like a reasonable simplification and would reopen exactly the hole this function
+// exists to close, because should_be_asked() answers "did the fd fire", not "is there
+// leftover readiness from before this wait" -- the two coincide for a wake, never for a
+// pre-existing state, which is the entire case this function is for.
+// Clears every registered entry's resolved readiness back to "nothing known yet this
+// call". Called once, before the pre-block ask below has a chance to return without ever
+// running poll(): without this, an entry whose readiness this call never touches before
+// that early return (a fd_is_readiness entry, resolved only by the poll() syscall further
+// down this same loop and so not yet run this call, or a fd-less entry that
+// poll_set_resolve_composed_pre_block() below does not ask) would still carry whatever
+// non-zero value poll() left in it from a previous, unrelated call to this same poll set.
+// The caller then walks every registered entry and collects every non-zero one into a
+// list sized for the n_ready this function returned, so a stale non-zero here is a
+// mismatched count, not just a wrong answer -- one entry too many for the list's
+// allocation.
+static void poll_set_reset_revents(poll_set_t *poll_set) {
+    for (mp_uint_t i = 0; i < poll_set->map.alloc; ++i) {
+        if (!mp_map_slot_is_filled(&poll_set->map, i)) {
+            continue;
+        }
+        poll_obj_t *poll_obj = MP_OBJ_TO_PTR(poll_set->map.table[i].value);
+        if (poll_obj->pollfd != NULL) {
+            poll_obj->pollfd->revents = 0;
+        }
+        poll_obj_set_revents(poll_obj, 0);
+    }
+}
+
+static mp_uint_t poll_set_resolve_composed_pre_block(poll_set_t *poll_set) {
+    mp_uint_t n_ready = 0;
+    for (mp_uint_t i = 0; i < poll_set->map.alloc; ++i) {
+        if (!mp_map_slot_is_filled(&poll_set->map, i)) {
+            continue;
+        }
+        poll_obj_t *poll_obj = MP_OBJ_TO_PTR(poll_set->map.table[i].value);
+        if (poll_obj->pollfd == NULL || poll_obj_fd_is_readiness(poll_obj)) {
+            continue;
+        }
+        int errcode;
+        mp_int_t ret = poll_obj->ioctl(poll_obj->obj, MP_STREAM_POLL, poll_obj_get_events(poll_obj), &errcode);
+        if (ret == -1) {
+            mp_raise_OSError(errcode);
+        }
+        poll_obj_set_revents(poll_obj, ret);
+        if (poll_obj->revents != 0) {
+            n_ready += 1;
+        }
+    }
+    return n_ready;
+}
+#endif
+
+#if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
+// Resolve readiness for every entry in the poll set from whichever source is authoritative
+// for it, called once poll() has produced fresh kernel state for every fd in the set. Each
+// entry takes its readiness from exactly one place, decided by poll_obj_fd_is_readiness():
+// a plain read of pollfd->revents (cheap, never filtered), or its own MP_STREAM_POLL ioctl,
+// filtered by poll_obj_should_be_asked() so a wake-source-only fd is asked exactly when its
+// own fd fired. An entry with no fd at all is always asked: poll_obj_should_be_asked()
+// returns true unconditionally for it, since it has no fd signal to filter on and no other
+// caller ever asks it first (poll_set_resolve_composed_pre_block() above skips it).
+static mp_uint_t poll_set_resolve_readiness(poll_set_t *poll_set) {
+    mp_uint_t n_ready = 0;
+    for (mp_uint_t i = 0; i < poll_set->map.alloc; ++i) {
+        if (!mp_map_slot_is_filled(&poll_set->map, i)) {
+            continue;
+        }
+
+        poll_obj_t *poll_obj = MP_OBJ_TO_PTR(poll_set->map.table[i].value);
+
+        if (poll_obj_fd_is_readiness(poll_obj)) {
+            if (poll_obj->pollfd->revents != 0) {
+                n_ready += 1;
+            }
+            continue;
+        }
+
+        if (poll_obj_should_be_asked(poll_obj)) {
+            int errcode;
+            mp_int_t ret = poll_obj->ioctl(poll_obj->obj, MP_STREAM_POLL, poll_obj_get_events(poll_obj), &errcode);
+            if (ret == -1) {
+                mp_raise_OSError(errcode);
+            }
+            poll_obj_set_revents(poll_obj, ret);
+        }
+        // Else skipped: poll_obj->revents keeps the value from the previous pass, which is
+        // necessarily 0 -- a non-zero value here would have made the previous pass return
+        // rather than call poll() and loop back round.
+
+        if (poll_obj->revents != 0) {
+            n_ready += 1;
+        }
+    }
+    return n_ready;
+}
+#endif // MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
 
 static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size_t *rwx_num, mp_uint_t timeout) {
     mp_uint_t start_ticks = mp_hal_ticks_ms();
@@ -346,7 +632,49 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
 
     #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
 
+    // select.select() cannot coexist with these optimisations (see the #error above), so
+    // rwx_num is always NULL here; only the non-POSIX loop below uses it.
+    (void)rwx_num;
+
+    #if MICROPY_PY_SELECT_EVENT_SOURCE
+    // Whether this is the first iteration of the loop below, used only by the pre-block
+    // ask: a composed entry needs a leftover-readiness check before the first poll() of
+    // this call, never on later passes. Meaningless without event sources, since nothing
+    // else in this loop varies by iteration count.
+    bool first_pass = true;
+    #endif
+
     for (;;) {
+        #if MICROPY_PY_SELECT_EVENT_SOURCE
+        poll_set_refresh_fd_events(poll_set);
+
+        if (first_pass) {
+            poll_set_reset_revents(poll_set);
+            mp_uint_t n_ready = poll_set_resolve_composed_pre_block(poll_set);
+            if (n_ready > 0) {
+                return n_ready;
+            }
+        }
+        #endif
+
+        #if MICROPY_PY_SELECT_EVENT_SOURCE
+        // Refresh the reserved slot immediately before poll() blocks on it. -1 when this
+        // thread may not act on the wake event (mp_sched_thread_can_run_callbacks(), see the
+        // caveat at its definition): registering the real fd here on a thread that will
+        // never drain it would be a lost wakeup for whichever thread actually needed it, so
+        // this thread's poll() falls back to the periodic sweep below instead.
+        //
+        // KNOWN GAP: on a GIL build, mp_sched_thread_can_run_callbacks() returns true for
+        // every thread, not just the one that owns this wait. Two threads each running their
+        // own select.poll() with the wake fd both injected would race to drain it, and
+        // whichever loses never sees its own wakeup. Fine for this branch's single-threaded
+        // asyncio measurement; not a resolved answer for increment 1 in general (unix-sleep-
+        // process-pending flagged this, 2026-07-29).
+        poll_set->pollfds[0].fd = mp_sched_thread_can_run_callbacks() ? mp_hal_wake_event_fd() : -1;
+        poll_set->pollfds[0].events = POLLIN;
+        poll_set->pollfds[0].revents = 0;
+        #endif
+
         MP_THREAD_GIL_EXIT();
 
         // Compute the timeout.
@@ -367,32 +695,49 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
         }
 
         // Call system poll for those objects that have a file descriptor.
-        int n_ready = poll(poll_set->pollfds, poll_set->max_used, t);
+        int n = poll(poll_set->pollfds, poll_set->max_used, t);
 
         MP_THREAD_GIL_ENTER();
 
         // The call to poll() may have been interrupted, but per PEP 475 we must retry if the
         // signal is EINTR (this implements a special case of calling MP_HAL_RETRY_SYSCALL()).
-        if (n_ready == -1) {
+        if (n == -1) {
             int err = errno;
             if (err != EINTR) {
                 mp_raise_OSError(err);
             }
-            n_ready = 0;
         }
 
-        // Explicitly poll any objects that do not have a file descriptor.
-        if (!poll_set_all_are_fds(poll_set)) {
-            n_ready += poll_set_poll_once(poll_set, rwx_num);
+        #if MICROPY_PY_SELECT_EVENT_SOURCE
+        // Drain only after polling readable, never before: the event is level-triggered and
+        // counting, so draining ahead of the wait it was meant to end discards the raise and
+        // leaves that wait with nothing to wake it (mp_hal_wake_event_fd()'s contract).
+        if (poll_set->pollfds[0].revents != 0) {
+            mp_hal_wake_event_drain();
         }
+        #endif
+
+        // Resolve readiness for every entry now that poll() has produced fresh state. On the
+        // first iteration, the pre-block ask above already asked every composed entry once;
+        // this call still asks any entry whose own fd just fired (poll_obj_should_be_asked()),
+        // composed or not, and always asks any entry with no fd at all.
+        mp_uint_t n_ready = poll_set_resolve_readiness(poll_set);
 
         // Return if an object is ready, or if the timeout expired.
         if (n_ready > 0 || (has_timeout && mp_hal_ticks_ms() - start_ticks >= timeout)) {
             return n_ready;
         }
 
-        // This would be mp_event_wait_ms() but the call to poll() above already includes a delay.
+        // Drain before pumping: mp_sched_unlock() raises for any callbacks left queued
+        // after a pump, and draining afterwards would eat that token. The wake-event drain
+        // above already happened before this point, so this is only the queued-callback pump.
+        //
+        // This would be mp_event_wait_ms() but the call to poll() above already includes a
+        // delay.
         mp_event_handle_nowait();
+        #if MICROPY_PY_SELECT_EVENT_SOURCE
+        first_pass = false;
+        #endif
     }
 
     #else

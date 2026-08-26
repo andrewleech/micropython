@@ -33,6 +33,15 @@
 // Enable extra Unix features.
 #include "../mpconfigvariant_common.h"
 
+// Let a stream declare its wake source(s) via MP_STREAM_SET_EVENT_SOURCE, so
+// select.poll() can sleep to the caller's real deadline instead of the
+// period-capped sweep, for any set where every entry has declared one.
+// Requires MICROPY_PY_SELECT_POSIX_OPTIMISATIONS, enabled above by
+// mpconfigvariant_common.h. Enabled only in coverage, which CI runs the full
+// test suite against, so the feature is exercised without adding to every
+// unix variant's size.
+#define MICROPY_PY_SELECT_EVENT_SOURCE (1)
+
 // Enable testing of split heap.
 #define MICROPY_GC_SPLIT_HEAP          (1)
 #define MICROPY_GC_SPLIT_HEAP_N_HEAPS  (4)
