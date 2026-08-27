@@ -573,6 +573,16 @@ MP_NOINLINE int main_(int argc, char **argv) {
         MP_DECLARE_CONST_FUN_OBJ_0(extra_cpp_coverage_obj);
         mp_store_global(MP_QSTR_extra_coverage, MP_OBJ_FROM_PTR(&extra_coverage_obj));
         mp_store_global(MP_QSTR_extra_cpp_coverage, MP_OBJ_FROM_PTR(&extra_cpp_coverage_obj));
+        #if MICROPY_PY_SELECT_EVENT_SOURCE
+        // A synthetic stream driving MP_STREAM_SET_EVENT_SOURCE itself (see coverage.c),
+        // so the SOURCE_SIGNAL wake path has coverage on unix without real hardware.
+        extern const mp_obj_type_t mp_type_signal_stream;
+        mp_store_global(MP_QSTR_SelectSignalStream, MP_OBJ_FROM_PTR(&mp_type_signal_stream));
+        // Forces the port to report that it cannot create a wake primitive, so a test can
+        // reach the degraded claim without exhausting real descriptors (see coverage.c).
+        MP_DECLARE_CONST_FUN_OBJ_1(mp_select_force_wake_obj_failure_obj);
+        mp_store_global(MP_QSTR_select_force_wake_obj_failure, MP_OBJ_FROM_PTR(&mp_select_force_wake_obj_failure_obj));
+        #endif
     }
     #endif
 

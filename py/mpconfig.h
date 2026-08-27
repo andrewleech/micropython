@@ -1963,6 +1963,16 @@ typedef time_t mp_timestamp_t;
 #define MICROPY_PY_ASYNCIO_TASK_QUEUE_PUSH_CALLBACK (0)
 #endif
 
+// Whether _asyncio provides a native ThreadSafeFlag base class that declares its wake
+// source to the "select" module (MP_STREAM_SET_EVENT_SOURCE), so a set() from another
+// thread or an IRQ ends a blocked poll() directly instead of waiting for the next
+// period-capped sweep. Meaningless without MICROPY_PY_SELECT_EVENT_SOURCE, which is what
+// makes a declared wake source do anything; defaults to it for that reason. The
+// pure-Python fallback in extmod/asyncio/event.py is used instead when this is 0.
+#ifndef MICROPY_PY_ASYNCIO_THREADSAFEFLAG
+#define MICROPY_PY_ASYNCIO_THREADSAFEFLAG (MICROPY_PY_SELECT_EVENT_SOURCE)
+#endif
+
 #ifndef MICROPY_PY_UCTYPES
 #define MICROPY_PY_UCTYPES (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
 #endif

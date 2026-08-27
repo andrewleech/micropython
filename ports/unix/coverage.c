@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <errno.h>
+#include <fcntl.h>
 
 #include "py/obj.h"
 #include "py/objfun.h"
@@ -20,6 +23,7 @@
 #include "py/binary.h"
 #include "py/bc.h"
 #include "py/mphal.h"
+#include "py/mperrno.h"
 
 // expected output of this file is found in extra_coverage.py.exp
 
@@ -147,6 +151,264 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     protocol, &textio_stream_p2,
     locals_dict, &rawfile_locals_dict2
     );
+
+#if MICROPY_PY_SELECT_EVENT_SOURCE
+
+// A stream that answers MP_STREAM_SET_EVENT_SOURCE itself, standing in for a hardware
+// driver so the SOURCE_SIGNAL wake path is testable on unix without real hardware. Built
+// with no fd (SelectSignalStream()) it registers as a bare wake source; built with_fd=True
+// it opens its own pipe(2) pair and registers as SOURCE_FD, FD_DYNAMIC and SOURCE_SIGNAL
+// together, matching a driver that is both fd-backed and able to raise spontaneously (e.g.
+// an interrupt landing between two poll() calls on its own fd). The pipe is internal, not
+// Python's os.pipe, because the unix port exposes no fd-returning call a test could use to
+// supply one from outside.
+//
+// ready is this stream's answer to MP_STREAM_POLL, set independently of any fd; signal()
+// updates it and then invokes the armed callback synchronously, standing in for an ISR or
+// another thread calling mp_event_signal() through it. write_fd() and drain_fd() drive and
+// clear real activity on the pipe's read end, for cases that must exercise the kernel's own
+// poll() wake rather than this stream's readiness answer. arm_count follows the O3b
+// contract: a stream declaring SOURCE_SIGNAL can be registered into more than one poll set
+// sharing this one cb/ctx pair, so it counts registrations and releases them only when the
+// count returns to zero, never on every individual Unregister.
+typedef struct _mp_obj_signal_stream_t {
+    mp_obj_base_t base;
+    int fd;    // read end registered with select.poll(), or -1 if this entry has no fd
+    int wr_fd; // write end for write_fd(), or -1 if this entry has no fd
+    uint16_t ready;
+    uint16_t poll_count;
+    uint8_t arm_count;
+    // 0xff before the first MP_STREAM_SET_EVENT_SOURCE call; otherwise one of the
+    // MP_STREAM_EVENT_OP_* values from py/stream.h.
+    uint8_t last_op;
+    void (*cb)(void *ctx);
+    void *ctx;
+} mp_obj_signal_stream_t;
+
+static mp_obj_t signal_stream_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+    mp_arg_check_num(n_args, n_kw, 0, 1, false);
+    mp_obj_signal_stream_t *o = mp_obj_malloc(mp_obj_signal_stream_t, type);
+    o->fd = -1;
+    o->wr_fd = -1;
+    if (n_args > 0 && mp_obj_is_true(args[0])) {
+        int fds[2];
+        if (pipe(fds) != 0) {
+            mp_raise_OSError(errno);
+        }
+        // Non-blocking so drain_fd() can read until empty without risking a wait of its
+        // own; a blocking pipe would hang there once the last pending byte is consumed.
+        if (fcntl(fds[0], F_SETFL, O_NONBLOCK) != 0 || fcntl(fds[1], F_SETFL, O_NONBLOCK) != 0) {
+            int e = errno;
+            close(fds[0]);
+            close(fds[1]);
+            mp_raise_OSError(e);
+        }
+        o->fd = fds[0];
+        o->wr_fd = fds[1];
+    }
+    o->ready = 0;
+    o->poll_count = 0;
+    o->arm_count = 0;
+    o->last_op = 0xff;
+    o->cb = NULL;
+    o->ctx = NULL;
+    return MP_OBJ_FROM_PTR(o);
+}
+
+static mp_obj_t signal_stream_set_ready(mp_obj_t self_in, mp_obj_t mask_in) {
+    mp_obj_signal_stream_t *self = MP_OBJ_TO_PTR(self_in);
+    self->ready = mp_obj_get_int(mask_in);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(signal_stream_set_ready_obj, signal_stream_set_ready);
+
+static mp_obj_t signal_stream_write_fd(mp_obj_t self_in) {
+    mp_obj_signal_stream_t *self = MP_OBJ_TO_PTR(self_in);
+    if (self->wr_fd < 0) {
+        mp_raise_OSError(MP_EINVAL);
+    }
+    if (write(self->wr_fd, "x", 1) != 1) {
+        mp_raise_OSError(errno);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(signal_stream_write_fd_obj, signal_stream_write_fd);
+
+// Reads self->fd empty and returns the byte count read, or 0 if the stream has no fd.
+// Shared by drain_fd() and the MP_STREAM_POLL case: a hybrid SOURCE_FD+SOURCE_SIGNAL entry
+// must not leave its fd readable once it has told the wait loop it is not ready, or the
+// kernel poll() call at the top of every remaining loop iteration wakes on the fd and spins
+// until the timeout expires.
+static mp_int_t signal_stream_drain(mp_obj_signal_stream_t *self) {
+    if (self->fd < 0) {
+        return 0;
+    }
+    char buf[64];
+    mp_int_t total = 0;
+    for (;;) {
+        ssize_t n = read(self->fd, buf, sizeof(buf));
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                break;
+            }
+            mp_raise_OSError(errno);
+        }
+        if (n == 0) {
+            break;
+        }
+        total += n;
+    }
+    return total;
+}
+
+static mp_obj_t signal_stream_drain_fd(mp_obj_t self_in) {
+    mp_obj_signal_stream_t *self = MP_OBJ_TO_PTR(self_in);
+    if (self->fd < 0) {
+        mp_raise_OSError(MP_EINVAL);
+    }
+    return mp_obj_new_int(signal_stream_drain(self));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(signal_stream_drain_fd_obj, signal_stream_drain_fd);
+
+static mp_obj_t signal_stream_close(mp_obj_t self_in) {
+    mp_obj_signal_stream_t *self = MP_OBJ_TO_PTR(self_in);
+    if (self->fd >= 0) {
+        close(self->fd);
+        self->fd = -1;
+    }
+    if (self->wr_fd >= 0) {
+        close(self->wr_fd);
+        self->wr_fd = -1;
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(signal_stream_close_obj, signal_stream_close);
+
+static mp_obj_t signal_stream_signal(mp_obj_t self_in, mp_obj_t mask_in) {
+    mp_obj_signal_stream_t *self = MP_OBJ_TO_PTR(self_in);
+    self->ready = mp_obj_get_int(mask_in);
+    if (self->cb != NULL) {
+        self->cb(self->ctx);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(signal_stream_signal_obj, signal_stream_signal);
+
+static mp_obj_t signal_stream_poll_count(mp_obj_t self_in) {
+    mp_obj_signal_stream_t *self = MP_OBJ_TO_PTR(self_in);
+    return mp_obj_new_int(self->poll_count);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(signal_stream_poll_count_obj, signal_stream_poll_count);
+
+static mp_obj_t signal_stream_arm_count(mp_obj_t self_in) {
+    mp_obj_signal_stream_t *self = MP_OBJ_TO_PTR(self_in);
+    return mp_obj_new_int(self->arm_count);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(signal_stream_arm_count_obj, signal_stream_arm_count);
+
+static mp_obj_t signal_stream_last_op(mp_obj_t self_in) {
+    mp_obj_signal_stream_t *self = MP_OBJ_TO_PTR(self_in);
+    if (self->last_op == 0xff) {
+        return mp_const_none;
+    }
+    return mp_obj_new_int(self->last_op);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(signal_stream_last_op_obj, signal_stream_last_op);
+
+static mp_uint_t signal_stream_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_t arg, int *errcode) {
+    mp_obj_signal_stream_t *o = MP_OBJ_TO_PTR(o_in);
+    switch (request) {
+        case MP_STREAM_POLL:
+            ++o->poll_count;
+            if ((o->ready & arg) == 0 && o->fd >= 0) {
+                // Not ready by this stream's own answer: drain the fd so it stops
+                // satisfying the kernel poll() that the wait loop layers on top of it.
+                signal_stream_drain(o);
+            }
+            return o->ready & arg;
+
+        case MP_STREAM_GET_FILENO:
+            if (o->fd < 0) {
+                *errcode = MP_EINVAL;
+                return MP_STREAM_ERROR;
+            }
+            return o->fd;
+
+        case MP_STREAM_SET_EVENT_SOURCE: {
+            mp_stream_event_source_t *source = (mp_stream_event_source_t *)arg;
+            o->last_op = source->op;
+            switch (source->op) {
+                case MP_STREAM_EVENT_OP_REGISTER:
+                    o->cb = source->cb;
+                    o->ctx = source->ctx;
+                    ++o->arm_count;
+                    source->fd = o->fd;
+                    source->flags = MP_STREAM_EVENT_SOURCE_SIGNAL;
+                    if (o->fd >= 0) {
+                        source->flags |= MP_STREAM_EVENT_SOURCE_FD | MP_STREAM_EVENT_FD_DYNAMIC;
+                        source->fd_events = source->events;
+                    } else {
+                        source->fd_events = 0;
+                    }
+                    break;
+                case MP_STREAM_EVENT_OP_REFRESH:
+                    source->fd_events = source->events;
+                    break;
+                case MP_STREAM_EVENT_OP_UNREGISTER:
+                    // arm_count is never 0 here: an Unregister is issued only for an entry
+                    // that is currently registered, and every Register that reached this
+                    // stream incremented it first.
+                    --o->arm_count;
+                    if (o->arm_count == 0) {
+                        o->cb = NULL;
+                        o->ctx = NULL;
+                    }
+                    break;
+            }
+            return 0;
+        }
+
+        default:
+            return 0;
+    }
+}
+
+static const mp_rom_map_elem_t signal_stream_locals_dict_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_set_ready), MP_ROM_PTR(&signal_stream_set_ready_obj) },
+    { MP_ROM_QSTR(MP_QSTR_signal), MP_ROM_PTR(&signal_stream_signal_obj) },
+    { MP_ROM_QSTR(MP_QSTR_poll_count), MP_ROM_PTR(&signal_stream_poll_count_obj) },
+    { MP_ROM_QSTR(MP_QSTR_arm_count), MP_ROM_PTR(&signal_stream_arm_count_obj) },
+    { MP_ROM_QSTR(MP_QSTR_last_op), MP_ROM_PTR(&signal_stream_last_op_obj) },
+    { MP_ROM_QSTR(MP_QSTR_write_fd), MP_ROM_PTR(&signal_stream_write_fd_obj) },
+    { MP_ROM_QSTR(MP_QSTR_drain_fd), MP_ROM_PTR(&signal_stream_drain_fd_obj) },
+    { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&signal_stream_close_obj) },
+};
+static MP_DEFINE_CONST_DICT(signal_stream_locals_dict, signal_stream_locals_dict_table);
+
+// Makes this port report that it cannot create a wake primitive, so a thread claiming one
+// from here on is handed the backing-less object instead. Exposed only so a test can reach
+// the degraded path deliberately: the real trigger is descriptor or memory exhaustion,
+// which a test cannot produce without taking the harness around it down too.
+static mp_obj_t signal_stream_force_wake_obj_failure(mp_obj_t enable_in) {
+    mp_hal_wake_obj_force_open_failure = mp_obj_is_true(enable_in);
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mp_select_force_wake_obj_failure_obj, signal_stream_force_wake_obj_failure);
+
+static const mp_stream_p_t signal_stream_p = {
+    .ioctl = signal_stream_ioctl,
+};
+
+MP_DEFINE_CONST_OBJ_TYPE(
+    mp_type_signal_stream,
+    MP_QSTR_SelectSignalStream,
+    MP_TYPE_FLAG_NONE,
+    make_new, signal_stream_make_new,
+    protocol, &signal_stream_p,
+    locals_dict, &signal_stream_locals_dict
+    );
+
+#endif // MICROPY_PY_SELECT_EVENT_SOURCE
 
 // str/bytes objects without a valid hash
 static const mp_obj_str_t str_no_hash_obj = {{&mp_type_str}, 0, 10, (const byte *)"0123456789"};

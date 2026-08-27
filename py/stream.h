@@ -83,6 +83,12 @@ struct mp_stream_seek_t {
 #define MP_STREAM_EVENT_FD_IS_READINESS  (0x04) // fd revents ARE readiness; skip my POLL
 #define MP_STREAM_EVENT_FD_DYNAMIC       (0x08) // re-query .fd_events every cycle
 
+// FD_IS_READINESS together with SOURCE_SIGNAL is not a useful combination: an entry whose
+// readiness comes straight from its own fd (FD_IS_READINESS) never has its MP_STREAM_POLL
+// ioctl consulted by the wait loop, so a callback armed through SOURCE_SIGNAL on the same
+// registration is never the thing that ends up reporting readiness for it. A driver should
+// declare one or the other, not both.
+
 // Cadences for MP_STREAM_SET_EVENT_SOURCE, distinguished by .op. cb == NULL
 // is not sufficient to tell Refresh and Unregister apart, since Refresh also
 // passes cb == NULL to avoid disturbing an existing arm.
@@ -99,11 +105,24 @@ struct mp_stream_seek_t {
 //                  readiness sweep and immediately before the block. Must
 //                  only update fd_events; must not touch cb/ctx, and must
 //                  not register or unregister any entry in the poll set.
-//   OP_UNREGISTER: called before the entry is released, with cb == NULL. A
-//                  stream that declares SOURCE_SIGNAL can be registered into
-//                  more than one poll set while sharing this one cb/ctx
-//                  pair, so it must count its registrations and disarm only
-//                  once the count reaches zero, not on every Unregister.
+//   OP_UNREGISTER: called only for an entry that declared SOURCE_SIGNAL,
+//                  before it is released from the poll set, with cb == NULL.
+//                  Like Refresh, must not register or unregister any entry
+//                  in the poll set.
+//
+// A stream that declares SOURCE_SIGNAL can be registered into more than one poll set
+// while sharing this one cb/ctx pair. The caller's guarantee is only this: at most one
+// OP_UNREGISTER per successful OP_REGISTER, and none at all if the poll set itself is
+// garbage collected while still registered (a select.poll() object has no finaliser). A
+// stream may treat OP_REGISTER as idempotent and OP_UNREGISTER as advisory, staying armed
+// for its own lifetime once first registered; that is the recommended shape for any
+// stream without a real cost to staying armed, and it is what every in-tree consumer
+// does. A stream whose arming has a cost worth avoiding may count registrations instead
+// and disarm once the count reaches zero, but must accept that the count can never reach
+// zero if every poll set holding a registration is dropped without unregistering rather
+// than collected: declining a second OP_REGISTER because of an already-nonzero count is
+// not conforming, since the failure mode is a permanently inert stream rather than a
+// merely suboptimal one.
 typedef struct _mp_stream_event_source_t {
     // In: supplied by the caller. The stream stores these if it declares
     // SOURCE_SIGNAL, and calls cb(ctx) when its readiness may have changed.

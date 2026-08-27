@@ -46,6 +46,20 @@
         MP_THREAD_GIL_ENTER(); \
     } while (0)
 
+#if MICROPY_HAL_HAS_WAKE_OBJ
+// Returns this thread's claimed wake object, if any, for another thread to claim.
+// Called from mp_thread_finish(); never from a wait, since a wake object is held for a
+// thread's whole lifetime rather than borrowed per wait.
+void mp_hal_wake_obj_release_this_thread(void);
+
+#if defined(MICROPY_UNIX_COVERAGE)
+// Test hook: while set, this port reports that it cannot create a wake primitive, so the
+// degraded claim is reachable without exhausting the process's real descriptors. Declared
+// here rather than as a local extern in coverage.c so both sides are type-checked.
+extern bool mp_hal_wake_obj_force_open_failure;
+#endif
+#endif
+
 // The port provides `mp_hal_stdio_mode_raw()` and `mp_hal_stdio_mode_orig()`.
 #define MICROPY_HAL_HAS_STDIO_MODE_SWITCH (1)
 
@@ -131,16 +145,8 @@ void mp_hal_wake_event_wait_ms(mp_uint_t timeout_ms);
 // timeout.  Returns 0 on timeout, or -1 with errno EINTR if cut short.
 int mp_hal_wake_event_wait_tv(struct timeval *tv);
 
-// The descriptor the wake event can be waited on, for a caller that runs its own
-// poll set and wants the event in it alongside its own descriptors, or -1 when
-// there is none to give.  Defined only where the wake event is backed by a
-// descriptor, so on this port and not on Windows.
-//
-// Drain it after, and only after, it has polled readable.  It is
-// level-triggered, so it stays readable until drained, and draining before a
-// wait instead discards a raise and leaves that wait with nothing to end it.
-int mp_hal_wake_event_fd(void);
-void mp_hal_wake_event_drain(void);
+// mp_hal_wake_event_fd() and mp_hal_wake_event_drain() are declared in py/mphal.h, behind
+// MICROPY_HAL_WAKE_EVENT_HAS_POSIX_FD, because extmod/modselect.c calls them.
 
 #if MICROPY_PY_BLUETOOTH
 enum {

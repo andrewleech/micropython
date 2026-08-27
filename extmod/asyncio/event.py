@@ -40,27 +40,47 @@ class Event:
 # that asyncio will poll until a flag is set.
 # Note: Unlike Event, this is self-clearing after a wait().
 try:
-    import io
+    # _ThreadSafeFlag (extmod/modasyncio.c) declares its wake source to the "select"
+    # module, so a set() from another thread or an IRQ ends a blocked poll() directly.
+    # wait() is the only thing this subclass contributes: a generator cannot be
+    # constructed from C. It reaches the flag through methods only, never through an
+    # attribute store, which on a Python subclass of a native base would write the
+    # instance's own members dict and permanently shadow the native state instead of
+    # setting it.
+    from _asyncio import _ThreadSafeFlag
 
-    class ThreadSafeFlag(io.IOBase):
-        def __init__(self):
-            self.state = 0
-
-        def ioctl(self, req, flags):
-            if req == 3:  # MP_STREAM_POLL
-                return self.state * flags
-            return -1  # Other requests are unsupported
-
-        def set(self):
-            self.state = 1
-
-        def clear(self):
-            self.state = 0
-
+    class ThreadSafeFlag(_ThreadSafeFlag):
         async def wait(self):
-            if not self.state:
+            if not self.is_set():
                 yield core._io_queue.queue_read(self)
-            self.state = 0
+            self.clear()
 
 except ImportError:
-    pass
+    try:
+        import io
+
+        class ThreadSafeFlag(io.IOBase):
+            def __init__(self):
+                self.state = 0
+
+            def ioctl(self, req, flags):
+                if req == 3:  # MP_STREAM_POLL
+                    return self.state * flags
+                return -1  # Other requests are unsupported
+
+            def is_set(self):
+                return bool(self.state)
+
+            def set(self):
+                self.state = 1
+
+            def clear(self):
+                self.state = 0
+
+            async def wait(self):
+                if not self.state:
+                    yield core._io_queue.queue_read(self)
+                self.state = 0
+
+    except ImportError:
+        pass

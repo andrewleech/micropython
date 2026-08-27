@@ -47,6 +47,20 @@ void MICROPY_WRAP_MP_SCHED_EXCEPTION(mp_sched_exception)(mp_obj_t exc) {
     mp_hal_signal_event();
 }
 
+#if MICROPY_PY_SELECT_EVENT_SOURCE
+volatile uint32_t mp_event_signal_count;
+
+// A SOURCE_SIGNAL stream calls this (never mp_hal_signal_event() directly)
+// to report that its readiness may have changed. Bumping the count before
+// poking the port's sleep primitive means a waiter that is already past its
+// pre-block sweep and into the block itself still learns of the raise on
+// its next pass, rather than only from the transport's own wake.
+void mp_event_signal(void) {
+    MICROPY_EVENT_SIGNAL_COUNT_INC();
+    mp_hal_signal_event();
+}
+#endif
+
 #if MICROPY_KBD_EXCEPTION
 // This function may be called asynchronously at any time so only do the bare minimum.
 void MICROPY_WRAP_MP_SCHED_KEYBOARD_INTERRUPT(mp_sched_keyboard_interrupt)(void) {

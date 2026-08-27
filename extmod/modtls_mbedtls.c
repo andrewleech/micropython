@@ -1006,7 +1006,7 @@ static mp_uint_t socket_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_t arg, i
             // whenever the socket is known non-blocking, so a pump can safely force
             // decryption; on a socket that may block, readiness falls back to "the library
             // has some buffered record" (mbedtls_ssl_check_pending) instead, since pumping
-            // there risks a real blocking syscall -- see the sock_may_block branch below.
+            // there risks a real blocking syscall; see the sock_may_block branch below.
             bool has_data = mbedtls_ssl_get_bytes_avail(&self->ssl) > 0;
             if (!has_data && mbedtls_ssl_check_pending(&self->ssl)) {
                 // A record is buffered but not yet decrypted (a held handshake message, or
@@ -1014,22 +1014,22 @@ static mp_uint_t socket_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_t arg, i
                 if (self->sock_may_block) {
                     // The pump below calls mbedtls_ssl_read, which reaches the underlying
                     // socket's recv() via the BIO callback. On a blocking socket that recv()
-                    // is a real synchronous syscall -- nothing in mbedtls error codes can
+                    // is a real synchronous syscall, and nothing in mbedtls error codes can
                     // prevent it. MP_STREAM_POLL is contractually non-blocking (called from
                     // poll()'s wait loop), so pumping here could make poll(timeout) block
                     // past its own timeout. When the socket may block, skip the pump and
                     // report ready on check_pending alone, exactly as the pre-event-source
                     // code does: a held handshake message polls ready with no progress until
                     // a real read processes it, the same narrow spin risk that already
-                    // exists without this mechanism. The alternative -- reporting not-ready
-                    // here -- would be a regression: nothing else will ever wake this poll
+                    // exists without this mechanism. The alternative, reporting not-ready
+                    // here, would be a regression: nothing else will ever wake this poll
                     // for a record that already fully arrived on the wire, so the caller
                     // would wait out its full timeout instead of spinning.
                     has_data = true;
                 } else {
                     // Pump with a zero-length read to force decryption without consuming
-                    // any application bytes -- mbedtls_ssl_read copies min(len, avail), and
-                    // len == 0 copies nothing -- then re-check. A held handshake message is
+                    // any application bytes; mbedtls_ssl_read copies min(len, avail), and
+                    // len == 0 copies nothing. Then re-check: a held handshake message is
                     // processed and yields no application data, so this correctly converges
                     // to not-ready; a complete application record decrypts and correctly
                     // becomes ready on the re-check below.
