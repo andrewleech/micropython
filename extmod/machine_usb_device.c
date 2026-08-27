@@ -57,6 +57,7 @@ static mp_obj_t usb_device_make_new(const mp_obj_type_t *type, size_t n_args, si
         o->base.type = &machine_usb_device_type;
         o->desc_dev = mp_const_none;
         o->desc_cfg = mp_const_none;
+        o->desc_bos = mp_const_none;
         o->desc_strs = mp_const_none;
         o->open_itf_cb = mp_const_none;
         o->reset_cb = mp_const_none;
@@ -196,7 +197,7 @@ static mp_obj_t usb_device_config(size_t n_args, const mp_obj_t *pos_args, mp_ma
     mp_obj_usb_device_t *self = (mp_obj_usb_device_t *)MP_OBJ_TO_PTR(pos_args[0]);
 
     enum { ARG_desc_dev, ARG_desc_cfg, ARG_desc_strs, ARG_open_itf_cb,
-           ARG_reset_cb, ARG_control_xfer_cb, ARG_xfer_cb, ARG_active };
+           ARG_reset_cb, ARG_control_xfer_cb, ARG_xfer_cb, ARG_desc_bos };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_desc_dev, MP_ARG_OBJ | MP_ARG_REQUIRED },
         { MP_QSTR_desc_cfg, MP_ARG_OBJ | MP_ARG_REQUIRED },
@@ -205,6 +206,7 @@ static mp_obj_t usb_device_config(size_t n_args, const mp_obj_t *pos_args, mp_ma
         { MP_QSTR_reset_cb, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_control_xfer_cb, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_xfer_cb, MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_desc_bos, MP_ARG_OBJ, {.u_obj = mp_const_none} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
@@ -213,6 +215,7 @@ static mp_obj_t usb_device_config(size_t n_args, const mp_obj_t *pos_args, mp_ma
     mp_obj_t desc_dev = args[ARG_desc_dev].u_obj;
     mp_obj_t desc_cfg = args[ARG_desc_cfg].u_obj;
     mp_obj_t desc_strs = args[ARG_desc_strs].u_obj;
+    mp_obj_t desc_bos = args[ARG_desc_bos].u_obj;
     if (!MP_OBJ_TYPE_HAS_SLOT(mp_obj_get_type(desc_dev), buffer)) {
         mp_raise_ValueError(MP_ERROR_TEXT("desc_dev"));
     }
@@ -223,10 +226,15 @@ static mp_obj_t usb_device_config(size_t n_args, const mp_obj_t *pos_args, mp_ma
         && !MP_OBJ_TYPE_HAS_SLOT(mp_obj_get_type(desc_strs), subscr)) {
         mp_raise_ValueError(MP_ERROR_TEXT("desc_strs"));
     }
+    if (desc_bos != mp_const_none
+        && !MP_OBJ_TYPE_HAS_SLOT(mp_obj_get_type(desc_bos), buffer)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("desc_bos"));
+    }
 
     self->desc_dev = desc_dev;
     self->desc_cfg = desc_cfg;
     self->desc_strs = desc_strs;
+    self->desc_bos = desc_bos;
     self->open_itf_cb = args[ARG_open_itf_cb].u_obj;
     self->reset_cb = args[ARG_reset_cb].u_obj;
     self->control_xfer_cb = args[ARG_control_xfer_cb].u_obj;
