@@ -365,17 +365,22 @@ void can_enable_rx_interrupts(CAN_HandleTypeDef *can, can_rx_fifo_t fifo, bool e
     HAL_FDCAN_ActivateNotification(can, ints, 0);
 }
 
-// Fixup the DataLength field from a byte count to a valid DLC value index (rounding up)
-static void encode_datalength(CanTxMsgTypeDef *txmsg) {
+// Fixup the DataLength field from a byte count to a valid DLC value index (rounding up).
+//
+// The destination copy routine determines which of two encodings it expects: a bare
+// DLC table index, or that index pre-shifted into the field position the DLC occupies
+// in the message RAM header word (bits 19:16). Which encoding is needed does not
+// depend on the MCU alone: on STM32H5, HAL_FDCAN_AddMessageToTxFifoQ() (used by
+// can_transmit()) shifts internally and wants a bare index, while this port's own
+// AddMessageToTxBuffer()/EnableTxBufferRequest() shim (used by can_transmit_buf_index(),
+// shared verbatim with STM32G4) expects the value already shifted. Callers pass
+// raw_dlc_index to select the encoding their destination routine needs.
+static void encode_datalength(CanTxMsgTypeDef *txmsg, bool raw_dlc_index) {
     // Roundup DataLength to next DLC size and encode to DLC.
     size_t len_bytes = txmsg->DataLength;
     for (mp_uint_t i = 0; i < MP_ARRAY_SIZE(DLCtoBytes); i++) {
         if (len_bytes <= DLCtoBytes[i]) {
-            #if defined(STM32N6)
-            txmsg->DataLength = i;
-            #else
-            txmsg->DataLength = (i << 16);
-            #endif
+            txmsg->DataLength = raw_dlc_index ? i : (i << 16);
             return;
         }
     }
@@ -398,7 +403,15 @@ HAL_StatusTypeDef can_transmit(CAN_HandleTypeDef *can, CanTxMsgTypeDef *txmsg, u
     }
     // Note: this function doesn't set up TX interrupts, because it's only used by pyb.CAN which
     // doesn't care about this - machine.CAN calls can_transmit_buf_index()
-    encode_datalength(txmsg);
+    //
+    // HAL_FDCAN_AddMessageToTxFifoQ() below is the real HAL implementation on every supported
+    // MCU. It expects a bare DLC index on STM32N6 and STM32H5, and that index pre-shifted into
+    // the header word on STM32G4 and STM32H7.
+    #if defined(STM32N6) || defined(STM32H5)
+    encode_datalength(txmsg, true);
+    #else
+    encode_datalength(txmsg, false);
+    #endif
 
     return HAL_FDCAN_AddMessageToTxFifoQ(can, txmsg, data);
 }
@@ -406,7 +419,15 @@ HAL_StatusTypeDef can_transmit(CAN_HandleTypeDef *can, CanTxMsgTypeDef *txmsg, u
 HAL_StatusTypeDef can_transmit_buf_index(CAN_HandleTypeDef *hcan, int index, CanTxMsgTypeDef *txmsg, const uint8_t *data) {
     uint32_t tx_loc = 1U << index;
 
-    encode_datalength(txmsg);
+    // HAL_FDCAN_AddMessageToTxBuffer() below is this port's own shim on STM32G4 and STM32H5
+    // (see the definition further down this file), which expects the DLC index pre-shifted
+    // into the header word. On STM32H7 and STM32N6 it resolves to the real HAL implementation,
+    // which expects a bare index on STM32N6 and that index pre-shifted on STM32H7.
+    #if defined(STM32N6)
+    encode_datalength(txmsg, true);
+    #else
+    encode_datalength(txmsg, false);
+    #endif
 
     HAL_StatusTypeDef err = HAL_FDCAN_ActivateNotification(hcan, FDCAN_IT_TX_COMPLETE | FDCAN_IT_TX_ABORT_COMPLETE, tx_loc);
     if (err == HAL_OK) {
