@@ -278,8 +278,14 @@ static void machine_can_port_set_filter(machine_can_obj_t *self, int filter_idx,
         // already accounted for in filter_idx due to CAN_FILTERS_STD_EXT_SEPARATE.
         .FilterIndex = filter_idx,
         .FilterType = FDCAN_FILTER_MASK,
-        // Round-robin between FIFO1 and FIFO0
-        .FilterConfig = (filter_idx & 1) ? FDCAN_FILTER_TO_RXFIFO1 : FDCAN_FILTER_TO_RXFIFO0,
+        // Every filter targets the same FIFO. Spreading them across both, as a
+        // round-robin on the filter index does, loses arrival order: recv()
+        // empties FIFO0 before it looks at FIFO1, so a frame matching an
+        // even-indexed filter always overtakes one matching an odd-indexed
+        // filter that arrived earlier. set_filters(None) installs standard IDs
+        // as filter 0 and extended as filter 1, so the default configuration
+        // reorders any bus carrying both widths.
+        .FilterConfig = FDCAN_FILTER_TO_RXFIFO0,
         .FilterID1 = can_id,
         .FilterID2 = mask,
     };
