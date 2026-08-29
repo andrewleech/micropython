@@ -120,6 +120,21 @@ const char *mp_usbd_runtime_string_cb(uint8_t index);
 // Maximum number of pending exceptions per single TinyUSB task execution
 #define MP_USBD_MAX_PEND_EXCS 2
 
+// How many transfers can be outstanding on one endpoint and direction.
+//
+// TinyUSB hands a single transfer at a time to the hardware, so a deeper
+// queue does not put more on the wire. What it does is let the completion
+// callback start the next transfer immediately, in C, instead of leaving the
+// endpoint idle until Python runs and submits one. Two entries is enough to
+// keep an endpoint busy when the application can produce a buffer per
+// transfer; raise it for producers that run in bursts.
+//
+// Costs one pointer per entry per endpoint and direction, plus two bytes of
+// bookkeeping per endpoint and direction.
+#ifndef MICROPY_HW_USBD_XFER_QUEUE_DEPTH
+#define MICROPY_HW_USBD_XFER_QUEUE_DEPTH (2)
+#endif
+
 typedef struct {
     mp_obj_base_t base;
 
@@ -138,9 +153,19 @@ typedef struct {
     bool active; // Has the user set the USB device active?
     bool trigger; // Has the user requested the active state change (or re-activate)?
 
-    // Temporary pointers for xfer data in progress on each endpoint
-    // Ensuring they aren't garbage collected until the xfer completes
-    mp_obj_t xfer_data[CFG_TUD_ENDPPOINT_MAX][2];
+    // Buffers for transfers submitted on each endpoint and direction, held
+    // so they are not garbage collected while the hardware still owns them.
+    //
+    // Each endpoint and direction is a FIFO: `xfer_head` is the transfer in
+    // progress and `xfer_num` counts the entries queued behind it, that one
+    // included. Completions arrive in submission order, which is what lets a
+    // caller match a completion to the buffer it submitted.
+    //
+    // Endpoint 0 is not reachable from submit_xfer() and uses only the first
+    // entry, to hold control transfer data.
+    mp_obj_t xfer_data[CFG_TUD_ENDPPOINT_MAX][2][MICROPY_HW_USBD_XFER_QUEUE_DEPTH];
+    uint8_t xfer_head[CFG_TUD_ENDPPOINT_MAX][2];
+    uint8_t xfer_num[CFG_TUD_ENDPPOINT_MAX][2];
 
     // Pointer to a memoryview that is reused to refer to various pieces of
     // control transfer data that are pushed to USB control transfer
@@ -153,6 +178,12 @@ typedef struct {
     mp_uint_t num_pend_excs;
     mp_obj_t pend_excs[MP_USBD_MAX_PEND_EXCS];
 } mp_obj_usb_device_t;
+
+// Hand the buffer at the head of an endpoint's queue to TinyUSB.
+//
+// Returns false if the queue is empty, the endpoint could not be claimed, or
+// the transfer was refused. The entry stays queued in the latter two cases.
+bool mp_usbd_xfer_start_head(mp_obj_usb_device_t *usbd, uint8_t ep_addr);
 
 // Built-in constant objects, possible values of builtin_driver
 //
