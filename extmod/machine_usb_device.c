@@ -63,8 +63,13 @@ static mp_obj_t usb_device_make_new(const mp_obj_type_t *type, size_t n_args, si
         o->control_xfer_cb = mp_const_none;
         o->xfer_cb = mp_const_none;
         for (int i = 0; i < CFG_TUD_ENDPPOINT_MAX; i++) {
-            o->xfer_data[i][0] = mp_const_none;
-            o->xfer_data[i][1] = mp_const_none;
+            for (int dir = 0; dir < 2; dir++) {
+                for (int slot = 0; slot < MICROPY_HW_USB_XFER_QUEUE_DEPTH; slot++) {
+                    o->xfer_data[i][dir][slot] = mp_const_none;
+                }
+                o->xfer_head[i][dir] = 0;
+                o->xfer_num[i][dir] = 0;
+            }
         }
         o->builtin_driver = MP_OBJ_FROM_PTR(&mp_type_usb_device_builtin_none);
         o->active = false; // Builtin USB may be active already, but runtime is inactive
@@ -93,7 +98,6 @@ static mp_obj_t usb_device_submit_xfer(mp_obj_t self, mp_obj_t ep, mp_obj_t buff
     mp_obj_usb_device_t *usbd = (mp_obj_usb_device_t *)MP_OBJ_TO_PTR(self);
     int ep_addr;
     mp_buffer_info_t buf_info = { 0 };
-    bool result;
 
     usb_device_check_active(usbd);
 
@@ -113,23 +117,31 @@ static mp_obj_t usb_device_submit_xfer(mp_obj_t self, mp_obj_t ep, mp_obj_t buff
         mp_raise_ValueError(MP_ERROR_TEXT("ep"));
     }
 
-    if (!usbd_edpt_claim(RHPORT, ep_addr)) {
+    uint8_t queued = usbd->xfer_num[ep_num][ep_dir];
+
+    if (queued >= MICROPY_HW_USB_XFER_QUEUE_DEPTH) {
+        // As many transfers are outstanding on this endpoint as it can hold.
         mp_raise_OSError(MP_EBUSY);
     }
 
-    #if TUSB_VERSION_NUMBER >= 2001
-    // This submit path runs from the MicroPython scheduler, never an ISR.
-    result = usbd_edpt_xfer(RHPORT, ep_addr, buf_info.buf, buf_info.len, false);
-    #else
-    result = usbd_edpt_xfer(RHPORT, ep_addr, buf_info.buf, buf_info.len);
-    #endif
+    // Store the buffer object until the transfer completes, keeping it alive
+    // and recording the order completions will arrive in.
+    usbd->xfer_data[ep_num][ep_dir][(usbd->xfer_head[ep_num][ep_dir] + queued)
+                                    % MICROPY_HW_USB_XFER_QUEUE_DEPTH] = buffer;
+    usbd->xfer_num[ep_num][ep_dir] = queued + 1;
 
-    if (result) {
-        // Store the buffer object until the transfer completes
-        usbd->xfer_data[ep_num][ep_dir] = buffer;
+    if (queued == 0) {
+        // Nothing in progress, so this transfer starts now. A transfer that is
+        // already running will start this one from its completion callback
+        // instead, which is the point of the queue.
+        if (!mp_usbd_xfer_start_head(usbd, ep_addr)) {
+            usbd->xfer_data[ep_num][ep_dir][usbd->xfer_head[ep_num][ep_dir]] = mp_const_none;
+            usbd->xfer_num[ep_num][ep_dir] = 0;
+            return mp_const_false;
+        }
     }
 
-    return mp_obj_new_bool(result);
+    return mp_const_true;
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(usb_device_submit_xfer_obj, usb_device_submit_xfer);
 
