@@ -50,6 +50,7 @@
 
 #define TX_EMPTY UINT32_MAX
 
+
 // A single frame buffered in the software receive ring (struct machine_can_port
 // below). Fixed size so the ring can be indexed arithmetically and the receive
 // interrupt handler never allocates. flags and len are narrower than the
@@ -87,9 +88,17 @@ struct machine_can_port {
     // approximate pending count and are not synchronised against the ISR.
     can_rx_ring_entry_t *rx_ring;
     mp_uint_t rx_ring_len;   // Ring capacity in frames, 0 if disabled
+    bool rxring_lost;  // A drop is owed to the next stored frame
     mp_uint_t rx_ring_head;  // Count of frames ever pushed
     mp_uint_t rx_ring_tail;  // Count of frames ever popped
 };
+
+// True when the receive interrupt has a sink to fill: either the port's own
+// ring, read back through recv(), or a RingIO the application reads directly.
+static inline bool can_rx_sink_active(machine_can_obj_t *self) {
+    return self->port->rx_ring_len > 0 || self->rxring != NULL;
+}
+
 
 // Convert the port agnostic CAN mode to the ST mode
 static uint32_t can_port_mode(machine_can_mode_t mode) {
@@ -162,8 +171,8 @@ static void machine_can_port_init(machine_can_obj_t *self) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("CAN init failed"));
     }
 
-    if (self->port->rx_ring_len > 0) {
-        // The ring is drained by the receive interrupt (can_rx_ring_fill(),
+    if (can_rx_sink_active(self)) {
+        // The sink is filled by the receive interrupt (can_rx_ring_fill(),
         // called from machine_can_irq_handler()), not by can_receive()
         // calls from Python. That interrupt is otherwise off until the user
         // requests IRQ_RX callbacks via CAN.irq(), so without this the ring
@@ -285,11 +294,18 @@ static void can_decode_rx_msg(const CanRxMsgTypeDef *msg, mp_uint_t *id, mp_uint
     #endif
 }
 
-// Drain both hardware RX FIFOs into the software receive ring, stopping once a
-// FIFO is empty or the ring is full. Called from the receive interrupt handler
-// (to move frames out of the hardware FIFO before it overflows) and
-// from machine_can_port_recv() (to refill the ring after a consumer pop frees
-// space). Never allocates.
+// Drain both hardware RX FIFOs into whichever sink is active. Called from the
+// receive interrupt handler (to move frames out of the hardware FIFO before
+// it overflows) and, for the port ring only, from machine_can_port_recv() (to
+// refill after a consumer pop frees space). Never allocates.
+//
+// The two sinks differ in how they handle running out of room, each in the
+// branch that implements it below: the port ring stops draining once full and
+// leaves that FIFO's interrupt masked, re-armed on the next
+// machine_can_port_recv() call once it has popped an entry and made room; the
+// RingIO sink always drains a FIFO to empty regardless of space, discarding
+// whatever does not fit, and is never refilled from machine_can_port_recv(),
+// which does not read it at all.
 //
 // Each iteration checks can_is_rx_pending() before calling can_receive(), so
 // can_receive() is only ever called when a frame is already known to be
@@ -300,15 +316,59 @@ static void can_decode_rx_msg(const CanRxMsgTypeDef *msg, mp_uint_t *id, mp_uint
 // would run arbitrary Python from inside a hardware interrupt. The FDCAN
 // driver (fdcan.c) does not have this problem, but the pending check avoids
 // relying on that difference between the two lower layers.
-//
-// A FIFO whose interrupt is left masked here (because the ring filled up
-// while frames were still pending) is re-armed on the next call, once
-// machine_can_port_recv() has popped an entry.
 static void can_rx_ring_fill(machine_can_obj_t *self) {
     struct machine_can_port *port = self->port;
     CAN_HandleTypeDef *can = &port->h;
 
     for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
+        // A RingIO sink takes the frame straight from the interrupt, so the
+        // application never makes a call per frame to collect it.
+        if (self->rxring != NULL) {
+            // Always taken off the controller, whether or not it fits: stopping
+            // here with frames still pending would leave this interrupt masked
+            // below, and nothing on this path calls back into the driver to
+            // re-arm it, so reception would stop for good once the ring filled.
+            while (can_is_rx_pending(can, fifo)) {
+                uint8_t rec[MACHINE_CAN_RX_RECORD_SIZE];
+                CanRxMsgTypeDef msg;
+                int res = can_receive(can, fifo, &msg, &rec[MACHINE_CAN_RX_RECORD_HEADER], 0);
+                assert(res == 0);
+                (void)res;
+                mp_uint_t id;
+                mp_uint_t flags;
+                size_t len;
+                can_decode_rx_msg(&msg, &id, &flags, &len);
+                rec[0] = id & 0xff;
+                rec[1] = (id >> 8) & 0xff;
+                rec[2] = (id >> 16) & 0xff;
+                rec[3] = (id >> 24) & 0xff;
+                rec[4] = flags & 0xff;
+                rec[5] = (flags >> 8) & 0xff;
+                rec[6] = (uint8_t)len;
+                // Frames lost because the ring was full are reported on the
+                // next one that fits, which is how a reader learns of them
+                // without a second channel to ask over.
+                rec[7] = port->rxring_lost ? 1 : 0;
+                memset(&rec[MACHINE_CAN_RX_RECORD_HEADER + len], 0, MP_CAN_MAX_LEN - len);
+                // Whole record or nothing: put_bytes refuses rather than
+                // writing part of one, so the reader cannot desynchronise.
+                if (ringbuf_put_bytes(self->rxring, rec, MACHINE_CAN_RX_RECORD_SIZE) == 0) {
+                    port->rxring_lost = false;
+                } else {
+                    port->rxring_lost = true;
+                    // Counted where a reader can actually see it: get_counters()
+                    // already reports the hardware FIFO's own overrun the same
+                    // way, and a RingIO consumer never calls recv(), so the
+                    // per-record 'lost' byte above is not a substitute for this,
+                    // only a same-stream notice for a reader who is looking.
+                    self->counters.rx_overruns++;
+                }
+            }
+            if (!can_is_rx_pending(can, fifo)) {
+                can_enable_rx_interrupts(can, fifo, true);
+            }
+            continue;
+        }
         while (port->rx_ring_head - port->rx_ring_tail < port->rx_ring_len
                && can_is_rx_pending(can, fifo)) {
             can_rx_ring_entry_t *entry = &port->rx_ring[port->rx_ring_head % port->rx_ring_len];
@@ -335,7 +395,17 @@ static void can_rx_ring_fill(machine_can_obj_t *self) {
 static bool machine_can_port_recv(machine_can_obj_t *self, void *data, size_t *dlen, mp_uint_t *id, mp_uint_t *flags, mp_uint_t *errors) {
     struct machine_can_port *port = self->port;
 
-    if (port->rx_ring_len == 0) {
+    if (self->rxring != NULL) {
+        // A RingIO sink is not a ring recv() knows how to serve: the caller
+        // reads it directly with readinto(), and the extmod layer refuses
+        // rxbuf and rxring together, so there is no port ring to fall back
+        // to either. Reject rather than falling into the direct-FIFO branch
+        // below, which would otherwise race can_rx_ring_fill() for frames
+        // the interrupt is also feeding into the RingIO.
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("recv() unsupported with rxring"));
+    }
+
+    if (!can_rx_sink_active(self)) {
         // No software ring requested: read directly from the hardware FIFO.
         CAN_HandleTypeDef *can = &port->h;
         CanRxMsgTypeDef msg;
@@ -394,7 +464,7 @@ static void machine_can_update_irqs(machine_can_obj_t *self) {
     // The receive interrupt also drives the software ring (can_rx_ring_fill()),
     // so it stays enabled whenever the ring is active even if the user has no
     // IRQ_RX callback registered.
-    bool want_rx_notify = (triggers & MP_CAN_IRQ_RX) || self->port->rx_ring_len > 0;
+    bool want_rx_notify = (triggers & MP_CAN_IRQ_RX) || can_rx_sink_active(self);
 
     for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
         if (want_rx_notify) {
@@ -527,6 +597,11 @@ static void machine_can_port_update_counters(machine_can_obj_t *self) {
         // software receive ring, so rx_pending still reflects the total number
         // of frames waiting to be read by recv().
         counters->rx_pending += port->rx_ring_head - port->rx_ring_tail;
+    } else if (self->rxring != NULL) {
+        // Same reasoning, for the RingIO sink: whole records only, so a
+        // partial trailing write (which cannot happen, ringbuf_put_bytes()
+        // is all-or-nothing) is not a concern here.
+        counters->rx_pending += ringbuf_avail(self->rxring) / MACHINE_CAN_RX_RECORD_SIZE;
     }
 
     // Other fields in 'counters' are updated from ISR directly
@@ -550,9 +625,15 @@ static void machine_can_port_restart(machine_can_obj_t *self) {
     uint32_t basepri = raise_irq_pri(IRQ_PRI_CAN);
     port->rx_ring_head = 0;
     port->rx_ring_tail = 0;
+    if (self->rxring != NULL) {
+        // Same reasoning as the port ring above: frames already sitting in
+        // the RingIO are from before the restart and should not surface as
+        // if they arrived after it.
+        ringbuf_reset(self->rxring);
+    }
     restore_irq_pri(basepri);
 
-    if (port->rx_ring_len > 0) {
+    if (can_rx_sink_active(self)) {
         // A ring that filled before this restart left one or both FIFOs'
         // receive interrupt masked (can_rx_ring_fill() only re-enables once a
         // FIFO drains empty), and can_restart()'s Stop()/Start() does not
@@ -596,6 +677,13 @@ static mp_uint_t machine_can_port_irq_flags(machine_can_obj_t *self) {
             // Frames already moved into the software ring no longer show up as
             // pending in the hardware FIFOs, so check the ring instead.
             if (self->port->rx_ring_head != self->port->rx_ring_tail) {
+                flags |= MP_CAN_IRQ_RX;
+            }
+        } else if (self->rxring != NULL) {
+            // Same reasoning as the port ring above, checked against the
+            // RingIO's own read/write cursors instead of rx_ring_head/tail,
+            // which this sink does not use.
+            if (ringbuf_avail(self->rxring) != 0) {
                 flags |= MP_CAN_IRQ_RX;
             }
         } else {
@@ -648,16 +736,21 @@ void machine_can_irq_handler(uint can_id,  can_int_t interrupt) {
             counters->rx_overruns++;
             break;
         case CAN_INT_MESSAGE_RECEIVED:
-            if (port->rx_ring_len > 0) {
-                // Drain the hardware FIFOs into the software ring here, so the
-                // ISR re-enables the RX interrupt itself instead of waiting for
+            if (can_rx_sink_active(self)) {
+                // Drain the hardware FIFOs into the sink here, so the ISR
+                // re-enables the RX interrupt itself instead of waiting for
                 // Python to call recv(). Only schedule the .irq() callback on
-                // the ring's empty-to-non-empty transition: further frames
+                // the sink's empty-to-non-empty transition: further frames
                 // arriving before the callback runs are coalesced into the
                 // same wakeup.
-                bool ring_was_empty = (port->rx_ring_head == port->rx_ring_tail);
+                bool was_empty = (self->rxring != NULL)
+                    ? (ringbuf_avail(self->rxring) == 0)
+                    : (port->rx_ring_head == port->rx_ring_tail);
                 can_rx_ring_fill(self);
-                if (ring_was_empty && port->rx_ring_head != port->rx_ring_tail) {
+                bool now_has = (self->rxring != NULL)
+                    ? (ringbuf_avail(self->rxring) != 0)
+                    : (port->rx_ring_head != port->rx_ring_tail);
+                if (was_empty && now_has) {
                     call_irq = call_irq || (self->mp_irq_trigger & MP_CAN_IRQ_RX);
                 }
             } else {

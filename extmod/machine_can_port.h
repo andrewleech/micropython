@@ -28,14 +28,23 @@
 
 #include "py/obj.h"
 #include "py/objarray.h"
+#include "py/ringbuf.h"
 #include "py/runtime.h"
 #include "shared/runtime/mpirq.h"
 
 #ifndef MICROPY_PY_MACHINE_CAN_RXBUF
-// Set by a port's mpconfigport.h if it supports CAN.init(rxbuf=N), a software
-// receive ring. Given a default here, ahead of machine_can_obj_t below, so
-// that ports without their own definition do not carry the rxbuf_len field.
-#define MICROPY_PY_MACHINE_CAN_RXBUF 0
+// Set by a port's mpconfigport.h if it supports two independent receive
+// buffering modes: CAN.init(rxbuf=N), a ring the port itself allocates and
+// owns, and CAN.init(rxring=RingIO(...)), a caller-supplied RingIO the
+// receive interrupt writes fixed CAN.RX_RECORD_SIZE records into directly.
+// A port defining this gets both; there is currently no way to opt into only
+// one. Given a default here, ahead of machine_can_obj_t below, so that ports
+// without their own definition do not carry the rxbuf_len/rxring fields.
+#define MICROPY_PY_MACHINE_CAN_RXBUF (0)
+#endif
+
+#if MICROPY_PY_MACHINE_CAN_RXBUF && !MICROPY_PY_MICROPYTHON_RINGIO
+#error "MICROPY_PY_MACHINE_CAN_RXBUF's rxring path needs MICROPY_PY_MICROPYTHON_RINGIO"
 #endif
 
 // This header is included into both extmod/machine_can.c and port-specific
@@ -96,6 +105,19 @@ typedef struct {
     mp_uint_t rx_overruns;
 } machine_can_counters_t;
 
+// Layout of one frame in a RingIO passed as CAN.init(rxring=...). Fixed size
+// so a reader can take frames with readinto() and so the interrupt can refuse a
+// frame that does not fit whole, rather than truncating one and desynchronising
+// every frame after it. Little-endian regardless of the machine.
+//
+//   0  id     uint32   identifier, extended bit per CAN.FLAG_EXT_ID in flags
+//   4  flags  uint16   CAN.FLAG_* as recv() reports them
+//   6  len    uint8    payload length, 0..MP_CAN_MAX_LEN
+//   7  lost   uint8    1 when frames were lost before this one
+//   8  data   bytes    payload, zero padded to MP_CAN_MAX_LEN
+#define MACHINE_CAN_RX_RECORD_HEADER (8)
+#define MACHINE_CAN_RX_RECORD_SIZE   (MACHINE_CAN_RX_RECORD_HEADER + MP_CAN_MAX_LEN)
+
 typedef struct _machine_can_obj_t {
     mp_obj_base_t base;
     mp_uint_t can_idx;
@@ -116,6 +138,16 @@ typedef struct _machine_can_obj_t {
     // Requested depth of the port's software receive ring, in frames, set via
     // CAN.init(rxbuf=N). 0 (the default) disables the ring.
     mp_uint_t rxbuf_len;
+
+    // Ring buffer of a RingIO passed to CAN.init(rxring=...), or NULL. When
+    // set, the receive interrupt writes each frame into it as a fixed
+    // CAN.RX_RECORD_SIZE record instead of into the port's own ring, and the
+    // application reads frames from the RingIO rather than through recv().
+    // Held as the buffer rather than the object because the interrupt cannot
+    // touch the object; the object itself is rooted below so it is not
+    // collected while the interrupt still refers to its buffer.
+    ringbuf_t *rxring;
+    mp_obj_t rxring_obj;
     #endif
 
     // Assumed some of these counters are updated from different port ISRs, etc. and some

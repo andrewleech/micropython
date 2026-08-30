@@ -78,6 +78,36 @@ Port-specific keyword arguments
      further `CAN.IRQ_RX` callback is scheduled while it stays non-empty,
      stalling reception once the ring fills.
 
+- **STM32** also accepts ``rxring``, a `RingIO <micropython.RingIO>` instance
+  the receive interrupt writes frames into directly, as a caller-managed
+  alternative to ``rxbuf``. ``rxbuf`` and ``rxring`` are exclusive: passing
+  both raises ``ValueError``. `CAN.recv` is not used with this sink; read
+  frames from the RingIO with ``readinto()`` instead, each one a fixed
+  ``CAN.RX_RECORD_SIZE`` bytes, little-endian:
+
+  =======  =======  ======  ==============================================
+  Offset   Field    Type    Meaning
+  =======  =======  ======  ==============================================
+  0        id       uint32  Identifier. The extended bit lives in *flags*.
+  4        flags    uint16  `CAN.FLAG_EXT_ID` etc, as `CAN.recv` reports them.
+  6        len      uint8   Payload length, ``0..CAN.RX_RECORD_SIZE - 8``.
+  7        lost     uint8   ``1`` when one or more frames were lost between
+                             this record and the previous one, because the
+                             RingIO had no room for them at the time.
+  8        data     bytes   Payload, zero-padded to fill the record.
+  =======  =======  ======  ==============================================
+
+  ``CAN.RX_RECORD_SIZE`` is 8 plus the largest payload this build supports
+  (64 with CAN-FD, 8 without), so it is not the same on every board: read it
+  rather than assuming a value. A RingIO's own usable capacity is one byte
+  less than the size it was constructed with, so ``RingIO(n)`` holds
+  ``(n - 1) // CAN.RX_RECORD_SIZE`` frames.
+
+  A frame that does not fit whole is dropped rather than written partially,
+  so a reader can never desynchronise mid-record; the drop is reported in the
+  *lost* byte of the next record that does fit, and also counted in
+  `CAN.get_counters`'s ``rx_overruns``.
+
 Methods
 -------
 
