@@ -225,6 +225,7 @@ static void machine_can_init_helper(machine_can_obj_t *self, size_t n_args, cons
     enum { ARG_bitrate, ARG_mode, ARG_sample_point, ARG_sjw, ARG_tseg1, ARG_tseg2,
            #if MICROPY_PY_MACHINE_CAN_RXBUF
            ARG_rxbuf,
+           ARG_rxring,
            #endif
     };
     static const mp_arg_t allowed_args[] = {
@@ -236,6 +237,7 @@ static void machine_can_init_helper(machine_can_obj_t *self, size_t n_args, cons
         { MP_QSTR_tseg2, MP_ARG_INT, {.u_int = -1} },
         #if MICROPY_PY_MACHINE_CAN_RXBUF
         { MP_QSTR_rxbuf, MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_rxring, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
         #endif
     };
 
@@ -274,6 +276,21 @@ static void machine_can_init_helper(machine_can_obj_t *self, size_t n_args, cons
     }
 
     #if MICROPY_PY_MACHINE_CAN_RXBUF
+    // A RingIO the receive interrupt writes frames into, as an alternative to
+    // the port's own ring plus a recv() call per frame. Held for the interrupt
+    // as a plain buffer, and as an object so it stays reachable.
+    mp_obj_t rxring_obj = args[ARG_rxring].u_obj;
+    if (rxring_obj == mp_const_none) {
+        self->rxring = NULL;
+        self->rxring_obj = MP_OBJ_NULL;
+    } else {
+        if (!mp_obj_is_type(rxring_obj, &mp_type_ringio)) {
+            mp_raise_TypeError(MP_ERROR_TEXT("rxring must be a RingIO"));
+        }
+        self->rxring = mp_ringio_get_ringbuf(rxring_obj);
+        self->rxring_obj = rxring_obj;
+    }
+
     mp_int_t rxbuf = args[ARG_rxbuf].u_int;
     if (rxbuf < 0) {
         mp_raise_ValueError(MP_ERROR_TEXT("rxbuf"));

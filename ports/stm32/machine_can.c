@@ -154,8 +154,8 @@ static void machine_can_port_init(machine_can_obj_t *self) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("CAN init failed"));
     }
 
-    if (self->port->rx_ring_len > 0) {
-        // The ring is drained by the receive interrupt (can_rx_ring_fill(),
+    if (can_rx_sink_active(self)) {
+        // The sink is filled by the receive interrupt (can_rx_ring_fill(),
         // called from machine_can_irq_handler()), not by can_receive()
         // calls from Python. That interrupt is otherwise off until the user
         // requests IRQ_RX callbacks via CAN.irq(), so without this the ring
@@ -291,11 +291,49 @@ static void can_decode_rx_msg(const CanRxMsgTypeDef *msg, mp_uint_t *id, mp_uint
 // A FIFO whose interrupt is left masked here (because the ring filled up
 // while frames were still pending) is re-armed on the next call, once
 // machine_can_port_recv() has popped an entry.
+// True when the receive interrupt has a sink to fill: either the port's own
+// ring, read back through recv(), or a RingIO the application reads directly.
+static inline bool can_rx_sink_active(machine_can_obj_t *self) {
+    return self->port->rx_ring_len > 0 || self->rxring != NULL;
+}
+
 static void can_rx_ring_fill(machine_can_obj_t *self) {
     struct machine_can_port *port = self->port;
     CAN_HandleTypeDef *can = &port->h;
 
     for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
+        // A RingIO sink takes the frame straight from the interrupt, so the
+        // application never makes a call per frame to collect it.
+        if (self->rxring != NULL) {
+            while (can_is_rx_pending(can, fifo)
+                   && ringbuf_free(self->rxring) >= MACHINE_CAN_RX_RECORD_SIZE) {
+                uint8_t rec[MACHINE_CAN_RX_RECORD_SIZE];
+                CanRxMsgTypeDef msg;
+                int res = can_receive(can, fifo, &msg, &rec[MACHINE_CAN_RX_RECORD_HEADER], 0);
+                assert(res == 0);
+                (void)res;
+                mp_uint_t id;
+                mp_uint_t flags;
+                size_t len;
+                can_decode_rx_msg(&msg, &id, &flags, &len);
+                rec[0] = id & 0xff;
+                rec[1] = (id >> 8) & 0xff;
+                rec[2] = (id >> 16) & 0xff;
+                rec[3] = (id >> 24) & 0xff;
+                rec[4] = flags & 0xff;
+                rec[5] = (flags >> 8) & 0xff;
+                rec[6] = (uint8_t)len;
+                rec[7] = 0;
+                memset(&rec[MACHINE_CAN_RX_RECORD_HEADER + len], 0, MP_CAN_MAX_LEN - len);
+                // Whole record or nothing: the free-space test above means this
+                // cannot partially write and desynchronise the reader.
+                ringbuf_put_bytes(self->rxring, rec, MACHINE_CAN_RX_RECORD_SIZE);
+            }
+            if (!can_is_rx_pending(can, fifo)) {
+                can_enable_rx_interrupts(can, fifo, true);
+            }
+            continue;
+        }
         while (port->rx_ring_head - port->rx_ring_tail < port->rx_ring_len
                && can_is_rx_pending(can, fifo)) {
             can_rx_ring_entry_t *entry = &port->rx_ring[port->rx_ring_head % port->rx_ring_len];
@@ -381,7 +419,7 @@ static void machine_can_update_irqs(machine_can_obj_t *self) {
     // The receive interrupt also drives the software ring (can_rx_ring_fill()),
     // so it stays enabled whenever the ring is active even if the user has no
     // IRQ_RX callback registered.
-    bool want_rx_notify = (triggers & MP_CAN_IRQ_RX) || self->port->rx_ring_len > 0;
+    bool want_rx_notify = (triggers & MP_CAN_IRQ_RX) || can_rx_sink_active(self);
 
     for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
         if (want_rx_notify) {
