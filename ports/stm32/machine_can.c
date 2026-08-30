@@ -50,6 +50,7 @@
 
 #define TX_EMPTY UINT32_MAX
 
+
 // A single frame buffered in the software receive ring (struct machine_can_port
 // below). Fixed size so the ring can be indexed arithmetically and the receive
 // interrupt handler never allocates. flags and len are narrower than the
@@ -89,6 +90,13 @@ struct machine_can_port {
     mp_uint_t rx_ring_head;  // Count of frames ever pushed
     mp_uint_t rx_ring_tail;  // Count of frames ever popped
 };
+
+// True when the receive interrupt has a sink to fill: either the port's own
+// ring, read back through recv(), or a RingIO the application reads directly.
+static inline bool can_rx_sink_active(machine_can_obj_t *self) {
+    return self->port->rx_ring_len > 0 || self->rxring != NULL;
+}
+
 
 // Convert the port agnostic CAN mode to the ST mode
 static uint32_t can_port_mode(machine_can_mode_t mode) {
@@ -291,12 +299,6 @@ static void can_decode_rx_msg(const CanRxMsgTypeDef *msg, mp_uint_t *id, mp_uint
 // A FIFO whose interrupt is left masked here (because the ring filled up
 // while frames were still pending) is re-armed on the next call, once
 // machine_can_port_recv() has popped an entry.
-// True when the receive interrupt has a sink to fill: either the port's own
-// ring, read back through recv(), or a RingIO the application reads directly.
-static inline bool can_rx_sink_active(machine_can_obj_t *self) {
-    return self->port->rx_ring_len > 0 || self->rxring != NULL;
-}
-
 static void can_rx_ring_fill(machine_can_obj_t *self) {
     struct machine_can_port *port = self->port;
     CAN_HandleTypeDef *can = &port->h;
