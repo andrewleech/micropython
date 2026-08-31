@@ -179,7 +179,11 @@ static void runtime_dev_reset(uint8_t rhport) {
 
     for (int epnum = 0; epnum < CFG_TUD_ENDPPOINT_MAX; epnum++) {
         for (int dir = 0; dir < 2; dir++) {
-            usbd->xfer_data[epnum][dir] = mp_const_none;
+            for (int slot = 0; slot < MICROPY_HW_USBD_XFER_QUEUE_DEPTH; slot++) {
+                usbd->xfer_data[epnum][dir][slot] = mp_const_none;
+            }
+            usbd->xfer_head[epnum][dir] = 0;
+            usbd->xfer_num[epnum][dir] = 0;
         }
     }
 
@@ -341,7 +345,7 @@ static bool runtime_dev_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_cont
 
         if (result) {
             // Keep buffer object alive until the transfer completes
-            usbd->xfer_data[0][dir] = cb_res;
+            usbd->xfer_data[0][dir][0] = cb_res;
         }
     } else {
         // Expect True or False to stall or continue
@@ -353,7 +357,7 @@ static bool runtime_dev_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_cont
             tud_control_status(rhport, request);
         } else if (stage == CONTROL_STAGE_ACK) {
             // Allow data to be GCed once it's no longer in use
-            usbd->xfer_data[0][dir] = mp_const_none;
+            usbd->xfer_data[0][dir][0] = mp_const_none;
         }
     }
 
@@ -377,12 +381,58 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_requ
     return runtime_dev_control_xfer_cb(rhport, stage, request);
 }
 
+bool mp_usbd_xfer_start_head(mp_obj_usb_device_t *usbd, uint8_t ep_addr) {
+    uint8_t epnum = tu_edpt_number(ep_addr);
+    uint8_t dir = tu_edpt_dir(ep_addr);
+
+    if (usbd->xfer_num[epnum][dir] == 0) {
+        return false;
+    }
+
+    mp_buffer_info_t buf_info;
+    mp_obj_t buffer = usbd->xfer_data[epnum][dir][usbd->xfer_head[epnum][dir]];
+    if (!mp_get_buffer(buffer, &buf_info, dir == TUSB_DIR_IN ? MP_BUFFER_READ : MP_BUFFER_RW)) {
+        return false;
+    }
+
+    if (!usbd_edpt_claim(RHPORT, ep_addr)) {
+        return false;
+    }
+
+    #if TUSB_VERSION_NUMBER >= 2001
+    bool result = usbd_edpt_xfer(RHPORT, ep_addr, buf_info.buf, buf_info.len, false);
+    #else
+    bool result = usbd_edpt_xfer(RHPORT, ep_addr, buf_info.buf, buf_info.len);
+    #endif
+
+    if (!result) {
+        usbd_edpt_release(RHPORT, ep_addr);
+    }
+    return result;
+}
+
 static bool runtime_dev_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes) {
     mp_obj_t ep = mp_obj_new_int(ep_addr);
     mp_obj_t cb_res = mp_const_false;
     mp_obj_usb_device_t *usbd = MP_OBJ_TO_PTR(MP_STATE_VM(usbd));
     if (!usbd) {
         return false;
+    }
+
+    uint8_t epnum = tu_edpt_number(ep_addr);
+    uint8_t dir = tu_edpt_dir(ep_addr);
+
+    // Retire the completed transfer and start whatever was queued behind it
+    // before running the Python callback, so the endpoint is not left idle for
+    // however long that callback takes. Releasing the buffer here, rather than
+    // after the callback, is also what allows the callback to submit: a buffer
+    // it queues must outlive this function.
+    if (usbd->xfer_num[epnum][dir] > 0) {
+        usbd->xfer_data[epnum][dir][usbd->xfer_head[epnum][dir]] = mp_const_none;
+        usbd->xfer_head[epnum][dir] =
+            (usbd->xfer_head[epnum][dir] + 1) % MICROPY_HW_USBD_XFER_QUEUE_DEPTH;
+        usbd->xfer_num[epnum][dir]--;
+        mp_usbd_xfer_start_head(usbd, ep_addr);
     }
 
     if (mp_obj_is_callable(usbd->xfer_cb)) {
@@ -393,9 +443,6 @@ static bool runtime_dev_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t r
         };
         cb_res = usbd_callback_function_n(usbd->xfer_cb, MP_ARRAY_SIZE(args), args);
     }
-
-    // Clear any xfer_data for this endpoint
-    usbd->xfer_data[tu_edpt_number(ep_addr)][tu_edpt_dir(ep_addr)] = mp_const_none;
 
     return cb_res != MP_OBJ_NULL && mp_obj_is_true(cb_res);
 }
@@ -496,9 +543,13 @@ static void mp_usbd_disconnect(mp_obj_usb_device_t *usbd) {
         // TODO: figure out if we really need this
         for (int epnum = 0; epnum < CFG_TUD_ENDPPOINT_MAX; epnum++) {
             for (int dir = 0; dir < 2; dir++) {
-                if (usbd->xfer_data[epnum][dir] != mp_const_none) {
+                if (usbd->xfer_num[epnum][dir] > 0) {
                     usbd_edpt_stall(RHPORT, tu_edpt_addr(epnum, dir));
-                    usbd->xfer_data[epnum][dir] = mp_const_none;
+                    for (int slot = 0; slot < MICROPY_HW_USBD_XFER_QUEUE_DEPTH; slot++) {
+                        usbd->xfer_data[epnum][dir][slot] = mp_const_none;
+                    }
+                    usbd->xfer_head[epnum][dir] = 0;
+                    usbd->xfer_num[epnum][dir] = 0;
                 }
             }
         }
