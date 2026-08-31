@@ -222,7 +222,12 @@ static mp_obj_t machine_can_deinit(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_can_deinit_obj, machine_can_deinit);
 
 static void machine_can_init_helper(machine_can_obj_t *self, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
-    enum { ARG_bitrate, ARG_mode, ARG_sample_point, ARG_sjw, ARG_tseg1, ARG_tseg2};
+    enum { ARG_bitrate, ARG_mode, ARG_sample_point, ARG_sjw, ARG_tseg1, ARG_tseg2,
+           #if MICROPY_PY_MACHINE_CAN_RXBUF
+           ARG_rxbuf,
+           ARG_rxring,
+           #endif
+    };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_bitrate, MP_ARG_INT | MP_ARG_REQUIRED },
         { MP_QSTR_mode, MP_ARG_INT, {.u_int = MP_CAN_MODE_NORMAL} },
@@ -230,6 +235,10 @@ static void machine_can_init_helper(machine_can_obj_t *self, size_t n_args, cons
         { MP_QSTR_sjw, MP_ARG_INT, {.u_int = CAN_SJW_MIN } },
         { MP_QSTR_tseg1, MP_ARG_INT, {.u_int = -1} },
         { MP_QSTR_tseg2, MP_ARG_INT, {.u_int = -1} },
+        #if MICROPY_PY_MACHINE_CAN_RXBUF
+        { MP_QSTR_rxbuf, MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_rxring, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        #endif
     };
 
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
@@ -265,6 +274,29 @@ static void machine_can_init_helper(machine_can_obj_t *self, size_t n_args, cons
         // Probably can make these values more restrictive
         mp_raise_ValueError(MP_ERROR_TEXT("sample_point"));
     }
+
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    // A RingIO the receive interrupt writes frames into, as an alternative to
+    // the port's own ring plus a recv() call per frame. Held for the interrupt
+    // as a plain buffer, and as an object so it stays reachable.
+    mp_obj_t rxring_obj = args[ARG_rxring].u_obj;
+    if (rxring_obj == mp_const_none) {
+        self->rxring = NULL;
+        self->rxring_obj = MP_OBJ_NULL;
+    } else {
+        if (!mp_obj_is_type(rxring_obj, &mp_type_ringio)) {
+            mp_raise_TypeError(MP_ERROR_TEXT("rxring must be a RingIO"));
+        }
+        self->rxring = mp_ringio_get_ringbuf(rxring_obj);
+        self->rxring_obj = rxring_obj;
+    }
+
+    mp_int_t rxbuf = args[ARG_rxbuf].u_int;
+    if (rxbuf < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("rxbuf"));
+    }
+    self->rxbuf_len = (mp_uint_t)rxbuf;
+    #endif
 
     int f_clock = machine_can_port_f_clock(self);
 
@@ -701,6 +733,11 @@ static const mp_rom_map_elem_t machine_can_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_restart), MP_ROM_PTR(&machine_can_restart_obj) },
 
     // Mode enum constants
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    // Size of one frame in a RingIO passed as CAN.init(rxring=...), so a
+    // reader can size its buffer without assuming MP_CAN_MAX_LEN.
+    { MP_ROM_QSTR(MP_QSTR_RX_RECORD_SIZE), MP_ROM_INT(MACHINE_CAN_RX_RECORD_SIZE) },
+    #endif
     { MP_ROM_QSTR(MP_QSTR_MODE_NORMAL), MP_ROM_INT(MP_CAN_MODE_NORMAL) },
     { MP_ROM_QSTR(MP_QSTR_MODE_SLEEP), MP_ROM_INT(MP_CAN_MODE_SLEEP) },
     { MP_ROM_QSTR(MP_QSTR_MODE_LOOPBACK), MP_ROM_INT(MP_CAN_MODE_LOOPBACK) },

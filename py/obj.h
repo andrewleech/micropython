@@ -883,6 +883,8 @@ extern const mp_obj_type_t mp_type_property;
 extern const mp_obj_type_t mp_type_stringio;
 extern const mp_obj_type_t mp_type_bytesio;
 extern const mp_obj_type_t mp_type_ringio;
+struct _ringbuf_t;
+struct _ringbuf_t *mp_ringio_get_ringbuf(mp_obj_t ringio);
 extern const mp_obj_type_t mp_type_reversed;
 extern const mp_obj_type_t mp_type_polymorph_iter;
 #if MICROPY_ENABLE_FINALISER
