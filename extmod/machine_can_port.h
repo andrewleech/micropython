@@ -105,7 +105,7 @@ typedef struct {
 //   0  id     uint32   identifier, extended bit per CAN.FLAG_EXTENDED in flags
 //   4  flags  uint16   CAN.FLAG_* as recv() reports them
 //   6  len    uint8    payload length, 0..MP_CAN_MAX_LEN
-//   7  -      uint8    reserved, zero
+//   7  lost   uint8    1 when frames were lost before this one
 //   8  data   bytes    payload, zero padded to MP_CAN_MAX_LEN
 #define MACHINE_CAN_RX_RECORD_HEADER (8)
 #define MACHINE_CAN_RX_RECORD_SIZE   (MACHINE_CAN_RX_RECORD_HEADER + MP_CAN_MAX_LEN)

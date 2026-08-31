@@ -87,6 +87,9 @@ struct machine_can_port {
     // approximate pending count and are not synchronised against the ISR.
     can_rx_ring_entry_t *rx_ring;
     mp_uint_t rx_ring_len;   // Ring capacity in frames, 0 if disabled
+    mp_uint_t rxring_head;     // Count of frames ever written to a RingIO sink
+    mp_uint_t rxring_dropped;  // Frames the RingIO sink had no room for
+    bool rxring_lost;          // A drop is owed to the next stored frame
     mp_uint_t rx_ring_head;  // Count of frames ever pushed
     mp_uint_t rx_ring_tail;  // Count of frames ever popped
 };
@@ -307,8 +310,11 @@ static void can_rx_ring_fill(machine_can_obj_t *self) {
         // A RingIO sink takes the frame straight from the interrupt, so the
         // application never makes a call per frame to collect it.
         if (self->rxring != NULL) {
-            while (can_is_rx_pending(can, fifo)
-                   && ringbuf_free(self->rxring) >= MACHINE_CAN_RX_RECORD_SIZE) {
+            // Always taken off the controller, whether or not it fits: stopping
+            // here with frames still pending would leave this interrupt masked
+            // below, and nothing on this path calls back into the driver to
+            // re-arm it, so reception would stop for good once the ring filled.
+            while (can_is_rx_pending(can, fifo)) {
                 uint8_t rec[MACHINE_CAN_RX_RECORD_SIZE];
                 CanRxMsgTypeDef msg;
                 int res = can_receive(can, fifo, &msg, &rec[MACHINE_CAN_RX_RECORD_HEADER], 0);
@@ -325,11 +331,20 @@ static void can_rx_ring_fill(machine_can_obj_t *self) {
                 rec[4] = flags & 0xff;
                 rec[5] = (flags >> 8) & 0xff;
                 rec[6] = (uint8_t)len;
-                rec[7] = 0;
+                // Frames lost because the ring was full are reported on the
+                // next one that fits, which is how a reader learns of them
+                // without a second channel to ask over.
+                rec[7] = port->rxring_lost ? 1 : 0;
                 memset(&rec[MACHINE_CAN_RX_RECORD_HEADER + len], 0, MP_CAN_MAX_LEN - len);
-                // Whole record or nothing: the free-space test above means this
-                // cannot partially write and desynchronise the reader.
-                ringbuf_put_bytes(self->rxring, rec, MACHINE_CAN_RX_RECORD_SIZE);
+                // Whole record or nothing: put_bytes refuses rather than
+                // writing part of one, so the reader cannot desynchronise.
+                if (ringbuf_put_bytes(self->rxring, rec, MACHINE_CAN_RX_RECORD_SIZE) == 0) {
+                    port->rxring_lost = false;
+                    port->rxring_head++;
+                } else {
+                    port->rxring_lost = true;
+                    port->rxring_dropped++;
+                }
             }
             if (!can_is_rx_pending(can, fifo)) {
                 can_enable_rx_interrupts(can, fifo, true);
@@ -657,16 +672,21 @@ void machine_can_irq_handler(uint can_id,  can_int_t interrupt) {
             counters->rx_overruns++;
             break;
         case CAN_INT_MESSAGE_RECEIVED:
-            if (port->rx_ring_len > 0) {
-                // Drain the hardware FIFOs into the software ring here, so the
-                // ISR re-enables the RX interrupt itself instead of waiting for
+            if (can_rx_sink_active(self)) {
+                // Drain the hardware FIFOs into the sink here, so the ISR
+                // re-enables the RX interrupt itself instead of waiting for
                 // Python to call recv(). Only schedule the .irq() callback on
-                // the ring's empty-to-non-empty transition: further frames
+                // the sink's empty-to-non-empty transition: further frames
                 // arriving before the callback runs are coalesced into the
                 // same wakeup.
-                bool ring_was_empty = (port->rx_ring_head == port->rx_ring_tail);
+                bool was_empty = (self->rxring != NULL)
+                    ? (ringbuf_avail(self->rxring) == 0)
+                    : (port->rx_ring_head == port->rx_ring_tail);
                 can_rx_ring_fill(self);
-                if (ring_was_empty && port->rx_ring_head != port->rx_ring_tail) {
+                bool now_has = (self->rxring != NULL)
+                    ? (ringbuf_avail(self->rxring) != 0)
+                    : (port->rx_ring_head != port->rx_ring_tail);
+                if (was_empty && now_has) {
                     call_irq = call_irq || (self->mp_irq_trigger & MP_CAN_IRQ_RX);
                 }
             } else {

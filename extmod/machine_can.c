@@ -733,6 +733,11 @@ static const mp_rom_map_elem_t machine_can_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_restart), MP_ROM_PTR(&machine_can_restart_obj) },
 
     // Mode enum constants
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    // Size of one frame in a RingIO passed as CAN.init(rxring=...), so a
+    // reader can size its buffer without assuming MP_CAN_MAX_LEN.
+    { MP_ROM_QSTR(MP_QSTR_RX_RECORD_SIZE), MP_ROM_INT(MACHINE_CAN_RX_RECORD_SIZE) },
+    #endif
     { MP_ROM_QSTR(MP_QSTR_MODE_NORMAL), MP_ROM_INT(MP_CAN_MODE_NORMAL) },
     { MP_ROM_QSTR(MP_QSTR_MODE_SLEEP), MP_ROM_INT(MP_CAN_MODE_SLEEP) },
     { MP_ROM_QSTR(MP_QSTR_MODE_LOOPBACK), MP_ROM_INT(MP_CAN_MODE_LOOPBACK) },
