@@ -125,6 +125,7 @@ typedef struct {
 
     mp_obj_t desc_dev; // Device descriptor bytes
     mp_obj_t desc_cfg; // Configuration descriptor bytes
+    mp_obj_t desc_bos; // BOS descriptor bytes, or None if not provided
     mp_obj_t desc_strs; // List/dict/similar to look up string descriptors by index
 
     // Runtime device driver callback functions
