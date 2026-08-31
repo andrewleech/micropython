@@ -10,3 +10,16 @@
 #define MICROPY_HW_SPI1_MOSI (9)
 #define MICROPY_HW_SPI1_MISO (8)
 #define MICROPY_HW_SPI1_SCK  (7)
+
+// microSD (Sense expansion board) in SPI mode: machine.SDCard(slot=2).
+#define MICROPY_HW_SDCARD_SPI_MOSI (9)
+#define MICROPY_HW_SDCARD_SPI_MISO (8)
+#define MICROPY_HW_SDCARD_SPI_SCK  (7)
+#define MICROPY_HW_SDCARD_SPI_CS   (21)
+
+// The same microSD via native SD/MMC (1-bit): machine.SDCard(slot=1, width=1).
+// Noticeably faster than SPI (esp. reads). The slot is SPI-wired, so only D0 is
+// available (1-bit): CLK=SPI SCK, CMD=SPI MOSI, D0=SPI MISO.
+#define MICROPY_HW_SDMMC_CLK       (7)
+#define MICROPY_HW_SDMMC_CMD       (9)
+#define MICROPY_HW_SDMMC_D0        (8)

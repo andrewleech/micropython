@@ -227,6 +227,7 @@ flaky_tests_to_ignore = {
     "thread/stress_recurse.py": ("stack overflow under emulation", None),
     "thread/stress_heap.py": ("flaky on macOS", ("darwin",)),
     "cmdline/repl_lock.py": ("REPL timing under QEMU", None),
+    "cmdline/repl_inspect.py": ("REPL timing under QEMU", None),
     "cmdline/repl_cont.py": ("REPL escaping on macOS", ("darwin",)),
     "extmod/time_time_ns.py": ("CI runner clock precision", None),
 }
@@ -987,7 +988,7 @@ def run_tests(pyb, tests, args, result_dir, num_threads=1):
         is_slice = test_name.find("slice") != -1
         is_async = test_name.startswith(("async_", "asyncio_")) or test_name.endswith("_async")
         is_const = test_name.startswith("const")
-        is_fstring = test_name.startswith("string_fstring")
+        is_fstring = test_name.startswith("string_fstring") or test_name.endswith("_fstring")
         is_tstring = test_name.startswith("string_tstring") or test_name.endswith("_tstring")
         is_inlineasm = test_name.startswith("asm")
 
@@ -1137,7 +1138,7 @@ def run_tests(pyb, tests, args, result_dir, num_threads=1):
 
         # Print a note if this looks like it might have been a misfired unittest
         if not uses_unittest and not test_passed:
-            with open(test_file, "r") as f:
+            with open(test_file, "r", encoding="utf-8") as f:
                 if any(re.match("^import.+unittest", l) for l in f.readlines()):
                     print(
                         "NOTE: {} may be a unittest that doesn't run unittest.main()".format(

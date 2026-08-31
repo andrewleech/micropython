@@ -30,6 +30,10 @@
 
 #define MICROPY_CONFIG_ROM_LEVEL    (MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES)
 
+// The asyncio REPL needs pollable stdin, which the semihosting console does
+// not provide; use the blocking REPL.
+#define MICROPY_REPL_ASYNCIO        (0)
+
 #if defined(__ARM_ARCH_ISA_ARM)
 #define MICROPY_EMIT_ARM            (1)
 #define MICROPY_EMIT_INLINE_THUMB   (1)
@@ -50,6 +54,8 @@
 #else
 #error "Unsupported RISC-V platform!"
 #endif
+#elif defined(__powerpc__) && defined(__powerpc64__)
+#define MICROPY_MAKE_POINTER_CALLABLE(p) ((void *)((mp_uint_t)(p) | 1))
 #endif
 
 #define MICROPY_MALLOC_USES_ALLOCATED_SIZE (1)
@@ -72,7 +78,7 @@
 
 // type definitions for the specific machine
 
-#if defined(__riscv) && (__riscv_xlen == 64)
+#if (defined(__riscv) && (__riscv_xlen == 64)) || (defined(__powerpc__) && defined(__powerpc64__))
 #define MP_SSIZE_MAX (0x7fffffffffffffff)
 #else
 #define MP_SSIZE_MAX (0x7fffffff)

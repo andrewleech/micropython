@@ -17,15 +17,70 @@ Functions
     CONST_X = const(123)
     CONST_Y = const(2 * CONST_X + 1)
 
-   Constants declared this way are still accessible as global variables from
-   outside the module they are declared in.  On the other hand, if a constant
-   begins with an underscore then it is hidden, it is not available as a global
-   variable, and does not take up any memory during execution.
+   When the parser encounters ``NAME = const(expr)``, it evaluates the expression
+   at compile time and substitutes the resulting value directly into the bytecode at
+   every use of ``NAME``, avoiding a global dictionary lookup each time.
 
-   This `const` function is recognised directly by the MicroPython parser and is
-   provided as part of the :mod:`micropython` module mainly so that scripts can be
-   written which run under both CPython and MicroPython, by following the above
-   pattern.
+   The ``const`` name is recognised directly by the parser so no import is actually
+   required in MicroPython.  However ``from micropython import const`` is recommended
+   so the script also runs on CPython where ``const`` is provided as an identity
+   function.  Note that the parser only recognises the bare name ``const`` -- using
+   ``micropython.const()`` (with module prefix) or an alias will not trigger the
+   optimisation.
+
+   Constants declared this way are still stored as global variables in the module's
+   dictionary, so other modules can access them (e.g.
+   ``import mymodule; print(mymodule.X)``).  Reassigning the global from another
+   module does not affect the inlined values within the defining module.  This global
+   entry costs at least two machine words of RAM.
+
+   **Module-private constants:** To avoid this RAM cost, prefix the name with an
+   underscore (e.g. ``_X = const(1)``).  This prevents the variable from being added
+   to the module dictionary and hides it from other modules.
+
+   The expression passed to ``const()`` must be evaluable at compile time.  Supported
+   types are:
+
+   - ``int`` (including expressions with arithmetic and bitwise operators)
+   - ``float``
+   - ``str``
+   - ``bytes``
+   - ``bool`` (``True``, ``False``), ``None``, ``...`` (Ellipsis)
+   - ``tuple`` of constants
+
+   The expression can reference previously defined constants.  Using runtime values
+   or function calls raises ``SyntaxError: not a constant``.
+
+   Examples::
+
+    BUFFER_SIZE = const(1024)
+    BUFFER_MASK = const(BUFFER_SIZE - 1)
+    FLAGS = const(0x01 | 0x02)
+    _SCALE = const(0.001)
+    _PREFIX = const("data_")
+    _HEADER = const(b"\x00\xff")
+    _MODES = const(("read", "write"))
+
+   Because the compiler evaluates boolean constants at compile time, ``const()``
+   can be used for conditional compilation.  Code guarded by a false constant is
+   eliminated from the bytecode entirely, and when frozen via ``mpy-cross`` the
+   unreachable code is stripped from the output::
+
+    FEATURE_X = const(True)
+
+    if FEATURE_X:
+        def feature_x_handler():
+            ...
+
+   For cross-platform compatibility with CPython, the typical pattern is::
+
+    try:
+        from micropython import const
+    except ImportError:
+        const = lambda x: x
+
+   See also :ref:`constrained` and :ref:`speed_python` for practical guidance on
+   using constants to reduce memory usage and improve performance.
 
 .. function:: opt_level([level])
 
@@ -185,6 +240,64 @@ Functions
 
    There is a finite queue to hold the scheduled functions and `schedule()`
    will raise a `RuntimeError` if the queue is full.
+
+   As a special case, it's possible to pass `micropython.kbd_intr` to this function
+   as the first argument (and ``None`` as the second argument), and that will
+   schedule a `KeyboardInterrupt` to be raised "very soon" in the main thread.
+
+.. function:: stdio_mode_raw(enabled)
+
+   Switch the terminal (stdin/stdout) between raw and original mode.  When
+   *enabled* is ``True`` the terminal is placed in raw mode (no echo, no line
+   editing, characters available immediately).  When *enabled* is ``False`` the
+   terminal settings are restored to their original state.
+
+   This is useful for code that needs to take over terminal I/O, for example
+   an alternative REPL such as ``asyncio.arepl``.
+
+   Availability: Unix port.  Requires ``MICROPY_PY_MICROPYTHON_STDIO_RAW``.
+
+.. function:: repl()
+
+   Enter a blocking interactive REPL.  Ctrl-D returns to the caller.  The
+   terminal's raw mode is set on entry and restored on return, even if an
+   exception is raised.
+
+   This backs :func:`asyncio.arepl.breakpoint`, providing a synchronous
+   breakpoint-style REPL from within async code.
+
+   Availability: Requires ``MICROPY_REPL_ASYNCIO_BREAKPOINT``.
+
+.. function:: repl_event_init()
+
+   Start the event-driven REPL used to build an asyncio REPL: print the banner
+   and the first prompt, then accept input one character at a time via
+   :func:`repl_event`.  Most code should use :mod:`asyncio.arepl` instead of
+   driving the REPL directly.
+
+   Availability: Requires ``MICROPY_REPL_ASYNCIO``.
+
+.. function:: repl_event(c)
+
+   Feed the single character *c* (an integer) to the event-driven REPL, which
+   echoes, edits and, on a complete line, executes it.  Returns either:
+
+   - a coroutine: a complete line containing a top-level ``await``, compiled to a
+     coroutine that the caller should run on the event loop, then call
+     :func:`repl_event_resume`; or
+   - an integer status, with bit ``0x100`` set on Ctrl-D (exit / soft reset) and
+     bit ``0x400`` set while the REPL is in raw mode (the caller should keep
+     feeding input without yielding so other output cannot corrupt the transfer).
+
+   Availability: Requires ``MICROPY_REPL_ASYNCIO``.
+
+.. function:: repl_event_resume()
+
+   Reset the input line and print a fresh prompt, after the caller has run the
+   deferred coroutine returned by :func:`repl_event`.
+
+   Availability: Requires ``MICROPY_REPL_ASYNCIO``.
+
 
 Classes
 -------

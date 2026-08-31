@@ -51,8 +51,17 @@ enum { ESEQ_NONE, ESEQ_ESC, ESEQ_ESC_BRACKET, ESEQ_ESC_BRACKET_DIGIT, ESEQ_ESC_O
 #pragma warning(disable : 4090)
 #endif
 
+#if MICROPY_REPL_ASYNCIO_BREAKPOINT
+// Guards the single-level readline save slot (rl_saved) used by
+// readline_push/readline_pop; reset in readline_init0.
+static bool rl_saved_valid = false;
+#endif
+
 void readline_init0(void) {
     memset(MP_STATE_PORT(readline_hist), 0, MICROPY_READLINE_HISTORY_SIZE * sizeof(const char*));
+    #if MICROPY_REPL_ASYNCIO_BREAKPOINT
+    rl_saved_valid = false;
+    #endif
 }
 
 static char *str_dup_maybe(const char *str) {
@@ -592,5 +601,34 @@ void readline_push_history(const char *line) {
         }
     }
 }
+
+#if MICROPY_REPL_ASYNCIO_BREAKPOINT
+// Save/restore readline state for reentrant use (e.g. sync REPL breakpoint
+// from within an async REPL session). Single-level stack since only one
+// level of nesting is needed.
+// Note: not thread-safe. The REPL is inherently single-threaded (one stdin),
+// so this is fine for current use. If multi-core REPL support is ever needed,
+// these would need to move to mp_state_thread_t.
+static readline_t rl_saved;
+
+// Caller is responsible for GC-rooting any vstr referenced by the
+// saved readline_t, e.g. via MP_REGISTER_ROOT_POINTER. Direct C
+// callers of readline_push without rooting will create a GC hazard.
+bool readline_push(void) {
+    if (rl_saved_valid) {
+        return false;
+    }
+    rl_saved = rl;
+    rl_saved_valid = true;
+    return true;
+}
+
+void readline_pop(void) {
+    if (rl_saved_valid) {
+        rl = rl_saved;
+        rl_saved_valid = false;
+    }
+}
+#endif // MICROPY_REPL_ASYNCIO_BREAKPOINT
 
 MP_REGISTER_ROOT_POINTER(const char *readline_hist[MICROPY_READLINE_HISTORY_SIZE]);

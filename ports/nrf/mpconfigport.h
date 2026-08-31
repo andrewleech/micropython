@@ -57,6 +57,11 @@
 #define CORE_FEAT (MICROPY_CONFIG_ROM_LEVEL >= MICROPY_CONFIG_ROM_LEVEL_CORE_FEATURES)
 #define EXTRA_FEAT (MICROPY_CONFIG_ROM_LEVEL >= MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES)
 
+// nrf does not freeze asyncio.arepl, so keep the blocking REPL on the
+// EXTRA-level parts (NRF52840/NRF9160) rather than boot-looping on a missing
+// frozen module.
+#define MICROPY_REPL_ASYNCIO (0)
+
 // options to control how MicroPython is built
 
 // Due to the use of LTO and the unknown distance between nlr.o and nlrthumb.o code,
@@ -228,6 +233,16 @@
 #endif
 
 #define MICROPY_PY_MACHINE_PWM      (MICROPY_PY_MACHINE_HW_PWM || MICROPY_PY_MACHINE_SOFT_PWM)
+
+// nrf91 (Cortex-M33 with TrustZone) has POWER->GPREGRET as a 2-element array
+// rather than separate GPREGRET/GPREGRET2 fields, and access requires the
+// secure/non-secure peripheral split. Not supported here.
+#if !defined(NRF91)
+#ifndef MICROPY_PY_MACHINE_MEM_BACKUP
+#define MICROPY_PY_MACHINE_MEM_BACKUP (1)
+#endif
+#define MICROPY_PY_MACHINE_MEM_BACKUP_INCLUDEFILE "ports/nrf/machine_mem_backup.c"
+#endif
 #define MICROPY_PY_MACHINE_PWM_DUTY (1)
 
 #if MICROPY_PY_MACHINE_HW_PWM

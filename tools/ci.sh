@@ -29,6 +29,12 @@ function ci_gcc_riscv_setup {
     riscv64-unknown-elf-gcc --version
 }
 
+function ci_gcc_ppc64_setup {
+    sudo apt-get update
+    sudo apt-get install gcc-powerpc64le-linux-gnu libc6-dev-ppc64el-cross
+    powerpc64le-linux-gnu-gcc --version
+}
+
 function ci_picotool_setup {
     # Manually installing picotool ensures we use a release version, and speeds up the build.
     git clone https://github.com/raspberrypi/pico-sdk.git
@@ -117,6 +123,7 @@ function ci_code_size_build {
             OUTFILE=$2
             IGNORE_ERRORS=$3
 
+            git restore ports/esp32/lockfiles/*  # esp32 port may update local lockfile
             git checkout --detach $COMMIT
             git submodule update --init $SUBMODULES
             git show -s
@@ -245,23 +252,29 @@ function ci_esp32_build_common {
     make ${MAKEOPTS} -C ports/esp32 submodules
 }
 
-function ci_esp32_build_cmod_spiram_s2 {
+function ci_esp32_build_cmod_spiram_d2wd {
     ci_esp32_build_common
 
+    # Combined USER_C_MODULES + freeze manifest test on ESP32_GENERIC.
     make ${MAKEOPTS} -C ports/esp32 \
         USER_C_MODULES=../../../examples/usercmodule/micropython.cmake \
-        FROZEN_MANIFEST=$(pwd)/ports/esp32/boards/manifest_test.py
+        FROZEN_MANIFEST="$(pwd)/ports/esp32/boards/manifest_test.py"
 
     # Test building native .mpy with xtensawin architecture.
     ci_native_mpy_modules_build xtensawin
 
-    make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC BOARD_VARIANT=SPIRAM
-    make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC_S2
+    # Test the c_module() codepath on the SPIRAM variant.
+    make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC BOARD_VARIANT=SPIRAM \
+        FROZEN_MANIFEST="$(pwd)/tests/tools/manifest_c_module.py"
+
+    # D2WD is the variant with smallest application partition in flash
+    make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC BOARD_VARIANT=D2WD
 }
 
-function ci_esp32_build_s3_c3 {
+function ci_esp32_build_s2_s3_c3 {
     ci_esp32_build_common
 
+    make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC_S2
     make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC_S3
     make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC_C3
 }
@@ -274,9 +287,10 @@ function ci_esp32_build_c2_c5_c6 {
     make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC_C6
 }
 
-function ci_esp32_build_p4 {
+function ci_esp32_build_h2_p4 {
     ci_esp32_build_common
 
+    make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC_H2
     make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC_P4
     make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC_P4 BOARD_VARIANT=C6_WIFI
 }
@@ -342,16 +356,18 @@ function ci_nrf_build {
 }
 
 ########################################################################################
-# ports/powerpc
+# ports/psoc-edge
 
-function ci_powerpc_setup {
-    sudo apt-get update
-    sudo apt-get install gcc-powerpc64le-linux-gnu libc6-dev-ppc64el-cross
+function ci_psoc_edge_setup {
+    ci_gcc_arm_setup
+    sudo apt remove python3-packaging python3-jsonschema python3-cryptography
+    sudo pip3 install edgeprotecttools
 }
 
-function ci_powerpc_build {
-    make ${MAKEOPTS} -C ports/powerpc UART=potato
-    make ${MAKEOPTS} -C ports/powerpc UART=lpc_serial
+function ci_psoc_edge_build {
+    make ${MAKEOPTS} -C mpy-cross
+    make ${MAKEOPTS} -C ports/psoc-edge submodules
+    make ${MAKEOPTS} -C ports/psoc-edge
 }
 
 ########################################################################################
@@ -382,6 +398,13 @@ function ci_qemu_setup_rv64 {
     sudo pip3 install pyelftools
     sudo pip3 install ar
     qemu-system-riscv64 --version
+}
+
+function ci_qemu_setup_ppc64 {
+    ci_gcc_ppc64_setup
+    sudo apt-get update
+    sudo apt-get install qemu-system
+    qemu-system-ppc64 --version
 }
 
 function ci_qemu_build_arm_prepare {
@@ -445,6 +468,12 @@ function ci_qemu_build_rv64 {
     make ${MAKEOPTS} -C ports/qemu BOARD=VIRT_RV64 test_natmod
 }
 
+function ci_qemu_build_ppc64 {
+    make ${MAKEOPTS} -C mpy-cross
+    make ${MAKEOPTS} -C ports/qemu BOARD=POWERNV9 submodules
+    make ${MAKEOPTS} -C ports/qemu BOARD=POWERNV9 test
+}
+
 ########################################################################################
 # ports/renesas-ra
 
@@ -478,9 +507,11 @@ function ci_rp2_build {
     make ${MAKEOPTS} -C ports/rp2 submodules
     make ${MAKEOPTS} -C ports/rp2
     make ${MAKEOPTS} -C ports/rp2 BOARD=RPI_PICO_W submodules
+    # Legacy USER_C_MODULES coverage on RPI_PICO_W.
     make ${MAKEOPTS} -C ports/rp2 BOARD=RPI_PICO_W USER_C_MODULES=../../examples/usercmodule/micropython.cmake
     make ${MAKEOPTS} -C ports/rp2 BOARD=RPI_PICO2 submodules
-    make ${MAKEOPTS} -C ports/rp2 BOARD=RPI_PICO2
+    # Test c_module() on RPI_PICO2.
+    make ${MAKEOPTS} -C ports/rp2 BOARD=RPI_PICO2 FROZEN_MANIFEST="$(pwd)/tests/tools/manifest_c_module.py"
     make ${MAKEOPTS} -C ports/rp2 BOARD=W5100S_EVB_PICO submodules
     # This build doubles as a build test for disabling threads in the config
     make ${MAKEOPTS} -C ports/rp2 BOARD=W5100S_EVB_PICO CFLAGS_EXTRA=-DMICROPY_PY_THREAD=0
@@ -502,6 +533,7 @@ function ci_samd_build {
     make ${MAKEOPTS} -C ports/samd submodules
     make ${MAKEOPTS} -C ports/samd BOARD=ADAFRUIT_ITSYBITSY_M0_EXPRESS
     make ${MAKEOPTS} -C ports/samd BOARD=ADAFRUIT_ITSYBITSY_M4_EXPRESS
+    make ${MAKEOPTS} -C ports/samd BOARD=SPARKFUN_SAMD21_DEV_BREAKOUT
 }
 
 ########################################################################################
@@ -535,6 +567,12 @@ function ci_stm32_pyb_build {
     make ${MAKEOPTS} -C ports/stm32/mboot BOARD=PYBV10 CFLAGS_EXTRA='-DMBOOT_FSLOAD=1 -DMBOOT_VFS_LFS2=1'
     make ${MAKEOPTS} -C ports/stm32/mboot BOARD=PYBD_SF6
     make ${MAKEOPTS} -C ports/stm32/mboot BOARD=STM32F769DISC CFLAGS_EXTRA='-DMBOOT_ADDRESS_SPACE_64BIT=1 -DMBOOT_SDCARD_ADDR=0x100000000ULL -DMBOOT_SDCARD_BYTE_SIZE=0x400000000ULL -DMBOOT_FSLOAD=1 -DMBOOT_VFS_FAT=1'
+}
+
+function ci_stm32_build_cmod {
+    make ${MAKEOPTS} -C mpy-cross
+    make ${MAKEOPTS} -C ports/stm32 submodules
+    make ${MAKEOPTS} -C ports/stm32 BOARD=PYBV11 FROZEN_MANIFEST="$(pwd)/tests/tools/manifest_c_module.py"
 }
 
 function ci_stm32_nucleo_build {
@@ -613,6 +651,12 @@ CI_UNIX_OPTS_QEMU_LOONG64=(
     MICROPY_STANDALONE=1
 )
 
+CI_UNIX_OPTS_QEMU_X64=(
+    CROSS_COMPILE=x86_64-linux-gnu-
+    VARIANT=coverage
+    MICROPY_STANDALONE=1
+)
+
 CI_UNIX_OPTS_SANITIZE_ADDRESS=(
     # Macro MP_ASAN allows detecting ASan on gcc<=13
     CFLAGS_EXTRA="-fsanitize=address --param asan-use-after-return=0 -DMP_ASAN=1"
@@ -673,6 +717,13 @@ function ci_unix_run_tests_full_helper {
     ci_unix_run_tests_full_extra $micropython
 }
 
+function ci_unix_run_native_mpy_tests_helper {
+    variant=$1
+    shift
+    MICROPYPATH=examples/natmod/features2 ./ports/unix/build-$variant/micropython -m features2
+    (cd tests && MICROPY_MICROPYTHON=../ports/unix/build-$variant/micropython ./run-natmodtests.py "$@" extmod/*.py)
+}
+
 function ci_native_mpy_modules_build {
     if [ "$1" = "" ]; then
         arch=x64
@@ -698,6 +749,14 @@ function ci_native_mpy_modules_32bit_build {
     ci_native_mpy_modules_build x86
 }
 
+function ci_native_mpy_modules_clang_build {
+    # This currently only supports the host architecture (assumed to be x64).
+    for natmod in btree deflate features1 features2 features3 features4 framebuf heapq random re
+    do
+        make -C examples/natmod/$natmod CC=clang
+    done
+}
+
 function ci_unix_minimal_build {
     make ${MAKEOPTS} -C ports/unix VARIANT=minimal
 }
@@ -713,6 +772,10 @@ function ci_unix_standard_build {
 
 function ci_unix_standard_run_tests {
     ci_unix_run_tests_full_helper standard
+}
+
+function ci_unix_standard_run_native_mpy_tests {
+    ci_unix_run_native_mpy_tests_helper standard "$@"
 }
 
 function ci_unix_standard_v2_build {
@@ -789,8 +852,7 @@ function ci_unix_coverage_run_mpy_merge_tests {
 }
 
 function ci_unix_coverage_run_native_mpy_tests {
-    MICROPYPATH=examples/natmod/features2 ./ports/unix/build-coverage/micropython -m features2
-    (cd tests && ./run-natmodtests.py "$@" extmod/*.py)
+    ci_unix_run_native_mpy_tests_helper coverage "$@"
 }
 
 function ci_unix_32bit_setup {
@@ -856,6 +918,7 @@ function ci_unix_gil_enabled_run_tests {
 function ci_unix_clang_setup {
     sudo apt-get update
     sudo apt-get install clang
+    pip3 install ar pyelftools
     clang --version
 }
 
@@ -1027,6 +1090,34 @@ qemu-loongarch64-static "$MPY_PATH"/micropython $@
 EOF
     chmod +x ./ports/unix/build-coverage/micropython-runner
     (cd tests && MICROPY_MICROPYTHON=../ports/unix/build-coverage/micropython-runner MICROPY_TEST_TIMEOUT=180 ./run-tests.py)
+}
+
+function ci_unix_qemu_x64_setup {
+    sudo apt-get update
+    sudo apt-get install gcc-x86-64-linux-gnu g++-x86-64-linux-gnu libc6-amd64-cross libltdl-dev
+    sudo apt-get install qemu-user-static
+    python3 -m pip install pyelftools
+    python3 -m pip install ar
+    qemu-x86_64-static --version
+    sudo mkdir -p /usr/gnemul
+    sudo ln -s /usr/x86_64-linux-gnu /usr/gnemul/qemu-x86_64
+}
+
+function ci_unix_qemu_x64_build {
+    ci_unix_build_helper "${CI_UNIX_OPTS_QEMU_X64[@]}"
+    ci_unix_build_ffi_lib_helper x86_64-linux-gnu-gcc
+    ci_native_mpy_modules_build x64
+}
+
+function ci_unix_qemu_x64_run_tests {
+    # Issues with x64 tests on non-x64 hosts:
+    # - thread/stress_aes.py takes around 90 seconds
+    # - ports/unix/ffi_callback.py crashes QEMU (x86_64-binfmt-P: QEMU internal SIGSEGV {code=MAPERR, addr=0x20})
+    file ./ports/unix/build-coverage/micropython
+    pushd tests
+    MICROPY_MICROPYTHON=../ports/unix/build-coverage/micropython ./run-tests.py --exclude '(thread/stress_aes.py|ports/unix/ffi_callback.py)'
+    MICROPY_MICROPYTHON=../ports/unix/build-coverage/micropython ./run-natmodtests.py extmod/btree*.py extmod/deflate*.py extmod/framebuf*.py extmod/heapq*.py extmod/random_basic*.py extmod/re*.py
+    popd
 }
 
 function ci_unix_repr_b_build {

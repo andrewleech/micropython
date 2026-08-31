@@ -104,8 +104,10 @@
 #define MICROPY_PY_OS_DUPTERM_STREAM_DETACHED_ATTACHED (1)
 #define MICROPY_PY_OS_SYNC          (1)
 #define MICROPY_PY_OS_UNAME         (1)
-#define MICROPY_PY_OS_URANDOM       (MICROPY_HW_ENABLE_RNG)
-#define MICROPY_PY_RANDOM_SEED_INIT_FUNC (rng_get())
+#if MICROPY_HW_ENABLE_RNG
+#define MICROPY_PY_OS_URANDOM       (1)
+#define MICROPY_PY_RANDOM_SEED_INIT_FUNC (mp_hal_get_hw_random_u32())
+#endif
 #define MICROPY_PY_TIME_GMTIME_LOCALTIME_MKTIME (1)
 #define MICROPY_PY_TIME_TIME_TIME_NS (1)
 #define MICROPY_PY_TIME_INCLUDEFILE "ports/stm32/modtime.c"
@@ -130,6 +132,13 @@
 #endif
 #define MICROPY_PY_MACHINE_CAN_INCLUDEFILE "ports/stm32/machine_can.c"
 #define MICROPY_PY_MACHINE_DHT_READINTO (1)
+// Backup memory via BKPSRAM or RTC BKP registers.
+#if MICROPY_HW_ENABLE_RTC
+#ifndef MICROPY_PY_MACHINE_MEM_BACKUP
+#define MICROPY_PY_MACHINE_MEM_BACKUP (1)
+#endif
+#define MICROPY_PY_MACHINE_MEM_BACKUP_INCLUDEFILE "ports/stm32/machine_mem_backup.c"
+#endif
 #define MICROPY_PY_MACHINE_PULSE    (1)
 #define MICROPY_PY_MACHINE_PIN_MAKE_NEW mp_pin_make_new
 #define MICROPY_PY_MACHINE_I2C      (MICROPY_HW_ENABLE_HW_I2C)
@@ -291,4 +300,4 @@ typedef long mp_off_t;
 #include <alloca.h>
 
 // Needed for MICROPY_PY_RANDOM_SEED_INIT_FUNC.
-uint32_t rng_get(void);
+uint32_t mp_hal_get_hw_random_u32(void);

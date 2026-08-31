@@ -15,6 +15,7 @@ skip = """
 ./ports/cc3200/telnet,\
 ./ports/esp32/managed_components,\
 ./ports/nrf/drivers/bluetooth/s1*,\
+./ports/psoc-edge/boards/*/bsp-cfg,\
 ./ports/stm32/usbhost,\
 ./tests,\
 ACKNOWLEDGEMENTS,\
@@ -33,6 +34,7 @@ extend-exclude = [
 extend-include = ["tools/cc1"]
 line-length = 99
 target-version = "py38"
+builtins = ["ptr", "ptr8", "ptr16", "ptr32", "uint", "micropython", "const", "execfile"]
 
 [tool.ruff.lint]
 exclude = [  # Ruff finds Python SyntaxError in these files
@@ -46,6 +48,7 @@ exclude = [  # Ruff finds Python SyntaxError in these files
   "tests/basics/string_tstring_operations.py",
   "tests/basics/string_tstring_parser1.py",
   "tests/cmdline/cmd_compile_only_error.py",
+  "tests/cmdline/repl_asyncio_intr.py",
   "tests/cmdline/repl_autocomplete.py",
   "tests/cmdline/repl_autocomplete_underscore.py",
   "tests/cmdline/repl_autoindent.py",
@@ -61,8 +64,8 @@ exclude = [  # Ruff finds Python SyntaxError in these files
   "tests/micropython/heapalloc_fail_tstring.py",
   "tests/micropython/viper_args.py",
 ]
-extend-select = ["C9", "PLC"]
-extend-ignore = [
+extend-select = ["C9", "PLC", "W292"]
+ignore = [
   "E401",
   "E402",
   "E722",

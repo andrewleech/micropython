@@ -39,7 +39,7 @@
 // as well as a fallback to generate MICROPY_GIT_TAG if the git repo or tags
 // are unavailable.
 #define MICROPY_VERSION_MAJOR 1
-#define MICROPY_VERSION_MINOR 29
+#define MICROPY_VERSION_MINOR 30
 #define MICROPY_VERSION_MICRO 0
 #define MICROPY_VERSION_PRERELEASE 1
 
@@ -567,11 +567,6 @@ typedef uint64_t mp_uint_t;
 #define MICROPY_DYNAMIC_COMPILER (0)
 #endif
 
-// Whether the compiler allows compiling top-level await expressions
-#ifndef MICROPY_COMP_ALLOW_TOP_LEVEL_AWAIT
-#define MICROPY_COMP_ALLOW_TOP_LEVEL_AWAIT (0)
-#endif
-
 // Whether to enable constant folding; eg 1+2 rewritten as 3
 #ifndef MICROPY_COMP_CONST_FOLDING
 #define MICROPY_COMP_CONST_FOLDING (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_CORE_FEATURES)
@@ -886,6 +881,31 @@ typedef uint64_t mp_uint_t;
 // Whether port requires event-driven REPL functions
 #ifndef MICROPY_REPL_EVENT_DRIVEN
 #define MICROPY_REPL_EVENT_DRIVEN (0)
+#endif
+
+// Whether to boot into an asyncio-based REPL (asyncio.arepl) instead of the
+// blocking friendly REPL. Requires asyncio.arepl in the frozen manifest.
+#ifndef MICROPY_REPL_ASYNCIO
+#if MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES
+#define MICROPY_REPL_ASYNCIO (1)
+#else
+#define MICROPY_REPL_ASYNCIO (0)
+#endif
+#endif
+
+// Whether asyncio.arepl provides breakpoint(), a blocking micropython.repl()
+// debugger REPL that nests inside a running asyncio REPL session. Separate
+// from MICROPY_REPL_ASYNCIO because it is an optional convenience with its
+// own flash cost, not needed for the asyncio REPL itself.
+#ifndef MICROPY_REPL_ASYNCIO_BREAKPOINT
+#define MICROPY_REPL_ASYNCIO_BREAKPOINT (MICROPY_REPL_ASYNCIO && MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EVERYTHING)
+#endif
+
+// Whether the compiler allows compiling top-level await expressions.  The
+// asyncio REPL needs this to compile REPL input containing await into a
+// coroutine that runs on the event loop.
+#ifndef MICROPY_COMP_ALLOW_TOP_LEVEL_AWAIT
+#define MICROPY_COMP_ALLOW_TOP_LEVEL_AWAIT (MICROPY_REPL_ASYNCIO)
 #endif
 
 // The number of items to keep in the readline history.
@@ -1367,12 +1387,17 @@ typedef time_t mp_timestamp_t;
 
 // Whether str object is proper unicode
 #ifndef MICROPY_PY_BUILTINS_STR_UNICODE
-#define MICROPY_PY_BUILTINS_STR_UNICODE (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
+#define MICROPY_PY_BUILTINS_STR_UNICODE (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_BASIC_FEATURES)
 #endif
 
 // Whether to check for valid UTF-8 when converting bytes to str
 #ifndef MICROPY_PY_BUILTINS_STR_UNICODE_CHECK
 #define MICROPY_PY_BUILTINS_STR_UNICODE_CHECK (MICROPY_PY_BUILTINS_STR_UNICODE)
+#endif
+
+// Whether bytes.decode() supports the 'ignore' and 'replace' error handlers
+#ifndef MICROPY_PY_BUILTINS_BYTES_DECODE_ERRORS
+#define MICROPY_PY_BUILTINS_BYTES_DECODE_ERRORS (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
 #endif
 
 // Whether str.center() method provided
@@ -1426,7 +1451,7 @@ typedef time_t mp_timestamp_t;
 
 // Whether to support memoryview.itemsize attribute
 #ifndef MICROPY_PY_BUILTINS_MEMORYVIEW_ITEMSIZE
-#define MICROPY_PY_BUILTINS_MEMORYVIEW_ITEMSIZE (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EVERYTHING)
+#define MICROPY_PY_BUILTINS_MEMORYVIEW_ITEMSIZE (MICROPY_PY_MACHINE_MEM_BACKUP || MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_BASIC_FEATURES)
 #endif
 
 // Whether to support set object
@@ -1607,6 +1632,11 @@ typedef time_t mp_timestamp_t;
 // Support for micropython.RingIO()
 #ifndef MICROPY_PY_MICROPYTHON_RINGIO
 #define MICROPY_PY_MICROPYTHON_RINGIO (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
+#endif
+
+// Whether to provide "micropython.stdio_mode_raw" function
+#ifndef MICROPY_PY_MICROPYTHON_STDIO_RAW
+#define MICROPY_PY_MICROPYTHON_STDIO_RAW (0)
 #endif
 
 // Whether to provide "array" module. Note that large chunk of the
@@ -2092,6 +2122,11 @@ typedef time_t mp_timestamp_t;
 // Whether to provide the "machine.mem8/16/32" objects
 #ifndef MICROPY_PY_MACHINE_MEMX
 #define MICROPY_PY_MACHINE_MEMX (MICROPY_PY_MACHINE)
+#endif
+
+// Whether to provide the "machine.mem_backup" function
+#ifndef MICROPY_PY_MACHINE_MEM_BACKUP
+#define MICROPY_PY_MACHINE_MEM_BACKUP (0)
 #endif
 
 // Whether to provide the "machine.Signal" class
