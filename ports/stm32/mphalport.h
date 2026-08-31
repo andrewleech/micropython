@@ -70,6 +70,14 @@ void mp_hal_set_interrupt_char(int c); // -1 to disable
 // Port level Wait-for-Event macro.
 // Do not use this macro directly, include py/runtime.h and
 // call mp_event_wait_indefinite() or mp_event_wait_ms(timeout).
+//
+// __WFE() rather than __WFI() so that work scheduled from an interrupt is not
+// slept through. The callers handle pending events and then sleep without
+// re-testing, so an interrupt landing in that window leaves work queued with
+// nothing pending in the NVIC to wake the processor, and it sleeps until the
+// next SysTick. MICROPY_SCHED_HOOK_SCHEDULED issues __SEV() when that work is
+// queued, and the event register is sticky, so the sleep is skipped whether
+// the interrupt arrived before it or during it.
 #if MICROPY_PY_THREAD
 #define MICROPY_INTERNAL_WFE(TIMEOUT_MS) \
     do { \
@@ -78,12 +86,12 @@ void mp_hal_set_interrupt_char(int c); // -1 to disable
             pyb_thread_yield(); \
             MP_THREAD_GIL_ENTER(); \
         } else { \
-            __WFI(); \
+            __WFE(); \
         } \
     } while (0)
 #define MICROPY_THREAD_YIELD() pyb_thread_yield()
 #else
-#define MICROPY_INTERNAL_WFE(TIMEOUT_MS) __WFI()
+#define MICROPY_INTERNAL_WFE(TIMEOUT_MS) __WFE()
 #define MICROPY_THREAD_YIELD()
 #endif
 
