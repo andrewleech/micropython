@@ -183,6 +183,10 @@ uint32_t trng_random_u32(void);
 #endif
 
 #define MICROPY_HW_ENABLE_USBDEV            (1)
+// Support machine.USBDevice
+#ifndef MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE
+#define MICROPY_HW_ENABLE_USB_RUNTIME_DEVICE (1)
+#endif
 // Enable USB-CDC serial port
 #ifndef MICROPY_HW_USB_CDC
 #define MICROPY_HW_USB_CDC                  (1)
