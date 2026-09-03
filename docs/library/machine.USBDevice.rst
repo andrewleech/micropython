@@ -4,9 +4,11 @@
 class USBDevice -- USB Device driver
 ====================================
 
-Availability: **ESP32, RP2, SAMD**
+Availability: **ESP32, RP2, SAMD, STM32, MIMXRT**
 
 .. note:: Native USB support is required, and not every board supports native USB.
+   On STM32 this also requires the board to use the TinyUSB stack
+   (``MICROPY_HW_TINYUSB_STACK``).
 
 USBDevice provides a low-level Python API for implementing USB device functions using
 Python code.
