@@ -278,8 +278,10 @@ static void machine_can_port_set_filter(machine_can_obj_t *self, int filter_idx,
         // already accounted for in filter_idx due to CAN_FILTERS_STD_EXT_SEPARATE.
         .FilterIndex = filter_idx,
         .FilterType = FDCAN_FILTER_MASK,
-        // Round-robin between FIFO1 and FIFO0
-        .FilterConfig = (filter_idx & 1) ? FDCAN_FILTER_TO_RXFIFO1 : FDCAN_FILTER_TO_RXFIFO0,
+        // Every filter targets FIFO0. recv() empties FIFO0 before it looks
+        // at FIFO1, so filters spread across both FIFOs would deliver frames
+        // grouped by which FIFO matched rather than in arrival order.
+        .FilterConfig = FDCAN_FILTER_TO_RXFIFO0,
         .FilterID1 = can_id,
         .FilterID2 = mask,
     };
@@ -306,9 +308,11 @@ static void machine_can_port_set_filter(machine_can_obj_t *self, int filter_idx,
         .FilterScale = CAN_FILTERSCALE_32BIT,
         .FilterMode = CAN_FILTERMODE_IDMASK,
         .FilterNumber = filter_idx,
-        // Apply the filters round-robin to each FIFO, as each filter in bxCAN is
-        // associated with only one FIFO.
-        .FilterFIFOAssignment = filter_idx % 2,
+        // Every filter targets FIFO0, matching the FDCAN branch above: bxCAN's
+        // recv() also empties FIFO0 before FIFO1, so filters split across both
+        // would deliver frames grouped by which FIFO matched rather than in
+        // arrival order.
+        .FilterFIFOAssignment = 0,
         .BankNumber = CAN_HW_MAX_FILTER, // Assign same number of filters to CAN2 as CAN1
     };
 
