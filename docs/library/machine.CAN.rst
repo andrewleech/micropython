@@ -37,9 +37,9 @@ Constructor
    - All other arguments are passed to :func:`CAN.init`. At least one argument (``bitrate``)
      must be provided.
 
-   Future versions of this class may also accept port-specific keyword arguments
-   here which configure the hardware. Currently no such keyword arguments are
-   implemented.
+   Some ports accept additional, port-specific keyword arguments here which
+   configure the hardware. See `can-port-kwargs` for the keyword arguments
+   supported by each port.
 
    Example
    ^^^^^^^
@@ -49,14 +49,42 @@ Constructor
       from machine import CAN
       can = CAN(1, 500_000)
 
-.. Add a table of port-specific keyword arguments here, once they exist
+.. _can-port-kwargs:
+
+Port-specific keyword arguments
+--------------------------------
+
+- **STM32** accepts ``rxbuf``, an integer giving the depth, in frames, of a
+  software receive ring. The default, ``0``, disables the ring: `CAN.recv`
+  reads directly from the hardware receive FIFO, which holds 3 frames per FIFO
+  on parts with a fixed message RAM layout (H5, G0, G4) and on classic bxCAN
+  parts, or 24 frames per FIFO on H7 and N6. A non-zero value has the receive
+  interrupt handler move frames out of the hardware FIFO into the ring as they
+  arrive, which lets the driver keep up with bus frame rates that would
+  otherwise overrun the hardware FIFO between calls to `CAN.recv`.
+
+  A frame that arrives once the ring is full is left in the hardware FIFO,
+  with that FIFO's receive interrupt masked until `CAN.recv` next pops an
+  entry from the ring and makes room. If the hardware FIFO then also fills,
+  the frame is dropped and counted the same way as any other hardware FIFO
+  overflow, via `CAN.get_counters` and the ``errors`` value returned by
+  `CAN.recv`.
+
+  .. note:: A `CAN.irq` handler configured for `CAN.IRQ_RX` is called once
+     when the ring transitions from empty to non-empty, not once per frame
+     added to the ring. The handler must call `CAN.recv` repeatedly until it
+     returns ``None`` to fully drain the ring: a handler that calls
+     `CAN.recv` only once per invocation leaves the ring non-empty, and no
+     further `CAN.IRQ_RX` callback is scheduled while it stays non-empty,
+     stalling reception once the ring fills.
 
 Methods
 -------
 
 .. method:: CAN.init(bitrate, mode=CAN.MODE_NORMAL, sample_point=75, sjw=1, tseg1=None, tseg2=None)
 
-   Initialise the CAN bus with the given parameters:
+   Initialise the CAN bus with the given parameters. Also accepts the
+   port-specific keyword arguments described under `can-port-kwargs`.
 
    - *bitrate* is the desired bus bit rate in bits per second.
    - *mode* is one of the values shown under `can-modes`, indicating the
@@ -379,6 +407,11 @@ Methods
 
   .. note:: The **Alif** port cannot report the exact number of pending RX or TX messages. It
             will report a number > 0, if messages are pending.
+
+  .. note:: On **STM32**, if the ``rxbuf`` keyword argument was used to configure a
+            software receive ring, the pending RX count includes frames already
+            moved into that ring as well as frames still queued in the hardware
+            FIFOs.
 
 .. method:: CAN.get_timings(list=None /)
 
