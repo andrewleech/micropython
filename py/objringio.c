@@ -115,6 +115,15 @@ static const mp_stream_p_t ringio_stream_p = {
     .is_text = false,
 };
 
+// Access the underlying ring buffer, so that a driver can produce into a
+// RingIO from an interrupt. The buffer's put and get are each safe against a
+// single producer and a single consumer in different contexts, which is what
+// this type exists for; the object itself must not be touched there.
+ringbuf_t *mp_obj_ringio_get_ringbuf(mp_obj_t self_in) {
+    micropython_ringio_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    return &self->ringbuffer;
+}
+
 MP_DEFINE_CONST_OBJ_TYPE(
     mp_type_ringio,
     MP_QSTR_RingIO,

@@ -133,7 +133,9 @@
 #define MICROPY_PY_MACHINE_CAN_INCLUDEFILE "ports/stm32/machine_can.c"
 // This port implements the software receive ring selected by CAN.init(rxbuf=N).
 // Defined here, ahead of extmod/machine_can_port.h, so that header can size
-// machine_can_obj_t's rxbuf_len field only for ports that use it.
+// machine_can_obj_t's rxbuf_len/rxring fields only for ports that use them.
+// Enables both CAN.init(rxbuf=N) and CAN.init(rxring=RingIO(...)); see the
+// definition in extmod/machine_can_port.h for what each covers.
 #define MICROPY_PY_MACHINE_CAN_RXBUF (1)
 #define MICROPY_PY_MACHINE_DHT_READINTO (1)
 // Backup memory via BKPSRAM or RTC BKP registers.
