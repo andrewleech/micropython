@@ -234,9 +234,16 @@ Methods
                transfers are built up through successive executions of
                ``control_xfer_cb``, see above.
 
-            Returns ``True`` if successful, ``False`` if the transfer could not
-            be queued (as USB device is not configured by host, or because
-            another transfer is queued on this endpoint.)
+            Returns ``True`` if the transfer was queued, or ``False`` if it was
+            refused because the USB device is not configured by the host.
+
+            An endpoint holds a small queue of outstanding transfers rather
+            than one at a time. Raises ``OSError`` with reason ``MP_EBUSY`` if
+            the endpoint's queue is already full; call again once an earlier
+            transfer on the same endpoint has completed. Completions are
+            delivered to ``xfer_cb`` in the order the transfers were
+            submitted, which is what lets a caller match a completion to the
+            buffer it submitted.
 
             When the USB host completes the transfer, the ``xfer_cb`` callback
             is called (see above).
