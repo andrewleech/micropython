@@ -22,6 +22,9 @@ ACKNOWLEDGEMENTS,\
 """
 
 [tool.ruff]
+# Apply exclude/extend-exclude even when files are passed explicitly on the
+# command line, as tools/pre-push-check.sh does with the changed-file list.
+force-exclude = true
 # Exclude third-party code from linting and formatting
 extend-exclude = [
   "lib",
