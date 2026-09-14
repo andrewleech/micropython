@@ -37,9 +37,8 @@ A good report lets us reproduce and assess the issue quickly. Please include:
   (`mpconfigport.h` / `mpconfigboard.h` options, native modules, `MICROPY_PREVIEW_VERSION_2`).
 - The reproducing code pasted directly into the report, not linked to an external repository (which
   may change), and minimised to the smallest snippet that still triggers the fault.
-- For sanitizer-based reports, build with ASan configured correctly, including
-  `--param asan-use-after-return=0` in `CFLAGS_EXTRA` and `LDFLAGS_EXTRA`, and paste the full
-  sanitizer trace.
+- For sanitizer-based reports, paste the full sanitizer trace, together with the compiler version and
+  the build command and options used to produce it.
 - The impact: what an attacker gains, and what access they need to trigger it (eg the ability to
   run arbitrary Python at the REPL, load an untrusted `.mpy`, or supply input to a specific API).
 - Any mitigation or workaround you are aware of.
