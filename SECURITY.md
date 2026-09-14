@@ -103,10 +103,8 @@ an issue is being actively exploited, we may bring disclosure forward.
 
 ### CVEs
 
-Where an issue warrants one, a CVE will be assigned. MicroPython is not currently a CVE Numbering
-Authority, so a CVE is requested through a Root such as MITRE. Most MicroPython CVEs to date have
-been assigned by third parties without project involvement; this policy brings assignment under
-project coordination.
+Where an issue warrants one, we will request a CVE and include it in the published advisory when
+assigned.
 
 ### Credit
 
