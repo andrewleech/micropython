@@ -31,8 +31,8 @@ fix exists.
 
 A good report lets us reproduce and assess the issue quickly. Please include:
 
-- The affected version (from the REPL banner: `Ctrl-B` in a serial session) or commit hash, and
-  whether you are running an official build or a modified one.
+- The affected version (shown in the startup banner after boot or a soft reset, `Ctrl-D`, in the
+  REPL) or commit hash, and whether you are running an official build or a modified one.
 - The affected port, board, and any non-default build configuration
   (`mpconfigport.h` / `mpconfigboard.h` options, native modules, `MICROPY_PREVIEW_VERSION_2`).
 - The reproducing code pasted directly into the report, not linked to an external repository (which
