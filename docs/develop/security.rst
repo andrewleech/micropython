@@ -44,9 +44,12 @@ Loading untrusted bytecode
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 MicroPython does not verify the integrity of ``.mpy`` bytecode it loads: the loader assumes a valid
-prelude and well-formed bytecode. A malformed ``.mpy`` can crash or corrupt the runtime. This is a
-long-standing, openly tracked assumption, not a hidden defect. Loading ``.mpy`` files from an
-untrusted source is equivalent to running untrusted native code, and should be treated as such.
+prelude and well-formed bytecode. The VM and loader are not hardened against invalid or corrupted
+bytecode, so a malformed ``.mpy`` can crash or corrupt the runtime. The ``.mpy`` format is a trusted
+deployment artefact, not an untrusted-input format; as with firmware images, a product that stores
+or receives ``.mpy`` files must protect their integrity before loading them. This is a long-standing,
+openly tracked assumption, not a hidden defect. Loading ``.mpy`` files from an untrusted source is
+equivalent to running untrusted native code, and should be treated as such.
 
 Isolation
 ~~~~~~~~~
