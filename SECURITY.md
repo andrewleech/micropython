@@ -11,6 +11,11 @@ Wi-Fi stack). We still want to know about them, so we can pull in the fix and ad
 upstream project is where the fix is coordinated. Code you have modified from an official release
 is out of scope.
 
+If a vendor SDK or other dependency issue affects an official MicroPython build, link the upstream
+report or CVE in a public security report, or email it if confidential handling is warranted. We
+will assess the affected ports and releases, track the required update, and publish any
+MicroPython-specific remediation.
+
 ## Reporting a vulnerability
 
 Most security issues should be reported publicly using the [security report form](https://github.com/micropython/micropython/issues/new?template=security.yml).
@@ -91,7 +96,9 @@ forward. Public reports are discussed and fixed in the open.
 ### CVEs
 
 Where an issue warrants one, we will request a CVE and include it with the published fix when
-assigned.
+assigned. An upstream CVE normally remains the identifier for a dependency vulnerability.
+MicroPython may request a separate CVE when its integration, configuration, or release handling
+creates a distinct vulnerability that users need to track separately.
 
 ### Credit
 
