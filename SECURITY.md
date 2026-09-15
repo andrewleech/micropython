@@ -13,19 +13,13 @@ is out of scope.
 
 ## Reporting a vulnerability
 
-**Please do not report security vulnerabilities through public GitHub issues, Discussions, or
-Discord.**
+Most security issues should be reported publicly using the [security report form](https://github.com/micropython/micropython/issues/new?template=security.yml).
+It applies the `security` label and lets the issue and its fix be discussed in the open.
 
-Report privately through one of:
-
-- **GitHub private vulnerability reporting**: open a draft advisory at
-  <https://github.com/micropython/micropython/security/advisories/new>. This keeps the report
-  private and gives us a place to work on the fix with you. This is the preferred route.
-- **Email**: security@micropython.org. To encrypt the report, our PGP key is available on request.
-
-If you are unsure whether an issue is a vulnerability, use the private route. We would rather
-receive a report that turns out to be a non-issue than have a real one disclosed publicly before a
-fix exists.
+If you believe an issue is readily exploitable, has high impact, or otherwise needs confidential
+handling, email [contact@micropython.org](mailto:contact@micropython.org) instead. Do not disclose
+the details publicly while it is handled privately. If you are unsure which route is appropriate,
+email us.
 
 ### What to include
 
@@ -73,40 +67,35 @@ The timelines below are best-effort targets, not contractual guarantees. We will
 1. Acknowledge your report within 7 days.
 2. Triage it, confirming the issue, determining affected versions and assessing severity, then share
    our assessment with you.
-3. Develop and review a fix privately in the GitHub advisory, keeping you informed and credited
-   (see below).
-4. Coordinate disclosure: publish the fix, the advisory, and, where warranted, a CVE.
+3. Develop and review a fix in the open for public reports. For reports made by email, keep details
+   confidential while a fix is prepared where appropriate.
+4. Publish the fix and, where warranted, request a CVE.
 
 ### Where issues are handled and recorded
 
-Not every security issue is embargoed:
+Security reports normally remain on the public issue tracker under the
+[`security`](https://github.com/micropython/micropython/issues?q=label%3Asecurity) label. This is
+the project's public record of security issues.
 
-- Lower-severity, locally-triggered issues (eg a crash that requires running untrusted Python on
-  the device) are frequently triaged, fixed, and discussed in the open on the public issue tracker
-  under the [`security-related`](https://github.com/micropython/micropython/issues?q=label%3Asecurity-related)
-  label. That label is the project's de-facto public record of security issues to date.
-- Readily-exploitable or high-impact issues are handled privately in a GitHub security advisory
-  under embargo (below) until a fix is ready.
-
-If you are unsure which category a finding falls into, use the private route and we will decide
-during triage. When we judge an issue does not need an embargo, we may move it to the public
-tracker so the fix can be reviewed in the open.
+Reports received by email are assessed to decide whether confidential handling is warranted. When
+it is not, we may ask the reporter to open a public issue so the fix can be reviewed in the open.
 
 ### Disclosure and embargo
 
-We practise coordinated disclosure, and ask that you give us a reasonable opportunity to fix an
-issue before disclosing it publicly. Our target embargo is at most 90 days from acknowledgement;
-we aim to release a fix well inside that window and will agree a public disclosure date with you. If
-an issue is being actively exploited, we may bring disclosure forward.
+For reports handled privately, we practise coordinated disclosure and ask that you give us a
+reasonable opportunity to fix the issue before disclosing it publicly. Our target embargo is at
+most 90 days from acknowledgement; we aim to release a fix well inside that window and will agree a
+public disclosure date with you. If an issue is being actively exploited, we may bring disclosure
+forward. Public reports are discussed and fixed in the open.
 
 ### CVEs
 
-Where an issue warrants one, we will request a CVE and include it in the published advisory when
+Where an issue warrants one, we will request a CVE and include it with the published fix when
 assigned.
 
 ### Credit
 
-We credit reporters in the published advisory unless you ask us not to. We do not run a paid
+We credit reporters with the published fix or CVE unless you ask us not to. We do not run a paid
 bug-bounty programme.
 
 ## Supported versions
