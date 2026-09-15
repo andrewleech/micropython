@@ -68,10 +68,9 @@ firmware author having opted out of it.
 
 ## What to expect after reporting
 
-The project is maintained by a small team. The timelines below are best-effort targets, not
-contractual guarantees. We will:
+The timelines below are best-effort targets, not contractual guarantees. We will:
 
-1. Acknowledge your report within 5 business days.
+1. Acknowledge your report within 7 days.
 2. Triage it, confirming the issue, determining affected versions and assessing severity, then share
    our assessment with you.
 3. Develop and review a fix privately in the GitHub advisory, keeping you informed and credited
