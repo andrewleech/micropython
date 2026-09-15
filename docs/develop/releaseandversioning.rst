@@ -11,8 +11,7 @@ is deliberate. It does not imply stability for internal or C-level interfaces.
 
 Breaking changes are deferred to 2.0 and collected behind ``MICROPY_PREVIEW_VERSION_2``, which
 defaults to off. A default build retains the ``1.x`` API; enabling the option selects the in-progress
-2.0 API. The `2.0 migration guide
-<https://docs.micropython.org/en/latest/reference/micropython2_migration.html>`_ records these
+2.0 API. The :doc:`2.0 migration guide </reference/micropython2_migration>` records these
 changes as they are introduced.
 
 Releases are feature-driven rather than tied to a fixed calendar. MicroPython maintains a single
