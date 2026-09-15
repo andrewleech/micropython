@@ -95,10 +95,12 @@ forward. Public reports are discussed and fixed in the open.
 
 ### CVEs
 
-Where an issue warrants one, we will request a CVE and include it with the published fix when
-assigned. An upstream CVE normally remains the identifier for a dependency vulnerability.
-MicroPython may request a separate CVE when its integration, configuration, or release handling
-creates a distinct vulnerability that users need to track separately.
+When a security issue is identified through a public report, private report, testing, normal
+development, or retrospective review, we assess whether it warrants a CVE. Where appropriate, we
+will request a CVE and include it with the published fix when assigned. An upstream CVE normally
+remains the identifier for a dependency vulnerability. MicroPython may request a separate CVE when
+its integration, configuration, or release handling creates a distinct vulnerability that users need
+to track separately.
 
 ### Credit
 
