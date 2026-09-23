@@ -79,11 +79,14 @@ def _detect_host():
     """Return the address debugpy should bind to on this runtime.
 
     A board that has an address of its own reports it, so tooling never has
-    to guess or hardcode a device IP. Interfaces are tried cheapest first: a
-    wired `LAN` is up without anything having to associate, while
-    constructing a `WLAN` starts the wifi driver on some ports. Only an
-    interface that is already active is asked, since bringing one up is the
-    caller's business and not a side effect of launching a debug session.
+    to guess or hardcode a device IP. USB networking comes first: its peer is
+    the host at the other end of the cable, the one driving this session, so
+    its address is always reachable from there where a WLAN one may not be.
+    Then cheapest first: a wired `LAN` is up without anything having to
+    associate, while constructing a `WLAN` starts the wifi driver on some
+    ports. Only an interface that is already active is asked, since bringing
+    one up is the caller's business and not a side effect of launching a
+    debug session.
 
     Everything else - the unix port with no `network` module, a board whose
     interfaces are all down, any error while probing - falls back to binding
@@ -96,6 +99,8 @@ def _detect_host():
         return "0.0.0.0"
 
     makers = []
+    if hasattr(network, "USBD_NCM"):
+        makers.append(network.USBD_NCM)
     if hasattr(network, "LAN"):
         makers.append(network.LAN)
     if hasattr(network, "WLAN"):
