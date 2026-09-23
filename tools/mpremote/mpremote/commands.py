@@ -906,7 +906,9 @@ def _exit_on_signal(exit_code=1):
             signal.signal(sig, old)
 
 
-def _stay_attached(proxy, message, pump_failed=None, device_gone=None, console=None):
+def _stay_attached(
+    proxy, message, pump_failed=None, device_gone=None, console=None, mount_pump=None
+):
     """Block until `proxy`'s one client session ends, reaping it on every exit path.
 
     Shared by `--dap-log`'s own proxy and a `--dap-repl` bridge - both are a
@@ -935,8 +937,15 @@ def _stay_attached(proxy, message, pump_failed=None, device_gone=None, console=N
     does to the board. A caller passes None when something already reads that
     connection: a mount's own RPC pump, or a `repl_dap` channel, whose reader
     owns the port and would lose frames to a second one.
+
+    `mount_pump` is a mounted session's `_pump_mount` thread, not yet
+    started. It prints the device's console, so it is started here, after
+    `message`, for the same reason the console reader is: a line of this
+    process's own must not land in the middle of one of the board's.
     """
     print(message, flush=True)
+    if mount_pump is not None:
+        mount_pump.start()
     console_stop = threading.Event()
     console_thread = None
     if console is not None:
@@ -985,44 +994,46 @@ def _stay_attached(proxy, message, pump_failed=None, device_gone=None, console=N
         cleanup()
 
 
-def _stay_attached_mount(message, pump_failed=None):
-    """Block until Ctrl-C or a reaping signal, for a mount with no proxy to watch.
+def _stay_attached_mount(message, pump_failed=None, finished=None, mount_pump=None):
+    """Block until the program ends, Ctrl-C or a reaping signal, for a mount with no proxy.
 
     A mounted session with neither a `--dap-repl` bridge nor a `--dap-log`
     proxy has no client-facing object of its own whose end marks the debug
     session as over - the DAP client talks straight to the device's TCP
-    endpoint - so this just waits to be interrupted. The `_pump_mount`
-    thread started alongside it is what actually keeps the mount's
-    filesystem RPC serviced while this blocks; `pump_failed` is that
-    thread's own signal that it stopped for a reason other than this
-    function's normal teardown, so a wedged device (see mount_local's
-    docstring) ends this wait instead of leaving it stuck until a user
-    notices and reaches for Ctrl-C themselves.
+    endpoint. The `_pump_mount` thread started alongside it is what actually
+    keeps the mount's filesystem RPC serviced while this blocks, and it is
+    also what sees the session end on the device's side: `finished` is set
+    once the boot script has run to completion, whether the target returned,
+    raised, or its client went away. `pump_failed` is that thread's signal
+    that it stopped for a reason other than this function's normal teardown,
+    so a wedged device (see mount_local's docstring) ends this wait instead
+    of leaving it stuck until a user notices and reaches for Ctrl-C.
 
-    Ending this wait is always the normal, expected way a mounted
-    plain-network session finishes - there is no client-session end for
-    mpremote to observe instead, unlike `_stay_attached`'s proxy wait - so
-    both Ctrl-C and a reaping signal return normally (exit 0) rather than
-    treating the interruption as a fault. A `pump_failed` end is different:
-    it is reported by `_pump_mount` itself before this returns, so nothing
-    further is printed here.
+    A finished program, Ctrl-C and a reaping signal all return normally
+    (exit 0): each is an expected way for a mounted plain-network session to
+    end. A `pump_failed` end is different: it is reported by `_pump_mount`
+    itself before this returns, so nothing further is printed here.
+
+    `mount_pump`, not yet started, is started after `message` is printed;
+    see `_stay_attached` for why.
     """
     print(message, flush=True)
+    if mount_pump is not None:
+        mount_pump.start()
     with _exit_on_signal(exit_code=0):
         try:
             while True:
                 if pump_failed is not None and pump_failed.is_set():
+                    return
+                if finished is not None and finished.is_set():
+                    print("the program on the device has ended", flush=True)
                     return
                 time.sleep(_POLL_S)
         except KeyboardInterrupt:
             return
 
 
-def _discard(_data):
-    """`read_until` data_consumer for a loop that wants the reads, not the bytes."""
-
-
-def _pump_mount(transport, stop_event, failed_event):
+def _pump_mount(transport, stop_event, failed_event, finished_event):
     """Background thread: keep a mounted transport's filesystem RPC serviced.
 
     `SerialIntercept.read` (installed on `transport.serial` by `mount_local`)
@@ -1031,11 +1042,17 @@ def _pump_mount(transport, stop_event, failed_event):
     the boot script is running - the DAP traffic the client drives rides a
     separate TCP endpoint. Without something to keep calling read on it, an
     RPC request the device makes on its next filesystem access would sit
-    unanswered and the device would block on it indefinitely. Ordinary console
-    bytes collected between RPC commands are discarded rather than printed:
-    this loop reads the RPC framing itself, so what is left over is whatever
-    fell between two commands rather than a clean stream of the program's
-    output. Emptying the console is what the device needs of it either way.
+    unanswered and the device would block on it indefinitely.
+
+    What `SerialIntercept` hands back is the console with the RPC already
+    taken out, so it is the debugged program's own output and goes to
+    stdout, through a `ConsoleSink` so a stalled consumer of this command's
+    output cannot stop the pump (see `_pump_console`). It ends the way every
+    raw-REPL exec does: the program's output and `\\x04`, anything the REPL
+    itself reported and a second `\\x04`. The second one means the boot
+    script is over and the device is back at a raw-REPL prompt; the REPL's
+    part goes to stderr, `finished_event` is set, and this returns, since
+    there is no more RPC to serve and the caller has a session to end.
 
     A read raising while `stop_event` is not set means the device stopped
     answering an RPC command mid-exchange, not that the caller asked this
@@ -1043,36 +1060,61 @@ def _pump_mount(transport, stop_event, failed_event):
     half-answered filesystem RPC leaves the device with no way back to a
     prompt on its own. `failed_event` reports that to whichever "stay
     attached" wait is running alongside this thread, so it stops waiting on
-    a session that is already over in every way that matters; a plain
-    return with nothing set is only reached when `stop_event` itself asked
-    for it.
+    a session that is already over in every way that matters. A return with
+    neither event set is only reached when `stop_event` itself asked for it.
     """
-    while not stop_event.is_set():
-        try:
-            # timeout_overall_strict: a single filesystem RPC command can
-            # stream bytes continuously for close to a whole _POLL_S window
-            # (a large file read), and this loop's only cadence for noticing
-            # stop_event is between read_until calls - non-strict semantics
-            # would let such a command's read_until run well past _POLL_S
-            # before this loop gets another chance to check.
-            transport.read_until(
-                1,
-                b"\x04",
-                timeout=_POLL_S,
-                timeout_overall=_POLL_S,
-                data_consumer=_discard,
-                timeout_overall_strict=True,
-            )
-        except Exception as er:
-            if not stop_event.is_set():
-                print(
-                    f"warning: the mount's filesystem RPC for "
-                    f"{transport.device_name!r} stopped unexpectedly "
-                    f"({_one_line(er)}); only a power cycle clears it",
-                    file=sys.stderr,
+    sink = ConsoleSink(limit=_CONSOLE_BUFFER_BYTES, poll=_CONSOLE_POLL_S)
+    repl_output = bytearray()
+    eofs = 0
+
+    def _consume(byte):
+        nonlocal eofs
+        if byte == b"\x04":
+            eofs += 1
+        elif eofs == 0:
+            sink.write(byte)
+        else:
+            repl_output.extend(byte)
+
+    try:
+        while not stop_event.is_set() and eofs < 2:
+            try:
+                # timeout_overall_strict: a single filesystem RPC command can
+                # stream bytes continuously for close to a whole _POLL_S window
+                # (a large file read), and this loop's only cadence for noticing
+                # stop_event is between read_until calls - non-strict semantics
+                # would let such a command's read_until run well past _POLL_S
+                # before this loop gets another chance to check.
+                transport.read_until(
+                    1,
+                    b"\x04",
+                    timeout=_POLL_S,
+                    timeout_overall=_POLL_S,
+                    data_consumer=_consume,
+                    timeout_overall_strict=True,
                 )
-                failed_event.set()
-            return
+            except Exception as er:
+                if not stop_event.is_set():
+                    print(
+                        f"warning: the mount's filesystem RPC for "
+                        f"{transport.device_name!r} stopped unexpectedly "
+                        f"({_one_line(er)}); only a power cycle clears it",
+                        file=sys.stderr,
+                    )
+                    failed_event.set()
+                return
+    finally:
+        dropped = sink.close()
+        if dropped:
+            print(
+                f"warning: dropped {dropped} bytes of the board's console output; "
+                "whatever is reading this command's output did not keep up",
+                file=sys.stderr,
+            )
+    if eofs >= 2:
+        if repl_output.strip():
+            print(repl_output.decode(errors="replace").rstrip(), file=sys.stderr)
+        finished_event.set()
 
 
 def _pump_console(transport, stop_event):
@@ -1671,7 +1713,7 @@ def do_debug(state, args):
     # signal-safe on their own.
     signal_guard = _exit_on_signal() if source_root is not None else contextlib.nullcontext()
     mounted = False
-    pump_stop = pump_thread = pump_failed = None
+    pump_stop = pump_thread = pump_failed = pump_finished = None
     with signal_guard:
         try:
             if source_root is not None:
@@ -1738,20 +1780,26 @@ def do_debug(state, args):
                 # running - the client's DAP traffic rides a separate TCP
                 # endpoint - so a background thread has to pump it for as
                 # long as this function stays attached below, whichever
-                # shape that takes. `pump_failed` is
-                # set by the thread itself if it ever stops for a reason
-                # other than the `pump_stop` this function requests, so the
-                # "stay attached" call below can tell an unrecoverably wedged
-                # device (see mount_local's docstring) apart from a normal
-                # end of session and stop waiting on it.
+                # shape that takes. The "stay attached" call starts it, once
+                # this process's own lines are out: it prints the board's
+                # console, and the handshake line must stay whole. Nothing is
+                # lost by the wait, since the device makes no filesystem RPC
+                # until a client has connected, and that needs the handshake.
+                # `pump_failed` is set by the thread itself if it ever stops
+                # for a reason other than the `pump_stop` this function
+                # requests, so the "stay attached" call can tell an
+                # unrecoverably wedged device (see mount_local's docstring)
+                # apart from a normal end of session and stop waiting on it;
+                # `pump_finished` is the boot script having run to its end,
+                # which is the session being over from the device's side.
                 pump_stop = threading.Event()
                 pump_failed = threading.Event()
+                pump_finished = threading.Event()
                 pump_thread = threading.Thread(
                     target=_pump_mount,
-                    args=(state.transport, pump_stop, pump_failed),
+                    args=(state.transport, pump_stop, pump_failed, pump_finished),
                     daemon=True,
                 )
-                pump_thread.start()
 
             # The client-facing port for a bridge this process runs itself.
             dap_bind_port = dap_log_bind_port if dap_log_arg else (args.port or 0)
@@ -1793,6 +1841,8 @@ def do_debug(state, args):
                     _stay_attached_mount(
                         "staying attached to service the mounted filesystem; Ctrl-C ends it",
                         pump_failed=pump_failed,
+                        finished=pump_finished,
+                        mount_pump=pump_thread,
                     )
                 return handshake
 
@@ -1808,14 +1858,16 @@ def do_debug(state, args):
                 proxy,
                 "staying attached to run the --dap-log proxy; Ctrl-C ends it",
                 pump_failed=pump_failed,
+                device_gone=pump_finished.is_set if mounted else None,
                 console=None if mounted else state.transport,
+                mount_pump=pump_thread,
             )
             return reported
         finally:
             if pump_stop is not None:
                 pump_stop.set()
             pump_alive = False
-            if pump_thread is not None:
+            if pump_thread is not None and pump_thread.ident is not None:
                 pump_thread.join(timeout=2)
                 pump_alive = pump_thread.is_alive()
             # getattr, not the local `mounted` flag: a `mount_local` that
