@@ -298,10 +298,11 @@ def _evict_target_modules(baseline):
 def _report(line, debugpy):
     """Print a marker line to stdout and show it in the client's debug console.
 
-    Both, because neither reaches everyone on its own: a mounted serial session
-    discards everything the device prints, and a caller reading stdout may have
-    no DAP client of its own. The text is identical on both channels, so there
-    is one format to parse rather than two.
+    Both, because neither reaches everyone on its own: a network target's
+    console is read by nobody once `mpremote debug` has handed over the
+    endpoint, and a caller reading stdout may have no DAP client of its own.
+    The text is identical on both channels, so there is one format to parse
+    rather than two.
     """
     print(line)
     debugpy.console(line + "\n")
@@ -463,6 +464,37 @@ def _run():
             return
 
 
+def _report_error(e):
+    """Print the target's traceback, and show it to the client too.
+
+    A client whose program died has otherwise been told nothing at all: the
+    session ending (see `_end_session`) says that it stopped, not why.
+    """
+    import io
+
+    buf = io.StringIO()
+    sys.print_exception(e, buf)
+    text = buf.getvalue()
+    print(text, end="")
+    debugpy = sys.modules.get("debugpy")
+    if debugpy is not None:
+        debugpy.console(text)
+
+
+def _end_session():
+    """Close the client's DAP connection once the target is over.
+
+    Nothing else would: the debug server has no thread of its own, so a
+    finished program leaves an open connection that no longer answers, and the
+    client waits on it for as long as anyone lets it - the only difference
+    between a program that ended and one stuck in a loop is then which of the
+    two the user guesses. Closing it is how a client learns the run is over.
+    """
+    debugpy = sys.modules.get("debugpy")
+    if debugpy is not None:
+        debugpy.disconnect()
+
+
 # Guarded so importing this module does not run device boot code: it ships as
 # a resource inside the mpremote package, where a package walk or autodoc pass
 # would otherwise execute it on the host. Both real invocations - `micropython
@@ -474,8 +506,10 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nInterrupted by user")
     except Exception as e:
-        print(f"Error: {e}")
+        _report_error(e)
     finally:
-        # Last, and after the prints above, so anything they said still goes
-        # out through the framing the host is still reading.
+        # Both last, and in this order: the prints above still go out through
+        # the framing the host is reading, and the REPL stream is only given
+        # back once the DAP channel riding it is closed.
+        _end_session()
         _release_repl_stream()
