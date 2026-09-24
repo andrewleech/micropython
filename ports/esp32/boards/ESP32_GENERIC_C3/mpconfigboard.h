@@ -7,3 +7,11 @@
 
 // Enable UART REPL for modules that have an external USB-UART and don't use native USB.
 #define MICROPY_HW_ENABLE_UART_REPL         (1)
+
+// This board is a debug-firmware build target: enable sys.settrace() support.
+#ifndef MICROPY_PY_SYS_SETTRACE
+#define MICROPY_PY_SYS_SETTRACE (1)
+#endif
+#ifndef MICROPY_PY_SYS_SETTRACE_LOCALNAMES
+#define MICROPY_PY_SYS_SETTRACE_LOCALNAMES (1)
+#endif
