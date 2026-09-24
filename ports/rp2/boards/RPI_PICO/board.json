@@ -15,5 +15,8 @@
     "product": "Pico",
     "thumbnail": "",
     "url": "https://www.raspberrypi.com/products/raspberry-pi-pico/",
+    "variants": {
+        "DEBUG_NCM": "sys.settrace debugging with USB NCM networking"
+    },
     "vendor": "Raspberry Pi"
 }
