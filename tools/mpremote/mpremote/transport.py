@@ -228,6 +228,23 @@ class Transport:
         except TransportExecError as e:
             raise _convert_filesystem_error(e, path) from None
 
+    def fs_ensure_path_exists(self, path):
+        # mkdir every directory in dirname(path) that doesn't already exist.
+        # Equivalent to os.makedirs(os.path.dirname(path)) run on the device.
+        split = path.split("/")
+
+        # Handle paths starting with "/".
+        if not split[0]:
+            split.pop(0)
+            split[0] = "/" + split[0]
+
+        prefix = ""
+        for i in range(len(split) - 1):
+            prefix += split[i]
+            if not self.fs_exists(prefix):
+                self.fs_mkdir(prefix)
+            prefix += "/"
+
     def fs_rmdir(self, path):
         try:
             self.exec("import os\nos.rmdir(%s)" % _quote_path(path))
