@@ -72,6 +72,7 @@ The full list of supported commands are:
 - `eval <mpremote_command_eval>`
 - `exec <mpremote_command_exec>`
 - `run <mpremote_command_run>`
+- `debug <mpremote_command_debug>`
 - `fs <mpremote_command_fs>`
 - `df <mpremote_command_df>`
 - `edit <mpremote_command_edit>`
@@ -214,6 +215,139 @@ The full list of supported commands are:
   By default, ``mpremote run`` will display any output from the script until it
   terminates. The ``--no-follow`` flag can be specified to return immediately and leave
   the device running the script in the background.
+
+.. _mpremote_command_debug:
+
+- **debug** -- debug a script on the device with a DAP client:
+
+  .. code-block:: bash
+
+      $ mpremote debug [options] [module[:method]]
+
+  Runs code on the device under a DAP (Debug Adapter Protocol) server, so an
+  editor such as VS Code can set breakpoints in it, step through it and read
+  its variables. Two things have to be in place first:
+
+  - the firmware must be built with ``MICROPY_PY_SYS_SETTRACE``, which is not
+    enabled by default on most boards;
+  - the ``debugpy`` package must be installed on the device. It lives in
+    ``micropython-lib`` under ``python-ecosys/debugpy``.
+
+  Without either one the command reports which is missing rather than
+  failing inside the debug server.
+
+  ``module[:method]`` names the code to run under the debugger. It defaults
+  to the resolved target's own ``program``, or ``target:main`` if there is
+  none. Put ``+`` in front of a chained mpremote command so it is not read as
+  this argument.
+
+  The device to debug is resolved in this order: ``--target``/``-t`` if
+  given; otherwise the device a preceding ``connect`` in the same chain is
+  already on, so ``mpremote connect <device> debug app:main`` debugs that
+  device; otherwise the sole target in an ``mpdebug.toml`` (see below), or an
+  error listing the available names if it defines several. ``--target``
+  itself takes either the name of a target in ``mpdebug.toml``, ``unix`` (a
+  local unix-port build, POSIX hosts only - it needs ``fcntl``), or a connect
+  string as accepted by ``mpremote connect``.
+
+  Every option must come before ``module[:method]``: mpremote reads the first
+  bare word after ``debug`` as the program and everything after it as the
+  next chained command, so an option placed later is silently taken as part
+  of that next command rather than as an option here.
+
+  The device reports its debug-server endpoint and firmware capabilities as
+  soon as it has bound the listening socket, before any DAP client attaches,
+  on one line of stdout:
+
+  .. code-block:: text
+
+      MPDBG-READY {"host": "192.0.2.10", "port": 5678, "caps": {...}}
+
+  Tooling parses that one line and ignores everything around it. A device
+  reporting a real address prints it verbatim and the command returns,
+  leaving the device waiting for a client; a board with no address to report
+  (no network interface, or one the firmware cannot read) reports the
+  wildcard ``0.0.0.0``, which is not an address to connect to, so the command
+  errors instead of printing an endpoint.
+
+  ``--port`` sets the listening port; left unset, the device applies its own
+  default. ``--port 0`` is rejected: it asks the system to choose, which the
+  device can only report back through ``getsockname()``, and no port
+  currently binds it. ``--timeout`` sets how long to wait for the device's
+  report; it does not bound anything after that.
+
+  ``--source PATH`` mounts a host directory on the device for the session and
+  emits the ``pathMappings`` a client needs to match its own files to the
+  device paths in the DAP frames, so breakpoints can be set in source the
+  board does not have on its filesystem.
+
+  ``--loop`` keeps the process and the DAP session alive across re-runs: the
+  DAP ``restart`` request is honoured, and each restart drops whatever the
+  program imported and imports it again, so an edit under ``--source`` takes
+  effect with no upload and no reset. Each re-run announces itself with a
+  ``MPDBG-RESTART {"iteration": N, "evicted": [...]}`` line, which is
+  deliberately not another ``MPDBG-READY``: the endpoint has not changed.
+
+  ``--dap-log`` records every DAP message (timestamp, direction, decoded
+  JSON) as JSONL. mpremote never sits in the data path a plain ``debug``
+  reports, so logging works by interposing a local proxy, bound to
+  loopback only, and reporting the proxy's endpoint instead of the
+  device's. Without ``--port``, the proxy binds an OS-assigned port; with
+  it, ``--port`` pins the proxy's (client-facing) port instead of the
+  device's, so a launch.json with a fixed port still goes through the
+  logger - the device is given a separate port of its own, chosen by binding
+  one on the host and closing it again. Once a client attaches, the proxy
+  connects through to the device and pumps both directions. The proxy serves
+  that one client session and does not re-arm afterwards; a second client
+  attaching to the same reported endpoint hangs rather than reaching the
+  device. ``--dap-log-file FILE`` names the JSONL path (an error unless
+  ``--dap-log`` is also given); omitted, it defaults to a timestamped file in
+  the current directory.
+
+  Three things keep the command attached instead of reporting and returning:
+  a ``unix`` target, whose subprocess it supervises; ``--dap-log``, whose
+  proxy has to keep running for the client to reach the device through it;
+  and ``--source``, whose mount needs its filesystem RPC serviced. While
+  attached, the command drains and prints the board's console: a console held
+  open but never read back-pressures into the device until the program stops.
+
+  A project-level ``mpdebug.toml``, discovered by searching the current
+  directory and its parents (stopping at a ``.git`` directory or ``$HOME``),
+  replaces per-invocation connect strings and capability bookkeeping with
+  named targets:
+
+  .. code-block:: toml
+
+      [target.pico]
+      kind = "serial"
+      device = "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_XXXX-if00"
+      requires = ["settrace"]
+      program = "app:run"
+
+  ``kind`` is one of ``unix``, ``serial``, ``network``. ``device`` is a
+  connect string, required for ``serial`` and optional for ``network``
+  (where it names the control-plane device used for the pre-boot handshake -
+  the debug endpoint itself is always reported by the device, never written
+  here); prefer a stable ``/dev/serial/by-id/...`` path over ``/dev/ttyACMn``,
+  which can renumber on replug (using one prints a warning but still works).
+  ``program`` is this target's ``module[:method]`` default and ``source`` its
+  ``--source`` default; the command-line flags override both.
+
+  ``firmware`` applies to a ``unix`` target only, and is either a path to a
+  built ``micropython`` binary (a relative one is resolved against the
+  directory holding ``mpdebug.toml``, not the current directory) or the
+  literal ``"system"`` to use whichever ``micropython`` is on ``PATH``. The
+  environment variable ``MPY_DEBUG_FIRMWARE`` overrides it. Since
+  ``mpdebug.toml`` is found by searching upward from the current directory,
+  the binary about to be run is named on stdout before it is started.
+
+  ``requires`` lists capability names that must appear (and be true) in the
+  device's handshake; an unrecognised name is rejected when the file is read,
+  and a missing capability is a hard error once the device has connected,
+  both before any client attaches. The names come from the ``debugpy``
+  package's own runtime probe rather than from a firmware build option, so
+  the set is whatever that version reports - ``settrace`` is the one every
+  build either has or has not.
 
 .. _mpremote_command_fs:
 
