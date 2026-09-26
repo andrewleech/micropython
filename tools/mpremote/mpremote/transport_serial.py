@@ -550,6 +550,9 @@ fs_hook_cmds = {
     "CMD_RENAME": 11,
     "CMD_MKDIR": 12,
     "CMD_RMDIR": 13,
+    # 14..16 are taken: `repl_dap` frames the DAP channel in this same marker
+    # namespace so the two can share one stream, and uses those three. A new
+    # filesystem command has to go above them.
 }
 
 fs_hook_code = f"""\

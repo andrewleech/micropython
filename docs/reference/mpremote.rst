@@ -304,12 +304,25 @@ The full list of supported commands are:
   ``--dap-log`` is also given); omitted, it defaults to a timestamped file in
   the current directory.
 
-  Three things keep the command attached instead of reporting and returning:
+  ``--dap-repl`` puts the DAP channel on the stream already carrying the
+  REPL, for a board that has only that one stream and no network - a single
+  USB-CDC interface, or a UART. The debug traffic and the program's output
+  share the wire, marked apart by a framing layer, the way ``mount`` already
+  interleaves its filesystem RPC. It reaches only ports where the REPL is a
+  Python object in a ``dupterm`` slot, and refuses rather than taking a
+  stream that would carry nothing. While such a session runs the REPL is not
+  usable for anything else, and Ctrl-C reaches the target as data rather than
+  as an interrupt, so the session ends when the host lets go of the port.
+  ``--dap-repl`` cannot be combined with ``--source`` (both frame the same
+  wire) or with a ``unix`` target (which has no stream to share).
+
+  Four things keep the command attached instead of reporting and returning:
   a ``unix`` target, whose subprocess it supervises; ``--dap-log``, whose
   proxy has to keep running for the client to reach the device through it;
-  and ``--source``, whose mount needs its filesystem RPC serviced. While
-  attached, the command drains and prints the board's console: a console held
-  open but never read back-pressures into the device until the program stops.
+  ``--source``, whose mount needs its filesystem RPC serviced; and
+  ``--dap-repl``, whose whole channel runs through mpremote. While attached,
+  the command drains and prints the board's console: a console held open but
+  never read back-pressures into the device until the program stops.
 
   A project-level ``mpdebug.toml``, discovered by searching the current
   directory and its parents (stopping at a ``.git`` directory or ``$HOME``),
@@ -323,6 +336,7 @@ The full list of supported commands are:
       device = "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_XXXX-if00"
       requires = ["settrace"]
       program = "app:run"
+      source = "./app"
 
   ``kind`` is one of ``unix``, ``serial``, ``network``. ``device`` is a
   connect string, required for ``serial`` and optional for ``network``
@@ -330,8 +344,9 @@ The full list of supported commands are:
   the debug endpoint itself is always reported by the device, never written
   here); prefer a stable ``/dev/serial/by-id/...`` path over ``/dev/ttyACMn``,
   which can renumber on replug (using one prints a warning but still works).
-  ``program`` is this target's ``module[:method]`` default and ``source`` its
-  ``--source`` default; the command-line flags override both.
+  ``program`` is this target's ``module[:method]`` default, ``source`` its
+  ``--source`` default, and ``dap_repl = true`` its ``--dap-repl`` default;
+  the command-line flags override all three.
 
   ``firmware`` applies to a ``unix`` target only, and is either a path to a
   built ``micropython`` binary (a relative one is resolved against the

@@ -46,11 +46,16 @@ client has finished configuring breakpoints, so breakpoints set before then
 are already applied by the time the target starts running.
 
 `dap_stream`, when given, moves the DAP channel off TCP and onto a byte
-stream: a path this runtime can open. `host`/`port` in the handshake then
-become `"serial"`/`0` and the `port` argument goes unused. A caller that asks
-for a stream and does not get one is told so: this never falls back to TCP
-behind the caller's back, because the caller has a bridge waiting on the
-stream and nothing listening on a port.
+stream: `"repl"` shares the stream this script was launched over, and
+anything else is a path this runtime can open. Either way `host`/`port` in
+the handshake become `"serial"`/`0` and the `port` argument goes unused. A
+caller that asks for a stream and does not get one is told so: this never
+falls back to TCP behind the caller's back, because the caller has a bridge
+waiting on the stream and nothing listening on a port. `caps["repl_dap"]`
+reports whether this run split the REPL stream - a property of the session
+rather than of the build, and the channel a board with one UART and no
+network has. It is the only one that changes what the REPL itself can do
+while a session is live (see the `debug` section of the mpremote docs).
 
 `loop`, when the literal `"loop"`, keeps the process and the DAP session alive
 across re-runs of the target: the DAP `restart` request is advertised and
@@ -74,11 +79,14 @@ def _detect_host():
     """Return the address debugpy should bind to on this runtime.
 
     A board that has an address of its own reports it, so tooling never has
-    to guess or hardcode a device IP. Interfaces are tried cheapest first: a
-    wired `LAN` is up without anything having to associate, while
-    constructing a `WLAN` starts the wifi driver on some ports. Only an
-    interface that is already active is asked, since bringing one up is the
-    caller's business and not a side effect of launching a debug session.
+    to guess or hardcode a device IP. USB networking comes first: its peer is
+    the host at the other end of the cable, the one driving this session, so
+    its address is always reachable from there where a WLAN one may not be.
+    Then cheapest first: a wired `LAN` is up without anything having to
+    associate, while constructing a `WLAN` starts the wifi driver on some
+    ports. Only an interface that is already active is asked, since bringing
+    one up is the caller's business and not a side effect of launching a
+    debug session.
 
     Everything else - the unix port with no `network` module, a board whose
     interfaces are all down, any error while probing - falls back to binding
@@ -91,6 +99,8 @@ def _detect_host():
         return "0.0.0.0"
 
     makers = []
+    if hasattr(network, "USBD_NCM"):
+        makers.append(network.USBD_NCM)
     if hasattr(network, "LAN"):
         makers.append(network.LAN)
     if hasattr(network, "WLAN"):
@@ -113,17 +123,110 @@ def _detect_host():
     return "0.0.0.0"
 
 
+# The dupterm slot the REPL occupies on the ports that put it in one. stm32
+# fixes it at 1 (`pyb_usb_vcp_init0`), and no other port currently has enough
+# slots for it to be anything else; a port that arrives with a different
+# arrangement has to be taught this rather than discovering it, since reading
+# every slot to find the busy one would displace whichever came first.
+_REPL_DUPTERM_SLOT = 1
+
+# Holds the one `ReplMux` for the length of a run that split the REPL stream,
+# empty otherwise. Two things read it: the handshake, for `caps["repl_dap"]`,
+# and the release at exit, which has to put the REPL back.
+_repl_mux = []
+
+
+def _repl_dap_stream():
+    """Split the REPL's own stream and return the DAP half.
+
+    The channel a board with one UART and no network has. What makes it
+    possible is that on some ports the runtime's console is a Python object in
+    a `dupterm` slot, so replacing it with a framing wrapper puts DAP on the
+    same wire and leaves program output on it too, marked apart. Where the
+    slot is empty the runtime writes to its console directly and no Python
+    object can intercept it, so this refuses rather than handing back a stream
+    that would carry nothing: rp2 and esp32 build one slot and the REPL is not
+    in it, and the unix port has no `dupterm` at all.
+
+    The REPL is displaced for the length of the session. On stm32, installing
+    anything in the slot detaches the interface from the REPL
+    (`usb_vcp_attach_to_repl(vcp, false)`), which stops the interrupt
+    character being scanned, so Ctrl-C reaches the target as data instead of
+    raising `KeyboardInterrupt`. The mpremote docs state that trade-off.
+
+    Which is why the stream must be able to say when the host has let go. On
+    every other channel a session that waits forever costs nothing the user
+    cannot walk away from; on this one it holds the console the board is
+    reached by, and Ctrl-C cannot end it. A stream with no `isconnected` is
+    refused here rather than taken and never given back.
+    """
+    import os
+
+    from debugpy.common import repl_mux
+
+    mux = repl_mux.ReplMux()
+    try:
+        previous = os.dupterm(mux.console, _REPL_DUPTERM_SLOT)
+    except (AttributeError, ValueError, OSError) as er:
+        raise OSError(f"this runtime cannot share the REPL stream: {er}")
+    if previous is None:
+        # An empty slot is not the REPL, and installing into it would have
+        # diverted nothing; put it back the way it was found.
+        os.dupterm(None, _REPL_DUPTERM_SLOT)
+        raise OSError(f"no REPL stream in dupterm slot {_REPL_DUPTERM_SLOT} to share")
+    if getattr(previous, "isconnected", None) is None:
+        os.dupterm(previous, _REPL_DUPTERM_SLOT)
+        raise OSError("the REPL stream cannot report the host letting go of it")
+    # Registered before it is attached: from the moment the wrapper is in the
+    # slot, the release path has to know about it. A failure in between would
+    # otherwise leave the board framing its own console with nothing able to
+    # put it back, and on this channel there is no second way in.
+    _repl_mux.append(mux)
+    try:
+        mux.attach(previous)
+    except Exception:
+        _repl_mux.pop()
+        os.dupterm(previous, _REPL_DUPTERM_SLOT)
+        raise
+    return mux.dap
+
+
+def _release_repl_stream():
+    """Put the REPL back, if this run took it. Safe to call when it did not.
+
+    Runs on every exit path, including a failed one: a board left with the
+    framing wrapper in the slot answers a plain REPL with escaped bytes, and
+    nothing short of a reset would clear it.
+    """
+    import os
+
+    while _repl_mux:
+        mux = _repl_mux.pop()
+        try:
+            port = mux.detach()
+            os.dupterm(port, _REPL_DUPTERM_SLOT)
+        except Exception:
+            pass
+
+
 def _detect_dap_stream(spec=None):
     """Return an open reader/writer stream for the DAP channel, or None for TCP.
 
-    `spec` is the caller's choice of channel: `None` for TCP, or a path this
+    `spec` is the caller's choice of channel: `None` for TCP, `"repl"` for
+    a share of the stream this script was launched over, or a path this
     runtime can open directly (what the unix port has instead of a USB
     interface). Failing to produce the requested stream raises rather than
     returning None, so the caller never gets a TCP endpoint it has no client
     for.
+
+    `caps["repl_dap"]` is derived from which channel `_run()` actually picked
+    (see `debugpy.get_capabilities()`), never guessed here, so the two cannot
+    disagree.
     """
     if spec is None:
         return None
+    if spec == "repl":
+        return _repl_dap_stream()
     try:
         return open(spec, "r+b")
     except OSError as er:
@@ -195,10 +298,11 @@ def _evict_target_modules(baseline):
 def _report(line, debugpy):
     """Print a marker line to stdout and show it in the client's debug console.
 
-    Both, because neither reaches everyone on its own: a mounted serial session
-    discards everything the device prints, and a caller reading stdout may have
-    no DAP client of its own. The text is identical on both channels, so there
-    is one format to parse rather than two.
+    Both, because neither reaches everyone on its own: a network target's
+    console is read by nobody once `mpremote debug` has handed over the
+    endpoint, and a caller reading stdout may have no DAP client of its own.
+    The text is identical on both channels, so there is one format to parse
+    rather than two.
     """
     print(line)
     debugpy.console(line + "\n")
@@ -270,7 +374,11 @@ def _run():
         actual_host, actual_port = debugpy.listen(host=host, port=port)
     print(f"Debug server listening on {actual_host}:{actual_port}")
 
-    caps = debugpy.get_capabilities()
+    # `.copy()` first: with a session live `get_capabilities()` hands back the
+    # session's own dict, and which channel this run took is not the debug
+    # server's to report - only the boot script knows it split the REPL.
+    caps = debugpy.get_capabilities().copy()
+    caps["repl_dap"] = bool(_repl_mux)
     # Exactly one MPDBG-READY line, valid JSON, nothing else on this line.
     print("MPDBG-READY " + json.dumps({"host": actual_host, "port": actual_port, "caps": caps}))
 
@@ -356,6 +464,37 @@ def _run():
             return
 
 
+def _report_error(e):
+    """Print the target's traceback, and show it to the client too.
+
+    A client whose program died has otherwise been told nothing at all: the
+    session ending (see `_end_session`) says that it stopped, not why.
+    """
+    import io
+
+    buf = io.StringIO()
+    sys.print_exception(e, buf)
+    text = buf.getvalue()
+    print(text, end="")
+    debugpy = sys.modules.get("debugpy")
+    if debugpy is not None:
+        debugpy.console(text)
+
+
+def _end_session():
+    """Close the client's DAP connection once the target is over.
+
+    Nothing else would: the debug server has no thread of its own, so a
+    finished program leaves an open connection that no longer answers, and the
+    client waits on it for as long as anyone lets it - the only difference
+    between a program that ended and one stuck in a loop is then which of the
+    two the user guesses. Closing it is how a client learns the run is over.
+    """
+    debugpy = sys.modules.get("debugpy")
+    if debugpy is not None:
+        debugpy.disconnect()
+
+
 # Guarded so importing this module does not run device boot code: it ships as
 # a resource inside the mpremote package, where a package walk or autodoc pass
 # would otherwise execute it on the host. Both real invocations - `micropython
@@ -367,4 +506,10 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nInterrupted by user")
     except Exception as e:
-        print(f"Error: {e}")
+        _report_error(e)
+    finally:
+        # Both last, and in this order: the prints above still go out through
+        # the framing the host is reading, and the REPL stream is only given
+        # back once the DAP channel riding it is closed.
+        _end_session()
+        _release_repl_stream()
