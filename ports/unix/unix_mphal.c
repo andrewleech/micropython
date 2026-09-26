@@ -176,7 +176,13 @@ main_term:;
     unsigned char c;
     ssize_t ret;
     MP_HAL_RETRY_SYSCALL(ret, read(STDIN_FILENO, &c, 1), {});
-    if (ret == 0) {
+    if (ret <= 0) {
+        // A failed read is reported as end of input, like a read of zero
+        // bytes. Returning `c` would return whatever the stack held, and the
+        // errors that reach here do not clear - EIO once a pty's last other
+        // opener goes away, for one - so the REPL takes the uninitialised
+        // byte and immediately asks for another, spinning on an error nothing
+        // is going to resolve.
         c = 4; // EOF, ctrl-D
     } else if (c == '\n') {
         c = '\r';
