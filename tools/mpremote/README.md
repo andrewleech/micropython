@@ -19,6 +19,16 @@ The full list of supported commands are:
     mpremote eval <string>            -- evaluate and print the string
     mpremote exec <string>            -- execute the string
     mpremote run <file>               -- run the given local script
+    mpremote debug [module[:method]]  -- debug a script on the device with a DAP client
+                                         options:
+                                             --target <target>
+                                             --port <port>
+                                             --timeout <seconds>
+                                             --source <path>
+                                             --loop
+                                             --dap-repl
+                                             --dap-log
+                                             --dap-log-file <file>
     mpremote fs <command> <args...>   -- execute filesystem commands on the device
                                          command may be: cat, ls, cp, rm, mkdir, rmdir, sha256sum
                                          use ":" as a prefix to specify a file on the device
