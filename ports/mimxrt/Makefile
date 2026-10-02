@@ -299,6 +299,7 @@ SHARED_SRC_C += \
 	shared/tinyusb/mp_usbd.c \
 	shared/tinyusb/mp_usbd_cdc.c \
 	shared/tinyusb/mp_usbd_descriptor.c \
+	shared/tinyusb/mp_usbd_runtime.c \
 
 # Set flash driver name, base address and internal flash flag, based on the flash type.
 ifeq ($(MICROPY_HW_FLASH_TYPE),$(filter $(MICROPY_HW_FLASH_TYPE),qspi_nor_flash))
