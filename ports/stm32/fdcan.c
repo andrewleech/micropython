@@ -192,9 +192,15 @@ bool can_init(CAN_HandleTypeDef *can, int can_id, can_tx_mode_t tx_mode, uint32_
     // The total number of words reserved for the Rx FIFOs per FDCAN instance is 864 words.
     init->RxBuffersNbr = 0;
     init->RxBufferSize = FDCAN_DATA_BYTES_64;
-    init->RxFifo0ElmtsNbr = 24;
+    // Every filter targets FIFO0 (machine_can_port_set_filter(), below), to
+    // keep received frames in arrival order rather than split across two
+    // FIFOs that drain independently. FIFO1 therefore never receives
+    // anything on this MCU family, where the split is a configurable message
+    // RAM partition rather than a hardware-fixed one, so its share is given
+    // to FIFO0 instead of sitting reserved and unreachable.
+    init->RxFifo0ElmtsNbr = 48;
     init->RxFifo0ElmtSize = FDCAN_DATA_BYTES_64;
-    init->RxFifo1ElmtsNbr = 24;
+    init->RxFifo1ElmtsNbr = 0;
     init->RxFifo1ElmtSize = FDCAN_DATA_BYTES_64;
     #endif // STM32H7 || STM32N6
 
