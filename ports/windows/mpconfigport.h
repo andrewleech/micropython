@@ -79,6 +79,15 @@
 #endif
 #define MICROPY_VFS                 (1)
 #define MICROPY_VFS_POSIX           (1)
+#ifndef MICROPY_VFS_ROM
+#define MICROPY_VFS_ROM             (1)
+#endif
+#ifndef MICROPY_VFS_ROM_IOCTL
+#define MICROPY_VFS_ROM_IOCTL       (1)
+#endif
+#ifndef MICROPY_VFS_ROM_IOCTL_USE_EXTERNAL
+#define MICROPY_VFS_ROM_IOCTL_USE_EXTERNAL (1) // Use vfs_rom_ioctl.c instead of main.c
+#endif
 #define MICROPY_PY_FUNCTION_ATTRS   (1)
 #define MICROPY_PY_DESCRIPTORS      (1)
 #define MICROPY_PY_DELATTR_SETATTR  (1)
