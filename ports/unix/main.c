@@ -854,7 +854,7 @@ MP_NOINLINE int main_(int argc, char **argv) {
     #endif // MICROPY_ENABLE_COMPILER
 
     #if MICROPY_MODULE_FROZEN || (MICROPY_VFS_ROM && MICROPY_VFS_ROM_IOCTL)
-done_execution:
+done_execution:;
     #endif
 
     #if MICROPY_ENABLE_COMPILER
@@ -943,7 +943,7 @@ static size_t romfs_size = 0;
 static mp_obj_t romfs_memoryview = MP_OBJ_NULL;
 
 #if MICROPY_ROMFS_EMBEDDED
-// Embedded romfs data - symbols provided by objcopy from romfs.img
+// Embedded ROMFS data and end symbols provided by the linked ROMFS object.
 // Build will fail to link if ROMFS_IMG was specified but object not provided
 extern const uint8_t romfs_embedded_data[];
 extern const uint8_t romfs_embedded_end[];

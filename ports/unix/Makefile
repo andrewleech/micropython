@@ -263,15 +263,22 @@ endif
 
 include $(TOP)/py/mkrules.mk
 
-# Rule to build romfs_data.o from romfs.img (must be after mkrules.mk for OBJCOPY)
+# Embed ROMFS in a read-only object with stable data/end symbols.
 ifdef ROMFS_IMG
 $(BUILD)/romfs_data.o: $(ROMFS_IMG) | $(BUILD)
+ifeq ($(UNAME_S),Darwin)
+	$(Q)printf '%s\n' '.section __TEXT,__const' '.balign 4' \
+		'.globl _romfs_embedded_data' '.globl _romfs_embedded_end' \
+		'_romfs_embedded_data:' '.incbin "$(abspath $<)"' \
+		'_romfs_embedded_end:' | $(CC) -x assembler -c -o $@ -
+else
 	$(Q)$(OBJCOPY) -I binary -O elf64-x86-64 -B i386:x86-64 \
 		--rename-section .data=.rodata,alloc,load,readonly,data,contents \
 		--add-section .note.GNU-stack=/dev/null \
 		--redefine-sym _binary_$(subst .,_,$(subst /,_,$(ROMFS_IMG)))_start=romfs_embedded_data \
 		--redefine-sym _binary_$(subst .,_,$(subst /,_,$(ROMFS_IMG)))_end=romfs_embedded_end \
 		$< $@
+endif
 endif
 
 .PHONY: test test_full_no_native test_full test//% test/% test-failures print-failures clean-failures
