@@ -191,6 +191,104 @@ function ci_mpy_cross_debug_emitter {
 }
 
 ########################################################################################
+# mcuboot
+
+function ci_mcuboot_setup {
+    pip3 install cryptography intelhex click cbor2 pyyaml pytest
+    # lib/stm32lib and lib/CMSIS_6 are needed because the host builds take the STM32H5 flash
+    # geometry from its CMSIS header (via ports/stm32/mcuboot/mcuboot_dev.h).
+    git submodule update --init lib/mcuboot lib/stm32lib lib/CMSIS_6
+}
+
+function ci_mcuboot_python_test {
+    # Layout header, generator, signing and log tools, host harness drivers, stm32 build files
+    # and the pydfu wire tests.
+    python3 -m pytest tests/mcuboot shared/tinyusb/mboot/tests/test_pydfu_wire.py -q
+}
+
+function ci_mcuboot_mboot_test {
+    # DFU core, regions, elements and the MCUboot DFU glue, on fake flash and fake TinyUSB.
+    make -C shared/tinyusb/mboot/tests check
+}
+
+function ci_mcuboot_host_core_test {
+    # shared/mcuboot glue on unmodified bootutil: unit tests, boot and update scenarios, fault
+    # injection and torn-write sweeps.
+    make ${MAKEOPTS} -C tests/mcuboot/host/core test
+    make ${MAKEOPTS} -C tests/mcuboot/host/core BOARD=plain test
+    # Swap modes move and scratch, the overwrite-external and single slot policies, the high FIH
+    # profile and the Mbed TLS crypto option. f7 is the PYBD_SF6 as shipped (single slot policy on
+    # sectors of 32, 128 and 256 KiB).
+    for board in move scratch overwrite single fih_high mbedtls f7; do
+        make ${MAKEOPTS} -C tests/mcuboot/host/core BOARD=$board test
+    done
+    # Port counter backend and entropy source of the high FIH profile, and the generated linker
+    # symbols in a preprocessed linker script and in plain -T scripts.
+    make ${MAKEOPTS} -C tests/mcuboot/host/features test
+    make ${MAKEOPTS} -C tests/mcuboot/host/ldtest test
+}
+
+function ci_mcuboot_host_bootloader_test {
+    # Bootloader main flow (boot decision, recovery, DFU, power-cut sweeps) on a simulated board;
+    # the test target includes the PYBD_SF6 as shipped (DFU into the single slot, fsload from FAT on
+    # the SPI flash).
+    make ${MAKEOPTS} -C tests/mcuboot/host/bootloader test
+    make ${MAKEOPTS} -C tests/mcuboot/host/bootloader sweep
+    make ${MAKEOPTS} -C tests/mcuboot/host/bootloader BOARD=bl_ow sweep
+    make ${MAKEOPTS} -C tests/mcuboot/host/bootloader BOARD=bl_single sweep
+}
+
+function ci_mcuboot_host_sweep_test {
+    # Power-cut sweeps over stock bootutil. First the minimal reference flash map backend on the
+    # NUCLEO-H563ZI board, then the shared/mcuboot flash map backend on three flash geometries,
+    # a secondary slot in SPI NOR flash, swap modes move and scratch, and the overwrite-external
+    # and single slot policies. With single, a cut install leaves no valid image and the
+    # bootloader starts nothing.
+    make ${MAKEOPTS} -C tests/mcuboot/host test
+    for board in h5 nrf rt spi move scratch overwrite single f7; do
+        make ${MAKEOPTS} -C tests/mcuboot/host BOARD=$board GLUE=shared test
+    done
+    # The SPI NOR model behind drivers/memory/spiflash.c.
+    make ${MAKEOPTS} -C tests/mcuboot/host/spi_nor test
+}
+
+function ci_mcuboot_fuzz_test {
+    # Unit tests of the fsload readers (FAT and littlefs2) built with gcc, AddressSanitizer and
+    # UndefinedBehaviorSanitizer. The libFuzzer targets need clang and are not built here.
+    make ${MAKEOPTS} -C tests/mcuboot/fuzz test
+}
+
+function ci_mcuboot_unix_build {
+    ci_unix_build_helper VARIANT=mcuboot
+    ci_unix_build_helper VARIANT=mcuboot_single
+}
+
+function ci_mcuboot_unix_run_tests {
+    # The mcuboot module on a file-backed fake flash.
+    (cd tests && MICROPY_MICROPYTHON=../ports/unix/build-mcuboot/micropython ./run-tests.py mcuboot/test_module.py)
+    # Single slot policy: no update slot, so calls that need one raise EPERM.
+    (cd tests && MICROPY_MICROPYTHON=../ports/unix/build-mcuboot_single/micropython ./run-tests.py mcuboot/test_module_single.py)
+}
+
+function ci_mcuboot_stm32_bootloader_build {
+    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI submodules
+    make ${MAKEOPTS} -C ports/stm32/mcuboot BOARD=NUCLEO_H563ZI
+    make ${MAKEOPTS} -C ports/stm32/mcuboot BOARD=NUCLEO_H563ZI MCUBOOT_TEST_FI=1 BUILD=build-NUCLEO_H563ZI-fi
+    make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF6 submodules
+    make ${MAKEOPTS} -C ports/stm32/mcuboot BOARD=PYBD_SF6
+}
+
+function ci_mcuboot_stm32_app_build {
+    make ${MAKEOPTS} -C mpy-cross
+    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI submodules
+    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI MCUBOOT=1
+    # Install the signed application on the simulated board of the bootloader host tests.
+    make -C tests/mcuboot/host/bootloader test-app APP=$(pwd)/ports/stm32/build-NUCLEO_H563ZI-mcuboot/firmware.signed.bin
+    make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF6 submodules
+    make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF6 MCUBOOT=1
+}
+
+########################################################################################
 # ports/alif
 
 function ci_alif_setup {
