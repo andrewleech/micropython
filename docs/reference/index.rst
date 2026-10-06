@@ -32,6 +32,7 @@ implementation and the best practices to use them.
    asm_thumb2_index.rst
    filesystem.rst
    romfs.rst
+   mcuboot.rst
    unicode_support.rst
    pyboard.py.rst
    micropython2_migration.rst
