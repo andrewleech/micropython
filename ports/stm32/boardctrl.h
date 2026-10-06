@@ -42,7 +42,13 @@
 #endif
 
 #ifndef MICROPY_BOARD_ENTER_BOOTLOADER
-#if MICROPY_HW_USES_BOOTLOADER
+#if MICROPY_HW_MCUBOOT_APP
+#if !MICROPY_PY_MCUBOOT
+#error "MICROPY_HW_MCUBOOT_APP needs the mcuboot module: machine.bootloader() enters the bootloader through extmod/modmcuboot.c"
+#endif
+// Declared in extmod/modmcuboot.h, which modmachine.c includes.
+#define MICROPY_BOARD_ENTER_BOOTLOADER(nargs, args) mcuboot_app_enter_bootloader(nargs, args)
+#elif MICROPY_HW_USES_BOOTLOADER
 #define MICROPY_BOARD_ENTER_BOOTLOADER(nargs, args) boardctrl_maybe_enter_mboot(nargs, args)
 #else
 #define MICROPY_BOARD_ENTER_BOOTLOADER(nargs, args)

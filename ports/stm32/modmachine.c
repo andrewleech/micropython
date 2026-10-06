@@ -48,6 +48,10 @@
 #include "i2c.h"
 #include "spi.h"
 #include "shared/tinyusb/mp_usbd.h"
+#if MICROPY_HW_MCUBOOT_APP
+#include "extmod/modmcuboot.h"
+#include "mcuboot/port_stm32.h"
+#endif
 
 #if defined(STM32G0)
 // G0 has BOR and POR combined
@@ -158,6 +162,10 @@ void machine_init(void) {
     {
         // get reset cause from RCC flags
         uint32_t state = RCC->RCC_SR;
+        #if MICROPY_HW_MCUBOOT_APP
+        // The MCUboot bootloader clears the flags and hands them over in a backup register.
+        state = mcuboot_stm32_reset_flags_take(state);
+        #endif
         if (state & RCC_SR_IWDGRSTF || state & RCC_SR_WWDGRSTF) {
             reset_cause = PYB_RESET_WDT;
         } else if (0
