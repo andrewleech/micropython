@@ -80,6 +80,9 @@
 #include "uart.h"
 #include "storage.h"
 #include "dma.h"
+#if MICROPY_HW_MCUBOOT_APP
+#include "mcuboot/port_stm32.h"
+#endif
 
 #if MICROPY_HW_TINYUSB_STACK
 #include "tusb.h"
@@ -240,6 +243,10 @@ void HardFault_Handler(void) {
   * @retval None
   */
 void NMI_Handler(void) {
+    #if MICROPY_HW_MCUBOOT_APP && MCUBOOT_STM32_FLASH_ECC
+    // Reading a flash word with an invalid ECC raises the NMI; count and clear it.
+    mcuboot_stm32_nmi_ecc();
+    #endif
 }
 
 /**
