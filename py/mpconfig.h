@@ -1982,6 +1982,13 @@ typedef time_t mp_timestamp_t;
 #define MICROPY_PY_DEFLATE_COMPRESS (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_FULL_FEATURES)
 #endif
 
+// Whether to provide the "mcuboot" module (MCUboot update and state API). The port must also
+// build extmod/modmcuboot.c and the shared/mcuboot sources (MICROPY_PY_MCUBOOT=1 in the make
+// fragment).
+#ifndef MICROPY_PY_MCUBOOT
+#define MICROPY_PY_MCUBOOT (0)
+#endif
+
 #ifndef MICROPY_PY_JSON
 #define MICROPY_PY_JSON (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
 #endif
