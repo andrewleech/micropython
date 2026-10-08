@@ -7,7 +7,6 @@ on:
       - '.github/workflows/*.yml'
       - 'extmod/extmod.cmake'
       - 'extmod/extmod.mk'
-      - 'extmod/modmcuboot.*'
       - 'lib/littlefs/**'
       - 'lib/CMSIS_6'
       - 'lib/mcuboot'
@@ -15,7 +14,6 @@ on:
       - 'lib/uzlib/**'
       - 'lib/stm32lib'
       - 'ports/stm32/**'
-      - 'ports/unix/variants/mcuboot*/**'
       - 'py/mpconfig.h'
       - 'shared/mcuboot/**'
       - 'shared/tinyusb/mboot/**'
@@ -47,20 +45,6 @@ jobs:
       run: tools/ci.sh mcuboot_setup
     - name: Run ci_${{ matrix.ci_func }}
       run: tools/ci.sh ${{ matrix.ci_func }}
-
-  unix:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v7
-    - name: Install packages
-      run: tools/ci.sh mcuboot_setup
-    - name: Build
-      run: tools/ci.sh mcuboot_unix_build
-    - name: Run tests
-      run: tools/ci.sh mcuboot_unix_run_tests
-    - name: Print failures
-      if: failure()
-      run: tests/run-tests.py --print-failures
 
   stm32:
     strategy:

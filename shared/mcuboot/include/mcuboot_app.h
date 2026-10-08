@@ -28,8 +28,8 @@
 #define MICROPY_INCLUDED_SHARED_MCUBOOT_MCUBOOT_APP_H
 
 // Application side API of the MCUboot glue, implemented in shared/mcuboot/src/app_api.c
-// and used by extmod/modmcuboot.c and by port code. Only plain C types appear here so the
-// users do not need the bootutil or flash map headers.
+// and used by port code. Only plain C types appear here so the users do not need the bootutil or
+// flash map headers.
 //
 // Functions returning int return 0 on success and a negative errno value on failure.
 

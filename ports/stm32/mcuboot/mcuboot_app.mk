@@ -29,10 +29,8 @@ include stm32.mk
 MCUBOOT_CPP_FLAGS = $(CFLAGS_MCU_$(MCU_SERIES)) -D$(CMSIS_MCU) -I$(TOP)/lib/CMSIS_6/CMSIS/Core/Include -I$(STM32LIB_CMSIS_ABS)/Include -I$(TOP)/ports/stm32
 include $(TOP)/shared/mcuboot/mcuboot_common.mk
 
-# MICROPY_PY_MCUBOOT adds the mcuboot module (extmod/extmod.mk adds extmod/modmcuboot.c).
 # MICROPY_HW_MCUBOOT_APP selects the port hooks: the flash ECC NMI handler, the reset flags
 # handoff and the routing of machine.bootloader().
-MICROPY_PY_MCUBOOT = 1
 
 # The firmware starts after the image header in the primary slot. The MCU's linker script is
 # replaced by its _mcuboot variant, which takes the addresses from the layout. An MCUboot build
@@ -48,7 +46,7 @@ TEXT0_ADDR := $(MCUBOOT_APP_LINK_ADDR)
 # sources have to find first.
 MCUBOOT_CRYPTO_INC = $(filter %/ext/tinycrypt/lib/include %/ext/mbedtls-asn1/include,$(MCUBOOT_INC))
 INC += $(filter-out $(MCUBOOT_CRYPTO_INC),$(MCUBOOT_INC))
-CFLAGS += $(MCUBOOT_CFLAGS) -DMICROPY_PY_MCUBOOT=1 -DMICROPY_HW_MCUBOOT_APP=1
+CFLAGS += $(MCUBOOT_CFLAGS) -DMICROPY_HW_MCUBOOT_APP=1
 
 # The port files shared with the bootloader: the handoff words, the ECC event counter and the
 # flash policy layered over flash.c.

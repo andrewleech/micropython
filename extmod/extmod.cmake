@@ -71,10 +71,6 @@ set(MICROPY_SOURCE_EXTMOD
     ${MICROPY_EXTMOD_DIR}/nimble/modbluetooth_nimble.c
 )
 
-if(MICROPY_PY_MCUBOOT)
-    list(APPEND MICROPY_SOURCE_EXTMOD ${MICROPY_EXTMOD_DIR}/modmcuboot.c)
-endif()
-
 # Single-precision libm math library.
 
 set(MICROPY_SOURCE_LIB_LIBM
