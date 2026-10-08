@@ -26,7 +26,8 @@ MBOOT_CPP_FLAGS = $(CFLAGS_MCU_$(MCU_SERIES)) -D$(CMSIS_MCU) -I$(TOP)/lib/CMSIS_
 include $(TOP)/shared/mboot/mboot_common.mk
 
 # MICROPY_HW_MBOOT_APP selects the port hooks: the flash ECC NMI handler, the reset flags
-# handoff and the routing of machine.bootloader().
+# handoff and the routing of machine.bootloader(). The Python module is an independent opt-in.
+MICROPY_PY_MBOOT ?= 0
 
 # The firmware starts after the image header in the primary slot. The MCU's linker script
 # takes the addresses from the layout, rather than the legacy STM32 Mboot layout.
@@ -42,6 +43,9 @@ TEXT0_ADDR := $(MBOOT_APP_LINK_ADDR)
 MBOOT_CRYPTO_INC = $(filter %/ext/tinycrypt/lib/include %/ext/mbedtls-asn1/include,$(MBOOT_INC))
 INC += $(filter-out $(MBOOT_CRYPTO_INC),$(MBOOT_INC))
 CFLAGS += $(MBOOT_CFLAGS) -DMICROPY_HW_MBOOT_APP=1
+ifeq ($(MICROPY_PY_MBOOT),1)
+CFLAGS += -DMICROPY_PY_MBOOT=1
+endif
 
 # The port file shared with the bootloader: the backup words, the flash ECC flags and the
 # controller primitives under the flash policy of shared/mboot.
