@@ -6,26 +6,25 @@
 .. module:: mcuboot
    :synopsis: query and control the MCUboot bootloader
 
-This module lets the running firmware query the `MCUboot <https://docs.mcuboot.com/>`_ bootloader that started it, confirm itself, install a new firmware image, ask the bootloader to enter its update mode, and read the bootloader's update log. The bootloader, the image format, the board layout and the build targets are covered in :ref:`mcuboot_bootloader`.
+The :mod:`mcuboot` module provides access to the bootloader that started the firmware. It reports slot state and update log entries, confirms the running image, writes update images and requests DFU or fsload. The bootloader, image format, board layout and build targets are covered in :ref:`mcuboot_bootloader`.
 
 **Availability:**
 
-* The stm32 port, when the firmware is built with ``MCUBOOT=1``. The bootloader, and with it this module, supports STM32H5 and STM32F7 boards that define the ``MCUBOOT_*`` settings in their ``mpconfigboard.h``. These are the NUCLEO_H563ZI (two slots, swap using offset) and the PYBD_SF6 (one slot, the ``single`` policy). A firmware built without ``MCUBOOT=1`` has no ``mcuboot`` module.
+* The stm32 port, when firmware is built with ``MCUBOOT=1``. The current board configurations are NUCLEO_H563ZI (STM32H5, two slots with swap using offset) and PYBD_SF6 (STM32F7, one slot with the ``single`` policy). A firmware built without ``MCUBOOT=1`` has no ``mcuboot`` module.
 
-* The unix port, when it is built with ``VARIANT=mcuboot`` (the swap policy) or ``VARIANT=mcuboot_single`` (the single slot policy). These variants keep their flash in a file and exist for testing the module. There is no bootloader behind them, so the functions that reset the device raise ``SystemExit`` instead.
+* The unix port's ``mcuboot`` and ``mcuboot_single`` variants, which keep flash in a file for module tests. They do not include a bootloader.
 
-The module is enabled by the ``MICROPY_PY_MCUBOOT`` build option, which is off by default. The module works directly on the bootloader's on-flash structures and does not verify signatures or hashes. The bootloader checks every image before running it, so an image installed through this module is only judged at the next reset, not when it is written.
+The module is enabled by the ``MICROPY_PY_MCUBOOT`` build option, which is off by default. It writes image data and update requests but does not verify signatures or hashes. The bootloader validates an image before starting it, so an image written through this module is checked at reset, not when it is written.
 
 Concepts
 --------
 
-The flash holds two image slots. The *primary slot* contains the image the bootloader starts, which is the firmware that is running when this module is imported. The *secondary slot* (the update slot) receives new images. With the default slot policy of a board, ``swap``, and its default swap mode the update slot is one flash erase unit larger than the primary slot, and a new image is installed by swapping the contents of the two slots at the next reset (the swap modes ``move`` and ``scratch`` need slots of other sizes, see the reference page).
+The NUCLEO_H563ZI has two image slots. The *primary slot* contains the image the bootloader starts, which is the firmware running when this module is imported. The *secondary slot* receives updates. With swap using offset, the secondary slot is one flash erase unit larger than the primary slot, and the bootloader swaps their contents at the next reset.
 
 A swap is normally a *test* swap: the new image runs once, and unless it calls :func:`confirm` before the next reset the bootloader swaps the old image back (a *revert*). A *permanent* swap has no revert. An image that the firmware already runs and has confirmed is *confirmed*.
 
-With the slot policy ``overwrite-external`` there is a secondary slot of the size of the primary slot, which may be on an external flash, and a new image is copied over the primary slot at the next reset. There is no test image and no revert: the new image is always permanent, there is nothing to confirm, and the *permanent* argument of :func:`request_upgrade` and :class:`Writer` makes no difference.
 
-If the slot policy of the board is ``single`` (the PYBD_SF6), there is only one slot, updates are written to it directly, there is no swap and nothing to revert. In that case :func:`confirm` does nothing, :func:`state` reports a confirmed image with no pending swap, and :func:`request_upgrade` and :class:`Writer` raise ``OSError(EPERM)``. An update then comes from the bootloader (DFU or :func:`request_fsload`), and an update that is interrupted leaves no valid image: the bootloader never starts an image that fails its validation and enters its recovery mode instead.
+If the slot policy is ``single`` (as on PYBD_SF6), there is only one slot, updates are written to it directly, and there is no swap or revert. In that case :func:`confirm` does nothing, :func:`state` reports a confirmed image with no pending swap, and :func:`request_upgrade` and :class:`Writer` raise ``OSError(EPERM)``. Updates come from the bootloader (DFU or :func:`request_fsload`). At boot, the bootloader validates the slot before starting an image and enters DFU recovery if no valid image is available.
 
 Version tuples have the form ``(major, minor, revision, build)``. Addresses returned by this module (for example by :func:`slots`) are CPU addresses of the flash, which are also the addresses the bootloader's DFU interface uses.
 
@@ -214,4 +213,4 @@ Besides the ``ValueError`` and ``TypeError`` from argument checks, the functions
 * ``ENOSPC``: a write would go past the end of the update slot.
 * ``EIO``: a flash read, erase or write failed, or any other failure.
 
-See :ref:`mcuboot_bootloader` for building, signing, the DFU and fsload update flows, the update log format and the tests.
+See :ref:`mcuboot_bootloader` for build configuration and update flows, and :ref:`mcuboot_update_log` for the update log format.
