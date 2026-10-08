@@ -216,7 +216,7 @@ function ci_mboot_stm32_bootloader_build {
 function ci_mboot_stm32_app_build {
     make ${MAKEOPTS} -C mpy-cross
     make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI submodules
-    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI
+    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI MICROPY_PY_MBOOT=1
     make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF6 submodules
     make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF6
 }

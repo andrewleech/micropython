@@ -30,7 +30,12 @@ Run these commands from the repository root, replacing ``<board>`` with a board 
     make -C ports/stm32 BOARD=<board>
     make -C ports/stm32 BOARD=<board> initial
 
-The bootloader build produces ``firmware.elf``, ``firmware.bin`` and ``firmware.hex`` in ``build-<board>-mboot``. The application build, in ``build-<board>``, produces ``firmware.signed.bin`` for updates. The ``initial`` target produces ``firmware.initial.bin`` and ``firmware.initial.hex``, including the state needed to boot the initial application without treating it as an unconfirmed update. The unsigned application binary is not an installable update, and the stock ``deploy``, ``deploy-stlink``, ``deploy-openocd`` and ``firmware.dfu`` targets of the port write that unsigned binary, so they are not used on these boards. Add ``MICROPY_PY_MBOOT=1`` to the application build to include the optional ``mboot`` Python module.
+Build outputs
+^^^^^^^^^^^^^
+
+The bootloader build writes ``firmware.elf``, ``firmware.bin`` and ``firmware.hex`` to ``build-<board>-mboot``. The application build writes ``firmware.signed.bin`` to ``build-<board>``. The ``initial`` target creates ``firmware.initial.bin`` and ``firmware.initial.hex`` with the state needed to boot the initial application without treating it as an unconfirmed update.
+
+The unsigned application binary is not an installable update. The port's standard ``deploy``, ``deploy-stlink``, ``deploy-openocd`` and ``firmware.dfu`` targets write that unsigned binary, so do not use them for these boards. Add ``MICROPY_PY_MBOOT=1`` to the application build to include the optional :mod:`mboot` module.
 
 Signing keys
 ^^^^^^^^^^^^
@@ -85,7 +90,11 @@ Update audit log
 
 The bootloader and application append records to a persistent update audit log. The log uses two flash erase units as a ring, so it keeps only the most recent records. By default, the area starts directly after the primary slot. Set ``MICROPY_HW_MBOOT_LOG_ADDR`` to move it, and leave it erased when first programming a device.
 
-The log is read-only over DFU as alternate setting 1, named ``Update audit log``, so a DFU tool that does not select an alternate setting has to be told to use ``-a 0`` for image downloads. Decode a raw dump of it with ``python3 tools/mboot_log.py DUMP.bin``; ``--unit`` shows the erase unit of each record and ``--json`` selects JSON output. The same tool decodes the 16-byte result of the DFU vendor request 0x81 with ``--result``.
+The log records DFU and filesystem update outcomes, swap and revert decisions, application requests and confirmation, rejected images, and security-counter initialisation failures. A failure to write a record does not fail the operation it describes.
+
+Read the log over DFU at alternate setting 1, named ``Update audit log``. DFU tools that do not select an alternate setting must use ``-a 0`` for image downloads.
+
+Decode a raw dump with ``python3 tools/mboot_log.py DUMP.bin``. Use ``--unit`` to show the erase unit for each record or ``--json`` to select JSON output. The same tool decodes the 16-byte result of DFU vendor request 0x81 with ``--result``. The :func:`mboot.log` function returns records from the application.
 
 Port integration
 ----------------
