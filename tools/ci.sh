@@ -194,10 +194,11 @@ function ci_mpy_cross_debug_emitter {
 # mcuboot
 
 function ci_mcuboot_setup {
+    ci_gcc_arm_setup
     pip3 install cryptography intelhex click cbor2 pyyaml pytest
-    # lib/stm32lib and lib/CMSIS_6 are needed because the host builds take the STM32H5 flash
-    # geometry from its CMSIS header (via ports/stm32/mcuboot/mcuboot_dev.h).
-    git submodule update --init lib/mcuboot lib/stm32lib lib/CMSIS_6
+    # lib/stm32lib and lib/CMSIS_6 provide the STM32H5 flash geometry used by host builds.
+    # The Mbed TLS backend test builds its crypto sources from lib/mbedtls.
+    git submodule update --init lib/mcuboot lib/stm32lib lib/CMSIS_6 lib/mbedtls
 }
 
 function ci_mcuboot_python_test {
