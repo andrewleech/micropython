@@ -205,7 +205,11 @@ Reset related functions
    Some ports support passing in an optional *value* argument which can control
    which bootloader to enter, what to pass to it, or other things.
 
-   On the stm32 port, a firmware built with ``MCUBOOT=1`` (see :ref:`mcuboot_bootloader`) resets into the MCUboot bootloader instead of the ROM bootloader. Called without an argument, or with an argument that is not a ``bytes`` object, it requests the bootloader's DFU mode, like :func:`mcuboot.request_dfu`. A ``bytes`` argument is taken as a bootloader element stream that describes a filesystem load, like the one :func:`mcuboot.request_fsload` builds; ``ValueError`` is raised if it is not a valid stream.
+   On the stm32 port, firmware built with ``MCUBOOT=1`` (see
+   :ref:`mcuboot_bootloader`) enters the MCUboot bootloader instead of the ROM
+   bootloader. Called without an argument, :func:`bootloader` requests DFU mode.
+   A ``bytes`` argument requests a filesystem update; an invalid request raises
+   ``ValueError``.
 
 Interrupt related functions
 ---------------------------
