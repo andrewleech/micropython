@@ -259,18 +259,6 @@ function ci_mcuboot_fuzz_test {
     make ${MAKEOPTS} -C tests/mcuboot/fuzz test
 }
 
-function ci_mcuboot_unix_build {
-    ci_unix_build_helper VARIANT=mcuboot
-    ci_unix_build_helper VARIANT=mcuboot_single
-}
-
-function ci_mcuboot_unix_run_tests {
-    # The mcuboot module on a file-backed fake flash.
-    (cd tests && MICROPY_MICROPYTHON=../ports/unix/build-mcuboot/micropython ./run-tests.py mcuboot/test_module.py)
-    # Single slot policy: no update slot, so calls that need one raise EPERM.
-    (cd tests && MICROPY_MICROPYTHON=../ports/unix/build-mcuboot_single/micropython ./run-tests.py mcuboot/test_module_single.py)
-}
-
 function ci_mcuboot_stm32_bootloader_build {
     make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI submodules
     make ${MAKEOPTS} -C ports/stm32/mcuboot BOARD=NUCLEO_H563ZI

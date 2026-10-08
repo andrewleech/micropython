@@ -49,7 +49,7 @@
 #include "spi.h"
 #include "shared/tinyusb/mp_usbd.h"
 #if MICROPY_HW_MCUBOOT_APP
-#include "extmod/modmcuboot.h"
+#include "shared/mcuboot/include/mcuboot_app.h"
 #include "mcuboot/port_stm32.h"
 #endif
 
@@ -303,6 +303,19 @@ static mp_obj_t mp_machine_unique_id(void) {
 MP_NORETURN static void mp_machine_reset(void) {
     powerctrl_mcu_reset();
 }
+
+#if MICROPY_HW_MCUBOOT_APP
+static MP_NORETURN void mcuboot_stm32_app_enter_bootloader(size_t n_args, const mp_obj_t *args) {
+    if (n_args > 0 && mp_obj_is_type(args[0], &mp_type_bytes)) {
+        size_t len;
+        const uint8_t *elems = (const uint8_t *)mp_obj_str_get_data(args[0], &len);
+        if (mcuboot_app_request_fsload(elems, len) < 0) {
+            mp_raise_ValueError(MP_ERROR_TEXT("invalid element stream"));
+        }
+    }
+    mcuboot_app_request_dfu();
+}
+#endif
 
 // Activate the bootloader without BOOT* pins.
 MP_NORETURN void mp_machine_bootloader(size_t n_args, const mp_obj_t *args) {

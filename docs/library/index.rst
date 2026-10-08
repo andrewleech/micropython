@@ -103,7 +103,6 @@ the following libraries.
    deflate.rst
    framebuf.rst
    machine.rst
-   mcuboot.rst
    micropython.rst
    neopixel.rst
    network.rst
