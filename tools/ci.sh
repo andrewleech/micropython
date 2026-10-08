@@ -260,6 +260,18 @@ function ci_mboot_fuzz_test {
     make ${MAKEOPTS} -C tests/mboot/fuzz test
 }
 
+function ci_mboot_unix_build {
+    ci_unix_build_helper VARIANT=mboot
+    ci_unix_build_helper VARIANT=mboot_single
+}
+
+function ci_mboot_unix_run_tests {
+    # The optional mboot module on file-backed fake flash.
+    (cd tests && MICROPY_MICROPYTHON="$(pwd)/../ports/unix/build-mboot/micropython" ./run-tests.py mboot/test_module.py)
+    # Single slot policy has no update slot, so calls that need one raise EPERM.
+    (cd tests && MICROPY_MICROPYTHON="$(pwd)/../ports/unix/build-mboot_single/micropython" ./run-tests.py mboot/test_module_single.py)
+}
+
 function ci_mboot_stm32_bootloader_build {
     make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI submodules
     make ${MAKEOPTS} -C ports/stm32/mboot/mcuboot BOARD=NUCLEO_H563ZI
@@ -271,7 +283,7 @@ function ci_mboot_stm32_bootloader_build {
 function ci_mboot_stm32_app_build {
     make ${MAKEOPTS} -C mpy-cross
     make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI submodules
-    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI MBOOT_BACKEND=mcuboot
+    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI MBOOT_BACKEND=mcuboot MICROPY_PY_MBOOT=1 BUILD=build-NUCLEO_H563ZI-mboot
     # Install the signed application on the simulated board of the bootloader host tests.
     make -C tests/mboot/host/bootloader test-app APP=$(pwd)/ports/stm32/build-NUCLEO_H563ZI-mboot/firmware.signed.bin
     make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF6 submodules

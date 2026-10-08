@@ -7,6 +7,7 @@ on:
       - '.github/workflows/*.yml'
       - 'extmod/extmod.cmake'
       - 'extmod/extmod.mk'
+      - 'extmod/modmboot.*'
       - 'lib/littlefs/**'
       - 'lib/CMSIS_6'
       - 'lib/mcuboot'
@@ -15,7 +16,9 @@ on:
       - 'lib/stm32lib'
       - 'ports/stm32/**'
       - 'ports/stm32/mboot/mcuboot/**'
-      - 'py/mpconfig.h'
+      - 'ports/unix/variants/mboot*/**'
+      - 'docs/library/index.rst'
+      - 'docs/library/mboot.rst'
       - 'shared/mboot/**'
       - 'tests/mboot/**'
       - 'tools/ci.sh'
@@ -45,6 +48,20 @@ jobs:
       run: tools/ci.sh mboot_setup
     - name: Run ci_${{ matrix.ci_func }}
       run: tools/ci.sh ${{ matrix.ci_func }}
+
+  unix_module:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install packages
+      run: tools/ci.sh mboot_setup
+    - name: Build Unix variants
+      run: tools/ci.sh mboot_unix_build
+    - name: Run module tests
+      run: tools/ci.sh mboot_unix_run_tests
+    - name: Print failures
+      if: failure()
+      run: tests/run-tests.py --print-failures
 
   stm32:
     strategy:

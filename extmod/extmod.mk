@@ -74,6 +74,10 @@ SRC_EXTMOD_C += \
 	shared/libc/abort_.c \
 	shared/libc/printf.c \
 
+ifeq ($(MICROPY_PY_MBOOT),1)
+SRC_EXTMOD_C += extmod/modmboot.c
+endif
+
 SRC_THIRDPARTY_C += \
 
 PY_O += $(addprefix $(BUILD)/, $(SRC_EXTMOD_C:.c=.o))
