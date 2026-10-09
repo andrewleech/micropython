@@ -21,6 +21,14 @@ A port provides the functions of `include/mboot_port.h`, `mboot_dev.h` (the flas
 
 A port should implement the rest on the services its application already has, not beside them. The STM32 port (`ports/stm32/mboot_port.c`, `mboot_boot.c`) runs the bootloader on `SystemClock_Config()` with the board's `MICROPY_HW_CLK_*` values, the HAL tick, `mp_hal_pin_config()`, `uart.c`, `mp_usbd_ll_init()`, `powerctrl.c` and `flash.c`, so a board needs no bootloader specific clock, pin or USB settings. It does need the settings its application already has that the bootloader reads: `MICROPY_HW_LED1` to `MICROPY_HW_LED3` with `MICROPY_HW_LED_ON/OFF`, `MICROPY_HW_USRSW_PIN`, `_PULL` and `_PRESSED` (the forced entry button, sampled at reset), and `MICROPY_HW_UART_REPL` with `_BAUD` for the bootloader log. On STM32H5 the bootloader runs with TrustZone disabled (TZEN=0).
 
+## Update audit log
+
+`src/updatelog.c` and `include/mboot_updatelog.h` provide the persistent update audit log in `MBOOT_AREA_LOG`. The bootloader and application append the same 32-byte record format, with a sequence number, event, result, source, image version, detail and hash prefix. A CRC-32/ISO-HDLC covers bytes 0 through 27. Two erase units alternate as the active ring; a torn or unreadable record consumes its slot but is not returned as valid.
+
+The log records DFU and filesystem update outcomes, swap/revert decisions, application requests and confirmation, assertion failures and security-counter initialization failures. Log-write failure does not fail the operation being recorded. `mboot_updatelog_read()` and the application wrapper `mboot_app_log_get()` return records newest-first, with index zero naming the newest valid record.
+
+The Mboot DFU binding exposes a read-only alternate setting named `Update audit log`. Decode its raw flash dump with `python3 tools/mboot_log.py DUMP.bin`; `--unit` adds erase-unit locations and `--json` selects JSON output. The tool also decodes the 16-byte vendor-request 0x81 reply with `--result HEX`. The live DFU result sequence counts session outcomes independently of the persistent log sequence.
+
 ## STM32 builds
 
 The STM32 port implements Mboot for STM32H5 and STM32F7 only. The bootloader is built with `make -C ports/stm32 -f Makefile.mboot BOARD=NUCLEO_H563ZI` into `build-<BOARD>-mboot`. Its application is built with `make -C ports/stm32 BOARD=NUCLEO_H563ZI` into `build-<BOARD>`; a board selects this by including `ports/stm32/mboot_app.mk` from its `mpconfigvariant.mk`. NUCLEO_H563ZI (two slots with swap) and PYBD_SF6 (STM32F767, single-slot policy with the update image in SPI flash) are the boards configured so far. `ports/stm32/mboot_dev.h` describes their flash.

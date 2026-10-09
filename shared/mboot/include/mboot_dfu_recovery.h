@@ -72,13 +72,10 @@ extern const mboot_wrange_t mboot_write_ranges[];
 #define MBOOT_DFU_PHASE_VALIDATE  2u  // validation of the downloaded image
 #define MBOOT_DFU_PHASE_PENDING   3u  // marking the image for the swap
 
-// Source field of mboot_dfu_recovery_result_t.
-#define MBOOT_DFU_RESULT_SOURCE_DFU 1u
-
 // Reply of vendor request 0x81 (MBOOT_VREQ_RESULT), little endian on the wire:
 // the outcome of the last session begin or manifest of this recovery session.
 // seq counts recorded outcomes from 1; 0 means none yet. code is mboot_result_t,
-// source is MBOOT_DFU_RESULT_SOURCE_DFU and detail is the bootutil return code or
+// source is the update audit log source (SRC_DFU) and detail is the bootutil return code or
 // the byte offset of a flash error.
 typedef struct {
     uint32_t seq;
