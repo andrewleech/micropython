@@ -28,6 +28,8 @@
 
 #include "mcuboot_config/mcuboot_config.h"
 #include "mboot_log.h"
+#include "mboot_types.h"
+#include "mboot_updatelog.h"
 
 // Longest formatted line; longer output is cut and still ends with a newline.
 #define LOG_LINE_MAX (128)
@@ -49,7 +51,8 @@ void mboot_log(int level, const char *fmt, ...) {
 }
 
 void mboot_assert_fail(const char *file, int line) {
-    // A failure while reporting a failure goes straight to recovery.
+    // A failure while handling a failure (the log or the update audit log asserting) goes straight
+    // to recovery.
     static bool failing;
     if (!failing) {
         failing = true;
@@ -57,6 +60,11 @@ void mboot_assert_fail(const char *file, int line) {
         mboot_log(MCUBOOT_LOG_LEVEL_ERROR, "ASSERT %s:%d\n", file, line);
         #else
         (void)file;
+        #endif
+        #if defined(MBOOT_ROLE_BOOTLOADER)
+        mboot_updatelog_append(LOG_ASSERT, MBOOT_RES_OK, SRC_BOOT, NULL, (uint32_t)line);
+        #else
+        mboot_updatelog_append(LOG_ASSERT, MBOOT_RES_OK, SRC_APP, NULL, (uint32_t)line);
         #endif
     }
     #if defined(MBOOT_ROLE_BOOTLOADER)
