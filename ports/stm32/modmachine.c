@@ -48,9 +48,9 @@
 #include "i2c.h"
 #include "spi.h"
 #include "shared/tinyusb/mp_usbd.h"
-#if MICROPY_HW_MCUBOOT_APP
-#include "shared/mcuboot/include/mcuboot_app.h"
-#include "mcuboot/port_stm32.h"
+#if MICROPY_HW_MBOOT_APP
+#include "shared/mboot/include/mboot_app.h"
+#include "mboot/mcuboot/port_stm32.h"
 #endif
 
 #if defined(STM32G0)
@@ -162,9 +162,9 @@ void machine_init(void) {
     {
         // get reset cause from RCC flags
         uint32_t state = RCC->RCC_SR;
-        #if MICROPY_HW_MCUBOOT_APP
+        #if MICROPY_HW_MBOOT_APP
         // The MCUboot bootloader clears the flags and hands them over in a backup register.
-        state = mcuboot_stm32_reset_flags_take(state);
+        state = mboot_stm32_reset_flags_take(state);
         #endif
         if (state & RCC_SR_IWDGRSTF || state & RCC_SR_WWDGRSTF) {
             reset_cause = PYB_RESET_WDT;
@@ -304,16 +304,16 @@ MP_NORETURN static void mp_machine_reset(void) {
     powerctrl_mcu_reset();
 }
 
-#if MICROPY_HW_MCUBOOT_APP
-static MP_NORETURN void mcuboot_stm32_app_enter_bootloader(size_t n_args, const mp_obj_t *args) {
+#if MICROPY_HW_MBOOT_APP
+static MP_NORETURN void mboot_stm32_app_enter_bootloader(size_t n_args, const mp_obj_t *args) {
     if (n_args > 0 && mp_obj_is_type(args[0], &mp_type_bytes)) {
         size_t len;
         const uint8_t *elems = (const uint8_t *)mp_obj_str_get_data(args[0], &len);
-        if (mcuboot_app_request_fsload(elems, len) < 0) {
+        if (mboot_app_request_fsload(elems, len) < 0) {
             mp_raise_ValueError(MP_ERROR_TEXT("invalid element stream"));
         }
     }
-    mcuboot_app_request_dfu();
+    mboot_app_request_dfu();
 }
 #endif
 
