@@ -81,23 +81,33 @@ def load_typing_environment(
 ) -> TypingEnvironment:
     """Load external policy, inventory dependencies, and retain unverified coverage.
 
-    A port entry names directory, typeshed, target, variant, target_package,
-    python_version, python_platform, pyrefly_version, packages, and provenance. Relative paths
-    are relative to policy_dir. Provenance must include firmware_version and
-    source_revision; it is a consumer declaration, not a fidelity approval.
+    Environment objects select the exact port, target and variant and name
+    directory, typeshed, target_package, python_version, python_platform,
+    pyrefly_version, packages and provenance. Relative paths are relative to
+    policy_dir. Firmware/source provenance declares identity, not fidelity approval.
     """
     policy_dir = Path(policy_dir).resolve()
     policy = json.loads((policy_dir / "typing.json").read_text(encoding="utf-8"))
-    if not isinstance(policy, dict):
-        raise ValueError("typing.json must map port names to environment objects")
-    entry = policy.get(port)
-    if not isinstance(entry, dict):
-        raise ValueError(f"typing.json requires an explicit environment object for port {port!r}")
-    for key, expected in (("target", target), ("variant", variant)):
-        if entry.get(key) != expected:
-            raise ValueError(
-                f"typing environment {key} {entry.get(key)!r} does not match selected {expected!r}"
-            )
+    if not isinstance(policy, dict) or not isinstance(policy.get("environments"), list):
+        raise ValueError(
+            "typing.json requires an environments list of explicit environment objects"
+        )
+    selected = (port, target, variant)
+    identities = set()
+    entry = None
+    for candidate in policy["environments"]:
+        if not isinstance(candidate, dict):
+            raise ValueError("typing environments must be explicit environment objects")
+        identity = tuple(_text(candidate, key) for key in ("port", "target", "variant"))
+        if identity in identities:
+            raise ValueError(f"duplicate typing environment for port/target/variant {identity!r}")
+        identities.add(identity)
+        if identity == selected:
+            entry = candidate
+    if entry is None:
+        raise ValueError(
+            f"no typing environment for port {port!r}, target {target!r}, variant {variant!r}"
+        )
     stub_directory = (policy_dir / _text(entry, "directory")).resolve()
     typeshed_directory = (policy_dir / _text(entry, "typeshed")).resolve()
     python_version = _text(entry, "python_version")
