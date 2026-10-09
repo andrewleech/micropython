@@ -40,7 +40,6 @@
 #include "mcuboot_request.h"
 #include "mcuboot_types.h"
 #include "mcuboot_update.h"
-#include "mcuboot_updatelog.h"
 #include "mcuboot_validate.h"
 
 #if defined(MCUBOOT_FSLOAD_ENABLE) && MCUBOOT_FSLOAD_ENABLE
@@ -535,7 +534,6 @@ bool mcuboot_intent_load(mcuboot_request_t *req) {
     }
     req->mode = MCUBOOT_REQ_FSLOAD;
     req->elems_len = len;
-    mcuboot_updatelog_append(LOG_FSLOAD_RETRY, MCUBOOT_RES_OK, SRC_FSLOAD, NULL, 0);
     return true;
     #else
     (void)req;
@@ -712,7 +710,6 @@ int mcuboot_fsload_run(const uint8_t *elems, size_t len) {
     uint32_t detail = 0;
 
     memset(&vr, 0, sizeof(vr));
-    mcuboot_updatelog_append(LOG_FSLOAD_BEGIN, MCUBOOT_RES_OK, SRC_FSLOAD, NULL, 0);
 
     int r = parse_request(elems, len, &rq);
     if (r < 0) {
@@ -731,10 +728,8 @@ int mcuboot_fsload_run(const uint8_t *elems, size_t len) {
 
     if (r == MCUBOOT_RES_OK) {
         MCUBOOT_LOG_INF("image installed");
-        mcuboot_updatelog_append(LOG_FSLOAD_DONE, MCUBOOT_RES_OK, SRC_FSLOAD, &vr.info, 0);
     } else {
         MCUBOOT_LOG_ERR("failed with result %d, detail %u", r, (unsigned)detail);
-        mcuboot_updatelog_append(LOG_FSLOAD_FAILED, r, SRC_FSLOAD, vr.info.valid ? &vr.info : NULL, detail);
     }
     store_status(&rq, r);
     return r;

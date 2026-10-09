@@ -24,7 +24,7 @@
  * THE SOFTWARE.
  */
 
-// Application side wrappers around bootutil_public.c, the request handoff and the update log.
+// Application wrappers around bootutil_public.c and the request handoff.
 // Compiled into the application build only (MCUBOOT_ROLE_APP). No signature or hash validation
 // happens here; that is done by the bootloader at the next boot.
 
@@ -41,7 +41,6 @@
 #include "mcuboot_types.h"
 #include "mcuboot_request.h"
 #include "mcuboot_update.h"
-#include "mcuboot_updatelog.h"
 #include "mcuboot_app.h"
 
 _Static_assert(BOOT_SWAP_TYPE_NONE == MCUBOOT_APP_SWAP_NONE, "swap type values");
@@ -178,19 +177,6 @@ static void version_from_header(const struct image_header *hdr, mcuboot_app_vers
     v->build = hdr->ih_ver.iv_build_num;
 }
 
-static void log_event(uint8_t type, const mcuboot_app_version_t *v) {
-    mcuboot_image_info_t info;
-    memset(&info, 0, sizeof(info));
-    if (v != NULL) {
-        info.valid = 1;
-        info.ver_major = v->major;
-        info.ver_minor = v->minor;
-        info.ver_rev = v->revision;
-        info.ver_build = v->build;
-    }
-    // A log write failure does not fail the operation that was logged.
-    (void)mcuboot_updatelog_append(type, MCUBOOT_RES_OK, SRC_APP, v != NULL ? &info : NULL, 0);
-}
 
 static int read_primary_state(struct boot_swap_state *st) {
     if (boot_read_swap_state_by_id(FLASH_AREA_IMAGE_PRIMARY(0), st) != 0) {
@@ -278,8 +264,6 @@ static const char *area_name(uint8_t id) {
         #endif
         case FLASH_AREA_IMAGE_SCRATCH:
             return "scratch";
-        case MCUBOOT_AREA_LOG:
-            return "log";
         case MCUBOOT_AREA_SECCNT:
             return "seccnt";
         case MCUBOOT_AREA_FS:
@@ -316,23 +300,6 @@ int mcuboot_app_fs_area(uint32_t *base, uint32_t *len) {
     return -ENOENT;
 }
 
-int mcuboot_app_log_get(uint32_t n, mcuboot_app_log_entry_t *entry) {
-    mcuboot_log_rec_t rec;
-    int rc = mcuboot_updatelog_read(n, &rec);
-    if (rc != 0) {
-        return rc;
-    }
-    entry->seq = rec.seq;
-    entry->type = rec.type;
-    entry->result = rec.result;
-    entry->source = rec.source;
-    entry->version.major = rec.ver_major;
-    entry->version.minor = rec.ver_minor;
-    entry->version.revision = rec.ver_rev;
-    entry->version.build = rec.ver_build;
-    entry->detail = rec.detail;
-    return 0;
-}
 
 // ---- actions ----
 
@@ -345,15 +312,6 @@ int mcuboot_app_confirm(void) {
     }
     if (boot_set_confirmed() != 0) {
         return -EIO;
-    }
-    if (before.magic == BOOT_MAGIC_GOOD && before.image_ok != BOOT_FLAG_SET) {
-        struct image_header hdr;
-        mcuboot_app_version_t v;
-        bool have_version = read_header(MCUBOOT_APP_SLOT_PRIMARY, &hdr) == 0;
-        if (have_version) {
-            version_from_header(&hdr, &v);
-        }
-        log_event(LOG_APP_CONFIRMED, have_version ? &v : NULL);
     }
     #endif
     return 0;
@@ -389,9 +347,6 @@ static int set_pending(bool permanent) {
     if (boot_set_pending(permanent ? 1 : 0) != 0) {
         return -EIO;
     }
-    mcuboot_app_version_t v;
-    version_from_header(&hdr, &v);
-    log_event(LOG_APP_UPGRADE_REQUESTED, &v);
     return 0;
     #else
     (void)permanent;
@@ -409,7 +364,6 @@ void mcuboot_app_reset(void) {
 }
 
 void mcuboot_app_request_dfu(void) {
-    log_event(LOG_APP_DFU_REQUESTED, NULL);
     mcuboot_request_set_and_reset(MCUBOOT_REQ_DFU, NULL, 0);
 }
 

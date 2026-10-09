@@ -31,7 +31,6 @@
 #include "mcuboot_crc32.h"
 #include "mcuboot_port.h"
 #include "mcuboot_request.h"
-#include "mcuboot_updatelog.h"
 
 // The request struct (1008 bytes) is followed by the 16 bytes of the test fault injection
 // state, which must survive a request being taken.
@@ -111,17 +110,12 @@ void mcuboot_request_set_and_reset(mcuboot_req_mode_t mode, const uint8_t *elems
         mode = MCUBOOT_REQ_DFU;
     }
 
-    // The sequence number follows the update log so that it increases from request to
-    // request across resets.
-    mcuboot_log_rec_t last;
-    uint32_t seq = mcuboot_updatelog_read(0, &last) == 0 ? last.seq + 1 : 1;
 
     mcuboot_request_t req;
     memset(&req, 0, sizeof(req));
     req.magic = MCUBOOT_REQ_MAGIC;
     req.version = MCUBOOT_REQ_VERSION;
     req.mode = (uint16_t)mode;
-    req.seq = seq;
     req.elems_len = (uint16_t)len;
     if (len != 0) {
         memcpy(req.elems, elems, len);

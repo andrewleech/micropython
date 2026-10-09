@@ -67,7 +67,7 @@ typedef struct {
     uint32_t magic;         // MCUBOOT_REQ_MAGIC
     uint16_t version;       // MCUBOOT_REQ_VERSION
     uint16_t mode;          // mcuboot_req_mode_t
-    uint32_t seq;           // incremented by the app per request, copied into the update log
+    uint32_t seq;           // reserved; must be zero
     uint16_t elems_len;     // valid bytes in elems
     uint16_t flags;         // 0
     uint32_t crc32;         // CRC-32/ISO-HDLC over the 20 header bytes with crc32 = 0, then elems[0..elems_len)

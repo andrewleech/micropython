@@ -49,9 +49,8 @@ void mcuboot_log(int level, const char *fmt, ...);
 // as vsnprintf does.
 int mcuboot_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap);
 
-// Failure handler behind ASSERT(). Logs the location, records LOG_ASSERT in the update log
-// when the log area is usable and then leaves for recovery: the bootloader role calls
-// mcuboot_fault_recover(), the app role resets so the bootloader decides. Never returns
+// Failure handler behind ASSERT(). Logs the location and then leaves for recovery: the bootloader
+// role calls mcuboot_fault_recover(), the app role resets so the bootloader decides. Never returns
 // and never loops silently.
 MCUBOOT_NORETURN void mcuboot_assert_fail(const char *file, int line);
 

@@ -32,9 +32,8 @@
 //
 // The request is an element stream (shared/tinyusb/mboot/include/mboot_elem.h) with a MOUNT
 // element, a FSLOAD element and optionally a STATUS element. fsload runs in two passes:
-//
 //   pass 1  open the file as a stream, wrap it in a read-only struct flash_area and run
-//           mcuboot_validate_view() over it; nothing outside the update log is written;
+//           mcuboot_validate_view() over it; nothing is written;
 //   pass 2  erase and write the target slot from the stream, then mark the image pending.
 //
 // Everything read from the device, the element stream and the file is untrusted until pass
@@ -51,16 +50,14 @@
 
 // ---- entry points ----
 
-// Runs the request in elems[0..len). Always appends FSLOAD_BEGIN and FSLOAD_DONE or
-// FSLOAD_FAILED to the update log and, if the request carries a STATUS element, stores 0 on
-// success or the negated result code on failure in the word it names. Returns
-// MCUBOOT_RES_OK or the mcuboot_result_t of the failure. On success the new image is pending
-// (policies swap and overwrite-external) or in place (policy single); the caller resets.
+// Runs the request in elems[0..len). If the request carries a STATUS element, stores 0 on
+// success or the negated result code on failure in the word it names. Returns MCUBOOT_RES_OK
+// or the mcuboot_result_t of the failure. On success the new image is pending (policies swap
+// and overwrite-external) or in place (policy single); the caller resets.
 int mcuboot_fsload_run(const uint8_t *elems, size_t len);
 
 // Policy single only. Loads the retry request written by pass 2 from MCUBOOT_AREA_INTENT into
-// req (mode MCUBOOT_REQ_FSLOAD) and logs FSLOAD_RETRY. Returns false when the area holds no
-// record with a valid CRC.
+// req (mode MCUBOOT_REQ_FSLOAD). Returns false when the area holds no record with a valid CRC.
 bool mcuboot_intent_load(mcuboot_request_t *req);
 
 // Writes the result word of a STATUS element. Weak: the default stores value at addr; a port

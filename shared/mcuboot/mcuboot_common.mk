@@ -129,10 +129,10 @@ MCUBOOT_SRC_DIR := shared/mcuboot/src
 MCUBOOT_MBOOT_DIR := shared/tinyusb/mboot
 MCUBOOT_TINYUSB_SRC_C :=
 
-# Flash map, flash access policy, logging, request handoff, update log and the update slot
+# Flash map, flash access policy, logging, request handoff and the update slot
 # session, in both roles. shadow.c has no code without the ECC policy.
 MCUBOOT_GLUE_SRC_C := $(addprefix $(MCUBOOT_SRC_DIR)/, \
-    flash_map.c flash_map_backend.c shadow.c record_ring.c request.c updatelog.c update.c mcuboot_crc32.c log.c printf_lite.c)
+    flash_map.c flash_map_backend.c shadow.c record_ring.c request.c update.c mcuboot_crc32.c log.c printf_lite.c)
 
 # A SPI flash as device 1 is driven through drivers/memory/spiflash.c, which the port provides.
 ifeq ($(MCUBOOT_SPIFLASH_ENABLE),1)
