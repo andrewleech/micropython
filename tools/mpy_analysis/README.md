@@ -15,6 +15,7 @@ This package supplies compiler-analysis checks, explicit MicroPython source inve
 - `sast-scope` collects manifest-selected frozen sources and optional compilation-database inputs using explicit roots and build variables.
 - `sast-run` invokes a selected external scanner with consumer-owned policy, records findings separately from operational and coverage failures, and rebases staged source locations.
 - `sast-check-fixtures` checks external positive/negative expectations using the same runner and coverage receipts.
+- `sast-sbom` generates a CycloneDX selected-source inventory and provenance/coverage receipt from the same manifest/compiler scope as SAST.
 
 A project installs it from its MicroPython checkout, like mpremote:
 
@@ -70,6 +71,30 @@ sast-scope --micropython-root "$MPY" \
 ```
 
 In manifest mode, `sast-scope --manifest ... --compile-database DB` appends native records using the same explicit roots and owners. `--compile-database` does not provide a standalone native-only mode and is not combined with `--scope`. Python interfaces are `load_scope(path)`, `parse_scope(data)`, `collect_manifest_scope(...)` and `collect_compdb_sources(database, roots=..., owners=...)`; consumers can add their externally selected groups before serializing the validated scope. The CLI does not infer application files or port/target matrices.
+
+The manifest collector additionally retains `packages` (physical selected-manifest identity, actual required name, explicit root/path, requested library alias, declared metadata and dependencies) and `package_requirements` (observed direct/transitive/repeated edges). Frozen `provenance.package_id` identifies the authority metadata owner; an ordinary include does not invent a new package and a transitive requirement's files remain attributed to that requirement. Physical aliases share package identity. Existing schema-v1 consumer scopes without package fields remain valid for scanners; SBOM generation explicitly reports their missing package inventory.
+
+## Selected-source SBOM
+
+Generate the inventory with `sast-scope`, adding `--compile-database /absolute/path/compile_commands.json` for the recorded build when native component selection is required. Pass the same inventory to both scanners and SBOM generation:
+
+```sh
+sast-sbom --scope scope.json --micropython-root "$MPY" --output-dir build/sbom
+```
+
+`$MPY` must match the inventory's actual manifest authority, including its version. The library root selected by `MPY_LIB_DIR` need not be the MicroPython checkout's gitlinked library; its actual repository revision is recorded. Explicit roots can also name separately versioned locally frozen libraries. Only `runtime_frozen_python` and compiler-evidenced `native` records enter this SBOM; other groups are reported as unassessed.
+
+The Python API is `generate_sbom(scope, *, micropython_root)` in `mpy_analysis.sbom`, returning `(document, receipt)`. The CLI writes CycloneDX 1.6 `sbom.json` and `sbom-summary.json`, deterministically and without network access. Components include selected source files with SHA-256 hashes, required packages with declared versions/dependency edges, actual source repositories and known native libraries selected by compiler records. Multiple compiler actions for the same physical source remain distinct evidence in the receipt without duplicating the file component. Frozen import aliases remain distinct identities.
+
+Known native library version extractors and vendored identities are adapted from [Matt Trentini's MicroPython SBOM work](https://github.com/mattytrentini/micropython/blob/efbf88cd35b778ea4d56dedb020bf310fe5c9b88/tools/sbom.py), with attribution in `native_sbom.py`, this package's licence and the adaptation commit. Selection is physical and build-driven: only selected littlefs generations and STM32/ASF4 families are represented. A CMSIS device version is labelled as such, not a HAL version. Release-note lower bounds and missing versions remain explicit gaps, not guessed exact releases or fabricated CPEs/PyPI identities.
+
+The receipt retains compiler commands/entry provenance, package selection, repository state/gitlink mismatches, source-to-component mappings and coverage limitations. `coverage_status` is `selected-sources-accounted` only when no recorded provenance/version gaps or unassessed groups remain, otherwise `incomplete`. This is never a vulnerability-clean result. A compilation database does not establish which objects were linked, include/header closure, build-fetched SDKs or runtime-loaded dependencies; neither status claims firmware completeness or a fresh firmware build. Use `sast-compdb` separately to prove the capture's completeness against its build.
+
+Tracked source state and source content are separate evidence. Generated, ignored or untracked inputs retain their hashes with an explicit provenance gap, no repository-to-file edge and no repository revision claiming to identify those bytes. Dirty tracked repositories retain their base revision and dirty-state evidence rather than pretending the selected content is committed.
+
+The CLI returns 0 for generated output, including explicitly incomplete provenance; invalid inputs or failed known extractors return 2. It safely invalidates owned output names even when scope loading/validation fails, protects scope/package/source inputs including physical aliases, rejects output symlinks, and leaves unrelated files alone. Collision failures preserve the input rather than deleting it. Stored inventories are recorded selections, not a promise that a consumer's active build has been refreshed. Source hashes and repository state describe the SBOM generation inputs.
+
+## Scanner source selection
 
 Pattern scanners submit `runtime_frozen_python`, `host_and_example_python` and `frontend` to the `project` policy, and C/C++ translation-unit suffixes in `native` to `native-c`. Other native records, such as headers, remain explicitly unassessed. Ruff submits Python records in both Python groups. Pyrefly and Pysa submit only `runtime_frozen_python`. Other groups are retained in the inventory and reported as unassessed, not silently discarded. Empty scanner selection fails.
 

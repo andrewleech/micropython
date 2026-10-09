@@ -1,4 +1,5 @@
 import copy
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -265,6 +266,391 @@ def test_manifest_uses_explicit_library_variables_and_root_owners(tmp_path):
     assert record["target_path"] == "demo/__init__.py"
     assert record["owner"] == "library-maintainer"
     assert record["provenance"]["package_metadata"]["version"] == "1"
+
+
+def authority_files(manifest, variables):
+    spec = importlib.util.spec_from_file_location(
+        "scope_test_manifest_authority", MPY_ROOT / "tools/manifestfile.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    resolver = module.ManifestFile(
+        module.MODE_FREEZE,
+        {
+            "MPY_DIR": str(MPY_ROOT),
+            **{name: str(Path(value).resolve()) for name, value in variables.items()},
+        },
+    )
+    before = os.getcwd()
+    try:
+        resolver.execute(str(manifest))
+    finally:
+        os.chdir(before)
+    return [
+        (
+            Path(output.full_path).resolve(),
+            output.target_path,
+            output.kind,
+            output.opt,
+            {
+                field: getattr(output.metadata, field)
+                for field in (
+                    "version",
+                    "description",
+                    "license",
+                    "author",
+                    "stdlib",
+                    "pypi",
+                    "pypi_publish",
+                )
+            },
+        )
+        for output in resolver.files()
+    ]
+
+
+def assert_authority_selection(data, manifest, variables):
+    assert [
+        (
+            scope.source_path(data, record),
+            record["target_path"],
+            record["provenance"]["freeze_kind"],
+            record["provenance"]["opt"],
+            record["provenance"]["package_metadata"],
+        )
+        for record in frozen(data)
+    ] == authority_files(manifest, variables)
+
+
+def test_manifest_retains_authority_graph_repeated_requires_and_metadata_ownership(tmp_path):
+    library = tmp_path / "library"
+    write(
+        library,
+        "python-ecosys/parent/manifest.py",
+        'metadata(version="2", description="parent", license="MIT", author="Maintainer", '
+        'pypi="parent-pypi", pypi_publish="mpy-parent")\n'
+        'module("parent.py", opt=1)\n'
+        'require("child", version=">=9", enabled=True)\n'
+        'include("extra.py")\n'
+        'require("child")\n',
+    )
+    write(library, "python-ecosys/parent/parent.py")
+    write(
+        library,
+        "python-ecosys/parent/extra.py",
+        'options.defaults(enabled=True)\nif options.enabled:\n    module("parent_extra.py")\n'
+        'require("child")\n',
+    )
+    write(library, "python-ecosys/parent/parent_extra.py")
+    write(
+        library,
+        "python-ecosys/child/manifest.py",
+        'metadata(version="3", description="child")\n'
+        'options.defaults(enabled=False)\nif options.enabled:\n    module("child.py")\n',
+    )
+    write(library, "python-ecosys/child/child.py")
+    write(tmp_path, "local.py")
+    write(tmp_path, "local_after.py")
+    write(tmp_path, "included.py", 'require("parent")\n')
+    variables = {"MPY_LIB_DIR": str(library)}
+    data = collect(
+        tmp_path,
+        'module("local.py")\ninclude("included.py")\ninclude("included.py")\n'
+        'require("parent")\nrequire("child")\nmodule("local_after.py")\n',
+        variables=variables,
+        roots={"consumer": str(tmp_path), "library": str(library)},
+        owners={"consumer": "consumer", "library": "library"},
+    )
+    assert_authority_selection(data, tmp_path / "manifest.py", variables)
+    parent_id = "library/python-ecosys/parent/manifest.py"
+    child_id = "library/python-ecosys/child/manifest.py"
+    packages = {package["id"]: package for package in data["packages"]}
+    assert set(packages) == {parent_id, child_id}
+    assert packages[parent_id]["dependencies"] == [child_id]
+    assert packages[child_id]["dependencies"] == []
+    assert packages[parent_id]["name"] == "parent"
+    assert packages[parent_id]["root"] == "library"
+    assert packages[parent_id]["path"] == "python-ecosys/parent/manifest.py"
+    assert packages[parent_id]["library"] is None
+    assert packages[parent_id]["metadata"] == {
+        "version": "2",
+        "description": "parent",
+        "license": "MIT",
+        "author": "Maintainer",
+        "stdlib": False,
+        "pypi": "parent-pypi",
+        "pypi_publish": "mpy-parent",
+    }
+    assert packages[child_id]["metadata"]["version"] == "3"
+    assert data["package_requirements"] == [
+        {"parent": None, "package": parent_id},
+        {"parent": parent_id, "package": child_id},
+        {"parent": parent_id, "package": child_id},
+        {"parent": parent_id, "package": child_id},
+        {"parent": None, "package": parent_id},
+        {"parent": None, "package": child_id},
+    ]
+    ownership = {
+        record["target_path"]: record["provenance"].get("package_id") for record in frozen(data)
+    }
+    assert ownership == {
+        "local.py": None,
+        "parent.py": parent_id,
+        "child.py": child_id,
+        "parent_extra.py": parent_id,
+        "local_after.py": None,
+    }
+    assert scope.parse_scope(data) == data
+
+
+def test_manifest_duplicate_names_use_authority_library_selection_and_physical_roots(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    for directory, package_name, version in [
+        (first, "first_pkg", "1"),
+        (second, "second_pkg", "2"),
+    ]:
+        write(
+            directory,
+            "nested/demo/manifest.py",
+            f'metadata(version="{version}")\npackage("{package_name}")\n',
+        )
+        write(directory, f"nested/demo/{package_name}/__init__.py")
+    # An alias must not create a second identity for the same physical manifest.
+    alias = tmp_path / "first-alias"
+    alias.symlink_to(first, target_is_directory=True)
+    variables = {"FIRST": str(first), "SECOND": str(second), "ALIAS": str(alias)}
+    data = collect(
+        tmp_path,
+        'add_library("first", "$(FIRST)")\n'
+        'add_library("second", "$(SECOND)", prepend=True)\n'
+        'add_library("alias", "$(ALIAS)")\n'
+        'require("demo")\nrequire("demo", library="first")\n'
+        'require("demo", library="second")\nrequire("demo", library="alias")\n',
+        variables=variables,
+        roots={"consumer": str(tmp_path), "first": str(first), "second": str(second)},
+        owners={"consumer": "consumer", "first": "first", "second": "second"},
+    )
+    assert_authority_selection(data, tmp_path / "manifest.py", variables)
+    first_id = "first/nested/demo/manifest.py"
+    second_id = "second/nested/demo/manifest.py"
+    assert [
+        (package["id"], package["name"], package["library"]) for package in data["packages"]
+    ] == [
+        (second_id, "demo", None),
+        (first_id, "demo", "first"),
+    ]
+    assert data["package_requirements"] == [
+        {"parent": None, "package": second_id},
+        {"parent": None, "package": first_id},
+        {"parent": None, "package": second_id},
+        {"parent": None, "package": first_id},
+    ]
+    assert {record["provenance"]["package_id"] for record in frozen(data)} == {first_id, second_id}
+
+
+def test_manifest_require_after_unrequired_include_does_not_fabricate_file_ownership(tmp_path):
+    write(tmp_path, "library/demo/manifest.py", 'metadata(version="1")\nmodule("demo.py")\n')
+    write(tmp_path, "library/demo/demo.py")
+    data = collect(
+        tmp_path,
+        'add_library("local", "library")\ninclude("library/demo")\nrequire("demo")\n',
+    )
+    assert "package_id" not in frozen(data)[0]["provenance"]
+    assert data["packages"] == [
+        {
+            "id": "fixture/library/demo/manifest.py",
+            "name": "demo",
+            "root": "fixture",
+            "path": "library/demo/manifest.py",
+            "library": None,
+            "metadata": {},
+            "dependencies": [],
+        }
+    ]
+    assert data["package_requirements"] == [
+        {"parent": None, "package": "fixture/library/demo/manifest.py"}
+    ]
+
+
+def package_inventory(tmp_path):
+    data = inventory(tmp_path)
+    write(tmp_path, "packages/parent/manifest.py")
+    write(tmp_path, "packages/child/manifest.py")
+    parent_id = "project/packages/parent/manifest.py"
+    child_id = "project/packages/child/manifest.py"
+    data["packages"] = [
+        {
+            "id": parent_id,
+            "name": "parent",
+            "root": "project",
+            "path": "packages/parent/manifest.py",
+            "library": None,
+            "metadata": {"version": None, "stdlib": False},
+            "dependencies": [child_id],
+        },
+        {
+            "id": child_id,
+            "name": "child",
+            "root": "project",
+            "path": "packages/child/manifest.py",
+            "library": "ecosys",
+            "metadata": {"version": "1"},
+            "dependencies": [],
+        },
+    ]
+    data["package_requirements"] = [
+        {"parent": None, "package": parent_id},
+        {"parent": parent_id, "package": child_id},
+    ]
+    frozen(data)[0]["provenance"]["package_id"] = parent_id
+    return data
+
+
+def test_scope_retains_optional_package_inventory_and_edges(tmp_path):
+    data = package_inventory(tmp_path)
+    assert scope.parse_scope(data) == data
+    del data["package_requirements"]
+    assert scope.parse_scope(data) == data
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("id", None),
+        ("id", ""),
+        ("id", 1),
+        ("name", None),
+        ("name", ""),
+        ("root", "missing"),
+        ("path", "../manifest.py"),
+        ("library", ""),
+        ("library", []),
+        ("metadata", None),
+        ("metadata", []),
+        ("metadata", {"version": 1}),
+        ("metadata", {"stdlib": "true"}),
+        ("metadata", {"author": []}),
+        ("metadata", {"license": False}),
+        ("metadata", {"pypi": {}}),
+        ("metadata", {"pypi_publish": 1}),
+        ("dependencies", None),
+        ("dependencies", "child"),
+        ("dependencies", [None]),
+        ("dependencies", ["missing"]),
+    ],
+)
+def test_scope_rejects_malformed_package_attributes(tmp_path, field, value):
+    data = package_inventory(tmp_path)
+    data["packages"][0][field] = value
+    with pytest.raises(ValueError):
+        scope.parse_scope(data)
+
+
+@pytest.mark.parametrize(
+    "field", ["id", "name", "root", "path", "library", "metadata", "dependencies"]
+)
+def test_scope_requires_package_attributes(tmp_path, field):
+    data = package_inventory(tmp_path)
+    del data["packages"][0][field]
+    with pytest.raises(ValueError):
+        scope.parse_scope(data)
+
+
+@pytest.mark.parametrize(
+    "requirements",
+    [
+        None,
+        {},
+        [None],
+        [{}],
+        [{"parent": None}],
+        [{"package": "missing"}],
+        [{"parent": "missing", "package": "missing"}],
+        [{"parent": 1, "package": "missing"}],
+        [{"parent": None, "package": "missing"}],
+    ],
+)
+def test_scope_rejects_malformed_and_dangling_package_requirements(tmp_path, requirements):
+    data = package_inventory(tmp_path)
+    data["package_requirements"] = requirements
+    with pytest.raises(ValueError):
+        scope.parse_scope(data)
+
+
+@pytest.mark.parametrize("packages", [None, {}, [None]])
+def test_scope_rejects_malformed_package_lists(tmp_path, packages):
+    data = package_inventory(tmp_path)
+    data["packages"] = packages
+    with pytest.raises(ValueError):
+        scope.parse_scope(data)
+
+
+def test_scope_rejects_duplicate_package_ids(tmp_path):
+    data = package_inventory(tmp_path)
+    data["packages"].append(copy.deepcopy(data["packages"][0]))
+    with pytest.raises(ValueError, match="duplicate package id"):
+        scope.parse_scope(data)
+
+
+def test_scope_rejects_requirements_missing_from_parent_dependencies(tmp_path):
+    data = package_inventory(tmp_path)
+    data["packages"][0]["dependencies"] = []
+    with pytest.raises(ValueError, match="parent dependencies"):
+        scope.parse_scope(data)
+
+
+@pytest.mark.parametrize("package_id", [None, "", 1, "missing"])
+def test_scope_rejects_malformed_and_dangling_source_package_ids(tmp_path, package_id):
+    data = package_inventory(tmp_path)
+    frozen(data)[0]["provenance"]["package_id"] = package_id
+    with pytest.raises(ValueError, match="package_id"):
+        scope.parse_scope(data)
+
+
+def test_scope_rejects_package_references_without_package_inventory(tmp_path):
+    data = package_inventory(tmp_path)
+    del data["packages"]
+    with pytest.raises(ValueError, match="unknown package"):
+        scope.parse_scope(data)
+
+
+def test_manifest_retains_required_packages_without_selected_python_files(tmp_path):
+    write(tmp_path, "library/header/manifest.py", 'metadata(description="header only")\n')
+    write(tmp_path, "local.py")
+    data = collect(
+        tmp_path,
+        'add_library("local", "library")\nrequire("header", version=">=7")\nmodule("local.py")\n',
+    )
+    assert [record["path"] for record in frozen(data)] == ["local.py"]
+    assert "package_id" not in frozen(data)[0]["provenance"]
+    package = data["packages"][0]
+    assert package["id"] == "fixture/library/header/manifest.py"
+    assert package["metadata"]["version"] is None
+    assert package["metadata"]["description"] == "header only"
+    assert package["dependencies"] == []
+    assert data["package_requirements"] == [{"parent": None, "package": package["id"]}]
+
+
+def test_manifest_requires_explicit_roots_for_selected_package_manifests(tmp_path):
+    library = tmp_path / "library"
+    sources = tmp_path / "sources"
+    write(library, "demo/manifest.py", 'module("demo.py", base_path="$(SOURCES)")\n')
+    write(sources, "demo.py")
+    manifest = write(
+        tmp_path, "manifest.py", 'add_library("local", "$(LIBRARY)")\nrequire("demo")\n'
+    )
+    with pytest.raises(ValueError, match="no explicit root"):
+        scope.collect_manifest_scope(
+            MPY_ROOT,
+            [manifest],
+            roots={"sources": str(sources)},
+            path_vars={"SOURCES": str(sources), "LIBRARY": str(library)},
+            owners={"sources": "source-owner"},
+            target="test-target",
+            variant="minimal",
+            port="unix",
+        )
 
 
 def test_manifest_rejects_sources_outside_explicit_roots(tmp_path):
