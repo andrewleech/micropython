@@ -37,6 +37,7 @@
 //   area 1 primary    dev 1 0x10000, 128 KiB
 //   area 2 secondary  dev 1 0x30000, 132 KiB (primary plus one erase unit); with
 //                     FUZZ_POLICY_SINGLE the secondary id maps to the primary area
+//   area 4 log        dev 1 0x51000, 8 KiB
 //   area 7 intent     dev 1 0x53000, 4 KiB
 //
 // Writes follow the flash model of the port interface: the target bytes must be erased (a second
@@ -55,12 +56,16 @@
 #define HOST_PRIMARY_SIZE 0x20000u
 #define HOST_SECONDARY_OFF 0x30000u
 #define HOST_SECONDARY_SIZE 0x21000u
+#define HOST_LOG_OFF 0x51000u
+#define HOST_LOG_SIZE 0x2000u
 #define HOST_INTENT_OFF 0x53000u
 #define HOST_INTENT_SIZE 0x1000u
 
 typedef struct {
     uint32_t writes;            // calls of mboot_port_flash_dev_write on device 1
     uint32_t erases;            // calls of mboot_port_flash_dev_erase on device 1
+    uint32_t writes_outside_log;
+    uint32_t erases_outside_log;
     uint32_t violations;        // bad alignment, write to non-erased bytes, access to device 0
     uint32_t fs_reads;          // calls of mboot_port_flash_dev_read on device 0
     uint64_t fs_read_bytes;     // bytes read from device 0

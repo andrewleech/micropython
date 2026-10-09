@@ -36,6 +36,7 @@
 #include "mboot_port.h"
 #include "mboot_types.h"
 #include "mboot_update.h"
+#include "mboot_updatelog.h"
 #include "mboot_dfu_recovery.h"
 #include "flash_map_backend/flash_map_backend.h"
 #include "sysflash/sysflash.h"
@@ -169,8 +170,16 @@ int mboot_flash_dev_erase(uint8_t dev, uint32_t off, uint32_t len) {
     return 0;
 }
 
-// ---- validation, bootutil ----
+// ---- update audit log, validation, bootutil ----
 
+int mboot_updatelog_append(uint8_t type, uint8_t result, uint8_t source,
+    const mboot_image_info_t *info, uint32_t detail) {
+    (void)source;
+    (void)info;
+    (void)detail;
+    ev(EV_LOG, type, result);
+    return 0;
+}
 
 mboot_validate_result_t fk_validate_result;
 

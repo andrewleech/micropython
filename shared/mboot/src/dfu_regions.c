@@ -54,6 +54,14 @@ static const mboot_region_t k_regions[] = {
         .name = DFU_IMAGE_NAME,
         .flags = MBOOT_REGION_FLAG_READABLE | MBOOT_REGION_FLAG_ERASE_REQUIRED_BEFORE_WRITE,
     },
+    {
+        .addr = MBOOT_LOG_ADDR,
+        .size = MBOOT_LOG_SIZE,
+        .sector_size = MBOOT_LOG_UNIT,
+        .sector_count = MBOOT_LOG_SIZE / MBOOT_LOG_UNIT,
+        .name = "Update audit log",
+        .flags = MBOOT_REGION_FLAG_READABLE | MBOOT_REGION_FLAG_READ_ONLY,
+    },
 };
 
 void mboot_port_get_regions(const mboot_region_t **regions_out, size_t *count_out) {

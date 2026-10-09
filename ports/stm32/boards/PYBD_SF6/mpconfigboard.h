@@ -132,12 +132,13 @@ void board_early_init_sf6(void);
 // filesystem is on SPI flash #1, so there is room for one slot only: the single policy updates
 // it in place, by DFU or from a file on the filesystem (fsload), and does not revert.
 //
-// 0x08000000 two 32 KiB sectors    the bootloader
-// 0x08010000 two 32 KiB sectors    unused by MCUboot
-// 0x08020000 128 KiB sector        intent area of fsload
+// 0x08000000 two 32 KiB sectors  the bootloader
+// 0x08010000 two 32 KiB sectors  update audit log
+// 0x08020000 128 KiB sector      intent area of fsload
 // 0x08040000 five 256 KiB sectors  the slot (image header, firmware, trailer)
-// 0x08180000 two 256 KiB sectors   security counter
+// 0x08180000 two 256 KiB sectors security counter
 #define MBOOT_POLICY              (MBOOT_POLICY_SEL_SINGLE)
+#define MBOOT_LOG_ADDR            (0x08010000)
 #define MBOOT_INTENT_ADDR         (0x08020000)
 #define MBOOT_PRIMARY_ADDR        (0x08040000)
 #define MBOOT_PRIMARY_SIZE        (1280 * 1024)

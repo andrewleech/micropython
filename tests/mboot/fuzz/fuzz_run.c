@@ -27,6 +27,7 @@
 #include "fuzz_common.h"
 
 #include "flash_map_backend/flash_map_backend.h"
+#include "mboot_updatelog.h"
 #include "stub_fuzz.h"
 #include "sysflash/sysflash.h"
 
@@ -65,9 +66,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     int r = mboot_fsload_run(copy, elems_len);
     free(copy);
 
+    FUZZ_CHECK(stub_state.log_records >= 2);
     const host_flash_stats_t *st = host_flash_stats();
     FUZZ_CHECK(st->violations == 0);
-    if (r == MBOOT_RES_OK) {
+    if (r != MBOOT_RES_OK) {
+        FUZZ_CHECK(stub_state.last_type == LOG_FSLOAD_FAILED);
+        FUZZ_CHECK(stub_state.last_result == r);
+    } else {
+        FUZZ_CHECK(stub_state.last_type == LOG_FSLOAD_DONE);
         #if defined(FUZZ_POLICY_SINGLE)
         FUZZ_CHECK(memcmp(host_slots() + HOST_PRIMARY_OFF, "\x3d\xb8\xf3\x96", 4) == 0);
         #else

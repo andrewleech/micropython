@@ -48,10 +48,10 @@
 // The port also gives MBOOT_BOOT_SIZE (the bootloader region at the start of device 0, unless the
 // board defines it first), MBOOT_VTOR_ALIGN and the RAM symbols.
 //
-// Erase units belong to areas. Every area (the bootloader region, the slots, the counter, the
-// shadow, scratch and intent areas and the filesystem) lies in one run of its device, starts at
-// and is a multiple of the erase unit of that run (MBOOT_<AREA>_UNIT), and overlaps no other
-// area. The primary slot, the secondary slot and the scratch and shadow areas have one erase
+// Erase units belong to areas. Every area (the bootloader region, the slots, the update audit log, the
+// counter, the shadow, scratch and intent areas and the filesystem) lies in one run of its device,
+// starts at and is a multiple of the erase unit of that run (MBOOT_<AREA>_UNIT), and overlaps no
+// other area. The primary slot, the secondary slot and the scratch and shadow areas have one erase
 // unit, because bootutil exchanges the slots sector by sector.
 //
 // Board inputs. Sizes are in bytes, a size of an area is a multiple of its erase unit.
@@ -68,7 +68,8 @@
 //                               lies in one run and is a number of its erase units
 //   MBOOT_HEADER_SIZE         image header (default 0x400)
 //   MBOOT_SECURITY_COUNTER    value signed into the image (default 0)
-//   MBOOT_SECCNT_ADDR         security counter in flash, two erase units (default: after the primary slot)
+//   MBOOT_LOG_ADDR            update audit log, two erase units (default: directly after the primary slot)
+//   MBOOT_SECCNT_ADDR         security counter in flash, two erase units (default: after the log)
 //   MBOOT_SHADOW_ADDR         shadow words of a device 0 with ECC (default: after the counter)
 //   MBOOT_FS_ADDR, _SIZE      the application filesystem, default the flash between the
 //                               auxiliary areas and the secondary slot
@@ -117,10 +118,10 @@
 //                               from a raw window of flash
 //   MBOOT_FSLOAD_GZIP         define as 1 to accept a gzip compressed update file
 //
-// Placement. The counter, shadow, scratch and intent areas follow the primary slot in that order,
-// each one directly behind the one before unless the board names its address, and are on device 0.
-// The default of the filesystem is behind them, except that a scratch or intent area that the
-// board places leaves it where it would be without. A secondary slot or filesystem on device 1 (a SPI flash) is
+// Placement. The update audit log, the counter, the shadow, the scratch and the intent area follow the
+// primary slot in that order, each one directly behind the one before unless the board names its
+// address, and are on device 0. The default of the filesystem is behind them, except that a
+// scratch or intent area that the board places leaves it where it would be without. A secondary slot or filesystem on device 1 (a SPI flash) is
 // allowed, the other areas are not. Device 1 has no ECC and its erase units are a multiple of the
 // 4 KiB erase block; a secondary slot on it needs the erase unit of the primary slot and a write
 // unit equal to the trailer alignment.
@@ -700,9 +701,16 @@
 
 // ---- areas next to the primary slot ----
 
+// The update audit log is two erase units that two record rings alternate in.
+#ifndef MBOOT_LOG_ADDR
+#define MBOOT_LOG_ADDR (MBOOT_PRIMARY_END)
+#endif
+#define MBOOT_LOG_UNIT MBOOT_UNIT_AT(MBOOT_LOG_ADDR)
+#define MBOOT_LOG_SIZE (2 * MBOOT_LOG_UNIT)
+
 #if defined(MBOOT_SECCNT_FLASH)
 #ifndef MBOOT_SECCNT_ADDR
-#define MBOOT_SECCNT_ADDR (MBOOT_PRIMARY_END)
+#define MBOOT_SECCNT_ADDR (MBOOT_LOG_ADDR + MBOOT_LOG_SIZE)
 #endif
 #define MBOOT_SECCNT_UNIT MBOOT_UNIT_AT(MBOOT_SECCNT_ADDR)
 #define MBOOT_SECCNT_SIZE (2 * MBOOT_SECCNT_UNIT)
@@ -711,7 +719,7 @@
 #if defined(MBOOT_SECCNT_ADDR)
 #error "MBOOT_SECCNT_ADDR needs MBOOT_ROLLBACK_COUNTER 1 with the counter in flash"
 #endif
-#define MBOOT_AUX_AFTER_SECCNT (MBOOT_PRIMARY_END)
+#define MBOOT_AUX_AFTER_SECCNT (MBOOT_LOG_ADDR + MBOOT_LOG_SIZE)
 #endif
 
 // One shadow sector for each trailer sector of each slot that is on a device with ECC.
@@ -818,6 +826,8 @@
 #define MBOOT_CHK_SECONDARY_ADDR (MBOOT_DEV0_BASE)
 #define MBOOT_CHK_SECONDARY_SIZE 0
 #endif
+#define MBOOT_CHK_LOG_ADDR (MBOOT_LOG_ADDR)
+#define MBOOT_CHK_LOG_SIZE (MBOOT_LOG_SIZE)
 #if defined(MBOOT_SECCNT_FLASH)
 #define MBOOT_CHK_SECCNT_ADDR (MBOOT_SECCNT_ADDR)
 #define MBOOT_CHK_SECCNT_SIZE (MBOOT_SECCNT_SIZE)
@@ -872,6 +882,9 @@
 #if !MBOOT_CHK_UNITS(SECONDARY)
 #error "the secondary slot has to lie in one run of erase units, start at and be a multiple of the erase unit"
 #endif
+#if !MBOOT_CHK_UNITS(LOG)
+#error "the update audit log has to lie in one run of erase units, start at and be a multiple of the erase unit"
+#endif
 #if !MBOOT_CHK_UNITS(SECCNT)
 #error "the counter area has to lie in one run of erase units, start at and be a multiple of the erase unit"
 #endif
@@ -896,6 +909,9 @@
 #endif
 #if !MBOOT_CHK_IN_DEV0(PRIMARY)
 #error "the primary slot does not fit in device 0"
+#endif
+#if !MBOOT_CHK_IN_DEV0(LOG)
+#error "the update audit log does not fit in device 0"
 #endif
 #if !MBOOT_CHK_IN_DEV0(SECCNT)
 #error "the counter area does not fit in device 0"
@@ -945,6 +961,8 @@
 #error "the bootloader region overlaps the primary slot"
 #elif MBOOT_CHK_OVERLAP(BOOT, SECONDARY)
 #error "the bootloader region overlaps the secondary slot"
+#elif MBOOT_CHK_OVERLAP(BOOT, LOG)
+#error "the bootloader region overlaps the update audit log"
 #elif MBOOT_CHK_OVERLAP(BOOT, SECCNT)
 #error "the bootloader region overlaps the counter area"
 #elif MBOOT_CHK_OVERLAP(BOOT, SHADOW)
@@ -957,6 +975,8 @@
 #error "the bootloader region overlaps the filesystem"
 #elif MBOOT_CHK_OVERLAP(PRIMARY, SECONDARY)
 #error "the primary slot overlaps the secondary slot"
+#elif MBOOT_CHK_OVERLAP(PRIMARY, LOG)
+#error "the primary slot overlaps the update audit log"
 #elif MBOOT_CHK_OVERLAP(PRIMARY, SECCNT)
 #error "the primary slot overlaps the counter area"
 #elif MBOOT_CHK_OVERLAP(PRIMARY, SHADOW)
@@ -967,6 +987,8 @@
 #error "the primary slot overlaps the intent area"
 #elif MBOOT_CHK_OVERLAP(PRIMARY, FS)
 #error "the filesystem overlaps the primary slot"
+#elif MBOOT_CHK_OVERLAP(SECONDARY, LOG)
+#error "the secondary slot overlaps the update audit log"
 #elif MBOOT_CHK_OVERLAP(SECONDARY, SECCNT)
 #error "the secondary slot overlaps the counter area"
 #elif MBOOT_CHK_OVERLAP(SECONDARY, SHADOW)
@@ -977,6 +999,16 @@
 #error "the secondary slot overlaps the intent area"
 #elif MBOOT_CHK_OVERLAP(SECONDARY, FS)
 #error "the filesystem overlaps the secondary slot"
+#elif MBOOT_CHK_OVERLAP(LOG, SECCNT)
+#error "the update audit log overlaps the counter area"
+#elif MBOOT_CHK_OVERLAP(LOG, SHADOW)
+#error "the update audit log overlaps the shadow area"
+#elif MBOOT_CHK_OVERLAP(LOG, SCRATCH)
+#error "the update audit log overlaps the scratch area"
+#elif MBOOT_CHK_OVERLAP(LOG, INTENT)
+#error "the update audit log overlaps the intent area"
+#elif MBOOT_CHK_OVERLAP(LOG, FS)
+#error "the filesystem overlaps the update audit log"
 #elif MBOOT_CHK_OVERLAP(SECCNT, SHADOW)
 #error "the counter area overlaps the shadow area"
 #elif MBOOT_CHK_OVERLAP(SECCNT, SCRATCH)
@@ -1076,21 +1108,24 @@
 // ---- identity ----
 
 // Binds a signed image to the flash layout it was linked for (custom TLV of the image):
-// FNV-1 over the 32 bit words below. The default swap-using-offset configuration uses the first
-// ten words; other policies, swap modes, counter backends or version checks, and counter or shadow
-// areas placed away from their defaults add more. tools/mboot_gen.py reads the same expression.
+// FNV-1 over the 32 bit words below. The words of the swap policy using offset with the
+// default choices are the first twelve; any other policy, swap mode, counter backend or version
+// check, and a counter or shadow area placed away from its default, add more, so that the id of
+// the default configuration does not depend on the choices. tools/mboot_gen.py reads the same
+// expression.
 #define MBOOT_ID_STEP(h, w) ((((h) ^ ((w) & 0xFFFFFFFFu)) * 16777619u) & 0xFFFFFFFFu)
 #define MBOOT_ID_0 0x811C9DC5u
 #define MBOOT_ID_1 MBOOT_ID_STEP(MBOOT_ID_0, MBOOT_PRIMARY_ADDR)
 #define MBOOT_ID_2 MBOOT_ID_STEP(MBOOT_ID_1, MBOOT_PRIMARY_SIZE)
 #define MBOOT_ID_3 MBOOT_ID_STEP(MBOOT_ID_2, MBOOT_SECONDARY_ADDR)
 #define MBOOT_ID_4 MBOOT_ID_STEP(MBOOT_ID_3, MBOOT_SECONDARY_SIZE)
-#define MBOOT_ID_5 MBOOT_ID_STEP(MBOOT_ID_4, MBOOT_FS_ADDR)
-#define MBOOT_ID_6 MBOOT_ID_STEP(MBOOT_ID_5, MBOOT_FS_SIZE)
-#define MBOOT_ID_7 MBOOT_ID_STEP(MBOOT_ID_6, MBOOT_HEADER_SIZE)
-#define MBOOT_ID_8 MBOOT_ID_STEP(MBOOT_ID_7, MBOOT_SLOT_UNIT)
-#define MBOOT_ID_9 MBOOT_ID_STEP(MBOOT_ID_8, MBOOT_MAX_WRITE_UNIT)
-#define MBOOT_ID_10 MBOOT_ID_STEP(MBOOT_ID_9, MBOOT_ROLLBACK_COUNTER)
+#define MBOOT_ID_5 MBOOT_ID_STEP(MBOOT_ID_4, MBOOT_LOG_ADDR)
+#define MBOOT_ID_6 MBOOT_ID_STEP(MBOOT_ID_5, MBOOT_FS_ADDR)
+#define MBOOT_ID_7 MBOOT_ID_STEP(MBOOT_ID_6, MBOOT_FS_SIZE)
+#define MBOOT_ID_8 MBOOT_ID_STEP(MBOOT_ID_7, MBOOT_HEADER_SIZE)
+#define MBOOT_ID_9 MBOOT_ID_STEP(MBOOT_ID_8, MBOOT_SLOT_UNIT)
+#define MBOOT_ID_10 MBOOT_ID_STEP(MBOOT_ID_9, MBOOT_MAX_WRITE_UNIT)
+#define MBOOT_ID_11 MBOOT_ID_STEP(MBOOT_ID_10, MBOOT_ROLLBACK_COUNTER)
 
 // Bit 0..2: policy and swap mode (0 swap using offset, 1 move, 2 scratch, 3 overwrite-external,
 // 4 single), bit 3: the counter is kept by the port, bit 4: no version check.
@@ -1128,14 +1163,14 @@
 #define MBOOT_ID_INTENT_ADDR 0
 #endif
 #if MBOOT_ID_MODE == 0 && MBOOT_ID_COUNTER == 0 && MBOOT_ID_VERSION == 0
-#define MBOOT_ID_11 MBOOT_ID_10
+#define MBOOT_ID_12 MBOOT_ID_11
 #else
-#define MBOOT_ID_11 MBOOT_ID_STEP(MBOOT_ID_STEP(MBOOT_ID_STEP(MBOOT_ID_STEP( \
-    MBOOT_ID_10, MBOOT_ID_MODE + MBOOT_ID_COUNTER + MBOOT_ID_VERSION), \
+#define MBOOT_ID_12 MBOOT_ID_STEP(MBOOT_ID_STEP(MBOOT_ID_STEP(MBOOT_ID_STEP( \
+    MBOOT_ID_11, MBOOT_ID_MODE + MBOOT_ID_COUNTER + MBOOT_ID_VERSION), \
     MBOOT_ID_SCRATCH_ADDR), MBOOT_ID_SCRATCH_SIZE), MBOOT_ID_INTENT_ADDR)
 #endif
-// The counter and shadow areas, when a board places them away from their defaults.
-#if defined(MBOOT_SECCNT_FLASH) && MBOOT_SECCNT_ADDR != MBOOT_PRIMARY_END
+// The counter and shadow areas, when a board placed them elsewhere than behind the update audit log.
+#if defined(MBOOT_SECCNT_FLASH) && MBOOT_SECCNT_ADDR != MBOOT_LOG_ADDR + MBOOT_LOG_SIZE
 #define MBOOT_ID_SECCNT_ADDR MBOOT_SECCNT_ADDR
 #else
 #define MBOOT_ID_SECCNT_ADDR 0
@@ -1146,10 +1181,10 @@
 #define MBOOT_ID_SHADOW_ADDR 0
 #endif
 #if MBOOT_ID_SECCNT_ADDR == 0 && MBOOT_ID_SHADOW_ADDR == 0
-#define MBOOT_ID_12 MBOOT_ID_11
+#define MBOOT_ID_13 MBOOT_ID_12
 #else
-#define MBOOT_ID_12 MBOOT_ID_STEP(MBOOT_ID_STEP(MBOOT_ID_11, MBOOT_ID_SECCNT_ADDR), MBOOT_ID_SHADOW_ADDR)
+#define MBOOT_ID_13 MBOOT_ID_STEP(MBOOT_ID_STEP(MBOOT_ID_12, MBOOT_ID_SECCNT_ADDR), MBOOT_ID_SHADOW_ADDR)
 #endif
-#define MBOOT_LAYOUT_ID MBOOT_ID_STEP(MBOOT_ID_12, MBOOT_API_VERSION)
+#define MBOOT_LAYOUT_ID MBOOT_ID_STEP(MBOOT_ID_13, MBOOT_API_VERSION)
 
 #endif // MICROPY_INCLUDED_SHARED_MBOOT_MBOOT_LAYOUT_H

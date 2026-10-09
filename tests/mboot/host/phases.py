@@ -43,7 +43,7 @@ Classes:
   P_IMAGEOK        image_ok flag
   P_MAGIC          trailer magic
   P_TRAILER_ERASE  erase of a sector that holds a slot trailer
-  P_SECCNT        security counter area
+  P_LOG            update audit log or counter area
   P_SCRATCH_ERASE  erase in the scratch area of swap using scratch
   P_SCRATCH_WRITE  write in the scratch area (data and the status kept there)
   P_INTENT         intent area of the single slot policy with fsload
@@ -77,7 +77,7 @@ CLASSES = (
     "P_WRITE_PRI",
     "P_ERASE_PRI",
     "P_WRITE_SEC",
-    "P_SECCNT",
+    "P_LOG",
     "P_SCRATCH_ERASE",
     "P_SCRATCH_WRITE",
     "P_INTENT",
@@ -102,8 +102,8 @@ def classify(lay, op):
     name = lay.area_at(dev, off, length)
     if name is None:
         return "P_OTHER"
-    if name == "seccnt":
-        return "P_SECCNT"
+    if name in ("log", "seccnt"):
+        return "P_LOG"
     if name == "scratch":
         return "P_SCRATCH_ERASE" if kind == "erase" else "P_SCRATCH_WRITE"
     if name == "intent":

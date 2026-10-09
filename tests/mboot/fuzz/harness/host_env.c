@@ -45,6 +45,7 @@ const struct flash_area mboot_areas[] = {
     #if !defined(MCUBOOT_SINGLE_APPLICATION_SLOT)
     { .fa_id = FLASH_AREA_IMAGE_SECONDARY(0), .fa_device_id = 1, .fa_off = HOST_SECONDARY_OFF, .fa_size = HOST_SECONDARY_SIZE },
     #endif
+    { .fa_id = MBOOT_AREA_LOG, .fa_device_id = 1, .fa_off = HOST_LOG_OFF, .fa_size = HOST_LOG_SIZE },
     { .fa_id = MBOOT_AREA_INTENT, .fa_device_id = 1, .fa_off = HOST_INTENT_OFF, .fa_size = HOST_INTENT_SIZE },
 };
 const unsigned mboot_area_count = sizeof(mboot_areas) / sizeof(mboot_areas[0]);
@@ -110,6 +111,9 @@ static bool power_ok(void) {
     return true;
 }
 
+static bool touches_log(uint32_t off, uint32_t len) {
+    return off < HOST_LOG_OFF + HOST_LOG_SIZE && off + len > HOST_LOG_OFF;
+}
 
 int mboot_port_flash_dev_init(void) {
     return 0;
@@ -157,6 +161,9 @@ int mboot_port_flash_dev_write(uint8_t dev, uint32_t off, const void *src, uint3
         return -EIO;
     }
     stats.writes++;
+    if (!touches_log(off, len)) {
+        stats.writes_outside_log++;
+    }
     for (uint32_t i = 0; i < len; ++i) {
         if (slots[off + i] != 0xff) {
             stats.violations++;
@@ -176,6 +183,9 @@ int mboot_port_flash_dev_erase(uint8_t dev, uint32_t off, uint32_t len) {
         return -EIO;
     }
     stats.erases++;
+    if (!touches_log(off, len)) {
+        stats.erases_outside_log++;
+    }
     memset(slots + off, 0xff, len);
     return 0;
 }

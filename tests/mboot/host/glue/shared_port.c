@@ -33,6 +33,7 @@
 #include "flash_map_backend/flash_map_backend.h"
 #include "mboot_log.h"
 #include "mboot_port.h"
+#include "mboot_updatelog.h"
 
 #include "host_glue.h"
 
@@ -77,6 +78,15 @@ void mboot_fault_recover(void) {
     _exit(66);
 }
 
+// The update audit log is not part of the sweep.
+int mboot_updatelog_append(uint8_t type, uint8_t result, uint8_t source, const mboot_image_info_t *info, uint32_t detail) {
+    (void)type;
+    (void)result;
+    (void)source;
+    (void)info;
+    (void)detail;
+    return 0;
+}
 
 // There is no fsload stream device in the sweep.
 int mboot_stream_area_read(uint32_t off, void *dst, uint32_t len) {

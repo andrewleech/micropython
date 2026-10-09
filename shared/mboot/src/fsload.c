@@ -40,6 +40,7 @@
 #include "mboot_request.h"
 #include "mboot_types.h"
 #include "mboot_update.h"
+#include "mboot_updatelog.h"
 #include "mboot_validate.h"
 
 #if defined(MBOOT_FSLOAD_ENABLE) && MBOOT_FSLOAD_ENABLE
@@ -534,6 +535,7 @@ bool mboot_intent_load(mboot_request_t *req) {
     }
     req->mode = MBOOT_REQ_FSLOAD;
     req->elems_len = len;
+    mboot_updatelog_append(LOG_FSLOAD_RETRY, MBOOT_RES_OK, SRC_FSLOAD, NULL, 0);
     return true;
     #else
     (void)req;
@@ -710,6 +712,7 @@ int mboot_fsload_run(const uint8_t *elems, size_t len) {
     uint32_t detail = 0;
 
     memset(&vr, 0, sizeof(vr));
+    mboot_updatelog_append(LOG_FSLOAD_BEGIN, MBOOT_RES_OK, SRC_FSLOAD, NULL, 0);
 
     int r = parse_request(elems, len, &rq);
     if (r < 0) {
@@ -728,8 +731,10 @@ int mboot_fsload_run(const uint8_t *elems, size_t len) {
 
     if (r == MBOOT_RES_OK) {
         MCUBOOT_LOG_INF("image installed");
+        mboot_updatelog_append(LOG_FSLOAD_DONE, MBOOT_RES_OK, SRC_FSLOAD, &vr.info, 0);
     } else {
         MCUBOOT_LOG_ERR("failed with result %d, detail %u", r, (unsigned)detail);
+        mboot_updatelog_append(LOG_FSLOAD_FAILED, r, SRC_FSLOAD, vr.info.valid ? &vr.info : NULL, detail);
     }
     store_status(&rq, r);
     return r;

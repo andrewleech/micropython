@@ -28,11 +28,11 @@
 #define MBOOT_TESTS_GLUE_FAKE_MBOOT_H
 
 // fake_mboot.h - in-memory Mboot environment for the dfu_glue.c host tests.
-// Device 0 flash is a byte array. The validation, update slot functions, port,
-// and TinyUSB task are fakes that record their calls. The layout comes from
-// the board and port headers the build is given (mboot_layout.h). The device
-// table and the DFU region and write range tables are the real ones (flash_map.c,
-// dfu_regions.c).
+// Device 0 flash is a byte array, and everything the glue calls (update audit log,
+// validation, update slot functions, port, TinyUSB task) is a fake that records
+// its calls. The layout comes from the board and port headers the build is
+// given (mboot_layout.h). The device table and the DFU region and write range
+// tables are the real ones (flash_map.c, dfu_regions.c).
 
 #include <setjmp.h>
 #include <stddef.h>
@@ -63,6 +63,8 @@
 #define FK_BOOT_SIZE MBOOT_BOOT_SIZE
 #define FK_PRIMARY_OFF FK_OFF(MBOOT_PRIMARY_ADDR)
 #define FK_PRIMARY_SIZE MBOOT_PRIMARY_SIZE
+#define FK_LOG_OFF FK_OFF(MBOOT_LOG_ADDR)
+#define FK_LOG_SIZE MBOOT_LOG_SIZE
 #define FK_SECCNT_OFF FK_OFF(MBOOT_SECCNT_ADDR)
 #define FK_SECCNT_SIZE MBOOT_SECCNT_SIZE
 #define FK_SHADOW_OFF FK_OFF(MBOOT_SHADOW_ADDR)
@@ -113,6 +115,7 @@ extern uint8_t fk_flash[FK_DEV_SIZE];
 typedef enum {
     EV_ERASE,     // a = device offset, b = length
     EV_WRITE,     // a = device offset, b = length
+    EV_LOG,       // a = log type, b = result
     EV_VALIDATE,  // a = view fa_id, b = flags
     EV_PENDING,   // a = image index, b = permanent
     EV_DEINIT,

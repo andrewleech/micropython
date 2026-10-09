@@ -24,7 +24,7 @@
  * THE SOFTWARE.
  */
 
-// Application wrappers around bootutil_public.c and the request handoff.
+// Application side wrappers around bootutil_public.c, the request handoff and the update audit log.
 // Compiled into the application build only (MBOOT_ROLE_APP). No signature or hash validation
 // happens here; that is done by the bootloader at the next boot.
 
@@ -41,6 +41,7 @@
 #include "mboot_types.h"
 #include "mboot_request.h"
 #include "mboot_update.h"
+#include "mboot_updatelog.h"
 #include "mboot_app.h"
 
 _Static_assert(BOOT_SWAP_TYPE_NONE == MBOOT_APP_SWAP_NONE, "swap type values");
@@ -177,6 +178,19 @@ static void version_from_header(const struct image_header *hdr, mboot_app_versio
     v->build = hdr->ih_ver.iv_build_num;
 }
 
+static void log_event(uint8_t type, const mboot_app_version_t *v) {
+    mboot_image_info_t info;
+    memset(&info, 0, sizeof(info));
+    if (v != NULL) {
+        info.valid = 1;
+        info.ver_major = v->major;
+        info.ver_minor = v->minor;
+        info.ver_rev = v->revision;
+        info.ver_build = v->build;
+    }
+    // A log write failure does not fail the operation that was logged.
+    (void)mboot_updatelog_append(type, MBOOT_RES_OK, SRC_APP, v != NULL ? &info : NULL, 0);
+}
 
 static int read_primary_state(struct boot_swap_state *st) {
     if (boot_read_swap_state_by_id(FLASH_AREA_IMAGE_PRIMARY(0), st) != 0) {
@@ -264,6 +278,8 @@ static const char *area_name(uint8_t id) {
         #endif
         case FLASH_AREA_IMAGE_SCRATCH:
             return "scratch";
+        case MBOOT_AREA_LOG:
+            return "log";
         case MBOOT_AREA_SECCNT:
             return "seccnt";
         case MBOOT_AREA_FS:
@@ -300,6 +316,23 @@ int mboot_app_fs_area(uint32_t *base, uint32_t *len) {
     return -ENOENT;
 }
 
+int mboot_app_log_get(uint32_t n, mboot_app_log_entry_t *entry) {
+    mboot_log_rec_t rec;
+    int rc = mboot_updatelog_read(n, &rec);
+    if (rc != 0) {
+        return rc;
+    }
+    entry->seq = rec.seq;
+    entry->type = rec.type;
+    entry->result = rec.result;
+    entry->source = rec.source;
+    entry->version.major = rec.ver_major;
+    entry->version.minor = rec.ver_minor;
+    entry->version.revision = rec.ver_rev;
+    entry->version.build = rec.ver_build;
+    entry->detail = rec.detail;
+    return 0;
+}
 
 // ---- actions ----
 
@@ -312,6 +345,15 @@ int mboot_app_confirm(void) {
     }
     if (boot_set_confirmed() != 0) {
         return -EIO;
+    }
+    if (before.magic == BOOT_MAGIC_GOOD && before.image_ok != BOOT_FLAG_SET) {
+        struct image_header hdr;
+        mboot_app_version_t v;
+        bool have_version = read_header(MBOOT_APP_SLOT_PRIMARY, &hdr) == 0;
+        if (have_version) {
+            version_from_header(&hdr, &v);
+        }
+        log_event(LOG_APP_CONFIRMED, have_version ? &v : NULL);
     }
     #endif
     return 0;
@@ -347,6 +389,9 @@ static int set_pending(bool permanent) {
     if (boot_set_pending(permanent ? 1 : 0) != 0) {
         return -EIO;
     }
+    mboot_app_version_t v;
+    version_from_header(&hdr, &v);
+    log_event(LOG_APP_UPGRADE_REQUESTED, &v);
     return 0;
     #else
     (void)permanent;
@@ -364,6 +409,7 @@ void mboot_app_reset(void) {
 }
 
 void mboot_app_request_dfu(void) {
+    log_event(LOG_APP_DFU_REQUESTED, NULL);
     mboot_request_set_and_reset(MBOOT_REQ_DFU, NULL, 0);
 }
 

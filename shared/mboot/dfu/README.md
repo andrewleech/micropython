@@ -26,6 +26,8 @@ Port contract
 
 `include/mboot_api.h` documents everything the binding code provides: `mboot_port_get_regions()`, the `mboot_port_flash_*` functions, the USB identity functions and the three hooks below. Regions of one alt setting share a name and must be contiguous and ascending; `MBOOT_REGION_FLAG_READ_ONLY` regions can be read and uploaded but not erased or written. `MBOOT_DFU_WRITE_ALIGN` (default 4) is the write unit; DNLOAD blocks are padded with 0xFF to a multiple of it.
 
+The Mboot binding also exposes its persistent `Update audit log` as a separate read-only alternate setting. Downloads and vendor erase requests cannot modify that region; upload its raw contents and decode them with `tools/mboot_log.py`.
+
 Protocol
 --------
 

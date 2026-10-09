@@ -24,9 +24,10 @@
  * THE SOFTWARE.
  */
 
-// The PYBD_SF6 flash map with swap and a version check instead of the security counter: two slots
-// of three 256 KiB sectors and a scratch area of one sector, which fill the 256 KiB run. The largest
-// image is two sectors, 512 KiB.
+// The PYBD_SF6 flash map with swap using scratch and a version check instead of the security
+// counter: two slots of three of the 256 KiB sectors and a scratch area of one sector, which fill
+// the 256 KiB run. The largest image is two sectors, 512 KiB. The update audit log is in the 32 KiB
+// sectors.
 
 #define MBOOT_PRIMARY_ADDR (0x08040000)
 #define MBOOT_PRIMARY_SIZE (3 * 0x40000)
@@ -34,6 +35,7 @@
 #define MBOOT_SWAP_MODE (MBOOT_SWAP_MODE_SEL_SCRATCH)
 #define MBOOT_SCRATCH_ADDR (0x081C0000)
 #define MBOOT_SCRATCH_SIZE (0x40000)
+#define MBOOT_LOG_ADDR (0x08010000)
 #define MBOOT_ROLLBACK_COUNTER (0)
 #define MBOOT_FS_ADDR (0x80000000)
 #define MBOOT_FS_SIZE (2 * 1024 * 1024)

@@ -45,6 +45,7 @@
 #include "mboot_port.h"
 #include "mboot_request.h"
 #include "mboot_types.h"
+#include "mboot_updatelog.h"
 #include "mboot_validate.h"
 #include "sysflash/sysflash.h"
 #include "tusb.h"
@@ -94,6 +95,7 @@ static bool check(bool cond, const char *expr, const char *file, int line) {
 // only slot: there is no secondary slot, no pending state and no old image to fall back to.
 #define SPARE (MBOOT_UPDATE_SPARE)
 #define SWAP_AFTER_UPDATE (MBOOT_POLICY_SWAP ? BOOT_SWAP_TYPE_REVERT : BOOT_SWAP_TYPE_NONE)
+#define LOG_UPDATE_DONE (MBOOT_POLICY_SWAP ? LOG_SWAP_DONE : LOG_SWAP_DONE_PERM)
 
 // ---- images ----
 
@@ -298,23 +300,25 @@ static uint32_t crc_area(uint8_t id) {
     return crc_range(fa->fa_device_id, fa->fa_off, fa->fa_size);
 }
 
-// CRC over the internal flash and, optionally, the secondary slot with its half of the shadow
-// area (the shadow words of the secondary trailer follow the writes DFU makes there).
+// CRC over the internal flash except the update audit log and, optionally, the secondary slot with
+// its half of the shadow area (the shadow words of the secondary trailer follow the writes DFU
+// makes there).
 static uint32_t crc_flash_except(bool secondary_too) {
+    const struct flash_area *log = area(MBOOT_AREA_LOG);
     const struct flash_area *sec = area(FLASH_AREA_IMAGE_SECONDARY(0));
     // A flash without ECC has no shadow area.
     const struct flash_area *shadow = mboot_flash_area_find(MBOOT_AREA_SHADOW);
     struct {
         uint32_t off;
         uint32_t end;
-    } skip[2] = {{0, 0}, {0, 0}};
+    } skip[3] = {{log->fa_off, log->fa_off + log->fa_size}, {0, 0}, {0, 0}};
     // A secondary slot on another device is not part of the internal flash and has no shadow words.
     if (secondary_too && sec->fa_device_id == 0) {
-        skip[0].off = sec->fa_off;
-        skip[0].end = sec->fa_off + sec->fa_size;
+        skip[1].off = sec->fa_off;
+        skip[1].end = sec->fa_off + sec->fa_size;
         if (shadow != NULL) {
-            skip[1].off = shadow->fa_off + shadow->fa_size / 2;
-            skip[1].end = shadow->fa_off + shadow->fa_size;
+            skip[2].off = shadow->fa_off + shadow->fa_size / 2;
+            skip[2].end = shadow->fa_off + shadow->fa_size;
         }
     }
     uint32_t crc = 0;
@@ -323,7 +327,7 @@ static uint32_t crc_flash_except(bool secondary_too) {
     while (pos < size) {
         bool skipped = false;
         uint32_t end = size;
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 3; i++) {
             if (skip[i].end == 0) {
                 continue;
             }
@@ -355,6 +359,24 @@ static bool is_erased(uint8_t dev, uint32_t off, uint32_t len) {
     return true;
 }
 
+// True if the newest update audit log record has the given type (and result, unless result is negative).
+static bool log_newest_is(uint8_t type, int result) {
+    mboot_log_rec_t rec;
+    if (mboot_updatelog_read(0, &rec) != 0) {
+        return false;
+    }
+    return rec.type == type && (result < 0 || rec.result == result);
+}
+
+static bool log_has(uint8_t type) {
+    mboot_log_rec_t rec;
+    for (uint32_t n = 0; mboot_updatelog_read(n, &rec) == 0; n++) {
+        if (rec.type == type) {
+            return true;
+        }
+    }
+    return false;
+}
 
 // ---- children ----
 
@@ -594,20 +616,24 @@ static void test_good_install(void) {
     CHECK(r.out.dfu.manifest_status == DFU_STATUS_OK);
     CHECK(r.out.dfu.result.code == MBOOT_RES_OK && r.out.dfu.result.phase == MBOOT_DFU_PHASE_VALIDATE);
     CHECK(r.out.kind == BL_OUT_RESET);
+    CHECK(log_newest_is(LOG_IMAGE_ACCEPTED, MBOOT_RES_OK));
 
     r = boot();
     CHECK(jumped_to(&r, 2));
     CHECK(r.out.swap_type == SWAP_AFTER_UPDATE);    // a test image, reverts unless confirmed
+    CHECK(log_newest_is(LOG_UPDATE_DONE, MBOOT_RES_OK));
 
     #if MBOOT_POLICY_SWAP
     r = boot();
     CHECK(jumped_to(&r, 1));
     CHECK(r.out.swap_type == BOOT_SWAP_TYPE_NONE);
+    CHECK(log_newest_is(LOG_REVERTED, MBOOT_RES_OK));
     #else
     // The update is final: the next boot runs it again.
     r = boot();
     CHECK(jumped_to(&r, 2));
     CHECK(r.out.swap_type == BOOT_SWAP_TYPE_NONE);
+    CHECK(!log_has(LOG_REVERTED));
     #endif
 
     // The same image again, this time confirmed.
@@ -627,7 +653,9 @@ static void test_good_install(void) {
     CHECK(fake_flash_stats()->violations == 0);
 }
 
-// Negative images over DFU are validated at the manifest step and leave the primary slot unchanged.
+// Negative images over DFU: the image is validated at the manifest step through a view of the
+// update slot, rejected with the right code, and nothing outside the update slot and the log
+// changes.
 static void test_dfu_rejections(void) {
     printf("negative images over DFU\n");
     for (size_t i = 0; i < N_VARIANTS; i++) {
@@ -650,6 +678,7 @@ static void test_dfu_rejections(void) {
         }
         CHECK(d->manifest_status == dfu_status_for(d->result.code));
         CHECK(d->result.phase == MBOOT_DFU_PHASE_VALIDATE);
+        CHECK(log_newest_is(LOG_IMAGE_REJECTED, d->result.code));
         const struct flash_area *sec = area(FLASH_AREA_IMAGE_SECONDARY(0));
         CHECK(is_erased(sec->fa_device_id, sec->fa_off + SPARE, 64));    // the header is gone
         CHECK(crc_area(FLASH_AREA_IMAGE_PRIMARY(0)) == pri_crc);
@@ -708,6 +737,7 @@ static void test_dfu_trailer_forged(void) {
     r = boot();
     CHECK(jumped_to(&r, 1));
     CHECK(r.out.swap_type == BOOT_SWAP_TYPE_NONE);
+    CHECK(!log_has(LOG_SWAP_DONE));
     free(forged.data);
 }
 
@@ -729,6 +759,7 @@ static void test_boot_layout(void) {
         if (!CHECK(jumped_to(&r, 1) && r.out.swap_type == BOOT_SWAP_TYPE_NONE)) {
             printf("    %s: %s\n", variants[i].name, describe(&r));
         }
+        CHECK(log_newest_is(LOG_SLOT_REJECTED_AT_BOOT, MBOOT_RES_ERR_LAYOUT));
         const struct flash_area *sec = area(FLASH_AREA_IMAGE_SECONDARY(0));
         CHECK(is_erased(0, sec->fa_off, 2 * eu()));
         // No pending update is left: the next boot does nothing.
@@ -743,14 +774,14 @@ static void test_boot_layout(void) {
     }
 }
 
-static void expect_fsload_refused(uint32_t rest_crc);
+static void expect_fsload_refused(const char *name, const uint16_t codes[2], uint32_t rest_crc);
 
 #if MBOOT_MIN_IMAGE_SIZE != 0
 // Swap using offset only resumes the swap of an image larger than one erase unit, so an update of at
 // most one unit is refused by every way that starts one: the manifest of a DFU session, fsload
 // (judged as a stream before anything is written) and the check of a pending update at boot, which
 // catches an image that reached the slot behind the front ends' back (the application writer, a
-// programmer). Nothing outside the update slot changes.
+// programmer). Nothing outside the update slot and the log changes.
 static void test_too_small(void) {
     printf("update of at most one erase unit\n");
     CHECK(small_blob.len <= eu());
@@ -764,6 +795,7 @@ static void test_too_small(void) {
         CHECK(d->result.code == MBOOT_RES_ERR_TOO_SMALL);
         CHECK(d->manifest_status == DFU_STATUS_ERR_FILE);
         CHECK(d->result.phase == MBOOT_DFU_PHASE_VALIDATE);
+        CHECK(log_newest_is(LOG_IMAGE_REJECTED, MBOOT_RES_ERR_TOO_SMALL));
         const struct flash_area *sec = area(FLASH_AREA_IMAGE_SECONDARY(0));
         CHECK(is_erased(sec->fa_device_id, sec->fa_off + SPARE, 64));
         CHECK(crc_area(FLASH_AREA_IMAGE_PRIMARY(0)) == pri_crc);
@@ -776,7 +808,8 @@ static void test_too_small(void) {
     settled_primary(&v1_initial, 1);
     rest_crc = crc_flash_except(false);
     CHECK(app_request_fsload("small"));
-    expect_fsload_refused(rest_crc);
+    const uint16_t codes[2] = {MBOOT_RES_ERR_TOO_SMALL, 0};
+    expect_fsload_refused("small", codes, rest_crc);
 
     settled_primary(&v1_initial, 1);
     put_update(&small_blob);
@@ -787,6 +820,7 @@ static void test_too_small(void) {
     CHECK(r.out.swap_type == BOOT_SWAP_TYPE_NONE);
     const struct flash_area *sec = area(FLASH_AREA_IMAGE_SECONDARY(0));
     CHECK(is_erased(sec->fa_device_id, sec->fa_off + SPARE, 64));
+    CHECK(log_newest_is(LOG_SLOT_REJECTED_AT_BOOT, MBOOT_RES_ERR_TOO_SMALL));
     r = boot();
     CHECK(jumped_to(&r, 1) && r.ops == 0);
     // A good update is installed afterwards.
@@ -837,6 +871,7 @@ static void test_downgrade(void) {
             printf("    %s: result code %u\n", cases[i].name, d->result.code);
         }
         CHECK(d->manifest_status == DFU_STATUS_ERR_FILE);
+        CHECK(log_newest_is(LOG_IMAGE_REJECTED, MBOOT_RES_ERR_DOWNGRADE));
         CHECK(crc_area(FLASH_AREA_IMAGE_PRIMARY(0)) == pri_crc);
         r = boot();
         CHECK(jumped_to(&r, 2));
@@ -852,23 +887,42 @@ static void test_downgrade(void) {
         CHECK(r.out.swap_type == BOOT_SWAP_TYPE_NONE);
         const struct flash_area *sec = area(FLASH_AREA_IMAGE_SECONDARY(0));
         CHECK(is_erased(sec->fa_device_id, sec->fa_off + SPARE, 64));
+        CHECK(log_newest_is(LOG_SLOT_REJECTED_AT_BOOT, -1));
     }
 }
 
-// The checks after a request whose file must be refused: the old image remains bootable and
-// no flash writes or erases take place.
-static void expect_fsload_refused(uint32_t rest_crc) {
+// The checks after a request whose file must be refused: the old image is still bootable, so the
+// bootloader logs the failure with one of the codes, writes nothing outside the update audit log and
+// boots the old image.
+static void expect_fsload_refused(const char *name, const uint16_t codes[2], uint32_t rest_crc) {
     run_t r = boot();
     CHECK(!r.crash && !r.hang);
     CHECK(r.out.kind == BL_OUT_RESET);
     CHECK(!r.out.dfu.entered);
-    CHECK(crc_flash_except(false) == rest_crc);
+    mboot_log_rec_t rec;
+    bool have = mboot_updatelog_read(0, &rec) == 0;
+    CHECK(have && rec.type == LOG_FSLOAD_FAILED);
+    if (have && !CHECK(code_in(rec.result, codes))) {
+        printf("    %s: result code %u\n", name, rec.result);
+    }
+    if (verbose && have) {
+        printf("    %-18s fsload code %u\n", name, rec.result);
+    }
+    CHECK(log_has(LOG_FSLOAD_BEGIN));
+    CHECK(crc_flash_except(false) == rest_crc);    // nothing written outside the update audit log
 
     r = boot();
     CHECK(jumped_to(&r, 1));
     CHECK(r.out.swap_type == BOOT_SWAP_TYPE_NONE);
 }
 
+static void variant_codes(size_t i, uint16_t codes[2]) {
+    codes[0] = MBOOT_RES_ERR_TOO_BIG;
+    codes[1] = 0;
+    if (i < N_VARIANTS) {
+        memcpy(codes, variants[i].codes, 2 * sizeof(codes[0]));
+    }
+}
 
 // Negative images through fsload: the same files from a FAT volume on the SPI flash,
 // validated as a stream area before anything is written.
@@ -876,10 +930,12 @@ static void test_fsload_rejections(void) {
     printf("negative images through fsload (stream area)\n");
     for (size_t i = 0; i <= N_VARIANTS; i++) {
         const char *name = i < N_VARIANTS ? variants[i].name : "oversize";
+        uint16_t codes[2];
+        variant_codes(i, codes);
         settled_primary(&v1_initial, 1);
         uint32_t rest_crc = crc_flash_except(false);
         CHECK(app_request_fsload(name));
-        expect_fsload_refused(rest_crc);
+        expect_fsload_refused(name, codes, rest_crc);
     }
 }
 
@@ -888,10 +944,13 @@ static void test_fsload_rejections(void) {
 static void test_fsload_raw_rejections(void) {
     printf("negative images through fsload (raw window)\n");
     for (size_t i = 0; i <= N_VARIANTS; i++) {
+        const char *name = i < N_VARIANTS ? variants[i].name : "oversize";
+        uint16_t codes[2];
+        variant_codes(i, codes);
         settled_primary(&v1_initial, 1);
         uint32_t rest_crc = crc_flash_except(false);
         CHECK(app_request_fsload_raw(i < N_VARIANTS ? &variant_blob[i] : &oversize_blob));
-        expect_fsload_refused(rest_crc);
+        expect_fsload_refused(name, codes, rest_crc);
     }
 }
 
@@ -903,19 +962,21 @@ static void test_fsload_raw_windows(void) {
     const struct flash_area *pri = area(FLASH_AREA_IMAGE_PRIMARY(0));
     uint32_t pri_addr = mboot_devs[pri->fa_device_id].base + pri->fa_off;
     struct {
+        const char *name;
         uint32_t base, len, base2, len2;
     } cases[] = {
-        {pri_addr, 0x1000, 0, 0},
-        {0x70000000u, 0x1000, 0, 0},
-        {FILE_BASE, 0x1000, 0x70000000u, 0x1000},
-        {FILE_BASE, 0x1000, pri_addr, 0x1000},
+        {"over the primary slot", pri_addr, 0x1000, 0, 0},
+        {"outside the devices", 0x70000000u, 0x1000, 0, 0},
+        {"second window outside the devices", FILE_BASE, 0x1000, 0x70000000u, 0x1000},
+        {"second window over the primary slot", FILE_BASE, 0x1000, pri_addr, 0x1000},
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         settled_primary(&v1_initial, 1);
         uint32_t rest_crc = crc_flash_except(false);
         build_fsload_raw(cases[i].base, cases[i].len, cases[i].base2, cases[i].len2);
         CHECK(request_reset());
-        expect_fsload_refused(rest_crc);
+        uint16_t codes[2] = {MBOOT_RES_ERR_REQUEST, 0};
+        expect_fsload_refused(cases[i].name, codes, rest_crc);
     }
 }
 #endif
@@ -926,10 +987,15 @@ static void test_fsload_gz_rejections(void) {
     printf("negative images through fsload (gzip)\n");
     for (size_t i = 0; i <= N_VARIANTS; i++) {
         const char *name = i < N_VARIANTS ? variants[i].name : "oversize";
+        uint16_t codes[2];
+        variant_codes(i, codes);
+        if (i == N_VARIANTS) {
+            codes[1] = MBOOT_RES_ERR_FS_GZIP;     // inflating more than the slot holds
+        }
         settled_primary(&v1_initial, 1);
         uint32_t rest_crc = crc_flash_except(false);
         CHECK(app_request_fsload_gz(name));
-        expect_fsload_refused(rest_crc);
+        expect_fsload_refused(name, codes, rest_crc);
     }
 }
 #endif
@@ -944,9 +1010,13 @@ static void expect_fsload_installed(void) {
     // never sends the chip a command it refuses.
     CHECK(fake_flash_stats()->dev_reads[1] > spi_reads);
     CHECK(fake_flash_stats()->violations == 0);
+    CHECK(log_newest_is(LOG_FSLOAD_DONE, MBOOT_RES_OK));
     r = boot();
     CHECK(jumped_to(&r, 2));
     CHECK(r.out.swap_type == SWAP_AFTER_UPDATE);
+    #if !MBOOT_POLICY_SINGLE
+    CHECK(log_newest_is(LOG_UPDATE_DONE, MBOOT_RES_OK));
+    #endif
 }
 
 static void test_fsload_good(void) {
@@ -1079,6 +1149,7 @@ static void test_no_image(void) {
     CHECK(in_dfu(&r) && r.out.kind == BL_OUT_DFU_WAIT);
     CHECK(r.out.dfu.why == REC_NO_IMAGE);
     CHECK(!r.out.dfu.primary.valid);
+    CHECK(log_has(LOG_NO_IMAGE));
 
     r = boot_with_install(&good_blob);
     CHECK(in_dfu(&r) && r.out.dfu.why == REC_NO_IMAGE);
@@ -1090,18 +1161,23 @@ static void test_no_image(void) {
     r = boot();
     CHECK(jumped_to(&r, 2));
     CHECK(r.out.swap_type == BOOT_SWAP_TYPE_NONE);
+    #if !MBOOT_POLICY_SINGLE
+    CHECK(log_newest_is(LOG_SWAP_DONE_PERM, MBOOT_RES_OK));
+    #endif
     r = boot();
     CHECK(jumped_to(&r, 2));
     CHECK(r.out.swap_type == BOOT_SWAP_TYPE_NONE);
 }
 
-// A security counter area that is not erased and holds no valid record is damaged: no image passes
-// the rollback check because the counter cannot be read, so DFU is entered. The primary slot is
+// A security counter area that is not erased and holds no valid record is damaged: the
+// bootloader logs it at startup, and no image passes the rollback check because the counter
+// cannot be read, so the primary image does not run and DFU is entered. The primary slot is
 // not erased: the image is fine, the counter is not.
 static void test_seccnt_damaged(void) {
-    printf("security counter area damaged: no image runs\n");
+    printf("security counter area damaged: logged, no image runs\n");
     #if ROLLBACK_COUNTER
     settled_primary(&v1_initial, 1);
+    CHECK(!log_has(LOG_SECCNT_FAILED));
     uint32_t pri_crc = crc_area(FLASH_AREA_IMAGE_PRIMARY(0));
     const struct flash_area *sc = area(MBOOT_AREA_SECCNT);
     // The records of unit 0 (the initial one and the one the image raised) are overwritten.
@@ -1112,7 +1188,15 @@ static void test_seccnt_damaged(void) {
     run_t r = boot();
     CHECK(in_dfu(&r) && r.out.kind == BL_OUT_DFU_WAIT);
     CHECK(!jumped(&r));
+    CHECK(log_has(LOG_SECCNT_FAILED));
     CHECK(crc_area(FLASH_AREA_IMAGE_PRIMARY(0)) == pri_crc);
+    mboot_log_rec_t rec;
+    for (uint32_t n = 0; mboot_updatelog_read(n, &rec) == 0; n++) {
+        if (rec.type == LOG_SECCNT_FAILED) {
+            CHECK(rec.source == SRC_BOOT && rec.result == MBOOT_RES_ERR_FLASH);
+            break;
+        }
+    }
     #endif
 }
 
@@ -1157,6 +1241,7 @@ static void test_assert_recovery(void) {
     CHECK(in_dfu(&r) && r.out.dfu.why == REC_FAULT);
     CHECK(r.out.dfu.primary.valid && r.out.dfu.primary.ver_major == 1);
     CHECK(crc_area(FLASH_AREA_IMAGE_PRIMARY(0)) == pri_crc);
+    CHECK(log_newest_is(LOG_ASSERT, MBOOT_RES_OK));
 
     // An invalid one loses its trailer and its header, as at a failed boot_go().
     const struct flash_area *pri = area(FLASH_AREA_IMAGE_PRIMARY(0));
@@ -1186,6 +1271,7 @@ static void test_settle(void) {
     CHECK(in_dfu(&r) && r.out.dfu.why == REC_APP_REQUEST);
     #if MBOOT_POLICY_SWAP
     CHECK(r.out.dfu.primary.valid && r.out.dfu.primary.ver_major == 1);    // v2 was reverted first
+    CHECK(log_has(LOG_REVERTED));
     #else
     CHECK(r.out.dfu.primary.valid && r.out.dfu.primary.ver_major == 2);    // v2 is final
     #endif
@@ -1194,6 +1280,7 @@ static void test_settle(void) {
     r = boot();
     CHECK(jumped_to(&r, 3));
     CHECK(r.out.swap_type == SWAP_AFTER_UPDATE);    // the new image is in test mode
+    CHECK(log_newest_is(LOG_UPDATE_DONE, MBOOT_RES_OK));
 
     // A pending test swap is completed before a forced entry stops at the front end.
     settled_primary(&v1_initial, 1);
@@ -1204,6 +1291,7 @@ static void test_settle(void) {
     r = boot();
     CHECK(in_dfu(&r) && r.out.dfu.why == REC_FORCED);
     CHECK(r.out.dfu.primary.valid && r.out.dfu.primary.ver_major == 2);
+    CHECK(log_newest_is(LOG_SWAP_DONE, MBOOT_RES_OK));    // marked pending as a test image
     bl_shared->entry_forced = false;
 }
 
@@ -1269,6 +1357,8 @@ static void test_validate_direct(void) {
     mboot_image_info_t info;
     mboot_image_info_read(sec, &info);
     CHECK(info.valid && info.ver_major == 2 && info.hash_prefix == r.info.hash_prefix);
+    mboot_image_info_read(area(MBOOT_AREA_LOG), &info);
+    CHECK(!info.valid);
 
     // A body unit of the update that reads as an ECC error: a flash error at that offset. A SPI
     // flash has no ECC, its reads do not fail.
@@ -1346,6 +1436,7 @@ static void test_single_install(void) {
     CHECK(in_dfu(&r) && r.out.dfu.why == REC_APP_REQUEST);
     CHECK(r.out.dfu.manifest_status == DFU_STATUS_OK);
     CHECK(r.out.dfu.result.code == MBOOT_RES_OK && r.out.dfu.result.phase == MBOOT_DFU_PHASE_VALIDATE);
+    CHECK(log_newest_is(LOG_IMAGE_ACCEPTED, MBOOT_RES_OK));
     r = boot();
     CHECK(jumped_to(&r, 2));
     CHECK(r.out.swap_type == BOOT_SWAP_TYPE_NONE);
@@ -1354,7 +1445,7 @@ static void test_single_install(void) {
     CHECK(fake_flash_stats()->violations == 0);
 }
 
-// A rejected image has overwritten the only slot: nothing runs and DFU is entered.
+// A rejected image has overwritten the only slot: nothing runs, DFU is entered, and the log says why.
 static void test_single_rejections(void) {
     printf("single slot: negative images over DFU leave no image\n");
     for (size_t i = 0; i < N_VARIANTS; i++) {
@@ -1372,6 +1463,7 @@ static void test_single_rejections(void) {
             printf("    %s: result code %u\n", variants[i].name, d->result.code);
         }
         CHECK(d->manifest_status == dfu_status_for(d->result.code));
+        CHECK(log_newest_is(LOG_IMAGE_REJECTED, d->result.code));
         // Wrong layout id: the signature is good, so boot_go() alone would start it. The front end
         // erased the header of the rejected image.
         expect_no_image();
@@ -1441,6 +1533,7 @@ static void test_single_downgrade(void) {
     run_t r = dfu_session(&old_counter_blob, 0, false);
     CHECK(in_dfu(&r) && r.out.dfu.manifest_status != 0xFF);
     CHECK(r.out.dfu.result.code == MBOOT_RES_ERR_DOWNGRADE);
+    CHECK(log_newest_is(LOG_IMAGE_REJECTED, MBOOT_RES_ERR_DOWNGRADE));
     expect_no_image();
     expect_dfu_recovers();
 
@@ -1677,11 +1770,11 @@ static bool tally_failed(const tally_t *t) {
 }
 
 typedef enum {
-    CL_PRI_BODY, CL_PRI_TRAILER, CL_SEC_SPARE, CL_SEC_BODY, CL_SEC_TRAILER, CL_SHADOW, CL_SECCNT, CL_OTHER, CL_COUNT
+    CL_PRI_BODY, CL_PRI_TRAILER, CL_SEC_SPARE, CL_SEC_BODY, CL_SEC_TRAILER, CL_SHADOW, CL_SECCNT, CL_LOG, CL_OTHER, CL_COUNT
 } op_class_t;
 
 static const char *const class_name[CL_COUNT] = {
-    "primary body", "primary trailer", "secondary spare", "secondary body", "secondary trailer", "shadow", "seccnt", "other"
+    "primary body", "primary trailer", "secondary spare", "secondary body", "secondary trailer", "shadow", "seccnt", "update audit log", "other"
 };
 
 static bool in_area(const fake_flash_op_t *op, const struct flash_area *fa) {
@@ -1712,6 +1805,9 @@ static op_class_t classify(const fake_flash_op_t *op) {
         return CL_SECCNT;
     }
     #endif
+    if (in_area(op, area(MBOOT_AREA_LOG))) {
+        return CL_LOG;
+    }
     return CL_OTHER;
 }
 

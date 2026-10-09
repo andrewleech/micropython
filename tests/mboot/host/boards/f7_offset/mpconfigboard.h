@@ -27,11 +27,12 @@
 // The PYBD_SF6 flash map with swap using offset and a version check instead of the security counter:
 // the primary slot is three of the 256 KiB sectors and the secondary slot four (one more for the
 // unit in front of the update image), which fills the 256 KiB run. The largest image is two
-// sectors, 512 KiB.
+// sectors, 512 KiB. The update audit log is in the 32 KiB sectors.
 
 #define MBOOT_PRIMARY_ADDR (0x08040000)
 #define MBOOT_PRIMARY_SIZE (3 * 0x40000)
 #define MBOOT_SECONDARY_ADDR (0x08100000)
+#define MBOOT_LOG_ADDR (0x08010000)
 #define MBOOT_ROLLBACK_COUNTER (0)
 #define MBOOT_FS_ADDR (0x80000000)
 #define MBOOT_FS_SIZE (2 * 1024 * 1024)

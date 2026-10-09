@@ -51,6 +51,7 @@ AREA_IDS = {
     "primary": 1,
     "secondary": 2,
     "scratch": 3,
+    "log": 4,
     "seccnt": 5,
     "fs": 6,
     "intent": 7,
@@ -58,7 +59,7 @@ AREA_IDS = {
 }
 LAYOUT_TLV_TAG = 0x00A1
 
-AREAS = ("boot", "primary", "secondary", "scratch", "seccnt", "shadow", "fs", "intent")
+AREAS = ("boot", "primary", "secondary", "scratch", "log", "seccnt", "shadow", "fs", "intent")
 DEVICE_FIELDS = ("NAME", "BASE", "SIZE", "WRITE", "ERASED_VAL", "MAPPED", "ECC", "RUNS")
 MAX_RUNS = 4
 
@@ -457,7 +458,7 @@ def render_ld(lay):
     out.append("MBOOT_MAX_IMAGE_SIZE = 0x%X;" % lay["max_image_size"])
     out.append("MBOOT_APP_START = MBOOT_PRIMARY_START + MBOOT_HEADER_SIZE;")
     out.append("MBOOT_APP_LEN = 0x%X;" % lay["app_len"])
-    for area in ("seccnt", "shadow", "scratch", "intent", "fs"):
+    for area in ("log", "seccnt", "shadow", "scratch", "intent", "fs"):
         if area in a:
             out.append("MBOOT_%s_START = 0x%08X;" % (area.upper(), a[area]["addr"]))
             out.append("MBOOT_%s_SIZE = 0x%X;" % (area.upper(), a[area]["size"]))

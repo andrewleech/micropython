@@ -71,6 +71,14 @@ typedef struct {
     uint32_t api;
 } mboot_app_bl_info_t;
 
+typedef struct {
+    uint32_t seq;
+    uint8_t type;                   // mboot_log_type_t
+    uint8_t result;                 // mboot_result_t
+    uint8_t source;                 // mboot_log_source_t
+    mboot_app_version_t version;
+    uint32_t detail;
+} mboot_app_log_entry_t;
 
 typedef struct {
     const char *name;               // static string
@@ -111,10 +119,12 @@ int mboot_app_state(mboot_app_state_t *state);
 size_t mboot_app_slot_count(void);
 int mboot_app_slot_get(size_t index, mboot_app_slot_t *slot);
 
+// Newest-first: n = 0 is the newest record. -ENOENT past the end.
+int mboot_app_log_get(uint32_t n, mboot_app_log_entry_t *entry);
 
 // ---- actions ----
 
-// Confirms the running image. Idempotent.
+// Confirms the running image. Idempotent. Writes an APP_CONFIRMED log record when the state changed.
 int mboot_app_confirm(void);
 
 // Confirms the running image if it is a test image that has not been confirmed yet. Port main()
@@ -128,7 +138,7 @@ int mboot_app_request_upgrade(bool permanent);
 // Reset into normal boot with the request region and retention word cleared.
 void mboot_app_reset(void) __attribute__((noreturn));
 
-// Reset into the bootloader DFU mode.
+// Reset into the bootloader DFU mode. Logs APP_DFU_REQUESTED first.
 void mboot_app_request_dfu(void) __attribute__((noreturn));
 
 // Reset into the bootloader with a fsload request. Returns -EINVAL if the stream is malformed.

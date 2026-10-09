@@ -1,5 +1,5 @@
 # Host build and tests of the shared/mboot core glue (flash map backend with ECC shadow words,
-# security counter, request handoff, printf, crc) together with the unmodified bootutil
+# security counter, update audit log, request handoff, printf, crc) together with the unmodified bootutil
 # and tinycrypt, on the fake flash of tests/mboot/host.
 #
 # The configuration is the board header pair selected by BOARD (tests/mboot/host/boards.mk).

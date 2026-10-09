@@ -30,6 +30,9 @@
 #include <stdint.h>
 
 typedef struct {
+    uint32_t log_records;
+    uint8_t last_type;
+    uint8_t last_result;
     uint32_t pending_calls;
     int pending_permanent;
     int pending_fail;

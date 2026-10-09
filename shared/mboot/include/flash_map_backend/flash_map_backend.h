@@ -112,16 +112,16 @@ int flash_device_base(uint8_t fd_id, uintptr_t *ret);
 // Same checks and flash policy as the flash_area_* calls but addressed by device and
 // device-relative offset. Writes need offset and length to be multiples of the device write
 // unit and erases multiples of the erase unit; otherwise -EINVAL. Every flash write outside
-// bootutil (DFU, fsload, counters) goes through these so that devices with ECC keep their trailer
-// shadow words in step with the trailer sectors.
+// bootutil (DFU, fsload, update audit log, counters) goes through these so that devices with
+// ECC keep their trailer shadow words in step with the trailer sectors.
 int mboot_flash_dev_read(uint8_t dev, uint32_t off, void *dst, uint32_t len);
 int mboot_flash_dev_write(uint8_t dev, uint32_t off, const void *src, uint32_t len);
 int mboot_flash_dev_erase(uint8_t dev, uint32_t off, uint32_t len);
 
-// flash_area_read() for records that carry their own CRC (the security counter): a read in which
-// the controller corrected a word fails with -EIO like an invalid word does. The record is then
-// not free (a cut during its program can leave a word that reads erased but takes no program) and
-// not valid.
+// flash_area_read() for areas of records that carry their own CRC (update audit log, security
+// counter): a read in which the controller corrected a word fails with -EIO like an invalid
+// word does. The record is then not free (a cut during its program can leave a word that reads
+// erased but takes no program) and not valid.
 int mboot_flash_area_read_record(const struct flash_area *fa, uint32_t off, void *dst, uint32_t len);
 
 // Checks the device and area tables against what the port accepts: power of two erase and write

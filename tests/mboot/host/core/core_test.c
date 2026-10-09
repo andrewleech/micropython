@@ -914,11 +914,12 @@ static bool verdict_failed(const verdict_t *v) {
 
 // Operation classes of the trace, by area.
 typedef enum {
-    CL_PRI_BODY, CL_PRI_TRAILER, CL_SEC_SPARE, CL_SEC_BODY, CL_SEC_TRAILER, CL_SHADOW, CL_SECCNT, CL_SCRATCH, CL_INTENT, CL_OTHER, CL_COUNT
+    CL_PRI_BODY, CL_PRI_TRAILER, CL_SEC_SPARE, CL_SEC_BODY, CL_SEC_TRAILER, CL_SHADOW, CL_SECCNT, CL_LOG, CL_SCRATCH, CL_INTENT,
+    CL_OTHER, CL_COUNT
 } op_class_t;
 
 static const char *const class_name[CL_COUNT] = {
-    "primary body", "primary trailer", "secondary spare", "secondary body", "secondary trailer", "shadow", "seccnt", "scratch", "intent", "other",
+    "primary body", "primary trailer", "secondary spare", "secondary body", "secondary trailer", "shadow", "seccnt", "log", "scratch", "intent", "other",
 };
 
 static op_class_t classify(const fake_flash_op_t *op) {
@@ -947,6 +948,10 @@ static op_class_t classify(const fake_flash_op_t *op) {
     a = area(MBOOT_AREA_SECCNT);
     if (a != NULL && o >= a->fa_off && o < a->fa_off + a->fa_size) {
         return CL_SECCNT;
+    }
+    a = area(MBOOT_AREA_LOG);
+    if (a != NULL && o >= a->fa_off && o < a->fa_off + a->fa_size) {
+        return CL_LOG;
     }
     a = area(FLASH_AREA_IMAGE_SCRATCH);
     if (a != NULL && o >= a->fa_off && o < a->fa_off + a->fa_size) {

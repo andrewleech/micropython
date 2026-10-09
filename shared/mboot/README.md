@@ -15,6 +15,14 @@ The bounded element parser is `src/mboot_elem.c` and `include/mboot_elem.h`. Fil
 
 The DFU policy contract is `include/mboot_dfu_recovery.h` with `mboot_dfu_recovery_*` entrypoints, distinct from the transport's `dfu/include/mboot_dfu.h` and `mboot_dfu_*` dispatch functions. Device-relative flash operations use `mboot_port_flash_dev_*`; transport address-relative operations use `mboot_port_flash_*`. The binding enforces the generated write ranges before accessing flash.
 
+## Update audit log
+
+`src/updatelog.c` and `include/mboot_updatelog.h` provide the persistent update audit log in `MBOOT_AREA_LOG`. The bootloader and application append the same 32-byte record format, with a sequence number, event, result, source, image version, detail and hash prefix. A CRC-32/ISO-HDLC covers bytes 0 through 27. Two erase units alternate as the active ring; a torn or unreadable record consumes its slot but is not returned as valid.
+
+The log records DFU and filesystem update outcomes, swap/revert decisions, application requests and confirmation, assertion failures and security-counter initialization failures. Log-write failure does not fail the operation being recorded. `mboot_updatelog_read()` and the application wrapper `mboot_app_log_get()` return records newest-first, with index zero naming the newest valid record.
+
+The Mboot DFU binding exposes a read-only alternate setting named `Update audit log`. Decode its raw flash dump with `python3 tools/mboot_log.py DUMP.bin`; `--unit` adds erase-unit locations and `--json` selects JSON output. The tool also decodes the 16-byte vendor-request 0x81 reply with `--result HEX`. The live DFU result sequence counts session outcomes independently of the persistent log sequence.
+
 ## STM32 builds
 
 The MCUboot-backed STM32 bootloader is built with `make -C ports/stm32/mboot/mcuboot BOARD=NUCLEO_H563ZI`. Its application is built with `make -C ports/stm32 BOARD=NUCLEO_H563ZI MBOOT_BACKEND=mcuboot`, using a separate `build-NUCLEO_H563ZI-mboot` directory by default. PYBD_SF6 supports the single-slot policy.

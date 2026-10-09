@@ -25,7 +25,7 @@
  */
 
 // The plain flash with swap using scratch: two slots of equal size and a scratch area of two erase
-// units directly after the primary slot.
+// units behind the update audit log.
 
 #define MBOOT_PRIMARY_SIZE (0x40000)
 #define MBOOT_SECONDARY_ADDR (0x90080000)
