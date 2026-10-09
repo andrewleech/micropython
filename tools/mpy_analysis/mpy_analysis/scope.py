@@ -16,11 +16,20 @@ import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping, Sequence
 
-from .compdb import entry_file
+from .compdb import entry_file, validate_entry
 
 SCHEMA_VERSION = 1
 FROZEN_GROUP = "runtime_frozen_python"
 _NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+_PACKAGE_METADATA_FIELDS = (
+    "version",
+    "description",
+    "license",
+    "author",
+    "stdlib",
+    "pypi",
+    "pypi_publish",
+)
 
 
 def _text(value: Any, label: str) -> str:
@@ -86,6 +95,66 @@ def report_path(scope: Mapping[str, Any], record: Mapping[str, Any]) -> str:
     return str(source_path(scope, record))
 
 
+def _validate_packages(scope: Mapping[str, Any]) -> set[str]:
+    packages = scope.get("packages", [])
+    if not isinstance(packages, list):
+        raise ValueError("packages must contain a list")
+    indexed = {}
+    for package in packages:
+        if not isinstance(package, dict):
+            raise ValueError("package must be an object")
+        package_id = _text(package.get("id"), "package id")
+        if package_id in indexed:
+            raise ValueError(f"duplicate package id: {package_id}")
+        _text(package.get("name"), "package name")
+        source_path(scope, package)
+        if "library" not in package:
+            raise ValueError("package library is required")
+        if package["library"] is not None:
+            _text(package["library"], "package library")
+        metadata = package.get("metadata")
+        if not isinstance(metadata, dict):
+            raise ValueError("package metadata must be an object")
+        for field in _PACKAGE_METADATA_FIELDS:
+            if field not in metadata:
+                continue
+            value = metadata[field]
+            if field == "stdlib":
+                if type(value) is not bool:
+                    raise ValueError("package metadata stdlib must be a boolean")
+            elif value is not None and not isinstance(value, str):
+                raise ValueError(f"package metadata {field} must be a string or null")
+        dependencies = package.get("dependencies")
+        if not isinstance(dependencies, list):
+            raise ValueError("package dependencies must contain a list")
+        for dependency in dependencies:
+            _text(dependency, "package dependency")
+        indexed[package_id] = package
+    for package in packages:
+        for dependency in package["dependencies"]:
+            if dependency not in indexed:
+                raise ValueError(f"unknown package dependency: {dependency}")
+    requirements = scope.get("package_requirements", [])
+    if not isinstance(requirements, list):
+        raise ValueError("package_requirements must contain a list")
+    for requirement in requirements:
+        if not isinstance(requirement, dict):
+            raise ValueError("package requirement must be an object")
+        if "parent" not in requirement:
+            raise ValueError("package requirement parent is required")
+        parent = requirement["parent"]
+        if parent is not None:
+            _text(parent, "package requirement parent")
+            if parent not in indexed:
+                raise ValueError(f"unknown package requirement parent: {parent}")
+        package_id = _text(requirement.get("package"), "package requirement package")
+        if package_id not in indexed:
+            raise ValueError(f"unknown package requirement package: {package_id}")
+        if parent is not None and package_id not in indexed[parent]["dependencies"]:
+            raise ValueError(f"package requirement missing from parent dependencies: {package_id}")
+    return set(indexed)
+
+
 def parse_scope(data: Any) -> dict[str, Any]:
     """Validate schema v1 without dropping groups, records or consumer metadata.
 
@@ -94,6 +163,8 @@ def parse_scope(data: Any) -> dict[str, Any]:
     rather than a source location. Empty selections are errors. Consumers may
     retain unknown groups; runners must account for them as unassessed or reject
     them, rather than omit them from selected-source coverage.
+    Optional packages identify required manifests. Dependency and requirement
+    edges, and source package_id provenance, must reference declared packages.
     """
     if not isinstance(data, dict):
         raise ValueError("scope must be a JSON object")
@@ -103,6 +174,7 @@ def parse_scope(data: Any) -> dict[str, Any]:
     result["roots"] = _roots(result.get("roots"))
     for field in ("target", "variant", "port"):
         _text(result.get(field), field)
+    package_ids = _validate_packages(result)
     groups = result.get("groups")
     if not isinstance(groups, dict):
         raise ValueError("groups must be a mapping of names to source lists")
@@ -129,6 +201,10 @@ def parse_scope(data: Any) -> dict[str, Any]:
                 and provenance
             ):
                 raise ValueError(f"source provenance is required: {source_identity(record)}")
+            if isinstance(provenance, dict) and "package_id" in provenance:
+                package_id = _text(provenance["package_id"], "source package_id")
+                if package_id not in package_ids:
+                    raise ValueError(f"unknown source package_id: {package_id}")
             if name == FROZEN_GROUP and "target_path" not in record:
                 raise ValueError(f"frozen source requires target_path: {source_identity(record)}")
             if "target_path" in record:
@@ -194,6 +270,9 @@ def collect_manifest_scope(
     because their Python source is unavailable. Repeated physical files with
     distinct frozen import identities are retained. The authority changes cwd
     while executing includes, so callers must serialize collection in a process.
+    Required packages and edges are observed on the authority's selected include
+    calls. Frozen ownership follows its metadata objects, including shared
+    metadata across ordinary includes, rather than source-directory guesses.
     """
     roots = _roots(dict(roots))
     mpy = Path(micropython_root).resolve(strict=True)
@@ -219,7 +298,75 @@ def collect_manifest_scope(
         raise RuntimeError(f"cannot load MicroPython manifest authority: {authority}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    resolver = module.ManifestFile(module.MODE_FREEZE, variables)
+
+    class ObservedManifestFile(module.ManifestFile):
+        """Observe authority-selected require includes and metadata ownership."""
+
+        def __init__(self):
+            super().__init__(module.MODE_FREEZE, variables)
+            self.packages = {}
+            self.package_requirements = []
+            self.metadata_packages = {}
+            self.package_metadata = {}
+            self.requests = []
+            self.include_packages = []
+
+        def require(self, name, version=None, pypi=None, library=None, **kwargs):
+            request = {
+                "name": name,
+                "library": library,
+                "parent": self.metadata_packages.get(self._metadata[-1]),
+                "selected": False,
+            }
+            self.requests.append(request)
+            try:
+                return super().require(name, version=version, pypi=pypi, library=library, **kwargs)
+            finally:
+                self.requests.pop()
+
+        def include(self, manifest_path, is_require=False, **kwargs):
+            package_id = None
+            if is_require and self.requests and not self.requests[-1]["selected"]:
+                request = self.requests[-1]
+                request["selected"] = True
+                # This path is chosen by the authority's library search, not by
+                # a parallel resolver. Identity uses its physical explicit root.
+                selected = Path(self._resolve_path(manifest_path))
+                if selected.is_dir():
+                    selected /= "manifest.py"
+                location = _locate_source(selected, roots, owners)
+                package_id = source_identity(location)
+                if package_id not in self.packages:
+                    self.packages[package_id] = {
+                        "id": package_id,
+                        "name": request["name"],
+                        "root": location["root"],
+                        "path": location["path"],
+                        "library": request["library"],
+                        "metadata": {},
+                        "dependencies": [],
+                    }
+                parent = request["parent"]
+                self.package_requirements.append({"parent": parent, "package": package_id})
+                if parent is not None:
+                    dependencies = self.packages[parent]["dependencies"]
+                    if package_id not in dependencies:
+                        dependencies.append(package_id)
+            self.include_packages.append(package_id)
+            try:
+                return super().include(manifest_path, is_require=is_require, **kwargs)
+            finally:
+                self.include_packages.pop()
+
+        def _manifest_globals(self, kwargs):
+            if self.include_packages and self.include_packages[-1] is not None:
+                package_id = self.include_packages[-1]
+                metadata = self._metadata[-1]
+                self.metadata_packages[metadata] = package_id
+                self.package_metadata.setdefault(package_id, metadata)
+            return super()._manifest_globals(kwargs)
+
+    resolver = ObservedManifestFile()
     cwd = os.getcwd()
     try:
         for path in manifest_paths:
@@ -245,21 +392,21 @@ def collect_manifest_scope(
             "freeze_kind": output.kind,
             "opt": output.opt,
             "package_metadata": {
-                field: getattr(output.metadata, field)
-                for field in (
-                    "version",
-                    "description",
-                    "license",
-                    "author",
-                    "stdlib",
-                    "pypi",
-                    "pypi_publish",
-                )
+                field: getattr(output.metadata, field) for field in _PACKAGE_METADATA_FIELDS
             },
         }
+        package_id = resolver.metadata_packages.get(output.metadata)
+        if package_id is not None:
+            record["provenance"]["package_id"] = package_id
         records.append(record)
     if not records:
         raise ValueError("manifest resolved no Python sources")
+    for package_id, package in resolver.packages.items():
+        metadata = resolver.package_metadata.get(package_id)
+        if metadata is not None:
+            package["metadata"] = {
+                field: getattr(metadata, field) for field in _PACKAGE_METADATA_FIELDS
+            }
     return parse_scope(
         {
             "schema_version": SCHEMA_VERSION,
@@ -268,6 +415,8 @@ def collect_manifest_scope(
             "variant": variant,
             "port": port,
             "groups": {group: records},
+            "packages": list(resolver.packages.values()),
+            "package_requirements": resolver.package_requirements,
         }
     )
 
@@ -288,26 +437,8 @@ def collect_compdb_sources(
         raise ValueError(f"compiler database must contain selected entries: {database}")
     records = []
     for index, entry in enumerate(entries):
-        if not isinstance(entry, dict):
-            raise ValueError(f"compiler database entry {index} must be an object")
-        directory = Path(_text(entry.get("directory"), f"entry {index} directory"))
-        if not directory.is_absolute() or not directory.is_dir():
-            raise ValueError(f"entry {index} directory must be an existing absolute directory")
-        _text(entry.get("file"), f"entry {index} file")
-        if "arguments" in entry:
-            arguments = entry["arguments"]
-            if not isinstance(arguments, list) or not arguments:
-                raise ValueError(f"entry {index} arguments must be a nonempty list")
-            for argument in arguments:
-                if not isinstance(argument, str) or "\x00" in argument:
-                    raise ValueError(f"entry {index} arguments must contain strings")
-        elif "command" not in entry:
-            raise ValueError(f"entry {index} requires arguments or command")
-        if "command" in entry:
-            _text(entry["command"], f"entry {index} command")
+        validate_entry(entry, f"entry {index}")
         record = _locate_source(Path(entry_file(entry)), roots, owners)
-        if not Path(entry_file(entry)).is_file():
-            raise ValueError(f"entry {index} source is not a file")
         if "owner" in entry:
             record["owner"] = _text(entry["owner"], f"entry {index} owner")
         record["provenance"] = {

@@ -29,6 +29,33 @@ def entry_file(entry):
     return os.path.normpath(os.path.join(entry["directory"], entry["file"]))
 
 
+def validate_entry(entry, label="compiler entry"):
+    """Validate a selected compilation record before interpreting its paths/argv."""
+    if not isinstance(entry, dict):
+        raise ValueError(f"{label} must be an object")
+    for field in ("directory", "file"):
+        value = entry.get(field)
+        if not isinstance(value, str) or not value.strip() or "\x00" in value:
+            raise ValueError(f"{label} {field} must be a nonempty string without NUL")
+    directory = Path(entry["directory"])
+    if not directory.is_absolute() or not directory.is_dir():
+        raise ValueError(f"{label} directory must be an existing absolute directory")
+    if "arguments" in entry:
+        arguments = entry["arguments"]
+        if not isinstance(arguments, list) or not arguments:
+            raise ValueError(f"{label} arguments must be a nonempty list")
+        if any(not isinstance(argument, str) or "\x00" in argument for argument in arguments):
+            raise ValueError(f"{label} arguments must contain strings without NUL")
+    elif "command" not in entry:
+        raise ValueError(f"{label} requires arguments or command")
+    if "command" in entry:
+        command = entry["command"]
+        if not isinstance(command, str) or not command.strip() or "\x00" in command:
+            raise ValueError(f"{label} command must be a nonempty string without NUL")
+    if not Path(entry_file(entry)).is_file():
+        raise ValueError(f"{label} source is not a file")
+
+
 def output_of(entry):
     """The object an entry writes, absolute, or None when the invocation names none."""
     argv = arguments_of(entry)
