@@ -43,16 +43,40 @@ from pathlib import Path
 
 # Flags that can change the predefined macro set or the type model. Grouping on anything else would
 # split the build into groups that derive identically.
-PREDEFINE_FLAG_PREFIXES = ("-m", "-std=", "-f", "-O", "-ansi", "-pthread", "-march", "-mcpu",
-                           "-target", "--target=", "-nostdinc")
+PREDEFINE_FLAG_PREFIXES = (
+    "-m",
+    "-std=",
+    "-f",
+    "-O",
+    "-ansi",
+    "-pthread",
+    "-march",
+    "-mcpu",
+    "-target",
+    "--target=",
+    "-nostdinc",
+)
 
 # Emitted by -dM but meaningless or actively wrong to force include: their value depends on the
 # file being compiled, not on the configuration.
-POSITIONAL_MACROS = {"__FILE__", "__LINE__", "__DATE__", "__TIME__", "__TIMESTAMP__",
-                     "__COUNTER__", "__BASE_FILE__", "__INCLUDE_LEVEL__"}
+POSITIONAL_MACROS = {
+    "__FILE__",
+    "__LINE__",
+    "__DATE__",
+    "__TIME__",
+    "__TIMESTAMP__",
+    "__COUNTER__",
+    "__BASE_FILE__",
+    "__INCLUDE_LEVEL__",
+}
 
-HAS_FAMILIES = ("__has_attribute", "__has_builtin", "__has_c_attribute", "__has_feature",
-                "__has_extension")
+HAS_FAMILIES = (
+    "__has_attribute",
+    "__has_builtin",
+    "__has_c_attribute",
+    "__has_feature",
+    "__has_extension",
+)
 
 SIZEOF_TYPES = {
     "bool": "_Bool",
@@ -97,7 +121,8 @@ def predefined_macros(cc, flags):
     proc = run([cc, *flags, "-dM", "-E", "-x", "c", "-"], input="")
     if proc.returncode != 0:
         raise DerivationError(
-            f"{cc} could not report its predefined macros: {proc.stderr.strip()[:400]}")
+            f"{cc} could not report its predefined macros: {proc.stderr.strip()[:400]}"
+        )
     lines = []
     for line in proc.stdout.splitlines():
         name = line.split()[1].split("(")[0] if line.startswith("#define ") else None
@@ -125,8 +150,10 @@ def type_sizes(cc, flags):
 def platform_xml(cc, flags, macros, sizes):
     """A cppcheck platform description derived from the compiler, not selected by name."""
     defines = dict(
-        (line.split()[1], " ".join(line.split()[2:])) for line in macros
-        if line.startswith("#define ") and "(" not in line.split()[1])
+        (line.split()[1], " ".join(line.split()[2:]))
+        for line in macros
+        if line.startswith("#define ") and "(" not in line.split()[1]
+    )
     char_bit = defines.get("__CHAR_BIT__")
     if char_bit is None:
         raise DerivationError(f"{cc} did not report __CHAR_BIT__")
@@ -148,34 +175,92 @@ def platform_xml(cc, flags, macros, sizes):
 
 # <limits.h> and <stdint.h> macro names, paired with the compiler predefine that carries the same
 # value. Used only as a fallback, for the defect described in limit_macro_fallbacks.
-LIMIT_MACRO_SOURCES = {name + "_MAX": "__" + name + "_MAX__" for name in (
-    "SCHAR", "SHRT", "INT", "LONG", "INTMAX", "INTPTR", "PTRDIFF", "SIZE", "UINTMAX", "UINTPTR",
-    "SIG_ATOMIC", "WCHAR", "WINT",
-    "INT8", "INT16", "INT32", "INT64", "UINT8", "UINT16", "UINT32", "UINT64",
-    "INT_LEAST8", "INT_LEAST16", "INT_LEAST32", "INT_LEAST64",
-    "UINT_LEAST8", "UINT_LEAST16", "UINT_LEAST32", "UINT_LEAST64",
-    "INT_FAST8", "INT_FAST16", "INT_FAST32", "INT_FAST64",
-    "UINT_FAST8", "UINT_FAST16", "UINT_FAST32", "UINT_FAST64")}
-LIMIT_MACRO_SOURCES.update({
-    "LLONG_MAX": "__LONG_LONG_MAX__",
-    "SIG_ATOMIC_MIN": "__SIG_ATOMIC_MIN__",
-    "WCHAR_MIN": "__WCHAR_MIN__",
-    "WINT_MIN": "__WINT_MIN__",
-})
+LIMIT_MACRO_SOURCES = {
+    name + "_MAX": "__" + name + "_MAX__"
+    for name in (
+        "SCHAR",
+        "SHRT",
+        "INT",
+        "LONG",
+        "INTMAX",
+        "INTPTR",
+        "PTRDIFF",
+        "SIZE",
+        "UINTMAX",
+        "UINTPTR",
+        "SIG_ATOMIC",
+        "WCHAR",
+        "WINT",
+        "INT8",
+        "INT16",
+        "INT32",
+        "INT64",
+        "UINT8",
+        "UINT16",
+        "UINT32",
+        "UINT64",
+        "INT_LEAST8",
+        "INT_LEAST16",
+        "INT_LEAST32",
+        "INT_LEAST64",
+        "UINT_LEAST8",
+        "UINT_LEAST16",
+        "UINT_LEAST32",
+        "UINT_LEAST64",
+        "INT_FAST8",
+        "INT_FAST16",
+        "INT_FAST32",
+        "INT_FAST64",
+        "UINT_FAST8",
+        "UINT_FAST16",
+        "UINT_FAST32",
+        "UINT_FAST64",
+    )
+}
+LIMIT_MACRO_SOURCES.update(
+    {
+        "LLONG_MAX": "__LONG_LONG_MAX__",
+        "SIG_ATOMIC_MIN": "__SIG_ATOMIC_MIN__",
+        "WCHAR_MIN": "__WCHAR_MIN__",
+        "WINT_MIN": "__WINT_MIN__",
+    }
+)
 # Signed types whose minimum the compiler does not predefine. Two's complement, which every target
 # this project builds for uses and which C23 requires.
-LIMIT_MACRO_MINIMA = ("SCHAR", "SHRT", "INT", "LONG", "LLONG", "INTMAX", "INTPTR", "PTRDIFF",
-                      "INT8", "INT16", "INT32", "INT64",
-                      "INT_LEAST8", "INT_LEAST16", "INT_LEAST32", "INT_LEAST64",
-                      "INT_FAST8", "INT_FAST16", "INT_FAST32", "INT_FAST64")
+LIMIT_MACRO_MINIMA = (
+    "SCHAR",
+    "SHRT",
+    "INT",
+    "LONG",
+    "LLONG",
+    "INTMAX",
+    "INTPTR",
+    "PTRDIFF",
+    "INT8",
+    "INT16",
+    "INT32",
+    "INT64",
+    "INT_LEAST8",
+    "INT_LEAST16",
+    "INT_LEAST32",
+    "INT_LEAST64",
+    "INT_FAST8",
+    "INT_FAST16",
+    "INT_FAST32",
+    "INT_FAST64",
+)
 # Unsigned maxima the compiler does not predefine, as the width of the type and the literal suffix
 # the value needs. They are emitted as literals rather than as the standard's (MAX * 2 + 1) form,
 # because cppcheck's preprocessor evaluates that form with signed arithmetic and gets it wrong: on
 # a 64-bit target, `#if 18446744073709551615UL == (9223372036854775807L * 2UL + 1UL)` is false to
 # cppcheck and true to the compiler.
-LIMIT_MACRO_UNSIGNED = {"UCHAR_MAX": ("bool", ""), "USHRT_MAX": ("short", ""),
-                        "UINT_MAX": ("int", "U"), "ULONG_MAX": ("long", "UL"),
-                        "ULLONG_MAX": ("long-long", "ULL")}
+LIMIT_MACRO_UNSIGNED = {
+    "UCHAR_MAX": ("bool", ""),
+    "USHRT_MAX": ("short", ""),
+    "UINT_MAX": ("int", "U"),
+    "ULONG_MAX": ("long", "UL"),
+    "ULLONG_MAX": ("long-long", "ULL"),
+}
 
 
 def limit_macro_fallbacks(macros, sizes, char_bit):
@@ -217,17 +302,22 @@ def limit_macro_fallbacks(macros, sizes, char_bit):
     lines.append("#ifndef INFINITY\n#define INFINITY (__builtin_inff())\n#endif")
     if "SCHAR_MAX" in defined:
         unsigned_char = "__CHAR_UNSIGNED__" in have
-        lines.append("#ifndef CHAR_MAX\n#define CHAR_MAX "
-                     + ("UCHAR_MAX" if unsigned_char else "SCHAR_MAX") + "\n#endif")
-        lines.append("#ifndef CHAR_MIN\n#define CHAR_MIN "
-                     + ("0" if unsigned_char else "SCHAR_MIN") + "\n#endif")
+        lines.append(
+            "#ifndef CHAR_MAX\n#define CHAR_MAX "
+            + ("UCHAR_MAX" if unsigned_char else "SCHAR_MAX")
+            + "\n#endif"
+        )
+        lines.append(
+            "#ifndef CHAR_MIN\n#define CHAR_MIN "
+            + ("0" if unsigned_char else "SCHAR_MIN")
+            + "\n#endif"
+        )
     return lines
 
 
 def has_queries(paths):
     """Every __has_* query the analysed sources and headers make, with the token each asks about."""
-    pattern = re.compile(
-        r"(" + "|".join(HAS_FAMILIES) + r")\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)")
+    pattern = re.compile(r"(" + "|".join(HAS_FAMILIES) + r")\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)")
     found = defaultdict(set)
     for path in paths:
         try:
@@ -255,13 +345,16 @@ def has_shims(cc, flags, queries):
         prefix = "CPPCHECK_" + family.strip("_").upper() + "_"
         probe = "".join(
             f"#if {family}({argument})\nCPPCHECK_ANSWER {argument} 1\n"
-            f"#else\nCPPCHECK_ANSWER {argument} 0\n#endif\n" for argument in arguments)
+            f"#else\nCPPCHECK_ANSWER {argument} 0\n#endif\n"
+            for argument in arguments
+        )
         values = {}
         if arguments:
             proc = run([cc, *flags, "-E", "-P", "-x", "c", "-"], input=probe)
             if proc.returncode != 0:
                 raise DerivationError(
-                    f"{cc} could not evaluate {family} queries: {proc.stderr.strip()[:300]}")
+                    f"{cc} could not evaluate {family} queries: {proc.stderr.strip()[:300]}"
+                )
             for line in proc.stdout.splitlines():
                 parts = line.split()
                 if len(parts) == 3 and parts[0] == "CPPCHECK_ANSWER":
@@ -269,10 +362,13 @@ def has_shims(cc, flags, queries):
             missing = set(arguments) - set(values)
             if missing:
                 raise DerivationError(
-                    f"{cc} did not answer {family} for: {', '.join(sorted(missing))}")
-        lines.append(f"/* {family}: a compiler builtin cppcheck's preprocessor does not provide. "
-                     f"An unlisted argument expands to an undefined identifier, which evaluates to "
-                     f"0, as it does for the compiler. */")
+                    f"{cc} did not answer {family} for: {', '.join(sorted(missing))}"
+                )
+        lines.append(
+            f"/* {family}: a compiler builtin cppcheck's preprocessor does not provide. "
+            f"An unlisted argument expands to an undefined identifier, which evaluates to "
+            f"0, as it does for the compiler. */"
+        )
         lines.append(f"#define {family}(x) {prefix}##x")
         for argument in arguments:
             lines.append(f"#define {prefix}{argument} {values[argument]}")
@@ -291,14 +387,18 @@ def write_inputs(database, out):
     queries = has_queries({str(resolved_file(e)) for e in database})
     manifest = []
     # Largest group first; sorted() is stable, so equal-sized groups keep database order.
-    for index, ((cc, flags), entries) in enumerate(sorted(groups.items(), key=lambda kv: -len(kv[1]))):
+    for index, ((cc, flags), entries) in enumerate(
+        sorted(groups.items(), key=lambda kv: -len(kv[1]))
+    ):
         flags = list(flags)
         macros = predefined_macros(cc, flags)
         sizes = type_sizes(cc, flags)
         char_bit = int(next(l.split()[2] for l in macros if l.startswith("#define __CHAR_BIT__ ")))
-        parts = ["\n".join(macros),
-                 "\n".join(has_shims(cc, flags, queries)[0]),
-                 "\n".join(limit_macro_fallbacks(macros, sizes, char_bit))]
+        parts = [
+            "\n".join(macros),
+            "\n".join(has_shims(cc, flags, queries)[0]),
+            "\n".join(limit_macro_fallbacks(macros, sizes, char_bit)),
+        ]
         (out / f"predefines-{index}.h").write_text("\n\n".join(parts) + "\n")
         (out / f"platform-{index}.xml").write_text(platform_xml(cc, flags, macros, sizes))
         (out / f"compile_commands-{index}.json").write_text(json.dumps(entries, indent=1) + "\n")
@@ -309,10 +409,14 @@ def write_inputs(database, out):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        prog="sast-cppcheck-inputs", description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
+        prog="sast-cppcheck-inputs",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("db", metavar="DB", help="compilation database (compile_commands.json)")
-    parser.add_argument("outdir", metavar="OUTDIR", help="directory to write the group inputs into")
+    parser.add_argument(
+        "outdir", metavar="OUTDIR", help="directory to write the group inputs into"
+    )
     args = parser.parse_args(argv)
     try:
         database = json.loads(Path(args.db).read_text())
@@ -320,11 +424,17 @@ def main(argv=None):
         print(f"sast-cppcheck-inputs: cannot read {args.db}: {exc}", file=sys.stderr)
         return 2
     out = Path(args.outdir)
-    # Stale group files from an earlier, larger grouping would otherwise sit beside groups.json
-    # looking like inputs, and a caller globbing for them would analyse a group that no longer
-    # exists.
-    for stale in ("compile_commands-*.json", "predefines-*.h", "platform-*.xml"):
-        for path in out.glob(stale):
+    generated = re.compile(
+        r"(?:compile_commands-[0-9]+\.json|predefines-[0-9]+\.h|platform-[0-9]+\.xml)"
+    )
+    if Path(args.db).resolve().parent == out.resolve() and (
+        generated.fullmatch(Path(args.db).name) or Path(args.db).name == "groups.json"
+    ):
+        print("sast-cppcheck-inputs: database conflicts with generated output", file=sys.stderr)
+        return 2
+    # Only indexed group artifacts belong to this tool.
+    for path in out.iterdir() if out.exists() else ():
+        if generated.fullmatch(path.name):
             path.unlink()
     try:
         manifest = write_inputs(database, out)

@@ -41,13 +41,40 @@ DROP_WITH_VALUE = ("-o", "-MF", "-MT", "-MQ")
 DROP = ("-MD", "-MMD")
 # Options whose value is a path, in both the separate and the joined form. Checked in this order
 # so that a joined value is split after the longest option name that matches.
-PATH_OPTIONS = ("-idirafter", "-isysroot", "-isystem", "-imacros", "-include", "-iquote",
-                "-iprefix", "-I")
+PATH_OPTIONS = (
+    "-idirafter",
+    "-isysroot",
+    "-isystem",
+    "-imacros",
+    "-include",
+    "-iquote",
+    "-iprefix",
+    "-I",
+)
 # Options whose separate value is not a path relative to the working directory, and must not be
 # mistaken for a source file. -iwithprefix values are relative to -iprefix, not rebased.
-VALUE_OPTIONS = ("-D", "-U", "-x", "-A", "-Xpreprocessor", "-Xassembler", "-Xlinker", "-aux-info",
-                 "-dumpbase", "-dumpdir", "-l", "-u", "-e", "-T", "-L", "-B", "-z", "--param",
-                 "-iwithprefix", "-iwithprefixbefore")
+VALUE_OPTIONS = (
+    "-D",
+    "-U",
+    "-x",
+    "-A",
+    "-Xpreprocessor",
+    "-Xassembler",
+    "-Xlinker",
+    "-aux-info",
+    "-dumpbase",
+    "-dumpdir",
+    "-l",
+    "-u",
+    "-e",
+    "-T",
+    "-L",
+    "-B",
+    "-z",
+    "--param",
+    "-iwithprefix",
+    "-iwithprefixbefore",
+)
 
 
 def rebase(path, directory, root):
@@ -68,8 +95,11 @@ def analysis_command(gcc, entry, sarif, root):
             i += 1
             continue
         # The joined forms (-MFfile, -ofile) too, which GCC accepts as the same options.
-        if a in DROP or (a.startswith(("-MF", "-MT", "-MQ")) and len(a) > 3) \
-                or (a.startswith("-o") and len(a) > 2):
+        if (
+            a in DROP
+            or (a.startswith(("-MF", "-MT", "-MQ")) and len(a) > 3)
+            or (a.startswith("-o") and len(a) > 2)
+        ):
             continue
         if a in PATH_OPTIONS and i < len(argv):
             cmd += [a, rebase(argv[i], directory, root)]
@@ -77,9 +107,9 @@ def analysis_command(gcc, entry, sarif, root):
             continue
         joined = next((o for o in PATH_OPTIONS if a.startswith(o) and len(a) > len(o)), None)
         if joined:
-            cmd.append(joined + rebase(a[len(joined):], directory, root))
+            cmd.append(joined + rebase(a[len(joined) :], directory, root))
         elif a.startswith("--sysroot="):
-            cmd.append("--sysroot=" + rebase(a[len("--sysroot="):], directory, root))
+            cmd.append("--sysroot=" + rebase(a[len("--sysroot=") :], directory, root))
         elif a in VALUE_OPTIONS and i < len(argv):
             cmd += [a, argv[i]]
             i += 1
@@ -88,8 +118,13 @@ def analysis_command(gcc, entry, sarif, root):
         else:
             # Anything else not an option is an input file: the source.
             cmd.append(rebase(a, directory, root))
-    return cmd + ["-o", "/dev/null", "-Wno-error", "-fanalyzer",
-                  f"-fdiagnostics-add-output=sarif:file={sarif}"]
+    return cmd + [
+        "-o",
+        "/dev/null",
+        "-Wno-error",
+        "-fanalyzer",
+        f"-fdiagnostics-add-output=sarif:file={sarif}",
+    ]
 
 
 def gcc_major(gcc):
@@ -99,15 +134,25 @@ def gcc_major(gcc):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="sast-fanalyzer", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        prog="sast-fanalyzer",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument("--db", required=True, help="the configuration's compilation database")
     ap.add_argument("--gcc", required=True, help="the analysis compiler, GCC 15 or later")
-    ap.add_argument("--root", required=True,
-                    help="the repository root; each unit is compiled from here so that the SARIF "
-                         "names files repository-relative")
-    ap.add_argument("--out", required=True, metavar="DIR",
-                    help="directory for <n>.sarif per database entry and summary.json")
+    ap.add_argument(
+        "--root",
+        required=True,
+        help="the repository root; each unit is compiled from here so that the SARIF "
+        "names files repository-relative",
+    )
+    ap.add_argument(
+        "--out",
+        required=True,
+        metavar="DIR",
+        help="directory for <n>.sarif per database entry and summary.json",
+    )
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     args = ap.parse_args(argv)
 
@@ -117,8 +162,11 @@ def main(argv=None):
         return 2
     major = gcc_major(gcc)
     if major is None or major < MIN_GCC:
-        print(f"sast-fanalyzer: {gcc} reports version {major}; GCC {MIN_GCC} or later is needed "
-              f"for -fdiagnostics-add-output=sarif:file=", file=sys.stderr)
+        print(
+            f"sast-fanalyzer: {gcc} reports version {major}; GCC {MIN_GCC} or later is needed "
+            f"for -fdiagnostics-add-output=sarif:file=",
+            file=sys.stderr,
+        )
         return 2
     try:
         entries = json.loads(Path(args.db).read_text())
@@ -129,16 +177,18 @@ def main(argv=None):
     root = os.path.abspath(args.root)
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    # Files from an earlier, larger database would otherwise be merged and uploaded with this run.
+    # Other analyzers may share the report directory.
     for stale in out.glob("*.sarif"):
-        stale.unlink()
+        if stale.stem.isascii() and stale.stem.isdecimal():
+            stale.unlink()
 
     def run(item):
         n, entry = item
         sarif = out / f"{n}.sarif"
-        proc = subprocess.run(analysis_command(gcc, entry, sarif, root), cwd=root,
-                              capture_output=True, text=True)
-        return n, entry["file"], proc.returncode, proc.stderr, sarif
+        proc = subprocess.run(
+            analysis_command(gcc, entry, sarif, root), cwd=root, capture_output=True, text=True
+        )
+        return n, entry["file"], proc.returncode, proc.stderr[-2000:], sarif
 
     started = time.monotonic()
     with ThreadPoolExecutor(max(1, args.jobs)) as pool:
@@ -148,13 +198,20 @@ def main(argv=None):
     rules, sarif_files, failures = Counter(), [], []
     for n, source, rc, stderr, sarif in rows:
         if not sarif.exists():
-            failures.append({"unit": source, "exit": rc, "reason": "no SARIF written",
-                             "stderr": stderr[-2000:]})
+            failures.append(
+                {
+                    "unit": source,
+                    "exit": rc,
+                    "reason": "no SARIF written",
+                    "stderr": stderr[-2000:],
+                }
+            )
             continue
         sarif_files.append(sarif.name)
         if rc != 0:
-            failures.append({"unit": source, "exit": rc, "reason": "non-zero exit",
-                             "stderr": stderr[-2000:]})
+            failures.append(
+                {"unit": source, "exit": rc, "reason": "non-zero exit", "stderr": stderr[-2000:]}
+            )
         try:
             for run_ in json.loads(sarif.read_text())["runs"]:
                 for result in run_.get("results", []):
@@ -163,8 +220,9 @@ def main(argv=None):
             failures.append({"unit": source, "exit": rc, "reason": f"unreadable SARIF: {exc}"})
     summary = {
         "gcc": gcc,
-        "gcc_version": subprocess.run([gcc, "--version"], capture_output=True,
-                                      text=True).stdout.splitlines()[0],
+        "gcc_version": subprocess.run(
+            [gcc, "--version"], capture_output=True, text=True
+        ).stdout.splitlines()[0],
         "units": len(entries),
         "sarif_files": len(sarif_files),
         "failures": failures,
@@ -173,8 +231,10 @@ def main(argv=None):
         "results_by_rule": dict(rules.most_common()),
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n")
-    print(f"units {summary['units']}, SARIF {summary['sarif_files']}, results {summary['results']}, "
-          f"{seconds} s")
+    print(
+        f"units {summary['units']}, SARIF {summary['sarif_files']}, results {summary['results']}, "
+        f"{seconds} s"
+    )
     for rule, count in rules.most_common():
         print(f"  {count:5d} {rule}")
     for f in failures:

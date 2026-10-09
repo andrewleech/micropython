@@ -46,15 +46,16 @@ def relative(path, root):
     """PATH made repository-relative when it lies inside ROOT, otherwise left absolute."""
     path = os.path.realpath(path)
     if path.startswith(root + os.sep):
-        return path[len(root) + 1:].replace(os.sep, "/")
+        return path[len(root) + 1 :].replace(os.sep, "/")
     return path
 
 
 def database_units(db_path, root):
     """The units a compilation database names, repository-relative, with their multiplicity."""
     entries = json.loads(Path(db_path).read_text())
-    return collections.Counter(relative(os.path.join(e["directory"], e["file"]), root)
-                               for e in entries)
+    return collections.Counter(
+        relative(os.path.join(e["directory"], e["file"]), root) for e in entries
+    )
 
 
 def first_error(archive, root):
@@ -69,8 +70,12 @@ def first_error(archive, root):
     for line in stderr.splitlines():
         match = ERROR.match(line)
         if match:
-            return (unit, relative(os.path.join(directory, match["file"]), root),
-                    int(match["line"]), match["message"])
+            return (
+                unit,
+                relative(os.path.join(directory, match["file"]), root),
+                int(match["line"]),
+                match["message"],
+            )
     return unit, None, None, None
 
 
@@ -79,8 +84,11 @@ def check(accepted_path, configuration, metadata_path, db_path, root="."):
     C analyser reads."""
     root = os.path.realpath(root)
     try:
-        accepted = [e for e in json.loads(Path(accepted_path).read_text()).get("codechecker", [])
-                    if configuration in e["configurations"]]
+        accepted = [
+            e
+            for e in json.loads(Path(accepted_path).read_text()).get("codechecker", [])
+            if configuration in e["configurations"]
+        ]
         for entry in accepted:
             missing = {"id", "file", "line", "translation_units"} - set(entry)
             if missing:
@@ -91,89 +99,141 @@ def check(accepted_path, configuration, metadata_path, db_path, root="."):
         expected = database_units(db_path, root)
     except (OSError, ValueError, KeyError, TypeError) as exc:
         return [f"{db_path}: unusable compilation database: {exc}"], [], []
-    assembly = [f"{unit}: assembly, not analysed" for unit in sorted(expected)
-                if os.path.splitext(unit)[1] in ASSEMBLY]
+    assembly = [
+        f"{unit}: assembly, not analysed"
+        for unit in sorted(expected)
+        if os.path.splitext(unit)[1] in ASSEMBLY
+    ]
     for unit in [u for u in expected if os.path.splitext(u)[1] in ASSEMBLY]:
         del expected[unit]
     metadata_path = Path(metadata_path)
     if not metadata_path.exists():
-        return [f"{metadata_path} is missing, so CodeChecker analysed none of the "
-                f"{sum(expected.values())} units in {db_path}"], [], assembly
+        return (
+            [
+                f"{metadata_path} is missing, so CodeChecker analysed none of the "
+                f"{sum(expected.values())} units in {db_path}"
+            ],
+            [],
+            assembly,
+        )
     try:
         tool = json.loads(metadata_path.read_text())["tools"][0]
         statistics = tool["analyzers"][ANALYZER]["analyzer_statistics"]
-        succeeded = collections.Counter(relative(s, root) for s in statistics["successful_sources"])
+        succeeded = collections.Counter(
+            relative(s, root) for s in statistics["successful_sources"]
+        )
         failed = collections.Counter(relative(s, root) for s in statistics["failed_sources"])
     except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
-        return [f"{metadata_path}: not a CodeChecker record of a {ANALYZER} run: {exc}"], [], assembly
+        return (
+            [f"{metadata_path}: not a CodeChecker record of a {ANALYZER} run: {exc}"],
+            [],
+            assembly,
+        )
 
     failures, matched = [], []
     for unit, count in sorted((expected - (succeeded + failed)).items()):
-        failures.append(f"{unit}: in the database {count} time(s) more than CodeChecker analysed "
-                        f"it; it was skipped or never attempted")
+        failures.append(
+            f"{unit}: in the database {count} time(s) more than CodeChecker analysed "
+            f"it; it was skipped or never attempted"
+        )
     for unit, count in sorted(((succeeded + failed) - expected).items()):
-        failures.append(f"{unit}: recorded by CodeChecker but not in {db_path}, so {metadata_path} "
-                        f"is not this run's record")
+        failures.append(
+            f"{unit}: recorded by CodeChecker but not in {db_path}, so {metadata_path} "
+            f"is not this run's record"
+        )
 
     errors = {}
-    for archive in sorted(glob.glob(os.path.join(glob.escape(str(metadata_path.parent)),
-                                                 "failed", "*.zip"))):
+    for archive in sorted(
+        glob.glob(os.path.join(glob.escape(str(metadata_path.parent)), "failed", "*.zip"))
+    ):
         try:
             unit, *error = first_error(archive, root)
         except (OSError, ValueError, KeyError, IndexError, TypeError, zipfile.BadZipFile) as exc:
             failures.append(f"{archive}: unreadable ({exc}), so a failure cannot be attributed")
             continue
-        errors[unit] = error
+        errors.setdefault(unit, []).append(error)
     used = set()
     for unit in sorted(failed):
-        if unit not in errors:
-            failures.append(f"{unit}: failed, and CodeChecker kept no record of why under "
-                            f"{metadata_path.parent / 'failed'}")
-            continue
-        file, line, message = errors[unit]
-        if file is None:
-            failures.append(f"{unit}: failed with no compiler error location, a crash or timeout; "
-                            f"not an accepted gap")
-            continue
-        hit = next((i for i, e in enumerate(accepted)
-                    if e["id"] == ANALYZER and e["file"] == file and e["line"] == line), None)
-        if hit is None:
-            failures.append(f"{file}:{line}: {message} (costs {unit}) is not an accepted gap")
-        elif unit not in accepted[hit]["translation_units"]:
-            failures.append(f"{file}:{line}: costs {unit}, which the accepted entry does not list; "
-                            f"an entry accepts only the translation units it names")
-        else:
-            used.add(hit)
-            matched.append(f"{file}:{line}: {message} (costs {unit}, accepted)")
+        unit_errors = errors.get(unit, [])
+        if len(unit_errors) != failed[unit]:
+            failures.append(
+                f"{unit}: {failed[unit]} failed build action(s), but "
+                f"{len(unit_errors)} failure archive(s) under "
+                f"{metadata_path.parent / 'failed'}"
+            )
+        for file, line, message in unit_errors:
+            if file is None:
+                failures.append(
+                    f"{unit}: failed with no compiler error location, a crash or timeout; "
+                    f"not an accepted gap"
+                )
+                continue
+            hit = next(
+                (
+                    i
+                    for i, e in enumerate(accepted)
+                    if e["id"] == ANALYZER and e["file"] == file and e["line"] == line
+                ),
+                None,
+            )
+            if hit is None:
+                failures.append(f"{file}:{line}: {message} (costs {unit}) is not an accepted gap")
+            elif unit not in accepted[hit]["translation_units"]:
+                failures.append(
+                    f"{file}:{line}: costs {unit}, which the accepted entry does not list; "
+                    f"an entry accepts only the translation units it names"
+                )
+            else:
+                used.add(hit)
+                matched.append(f"{file}:{line}: {message} (costs {unit}, accepted)")
+    for unit in sorted(errors.keys() - failed.keys()):
+        failures.append(f"{unit}: failure archive is not recorded in this run's failed sources")
     for i, entry in enumerate(accepted):
         if i not in used:
-            failures.append(f"{entry['file']}:{entry['line']}: {entry['id']}: accepted for "
-                            f"{configuration} but not observed; remove the entry if the gap has "
-                            f"closed")
+            failures.append(
+                f"{entry['file']}:{entry['line']}: {entry['id']}: accepted for "
+                f"{configuration} but not observed; remove the entry if the gap has "
+                f"closed"
+            )
     return failures, matched, assembly
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="sast-codechecker-coverage", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--accepted", required=True, metavar="FILE",
-                    help="the project's accepted coverage gaps (analysis/coverage-gaps.json)")
+    ap = argparse.ArgumentParser(
+        prog="sast-codechecker-coverage",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument(
+        "--accepted",
+        required=True,
+        metavar="FILE",
+        help="the project's accepted coverage gaps (analysis/coverage-gaps.json)",
+    )
     ap.add_argument("--configuration", required=True, metavar="NAME")
-    ap.add_argument("--db", required=True, metavar="FILE",
-                    help="the compilation database the run analysed")
-    ap.add_argument("--root", default=".",
-                    help="repository the units are made relative to (default: .)")
-    ap.add_argument("metadata", metavar="METADATA",
-                    help="the run's metadata.json, in CodeChecker's output directory")
+    ap.add_argument(
+        "--db", required=True, metavar="FILE", help="the compilation database the run analysed"
+    )
+    ap.add_argument(
+        "--root", default=".", help="repository the units are made relative to (default: .)"
+    )
+    ap.add_argument(
+        "metadata",
+        metavar="METADATA",
+        help="the run's metadata.json, in CodeChecker's output directory",
+    )
     args = ap.parse_args(argv)
-    failures, matched, assembly = check(args.accepted, args.configuration, args.metadata, args.db,
-                                        args.root)
+    failures, matched, assembly = check(
+        args.accepted, args.configuration, args.metadata, args.db, args.root
+    )
     for line in assembly + matched:
         print(line)
     for line in failures:
         print(f"FAIL {line}", file=sys.stderr)
-    print(f"{args.configuration}: {len(assembly)} assembly unit(s) not analysed, {len(matched)} "
-          f"accepted gap(s), {len(failures)} failure(s)")
+    print(
+        f"{args.configuration}: {len(assembly)} assembly unit(s) not analysed, {len(matched)} "
+        f"accepted gap(s), {len(failures)} failure(s)"
+    )
     return 1 if failures else 0
 
 
