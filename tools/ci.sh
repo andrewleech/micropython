@@ -198,7 +198,8 @@ function ci_mboot_setup {
     pip3 install cryptography intelhex click cbor2 pyyaml pytest
     # lib/stm32lib and lib/CMSIS_6 provide the STM32H5 flash geometry used by host builds.
     # The Mbed TLS backend test builds its crypto sources from lib/mbedtls.
-    git submodule update --init lib/mcuboot lib/stm32lib lib/CMSIS_6 lib/mbedtls
+    # Python checks compile the F7 DFU bootloader, including the TinyUSB transport.
+    git submodule update --init lib/mcuboot lib/stm32lib lib/CMSIS_6 lib/mbedtls lib/tinyusb
 }
 
 function ci_mboot_python_test {
