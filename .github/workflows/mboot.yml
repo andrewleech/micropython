@@ -1,0 +1,62 @@
+name: Mboot
+
+on:
+  push:
+  pull_request:
+    paths:
+      - '.github/workflows/*.yml'
+      - 'extmod/extmod.cmake'
+      - 'extmod/extmod.mk'
+      - 'lib/littlefs/**'
+      - 'lib/CMSIS_6'
+      - 'lib/mcuboot'
+      - 'lib/oofatfs/**'
+      - 'lib/uzlib/**'
+      - 'lib/stm32lib'
+      - 'ports/stm32/**'
+      - 'ports/stm32/mboot/mcuboot/**'
+      - 'py/mpconfig.h'
+      - 'shared/mboot/**'
+      - 'tests/mboot/**'
+      - 'tools/ci.sh'
+      - 'tools/mboot_*.py'
+      - 'tools/pydfu.py'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host_tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        ci_func:  # names are functions in ci.sh
+          - mboot_python_test
+          - mboot_dfu_test
+          - mboot_host_core_test
+          - mboot_host_bootloader_test
+          - mboot_host_sweep_test
+          - mboot_fuzz_test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install packages
+      run: tools/ci.sh mboot_setup
+    - name: Run ci_${{ matrix.ci_func }}
+      run: tools/ci.sh ${{ matrix.ci_func }}
+
+  stm32:
+    strategy:
+      fail-fast: false
+      matrix:
+        ci_func:  # names are functions in ci.sh
+          - mboot_stm32_bootloader_build
+          - mboot_stm32_app_build
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install packages
+      run: tools/ci.sh stm32_setup mboot_setup && tools/ci.sh stm32_path >> "$GITHUB_PATH"
+    - name: Build ci_${{ matrix.ci_func }}
+      run: tools/ci.sh ${{ matrix.ci_func }}

@@ -73,6 +73,24 @@ __verbose = None
 # USB DFU interface
 __DFU_INTERFACE = 0
 
+# DfuSe command bytes, placed at the start of the DNLOAD data buffer. Only used when __dfuse
+# is set.
+_DFUSE_CMD_ERASE = 0x41
+_DFUSE_CMD_SET_ADDRESS = 0x21
+
+# Vendor erase request of pure DFU 1.1 (shared/tinyusb/mboot).
+_MBOOT_VREQ_ERASE = 0x80
+
+# Set by --dfuse: use the DfuSe protocol instead of pure DFU 1.1.
+__dfuse = False
+
+# Memory layout parsed from the device's DFU interface string (pure DFU mode). A list of
+# segments with fields addr, last_addr, size, num_pages, page_size.
+__mem_layout = None
+
+# Base address of the active region (pure DFU mode).
+__region_base = None
+
 if "length" in inspect.getfullargspec(usb.util.get_string).args:
     # PyUSB 1.0.0.b1 has the length argument
     def get_string(dev, index):
@@ -101,9 +119,66 @@ def find_dfu_cfg_descr(descr):
     return None
 
 
+def _parse_layout(layout_str):
+    """Parse an interface string of the form '@name /addr/geometry[/addr/geometry]...' (as used
+    by dfu-util and shared/tinyusb/mboot) into a list of segments, see get_memory_layout().
+    Returns None if the string is not in that format.
+    """
+    seg_re = re.compile(r"(\d+)\*(\d+)(.)(.)")
+    parts = layout_str.split("/")
+    result = []
+    for i in range(1, len(parts) - 1, 2):
+        try:
+            addr = int(parts[i].strip(), 0)
+        except ValueError:
+            return None
+        for segment in parts[i + 1].split(","):
+            seg_match = seg_re.match(segment.strip())
+            if not seg_match:
+                return None
+            num_pages = int(seg_match.group(1), 10)
+            page_size = int(seg_match.group(2), 10)
+            multiplier = seg_match.group(3)
+            if multiplier == "K":
+                page_size *= 1024
+            if multiplier == "M":
+                page_size *= 1024 * 1024
+            size = num_pages * page_size
+            result.append(
+                named(
+                    (addr, addr + size - 1, size, num_pages, page_size),
+                    "addr last_addr size num_pages page_size",
+                )
+            )
+            addr += size
+    return result or None
+
+
+def _parse_mem_layout(device):
+    """Return (layout, base address) for the first interface whose string is a memory layout,
+    or (None, None) if there is none."""
+    for intf in device[0]:
+        iface_str = get_string(device, intf.iInterface)
+        if iface_str and iface_str.startswith("@"):
+            layout = _parse_layout(iface_str)
+            if layout:
+                return layout, layout[0]["addr"]
+    return None, None
+
+
+def page_size_for(addr):
+    """Return the page/sector size of the region containing addr (pure DFU mode)."""
+    if __mem_layout is None:
+        raise ValueError("Memory layout not initialised")
+    for segment in __mem_layout:
+        if segment["addr"] <= addr <= segment["last_addr"]:
+            return segment["page_size"]
+    raise ValueError("Address 0x%x not found in memory layout" % addr)
+
+
 def init(**kwargs):
     """Initializes the found DFU device so that we can program it."""
-    global __dev, __cfg_descr
+    global __dev, __cfg_descr, __mem_layout, __region_base
     devices = get_dfu_devices(**kwargs)
     if not devices:
         raise ValueError("No DFU device found")
@@ -125,6 +200,13 @@ def init(**kwargs):
             __cfg_descr = find_dfu_cfg_descr(itf.extra_descriptors)
             if __cfg_descr:
                 break
+
+    # Pure DFU mode reads the memory layout from the interface string.
+    if not __dfuse:
+        __mem_layout, __region_base = _parse_mem_layout(__dev)
+        if __mem_layout is None:
+            print("Detected legacy DFU device; re-run with --dfuse")
+            sys.exit(1)
 
     # Get device into idle state
     for attempt in range(4):
@@ -168,14 +250,21 @@ def check_status(stage, expected):
 
 def mass_erase():
     """Performs a MASS erase (i.e. erases the entire device)."""
-    # Send DNLOAD with first byte=0x41
-    __dev.ctrl_transfer(0x21, __DFU_DNLOAD, 0, __DFU_INTERFACE, "\x41", __TIMEOUT)
+    if __dfuse:
+        # DfuSe: send DNLOAD with first byte=0x41
+        __dev.ctrl_transfer(0x21, __DFU_DNLOAD, 0, __DFU_INTERFACE, "\x41", __TIMEOUT)
 
-    # Execute last command
-    check_status("erase", __DFU_STATE_DFU_DOWNLOAD_BUSY)
+        # Execute last command
+        check_status("erase", __DFU_STATE_DFU_DOWNLOAD_BUSY)
 
-    # Check command state
-    check_status("erase", __DFU_STATE_DFU_DOWNLOAD_IDLE)
+        # Check command state
+        check_status("erase", __DFU_STATE_DFU_DOWNLOAD_IDLE)
+    else:
+        # Pure DFU 1.1: vendor erase request. bmRequestType=0x41 (host to device, vendor,
+        # interface), bRequest=0x80 (_MBOOT_VREQ_ERASE), wValue=0 (active region), wIndex is the
+        # interface. The data is <addr:u32 LE><length:u32 LE>, length 0xFFFFFFFF meaning mass erase.
+        data = struct.pack("<II", 0, 0xFFFFFFFF)
+        __dev.ctrl_transfer(0x41, _MBOOT_VREQ_ERASE, 0, __DFU_INTERFACE, data, __TIMEOUT)
 
 
 def page_erase(addr):
@@ -183,27 +272,32 @@ def page_erase(addr):
     if __verbose:
         print("Erasing page: 0x%x..." % (addr))
 
-    # Send DNLOAD with first byte=0x41 and page address
-    buf = struct.pack("<BI", 0x41, addr)
-    __dev.ctrl_transfer(0x21, __DFU_DNLOAD, 0, __DFU_INTERFACE, buf, __TIMEOUT)
+    if __dfuse:
+        # DfuSe: send DNLOAD with first byte=0x41 and page address
+        buf = struct.pack("<BI", _DFUSE_CMD_ERASE, addr)
+        __dev.ctrl_transfer(0x21, __DFU_DNLOAD, 0, __DFU_INTERFACE, buf, __TIMEOUT)
 
-    # Execute last command
-    check_status("erase", __DFU_STATE_DFU_DOWNLOAD_BUSY)
+        # Execute last command
+        check_status("erase", __DFU_STATE_DFU_DOWNLOAD_BUSY)
 
-    # Check command state
-    check_status("erase", __DFU_STATE_DFU_DOWNLOAD_IDLE)
+        # Check command state
+        check_status("erase", __DFU_STATE_DFU_DOWNLOAD_IDLE)
+    else:
+        # Pure DFU 1.1: vendor erase request for the sector that contains addr.
+        ps = page_size_for(addr)
+        data = struct.pack("<II", addr, ps)
+        __dev.ctrl_transfer(0x41, _MBOOT_VREQ_ERASE, 0, __DFU_INTERFACE, data, __TIMEOUT)
 
 
 def set_address(addr):
-    """Sets the address for the next operation."""
-    # Send DNLOAD with first byte=0x21 and page address
-    buf = struct.pack("<BI", 0x21, addr)
+    """Sets the address for the next operation (DfuSe only).
+
+    Pure DFU 1.1 puts the address in wBlockNum at write time, so it never calls this.
+    """
+    assert __dfuse
+    buf = struct.pack("<BI", _DFUSE_CMD_SET_ADDRESS, addr)
     __dev.ctrl_transfer(0x21, __DFU_DNLOAD, 0, __DFU_INTERFACE, buf, __TIMEOUT)
-
-    # Execute last command
     check_status("set address", __DFU_STATE_DFU_DOWNLOAD_BUSY)
-
-    # Check command state
     check_status("set address", __DFU_STATE_DFU_DOWNLOAD_IDLE)
 
 
@@ -226,13 +320,33 @@ def write_memory(addr, buf, progress=None, progress_addr=0, progress_size=0):
         if progress and xfer_count % 2 == 0:
             progress(progress_addr, xfer_base + xfer_bytes - progress_addr, progress_size)
 
-        # Set mem write address
-        set_address(xfer_base + xfer_bytes)
+        cur_addr = xfer_base + xfer_bytes
 
         # Send DNLOAD with fw data
         chunk = min(__cfg_descr.wTransferSize, xfer_total - xfer_bytes)
+        if __dfuse:
+            # DfuSe: set the address via DNLOAD, then send the data as block number 2.
+            set_address(cur_addr)
+            wblock = 2
+        else:
+            # Pure DFU 1.1: the block number is (addr - region_base) / wTransferSize, so
+            # cur_addr has to be aligned to wTransferSize relative to the region base. That
+            # holds when xfer_base is block aligned and chunks are full wTransferSize steps up
+            # to the final partial one.
+            offset = cur_addr - __region_base
+            if offset % __cfg_descr.wTransferSize != 0:
+                raise SystemExit(
+                    "pydfu: address 0x%x is not aligned to wTransferSize=%d "
+                    "(region base 0x%x)" % (cur_addr, __cfg_descr.wTransferSize, __region_base)
+                )
+            wblock = offset // __cfg_descr.wTransferSize
         __dev.ctrl_transfer(
-            0x21, __DFU_DNLOAD, 2, __DFU_INTERFACE, buf[xfer_bytes : xfer_bytes + chunk], __TIMEOUT
+            0x21,
+            __DFU_DNLOAD,
+            wblock,
+            __DFU_INTERFACE,
+            buf[xfer_bytes : xfer_bytes + chunk],
+            __TIMEOUT,
         )
 
         # Execute last command
@@ -252,11 +366,23 @@ def write_page(buf, xfer_offset):
 
     xfer_base = 0x08000000
 
-    # Set mem write address
-    set_address(xfer_base + xfer_offset)
+    cur_addr = xfer_base + xfer_offset
 
     # Send DNLOAD with fw data
-    __dev.ctrl_transfer(0x21, __DFU_DNLOAD, 2, __DFU_INTERFACE, buf, __TIMEOUT)
+    if __dfuse:
+        # DfuSe: set the address via DNLOAD, then send the data as block number 2.
+        set_address(cur_addr)
+        wblock = 2
+    else:
+        # Pure DFU 1.1: the block number is derived from the address.
+        offset = cur_addr - __region_base
+        if offset % __cfg_descr.wTransferSize != 0:
+            raise SystemExit(
+                "pydfu: address 0x%x is not aligned to wTransferSize=%d "
+                "(region base 0x%x)" % (cur_addr, __cfg_descr.wTransferSize, __region_base)
+            )
+        wblock = offset // __cfg_descr.wTransferSize
+    __dev.ctrl_transfer(0x21, __DFU_DNLOAD, wblock, __DFU_INTERFACE, buf, __TIMEOUT)
 
     # Execute last command
     check_status("write memory", __DFU_STATE_DFU_DOWNLOAD_BUSY)
@@ -265,25 +391,33 @@ def write_page(buf, xfer_offset):
     check_status("write memory", __DFU_STATE_DFU_DOWNLOAD_IDLE)
 
     if __verbose:
-        print("Write: 0x%x " % (xfer_base + xfer_offset))
+        print("Write: 0x%x " % (cur_addr))
 
 
 def exit_dfu():
     """Exit DFU mode, and start running the program."""
-    # Set jump address
-    set_address(0x08000000)
-
-    # Send DNLOAD with 0 length to exit DFU
+    # DfuSe and pure DFU 1.1 both manifest with a zero-length DNLOAD at block number 0. No
+    # DfuSe leave address is set first.
     __dev.ctrl_transfer(0x21, __DFU_DNLOAD, 0, __DFU_INTERFACE, None, __TIMEOUT)
 
     try:
         # Execute last command
         if get_status() != __DFU_STATE_DFU_MANIFEST:
             print("Failed to reset device")
+        elif not __dfuse:
+            # Pure DFU 1.1: the device validates the image while handling the next status
+            # request, which holds the bus until that is done. The state ends as
+            # dfuMANIFEST-WAIT-RESET, or dfuERROR if the image was rejected.
+            stat = __dev.ctrl_transfer(0xA1, __DFU_GETSTATUS, 0, __DFU_INTERFACE, 6, 20000)
+            if stat[4] == __DFU_STATE_DFU_ERROR:
+                raise SystemExit("DFU: image rejected (status 0x%02x)" % stat[0])
+            # bitWillDetach is 0, so the device leaves DFU mode on a USB reset from the host.
+            __dev.reset()
 
         # Release device
         usb.util.dispose_resources(__dev)
-    except:
+    except usb.core.USBError:
+        # A DfuSe device resets itself and is gone before the next request.
         pass
 
 
@@ -446,34 +580,10 @@ def get_memory_layout(device):
         page_size   - Size of each page, in bytes.
     """
 
-    cfg = device[0]
-    intf = cfg[(0, 0)]
-    mem_layout_str = get_string(device, intf.iInterface)
-    mem_layout = mem_layout_str.split("/")
-    result = []
-    for mem_layout_index in range(1, len(mem_layout), 2):
-        addr = int(mem_layout[mem_layout_index], 0)
-        segments = mem_layout[mem_layout_index + 1].split(",")
-        seg_re = re.compile(r"(\d+)\*(\d+)(.)(.)")
-        for segment in segments:
-            seg_match = seg_re.match(segment)
-            num_pages = int(seg_match.groups()[0], 10)
-            page_size = int(seg_match.groups()[1], 10)
-            multiplier = seg_match.groups()[2]
-            if multiplier == "K":
-                page_size *= 1024
-            if multiplier == "M":
-                page_size *= 1024 * 1024
-            size = num_pages * page_size
-            last_addr = addr + size - 1
-            result.append(
-                named(
-                    (addr, last_addr, size, num_pages, page_size),
-                    "addr last_addr size num_pages page_size",
-                )
-            )
-            addr += size
-    return result
+    layout = _parse_layout(get_string(device, device[0][(0, 0)].iInterface))
+    if layout is None:
+        raise ValueError("Unrecognised memory layout string")
+    return layout
 
 
 def list_dfu_devices(*args, **kwargs):
@@ -502,7 +612,10 @@ def write_elements(elements, mass_erase_used, progress=None):
     erasing as needed.
     """
 
-    mem_layout = get_memory_layout(__dev)
+    if __dfuse:
+        mem_layout = get_memory_layout(__dev)
+    else:
+        mem_layout = __mem_layout
     for elem in elements:
         addr = elem["addr"]
         size = elem["size"]
@@ -552,7 +665,7 @@ def cli_progress(addr, offset, size):
 
 def main():
     """Test program for verifying this files functionality."""
-    global __verbose
+    global __verbose, __dfuse
     # Parse CMD args
     parser = argparse.ArgumentParser(description="DFU Python Util")
     parser.add_argument(
@@ -570,9 +683,17 @@ def main():
     parser.add_argument(
         "-v", "--verbose", help="increase output verbosity", action="store_true", default=False
     )
+    parser.add_argument(
+        "--dfuse",
+        help="use legacy DfuSe protocol (stm32/mboot compatibility); "
+        "this flag may be removed in a future release",
+        action="store_true",
+        default=False,
+    )
     args = parser.parse_args()
 
     __verbose = args.verbose
+    __dfuse = args.dfuse
 
     kwargs = {}
     if args.vid:

@@ -42,7 +42,9 @@
 #endif
 
 #ifndef MICROPY_BOARD_ENTER_BOOTLOADER
-#if MICROPY_HW_USES_BOOTLOADER
+#if MICROPY_HW_MBOOT_APP
+#define MICROPY_BOARD_ENTER_BOOTLOADER(nargs, args) mboot_stm32_app_enter_bootloader(nargs, args)
+#elif MICROPY_HW_USES_BOOTLOADER
 #define MICROPY_BOARD_ENTER_BOOTLOADER(nargs, args) boardctrl_maybe_enter_mboot(nargs, args)
 #else
 #define MICROPY_BOARD_ENTER_BOOTLOADER(nargs, args)

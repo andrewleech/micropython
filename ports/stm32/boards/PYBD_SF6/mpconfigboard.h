@@ -24,6 +24,13 @@
  * THE SOFTWARE.
  */
 
+#ifndef MICROPY_INCLUDED_STM32_BOARDS_PYBD_SF6_MPCONFIGBOARD_H
+#define MICROPY_INCLUDED_STM32_BOARDS_PYBD_SF6_MPCONFIGBOARD_H
+
+// This file is read a second time by shared/mboot/include/mboot_layout.h in the MCUboot
+// builds. The configuration of PYBD_SF2 that it undefines and redefines below is not the same
+// on a second pass, hence the include guard.
+
 // Take PYBD_SF2 as base configuration
 #include "boards/PYBD_SF2/mpconfigboard.h"
 
@@ -119,3 +126,34 @@
 extern unsigned char _micropy_hw_romfs_part0_start;
 
 void board_early_init_sf6(void);
+
+// Mboot (MBOOT_BACKEND=mcuboot builds, see docs/reference/mboot.rst). The flash is 4 sectors of 32 KiB, one
+// of 128 KiB and seven of 256 KiB. A firmware image needs five of the 256 KiB sectors and the
+// filesystem is on SPI flash #1, so there is room for one slot only: the single policy updates
+// it in place, by DFU or from a file on the filesystem (fsload), and does not revert.
+//
+// 0x08000000 two 32 KiB sectors    the bootloader
+// 0x08010000 two 32 KiB sectors    unused by MCUboot
+// 0x08020000 128 KiB sector        intent area of fsload
+// 0x08040000 five 256 KiB sectors  the slot (image header, firmware, trailer)
+// 0x08180000 two 256 KiB sectors   security counter
+#define MBOOT_POLICY              (MBOOT_POLICY_SEL_SINGLE)
+#define MBOOT_INTENT_ADDR         (0x08020000)
+#define MBOOT_PRIMARY_ADDR        (0x08040000)
+#define MBOOT_PRIMARY_SIZE        (1280 * 1024)
+#define MBOOT_SECCNT_ADDR         (0x08180000)
+#define MBOOT_ROLLBACK_COUNTER    (1)
+#define MBOOT_DFU                 (1)
+
+// The application filesystem is FAT on SPI flash #1, read by the bootloader to install an update
+// from a file (fsload). The chip is detected at run time and is 2 MiB or 8 MiB, so the layout
+// takes the size that both have.
+#define MBOOT_FSLOAD_FAT          (1)
+#define MBOOT_FS_ADDR             (0x80000000)
+#define MBOOT_FS_SIZE             (2 * 1024 * 1024)
+#define MBOOT_DEV1_SIZE           (MBOOT_FS_SIZE)
+
+// There is no log UART: MICROPY_HW_UART_REPL is not defined and USB is the console.
+#define MBOOT_LOG_LEVEL           (0)
+
+#endif // MICROPY_INCLUDED_STM32_BOARDS_PYBD_SF6_MPCONFIGBOARD_H
