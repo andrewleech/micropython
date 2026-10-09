@@ -59,9 +59,9 @@
 #endif
 
 #include "boardctrl.h"
-#if MICROPY_HW_MCUBOOT_APP
-#include "mcuboot_app.h"
-#include "mcuboot_layout.h"
+#if MICROPY_HW_MBOOT_APP
+#include "mboot_app.h"
+#include "mboot_layout.h"
 #endif
 #include "mpbthciport.h"
 #include "mpu.h"
@@ -682,9 +682,9 @@ soft_reset:
         goto soft_reset_exit;
     }
 
-    #if MICROPY_HW_MCUBOOT_APP && defined(MCUBOOT_CONFIRM_AUTO)
-    // MCUBOOT_CONFIRM_AUTO: boot.py has completed, so confirm a test image.
-    mcuboot_app_confirm_if_pending();
+    #if MICROPY_HW_MBOOT_APP && defined(MBOOT_CONFIRM_AUTO)
+    // MBOOT_CONFIRM_AUTO: boot.py has completed, so confirm a test image.
+    mboot_app_confirm_if_pending();
     #endif
 
     // Now we initialise sub-systems that need configuration from boot.py,

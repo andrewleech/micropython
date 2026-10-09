@@ -23,5 +23,5 @@ MICROPY_PY_SSL = 1
 MICROPY_SSL_MBEDTLS = 1
 MICROPY_HW_ENABLE_ISR_UART_FLASH_FUNCS_IN_RAM = 1
 
-# pyocd target for programming the MCUboot builds (ports/stm32/mcuboot, MCUBOOT=1).
+# pyocd target for programming the MCUboot builds (ports/stm32/mboot/mcuboot, MBOOT_BACKEND=mcuboot).
 PYOCD_TARGET = stm32h563zitx

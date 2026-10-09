@@ -159,7 +159,7 @@ To always read a positive integer
    stm32   BKP16R-BKP18R   ``rfcore_firmware.py`` on STM32WB
    stm32   last BKP reg    clock frequency (``MICROPY_HW_CLK_LAST_FREQ``)
    stm32   BKP31R (N6)     mboot bootloader entry
-   stm32   BKP28R-BKP30R   MCUboot bootloader handoff on STM32H5, ``MCUBOOT=1`` builds
+   stm32   BKP28R-BKP30R   mboot handoff on STM32H5, ``MBOOT_BACKEND=mcuboot`` builds
    ======  ==============  =========================================================
 
    The buffer allows direct register access and can be combined with
@@ -205,8 +205,8 @@ Reset related functions
    Some ports support passing in an optional *value* argument which can control
    which bootloader to enter, what to pass to it, or other things.
 
-   On the stm32 port, firmware built with ``MCUBOOT=1`` (see
-   :ref:`mcuboot_bootloader`) enters the MCUboot bootloader instead of the ROM
+   On the stm32 port, firmware built with ``MBOOT_BACKEND=mcuboot`` (see
+   :ref:`mboot_bootloader`) enters the mboot bootloader instead of the ROM
    bootloader. Called without an argument, :func:`bootloader` requests DFU mode.
    A ``bytes`` argument requests a filesystem update; an invalid request raises
    ``ValueError``.

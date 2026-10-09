@@ -19,20 +19,20 @@ $(error Invalid BOARD_VARIANT specified: $(BOARD_VARIANT))
 endif
 endif
 
-# MCUBOOT=1 builds the application that runs under the MCUboot bootloader, see
-# mcuboot/mcuboot_app.mk. The objects, linker script and load address differ from the default
+# MBOOT_BACKEND=mcuboot builds the application for the MCUboot-backed Mboot bootloader, see
+# mboot/mcuboot/mboot_app.mk. The objects, linker script and load address differ from the default
 # firmware, so it gets its own build directory.
-MCUBOOT ?= 0
-ifeq ($(MCUBOOT),1)
-BUILD_SUFFIX_MCUBOOT = -mcuboot
+MBOOT_BACKEND ?=
+ifeq ($(MBOOT_BACKEND),mcuboot)
+BUILD_SUFFIX_MBOOT = -mboot
 endif
 
 # If the build directory is not given, make it reflect the board name (and
-# optionally the board variant, and the MCUboot application build).
+# optionally the board variant, and the Mboot application build).
 ifneq ($(BOARD_VARIANT),)
-BUILD ?= build-$(BOARD)-$(BOARD_VARIANT)$(BUILD_SUFFIX_MCUBOOT)
+BUILD ?= build-$(BOARD)-$(BOARD_VARIANT)$(BUILD_SUFFIX_MBOOT)
 else
-BUILD ?= build-$(BOARD)$(BUILD_SUFFIX_MCUBOOT)
+BUILD ?= build-$(BOARD)$(BUILD_SUFFIX_MBOOT)
 endif
 
 include ../../py/mkenv.mk
@@ -46,9 +46,9 @@ else
 include $(BOARD_DIR)/mpconfigvariant_$(BOARD_VARIANT).mk
 endif
 
-# Application variant for the MCUboot bootloader.
-ifeq ($(MCUBOOT),1)
-include mcuboot/mcuboot_app.mk
+# Application variant for the MCUboot-backed Mboot bootloader.
+ifeq ($(MBOOT_BACKEND),mcuboot)
+include mboot/mcuboot/mboot_app.mk
 endif
 
 # qstr definitions (must come before including py.mk)
@@ -550,7 +550,7 @@ endif
 
 all: $(TOP)/lib/stm32lib/README.md all_main $(BUILD)/firmware.hex
 
-ifeq ($(MCUBOOT),1)
+ifeq ($(MBOOT_BACKEND),mcuboot)
 all_main: $(BUILD)/firmware.bin
 else ifeq ($(MBOOT_ENABLE_PACKING),1)
 all_main: $(BUILD)/firmware.pack.dfu
@@ -591,7 +591,7 @@ define GENERATE_ELF
 	$(Q)$(CC) $(LDFLAGS) -o $(1) $(2) $(LDFLAGS_MOD) $(LIBS)
 	$(Q)$(SIZE) $(1)
 	$(if $(filter-out $(TEXT0_ADDR),0x08000000), \
-		$(ECHO) "INFO: this build requires $(if $(filter 1,$(MCUBOOT)),the MCUboot bootloader,mboot) to be installed first")
+		$(ECHO) "INFO: this build requires $(if $(filter mcuboot,$(MBOOT_BACKEND)),the MCUboot-backed Mboot bootloader,mboot) to be installed first")
 	$(if $(filter $(TEXT1_ADDR),0x90000000), \
 		$(ECHO) "INFO: this build places firmware in external QSPI flash")
 endef
@@ -741,8 +741,8 @@ $(GEN_CDCINF_FILE): $(CDCINF_TEMPLATE) $(INSERT_USB_IDS) $(USB_IDS_FILE) | $(HEA
 	$(ECHO) "GEN $@"
 	$(Q)$(PYTHON) $(INSERT_USB_IDS) $(USB_IDS_FILE) $< > $@
 
-ifeq ($(MCUBOOT),1)
-include mcuboot/mcuboot_app_rules.mk
+ifeq ($(MBOOT_BACKEND),mcuboot)
+include mboot/mcuboot/mboot_app_rules.mk
 endif
 
 include $(TOP)/py/mkrules.mk
