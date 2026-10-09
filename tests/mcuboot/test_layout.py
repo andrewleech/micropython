@@ -169,12 +169,11 @@ class TestRealBoard(unittest.TestCase):
         self.assertEqual((a["boot"]["addr"], a["boot"]["size"]), (0x08000000, 0x10000))
         self.assertEqual((a["primary"]["addr"], a["primary"]["size"]), (0x08010000, 0xA0000))
         self.assertEqual((a["secondary"]["addr"], a["secondary"]["size"]), (0x08100000, 0xA2000))
-        self.assertEqual((a["log"]["addr"], a["log"]["size"]), (0x080B0000, 0x4000))
-        self.assertEqual((a["seccnt"]["addr"], a["seccnt"]["size"]), (0x080B4000, 0x4000))
-        self.assertEqual((a["shadow"]["addr"], a["shadow"]["size"]), (0x080B8000, 0x4000))
-        self.assertEqual((a["fs"]["addr"], a["fs"]["size"]), (0x080BC000, 0x44000))
+        self.assertEqual((a["seccnt"]["addr"], a["seccnt"]["size"]), (0x080B0000, 0x4000))
+        self.assertEqual((a["shadow"]["addr"], a["shadow"]["size"]), (0x080B4000, 0x4000))
+        self.assertEqual((a["fs"]["addr"], a["fs"]["size"]), (0x080B8000, 0x48000))
         self.assertEqual(lay["max_img_sectors"], 81)
-        self.assertEqual(lay["layout_id"], "3535692f")
+        self.assertEqual(lay["layout_id"], "f78a8771")
         self.assertEqual({a["erase"] for a in lay["areas"].values()}, {0x2000})
         self.assertEqual(lay["trailer_size"], 2688)
         self.assertEqual(lay["max_image_size"], 0x9E000)
@@ -220,8 +219,8 @@ class TestDerivation(unittest.TestCase):
     def test_version_rollback_has_no_counter_area(self):
         _, lay = layout(board(MCUBOOT_ROLLBACK_COUNTER="0"))
         self.assertNotIn("seccnt", lay["areas"])
-        self.assertEqual(lay["areas"]["shadow"]["addr"], 0x080B4000)
-        self.assertEqual(lay["areas"]["fs"]["addr"], 0x080B8000)
+        self.assertEqual(lay["areas"]["shadow"]["addr"], 0x080B0000)
+        self.assertEqual(lay["areas"]["fs"]["addr"], 0x080B4000)
 
     def test_filesystem_override(self):
         _, lay = layout(board(MCUBOOT_FS_ADDR="0x080C0000", MCUBOOT_FS_SIZE="0x40000"))
@@ -232,7 +231,7 @@ class TestDerivation(unittest.TestCase):
     def test_primary_address_override(self):
         _, lay = layout(board(MCUBOOT_PRIMARY_ADDR="0x08020000", MCUBOOT_PRIMARY_SIZE="0x80000"))
         self.assertEqual(lay["areas"]["primary"]["addr"], 0x08020000)
-        self.assertEqual(lay["areas"]["log"]["addr"], 0x080A0000)
+        self.assertEqual(lay["areas"]["seccnt"]["addr"], 0x080A0000)
 
     def test_dfu_ids(self):
         _, lay = layout(board())
@@ -433,12 +432,12 @@ class TestPolicies(unittest.TestCase):
         self.assertEqual(lay["swap_mode"], "scratch")
         self.assertEqual(a["secondary"]["size"], a["primary"]["size"])
         self.assertEqual((a["scratch"]["id"], a["scratch"]["size"]), (3, 0x2000))
-        self.assertEqual(a["scratch"]["addr"], a["log"]["addr"] + a["log"]["size"])
+        self.assertEqual(a["scratch"]["addr"], a["primary"]["addr"] + a["primary"]["size"])
         self.assertEqual(a["fs"]["addr"], a["scratch"]["addr"] + a["scratch"]["size"])
         self.assertNotIn("MCUBOOT_BOOTSTRAP", values)
 
     def test_scratch_placement_is_a_board_input(self):
-        # A board sets the scratch address and size itself instead of taking the area behind the log.
+        # A board-placed scratch area does not move the default filesystem address.
         with tempfile.TemporaryDirectory() as tmp:
             src = HOST_BOARDS / "scratch"
             for f in ("mcuboot_dev.h", "mpconfigboard.h"):
@@ -453,9 +452,9 @@ class TestPolicies(unittest.TestCase):
             (lay["areas"]["scratch"]["addr"], lay["areas"]["scratch"]["size"]),
             (0x900E0000, 0x4000),
         )
-        # The filesystem is not moved behind it: it still starts after the auxiliary areas.
         self.assertEqual(
-            lay["areas"]["fs"]["addr"], lay["areas"]["log"]["addr"] + lay["areas"]["log"]["size"]
+            lay["areas"]["fs"]["addr"],
+            lay["areas"]["primary"]["addr"] + lay["areas"]["primary"]["size"],
         )
 
     def test_overwrite_external(self):
@@ -588,7 +587,7 @@ class TestPolicies(unittest.TestCase):
         self.assertIn("MCUBOOT_INTENT_START = 0x", ld)
         self.assertNotIn("MCUBOOT_SECONDARY_START", ld)
         ld = gen.render_ld(host_layout("scratch")[1])
-        self.assertIn("MCUBOOT_SCRATCH_START = 0x90052000;", ld)
+        self.assertIn("MCUBOOT_SCRATCH_START = 0x90050000;", ld)
         self.assertIn("MCUBOOT_SCRATCH_SIZE = 0x2000;", ld)
 
 
@@ -622,7 +621,10 @@ class TestRefused(unittest.TestCase):
 
     def test_overlaps(self):
         self.refused(
-            "secondary slot overlaps the shadow area", MCUBOOT_SECONDARY_ADDR="0x080B8000"
+            "secondary slot overlaps the shadow area",
+            MCUBOOT_SECONDARY_ADDR="0x080B4000",
+            MCUBOOT_FS_ADDR="0x08160000",
+            MCUBOOT_FS_SIZE="0x48000",
         )
         self.refused(
             "bootloader region overlaps the primary slot", MCUBOOT_PRIMARY_ADDR="0x08008000"
@@ -795,7 +797,9 @@ class TestRefused(unittest.TestCase):
         self.refused(
             "secondary slot overlaps the shadow area",
             MCUBOOT_SWAP_MODE=SEL["move"],
-            MCUBOOT_SECONDARY_ADDR="0x080B8000",
+            MCUBOOT_SECONDARY_ADDR="0x080B4000",
+            MCUBOOT_FS_ADDR="0x08160000",
+            MCUBOOT_FS_SIZE="0x48000",
         )
         self.refused(
             "does not fit in device 0",
@@ -1015,13 +1019,12 @@ class TestRuns(unittest.TestCase):
     run and has the erase unit of that run."""
 
     # The shipped PYBD_SF6 configuration: single slot policy, bootloader in the first two 32 KiB
-    # sectors, update log in the next two, the intent area in the 128 KiB sector, the primary slot
-    # in five 256 KiB sectors, the counter in the last two, the filesystem on the SPI flash.
+    # sectors, the next two unused, the intent area in the 128 KiB sector, the primary slot in five
+    # 256 KiB sectors, the counter in the last two, the filesystem on the SPI flash.
     F7 = {
         "MCUBOOT_POLICY": "(MCUBOOT_POLICY_SEL_SINGLE)",
         "MCUBOOT_PRIMARY_ADDR": "(0x08040000)",
         "MCUBOOT_PRIMARY_SIZE": "(5 * 0x40000)",
-        "MCUBOOT_LOG_ADDR": "(0x08010000)",
         "MCUBOOT_INTENT_ADDR": "(0x08020000)",
         "MCUBOOT_SECCNT_ADDR": "(0x08180000)",
         "MCUBOOT_ROLLBACK_COUNTER": "(1)",
@@ -1065,7 +1068,6 @@ class TestRuns(unittest.TestCase):
             units,
             {
                 "boot": (0x08000000, 0x10000, 0x8000),
-                "log": (0x08010000, 0x10000, 0x8000),
                 "intent": (0x08020000, 0x20000, 0x20000),
                 "primary": (0x08040000, 0x140000, 0x40000),
                 "seccnt": (0x08180000, 0x80000, 0x40000),
@@ -1118,7 +1120,6 @@ class TestRuns(unittest.TestCase):
         )
         self.assertEqual(a["secondary"]["addr"] + a["secondary"]["size"], 0x08200000)
         self.assertEqual({a[n]["erase"] for n in ("primary", "secondary")}, {0x40000})
-        self.assertEqual(a["log"]["erase"], 0x8000)
         self.assertEqual(off["max_image_size"], 2 * 0x40000)
         self.assertEqual(off["min_image_size"], 0x40001)
         self.assertEqual(off["dfu"]["update_addr"], a["secondary"]["addr"] + 0x40000)
@@ -1229,10 +1230,6 @@ class TestRuns(unittest.TestCase):
             "primary slot has to lie in one run of erase units, start at and be a multiple of the erase unit",
             {"MCUBOOT_PRIMARY_ADDR": "(0x08050000)", "MCUBOOT_PRIMARY_SIZE": "(0x100000)"},
         )
-        self.refused(
-            "update log has to lie in one run",
-            {"MCUBOOT_LOG_ADDR": "(0x08014000)"},
-        )
 
     def test_area_size_is_a_multiple_of_the_unit_of_its_run(self):
         self.refused(
@@ -1245,8 +1242,8 @@ class TestRuns(unittest.TestCase):
         )
 
     def test_the_default_filesystem_cannot_span_runs(self):
-        # Without MCUBOOT_FS_ADDR the filesystem takes the flash between the log and the secondary slot,
-        # which is more than one run.
+        # Without MCUBOOT_FS_ADDR the filesystem fills the space between the auxiliaries and the
+        # secondary slot, so this layout is refused when that space crosses an erase-run boundary.
         self.refused(
             "filesystem has to lie in one run",
             {
@@ -1260,6 +1257,7 @@ class TestRuns(unittest.TestCase):
                 "MCUBOOT_FS_ADDR": None,
                 "MCUBOOT_FS_SIZE": None,
             },
+            self.four_runs(0x08100000, run3_erase=0x40000),
         )
 
     def test_the_filesystem_has_room(self):
@@ -1273,7 +1271,7 @@ class TestRuns(unittest.TestCase):
 
     # A device of four runs: four 32 KiB sectors, one of 128 KiB, then 256 KiB sectors up to
     # 0x08140000 or 0x08180000, then 128 KiB sectors.
-    def four_runs(self, big_end):
+    def four_runs(self, big_end, run3_erase=0x20000):
         return [
             (
                 "#define MCUBOOT_DEV0_RUN2_SIZE (7 * 0x40000u)",
@@ -1282,8 +1280,8 @@ class TestRuns(unittest.TestCase):
             ("#define MCUBOOT_DEV0_RUNS 3", "#define MCUBOOT_DEV0_RUNS 4"),
             (
                 "#define MCUBOOT_DEV0_WRITE",
-                "#define MCUBOOT_DEV0_RUN3_SIZE %#xu\n#define MCUBOOT_DEV0_RUN3_ERASE 0x20000u\n#define MCUBOOT_DEV0_WRITE"
-                % (0x08200000 - big_end),
+                "#define MCUBOOT_DEV0_RUN3_SIZE %#xu\n#define MCUBOOT_DEV0_RUN3_ERASE %#xu\n#define MCUBOOT_DEV0_WRITE"
+                % (0x08200000 - big_end, run3_erase),
             ),
         ]
 
@@ -1296,7 +1294,6 @@ class TestRuns(unittest.TestCase):
             "MCUBOOT_ROLLBACK_COUNTER": "(0)",
             "MCUBOOT_PRIMARY_ADDR": "(0x08040000)",
             "MCUBOOT_PRIMARY_SIZE": "(0x80000)",
-            "MCUBOOT_LOG_ADDR": "(0x08010000)",
         }
         d.update(kv)
         return d
@@ -1339,11 +1336,9 @@ class TestRuns(unittest.TestCase):
         defs = self.swap_defs(
             MCUBOOT_POLICY="(MCUBOOT_POLICY_SEL_OVERWRITE_EXTERNAL)",
             MCUBOOT_SECONDARY_ADDR="(0x080C0000)",
-            MCUBOOT_LOG_ADDR="(0x08140000)",
             MCUBOOT_SHADOW_ADDR="(0x08010000)",
         )
         self.refused("shadow area needs the erase unit of the slots", defs, dev=dev)
-        defs["MCUBOOT_LOG_ADDR"] = "(0x08010000)"
         defs["MCUBOOT_SHADOW_ADDR"] = "(0x08140000)"
         r = self.f7_board(defs, dev)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -1352,8 +1347,6 @@ class TestRuns(unittest.TestCase):
 
     def test_no_two_areas_overlap(self):
         for defs, message in (
-            ({"MCUBOOT_LOG_ADDR": "(0x08008000)"}, "bootloader region overlaps the update log"),
-            ({"MCUBOOT_INTENT_ADDR": "(0x08010000)"}, "update log overlaps the intent area"),
             ({"MCUBOOT_SECCNT_ADDR": "(0x08100000)"}, "primary slot overlaps the counter area"),
             ({"MCUBOOT_INTENT_ADDR": "(0x08180000)"}, "counter area overlaps the intent area"),
             (
@@ -1364,23 +1357,17 @@ class TestRuns(unittest.TestCase):
             with self.subTest(message=message):
                 self.refused(message, defs)
 
-    def test_log_and_counter_follow_the_unit_at_their_address(self):
+    def test_counter_uses_two_units_of_its_run(self):
         _, lay = board_layout(HOST_BOARDS / "f7")
-        # Two units of 32 KiB for the log, two of 256 KiB for the counter.
-        self.assertEqual(lay["areas"]["log"]["size"], 2 * 0x8000)
         self.assertEqual(lay["areas"]["seccnt"]["size"], 2 * 0x40000)
 
-    def test_explicit_areas_on_a_uniform_device(self):
-        _, lay = layout(board(MCUBOOT_LOG_ADDR="0x080C0000"))
+    def test_explicit_counter_and_shadow_placement(self):
+        _, lay = layout(board(MCUBOOT_SECCNT_ADDR="0x080C0000"))
         a = lay["areas"]
-        self.assertEqual(a["log"]["addr"], 0x080C0000)
-        # The counter and the shadow area follow the log wherever it is.
-        self.assertEqual(a["seccnt"]["addr"], 0x080C4000)
-        self.assertEqual(a["shadow"]["addr"], 0x080C8000)
+        self.assertEqual((a["seccnt"]["addr"], a["shadow"]["addr"]), (0x080C0000, 0x080C4000))
         _, lay = layout(board(MCUBOOT_SECCNT_ADDR="0x080E0000", MCUBOOT_SHADOW_ADDR="0x080F0000"))
         a = lay["areas"]
         self.assertEqual((a["seccnt"]["addr"], a["shadow"]["addr"]), (0x080E0000, 0x080F0000))
-        self.assertEqual(a["log"]["addr"], 0x080B0000)
 
     def test_explicit_counter_and_shadow_need_their_feature(self):
         r = preprocess(board(MCUBOOT_SECCNT_ADDR="0x080E0000", MCUBOOT_ROLLBACK_COUNTER="0"))
@@ -1415,9 +1402,9 @@ class TestRuns(unittest.TestCase):
 
     def test_layout_id_follows_explicit_areas_but_not_the_defaults(self):
         base = layout(board())[1]["layout_id"]
-        # The counter behind the log is where it is without the input.
-        self.assertEqual(base, layout(board(MCUBOOT_SECCNT_ADDR="0x080B4000"))[1]["layout_id"])
-        self.assertEqual(base, layout(board(MCUBOOT_SHADOW_ADDR="0x080B8000"))[1]["layout_id"])
+        # The counter immediately after the primary slot is where it is without the input.
+        self.assertEqual(base, layout(board(MCUBOOT_SECCNT_ADDR="0x080B0000"))[1]["layout_id"])
+        self.assertEqual(base, layout(board(MCUBOOT_SHADOW_ADDR="0x080B4000"))[1]["layout_id"])
         moved = layout(board(MCUBOOT_SECCNT_ADDR="0x080E0000"))[1]["layout_id"]
         self.assertNotEqual(base, moved)
         self.assertNotEqual(base, layout(board(MCUBOOT_SHADOW_ADDR="0x080E0000"))[1]["layout_id"])
@@ -1455,8 +1442,8 @@ class TestRuns(unittest.TestCase):
             src.write_text(
                 '#include <stdio.h>\n#include <stdint.h>\n#include "mcuboot_layout.h"\n'
                 "int main(void) {\n"
-                '  printf("%u %u %u %u %u\\n", (unsigned)MCUBOOT_BOOT_UNIT, (unsigned)MCUBOOT_LOG_UNIT,\n'
-                "    (unsigned)MCUBOOT_INTENT_UNIT, (unsigned)MCUBOOT_SLOT_UNIT, (unsigned)MCUBOOT_SECCNT_UNIT);\n"
+                '  printf("%u %u %u %u\\n", (unsigned)MCUBOOT_BOOT_UNIT, (unsigned)MCUBOOT_INTENT_UNIT,\n'
+                "    (unsigned)MCUBOOT_SLOT_UNIT, (unsigned)MCUBOOT_SECCNT_UNIT);\n"
                 "  return 0; }\n"
             )
             exe = Path(tmp) / "u"
@@ -1475,7 +1462,7 @@ class TestRuns(unittest.TestCase):
                 check=True,
             )
             out = subprocess.run([str(exe)], capture_output=True, text=True, check=True).stdout
-        self.assertEqual(out.split(), ["32768", "32768", "131072", "262144", "262144"])
+        self.assertEqual(out.split(), ["32768", "131072", "262144", "262144"])
 
 
 @unittest.skipIf(CC is None, "needs a host C compiler")
@@ -1597,7 +1584,7 @@ class TestGenerator(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             ld = (Path(tmp) / "mcuboot_layout.ld").read_text()
             self.assertIn("MCUBOOT_PRIMARY_START = 0x08010000;", ld)
-            self.assertIn("MCUBOOT_FS_START = 0x080BC000;", ld)
+            self.assertIn("MCUBOOT_FS_START = 0x080B8000;", ld)
             mk = (Path(tmp) / "mcuboot_layout.mk").read_text()
             self.assertIn("MCUBOOT_APP_LINK_ADDR := 0x08010400", mk)
             self.assertIn("MCUBOOT_DFU_WRITE_ALIGN := 16", mk)

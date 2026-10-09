@@ -1,5 +1,5 @@
 # Host build and tests of the shared/mcuboot core glue (flash map backend with ECC shadow words,
-# security counter, update log, request handoff, printf, crc) together with the unmodified bootutil
+# security counter, request handoff, printf, crc) together with the unmodified bootutil
 # and tinycrypt, on the fake flash of tests/mcuboot/host.
 #
 # The configuration is the board header pair selected by BOARD (tests/mcuboot/host/boards.mk).

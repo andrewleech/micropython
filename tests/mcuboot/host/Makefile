@@ -62,8 +62,8 @@ GEN_SRC := $(MCUBOOT_GEN_SRC_C)
 HOST_SRC := $(CURDIR)/host_sweep.c $(CURDIR)/fake_flash.c
 
 ifeq ($(GLUE),shared)
-# The boot decision does not need the request handoff, the update log or the jump code.
-GLUE_SRC := $(abspath $(addprefix $(TOP)/,$(filter-out %/request.c %/updatelog.c %/arm_jump.c,$(MCUBOOT_GLUE_SRC_C))))
+# The boot decision does not need the request handoff or the jump code.
+GLUE_SRC := $(abspath $(addprefix $(TOP)/,$(filter-out %/request.c %/arm_jump.c,$(MCUBOOT_GLUE_SRC_C))))
 HOST_SRC += $(CURDIR)/glue/shared_port.c
 # A flash map device that is not memory mapped is a SPI NOR chip model (spi_nor/) behind the real
 # drivers/memory/spiflash.c and the flash_spiflash.c backend; spi_nor/port_flash.c is the port.

@@ -33,7 +33,6 @@
 #include "flash_map_backend/flash_map_backend.h"
 #include "mcuboot_log.h"
 #include "mcuboot_port.h"
-#include "mcuboot_updatelog.h"
 
 #include "host_glue.h"
 
@@ -78,15 +77,6 @@ void mcuboot_fault_recover(void) {
     _exit(66);
 }
 
-// The update log is not part of the sweep.
-int mcuboot_updatelog_append(uint8_t type, uint8_t result, uint8_t source, const mcuboot_image_info_t *info, uint32_t detail) {
-    (void)type;
-    (void)result;
-    (void)source;
-    (void)info;
-    (void)detail;
-    return 0;
-}
 
 // There is no fsload stream device in the sweep.
 int mcuboot_stream_area_read(uint32_t off, void *dst, uint32_t len) {

@@ -34,11 +34,10 @@
 #include "host_env.h"
 #include "mcuboot_fsload.h"
 #include "mcuboot_request.h"
-#include "mcuboot_updatelog.h"
 #include "mcuboot_validate.h"
 #include "sysflash/sysflash.h"
 
-// Host tests of fsload, over the real flash map backend, update log and bootutil validation:
+// Host tests of fsload, over the real flash map backend and bootutil validation:
 // files that must be installed, files and requests that must be refused without a flash write,
 // and the retry of the single policy after a power cut.
 //
@@ -51,8 +50,7 @@
 // <expected> is "ok" or a comma separated list of result codes, any of which is accepted. The
 // device file becomes the contents of device 0 (address 0x90000000) and the element file is the
 // request. After a case that must succeed the target slot must hold the image file. After a
-// case that must fail: no write or erase outside the update log area, slots unchanged, and a
-// FSLOAD_FAILED record with the result code.
+// case that must fail: no flash writes or erases and slots unchanged.
 //
 // With the swap policy a success is also checked for the pending test swap
 // (boot_swap_type_multi); with the single policy the primary slot holds the image.
@@ -185,7 +183,7 @@ static uint32_t image_len(const uint8_t *img) {
     return off + le16(img + off + 2);
 }
 
-// Copy of the slots, for the "slots unchanged" checks (the update log area is excluded).
+// Copy of the slots, for the "slots unchanged" checks.
 static uint8_t snapshot[HOST_SLOT_SIZE];
 
 static void snapshot_slots(void) {
@@ -193,9 +191,7 @@ static void snapshot_slots(void) {
 }
 
 static bool slots_unchanged(void) {
-    return memcmp(snapshot, host_slots(), HOST_LOG_OFF) == 0 &&
-           memcmp(snapshot + HOST_LOG_OFF + HOST_LOG_SIZE, host_slots() + HOST_LOG_OFF + HOST_LOG_SIZE,
-               HOST_SLOT_SIZE - HOST_LOG_OFF - HOST_LOG_SIZE) == 0;
+    return memcmp(snapshot, host_slots(), HOST_SLOT_SIZE) == 0;
 }
 
 // The image in area_id validates (the old image, for the primary slot under the single policy).
@@ -265,13 +261,10 @@ static int run_case(const char *dir, const test_case_t *tc, const uint8_t *initi
     #endif
     const host_flash_stats_t *st = host_flash_stats();
 
-    mcuboot_log_rec_t rec;
-    CHECK(mcuboot_updatelog_read(0, &rec) == 0, "log has a record");
     CHECK(expected_has(tc->expected, r), "result %s (%d), expected %s", code_name(r), r, tc->expected);
     CHECK(st->violations == 0, "flash model violations %u", (unsigned)st->violations);
 
     if (r == MCUBOOT_RES_OK) {
-        CHECK(rec.type == LOG_FSLOAD_DONE && rec.result == 0, "log type %u result %u", rec.type, rec.result);
         if (img != NULL) {
             uint32_t len = image_len(img);
             CHECK(len <= img_len, "image length");
@@ -281,9 +274,8 @@ static int run_case(const char *dir, const test_case_t *tc, const uint8_t *initi
         CHECK(boot_swap_type_multi(0) == BOOT_SWAP_TYPE_TEST, "pending test swap, got %d", boot_swap_type_multi(0));
         #endif
     } else {
-        CHECK(rec.type == LOG_FSLOAD_FAILED && rec.result == r, "log type %u result %u", rec.type, rec.result);
-        CHECK(st->writes_outside_log == 0 && st->erases_outside_log == 0, "flash writes %u erases %u outside the log",
-            (unsigned)st->writes_outside_log, (unsigned)st->erases_outside_log);
+        CHECK(st->writes == 0 && st->erases == 0, "flash writes %u erases %u", (unsigned)st->writes,
+            (unsigned)st->erases);
         CHECK(slots_unchanged(), "slots changed");
     }
 
@@ -359,7 +351,6 @@ static void power_cut_sweep(const char *dir, const test_case_t *tc, const uint8_
         CHECK(mcuboot_fsload_run(elems, elems_len) == MCUBOOT_RES_OK, "second request after a cut at %u", (unsigned)k);
         CHECK(memcmp(host_slots() + target_off(), img, image_len(img)) == 0, "secondary holds the image after a cut at %u", (unsigned)k);
         CHECK(boot_swap_type_multi(0) == BOOT_SWAP_TYPE_TEST, "pending after a cut at %u", (unsigned)k);
-        CHECK(host_flash_stats()->writes_outside_log > 0, "second request wrote");
         completed++;
         #endif
     }

@@ -551,13 +551,12 @@ def build(out):
         )
 
     # The source window may not cover any area of the flash map except the filesystem area:
-    # the target slots, the log and the intent record are refused before anything is read.
+    # the target slots and intent record are refused before anything is read.
     slot = 0x08000000
     for name, addr, length, expected in (
         ("primary", slot + 0x10000, 0x1000, E_REQUEST),
         ("primary_tail", slot + 0x2F000, 0x2000, E_REQUEST),
         ("secondary", slot + 0x30000, 0x1000, [E_REQUEST, E_HEADER]),
-        ("log", slot + 0x51000, 0x100, E_REQUEST),
         ("intent", slot + 0x53000, 0x100, [E_REQUEST, E_HEADER]),
         ("before_primary_into_it", slot + 0x0F000, 0x2000, E_REQUEST),
     ):

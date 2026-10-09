@@ -33,8 +33,8 @@
 
 #include "flash_map_backend/flash_map_backend.h"
 
-// Fixed size records appended to a flash area made of erase units (the update log, the flash
-// security counter). A record starts with a magic word and carries a CRC-32 of its first
+// Fixed size records appended to a flash area of erase units, such as the flash security counter.
+// A record starts with a magic word and carries a CRC-32 of its first
 // crc_span bytes in the word that follows them; the rest of the slot is padding. A slot holds
 // one record of max(record size, write unit) bytes and is written with a single flash write, so
 // a slot torn by a power cut is either unreadable or fails its CRC and never reads as valid.

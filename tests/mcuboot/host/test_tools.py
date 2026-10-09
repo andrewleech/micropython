@@ -28,7 +28,7 @@
   python3 tests/mcuboot/host/test_tools.py
 
 Covers phase labelling and trailer geometry against the trailer offsets of the STM32H563 flash
-map, the update log decoder, the fi_sweep.py trace parser, trial selection and the arm / disarm /
+map, the DFU result decoder, the fi_sweep.py trace parser, trial selection and the arm / disarm /
 settle protocol against a model target. The dry run of fi_sweep.py reads the layout that
 tools/mcuboot_gen.py writes for the NUCLEO-H563ZI (the Makefile of this directory runs it) and
 the trace of a 3 sector swap on that board. Regenerate fixtures/swap_3s_h5.fi.log when the flash
@@ -44,7 +44,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -54,7 +53,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "tools"))
 import fi_log  # noqa: E402
 import fi_sweep  # noqa: E402
 import layout as layout_mod  # noqa: E402
-import mcuboot_log  # noqa: E402
+import mcuboot_dfu_result  # noqa: E402
 import phases  # noqa: E402
 import report  # noqa: E402
 
@@ -179,25 +178,6 @@ class PhaseTests(unittest.TestCase):
         self.assertTrue(any("no cuts" in c["verdict"] for c in rep["classes"]))
 
 
-def make_rec(seq, rtype, result=0, source=0, flags=3, ver=(2, 0, 0, 0), detail=0, hash_prefix=0):
-    body = struct.pack(
-        "<IIBBBBBBHIII",
-        mcuboot_log.REC_MAGIC,
-        seq,
-        rtype,
-        result,
-        source,
-        flags,
-        ver[0],
-        ver[1],
-        ver[2],
-        ver[3],
-        detail,
-        hash_prefix,
-    )
-    return body + struct.pack("<I", zlib.crc32(body) & 0xFFFFFFFF)
-
-
 def spi_layout(dev1_erase=8192):
     """The h5 flash map with the secondary slot in a SPI NOR flash (device 1, not memory mapped)."""
     data = {
@@ -261,49 +241,17 @@ class SpiSlotTests(unittest.TestCase):
             spi_layout(dev1_erase=131072)
 
 
-class LogDecodeTests(unittest.TestCase):
-    def test_order_across_units_and_wrap(self):
-        unit = 256
-        a = make_rec(0xFFFFFFFF, 6) + make_rec(0, 8)  # wraps: 0xFFFFFFFF is older than 0
-        a += b"\xff" * (unit - len(a))
-        b = make_rec(1, 13) + b"\xff" * (unit - 32)
-        recs, consumed, free, notes = mcuboot_log.decode_dump(b + a, unit)
-        self.assertEqual([r["seq"] for r in recs], [0xFFFFFFFF, 0, 1])
-        self.assertEqual(
-            [r["type_name"] for r in recs], ["SWAP_DONE", "REVERTED", "APP_CONFIRMED"]
-        )
-        self.assertEqual(recs[2]["unit"], 0)
-        self.assertEqual(consumed, [])
-        self.assertEqual(free, 2 * (unit // 32) - 3)
-        self.assertEqual(notes, [])
-
-    def test_torn_record_is_consumed_not_valid(self):
-        good = make_rec(7, 4)
-        torn = bytearray(make_rec(8, 5))
-        torn[9] ^= 0x10
-        data = good + bytes(torn) + b"\xff" * 32
-        recs, consumed, free, notes = mcuboot_log.decode_dump(data)
-        self.assertEqual([r["seq"] for r in recs], [7])
-        self.assertEqual(len(consumed), 1)
-        self.assertEqual(consumed[0]["offset"], 32)
-        self.assertEqual(free, 1)
-
-    def test_partially_programmed_magic_is_consumed(self):
-        data = b"\x4d\x42\xff\xff" + b"\xff" * 28
-        recs, consumed, free, _ = mcuboot_log.decode_dump(data)
-        self.assertEqual((len(recs), len(consumed), free), (0, 1, 0))
-
-    def test_gap_is_reported(self):
-        recs, _, _, notes = mcuboot_log.decode_dump(make_rec(3, 1) + make_rec(9, 1))
-        self.assertEqual(len(recs), 2)
-        self.assertEqual(len(notes), 1)
-
-    def test_dfu_result(self):
-        r = mcuboot_log.decode_result(struct.pack("<IHBBII", 5, 4, 1, 3, 0xAB, 0))
+class DfuResultDecodeTests(unittest.TestCase):
+    def test_decodes_result(self):
+        r = mcuboot_dfu_result.decode_result(struct.pack("<IHBBII", 5, 4, 1, 3, 0xAB, 0))
         self.assertEqual(
             (r["seq"], r["code_name"], r["source_name"], r["phase"], r["detail"]),
             (5, "ERR_SIG", "dfu", 3, 0xAB),
         )
+
+    def test_rejects_wrong_length(self):
+        with self.assertRaisesRegex(ValueError, "16 bytes"):
+            mcuboot_dfu_result.decode_result(b"\0" * 15)
 
 
 class TraceTests(unittest.TestCase):

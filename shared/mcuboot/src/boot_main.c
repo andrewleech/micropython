@@ -42,7 +42,6 @@
 #include "mcuboot_port.h"
 #include "mcuboot_request.h"
 #include "mcuboot_types.h"
-#include "mcuboot_updatelog.h"
 #include "mcuboot_validate.h"
 #include "sysflash/sysflash.h"
 
@@ -156,53 +155,6 @@ MCUBOOT_NORETURN void mcuboot_fault_recover(void) {
     enter_recovery(REC_FAULT);
 }
 
-// ---- update log after boot_go() ----
-
-static bool info_equal(const mcuboot_image_info_t *a, const mcuboot_image_info_t *b) {
-    return a->valid == b->valid && a->ver_major == b->ver_major && a->ver_minor == b->ver_minor && a->ver_rev == b->ver_rev
-           && a->ver_build == b->ver_build && a->sec_cnt == b->sec_cnt && a->hash_prefix == b->hash_prefix;
-}
-
-static bool info_older(const mcuboot_image_info_t *a, const mcuboot_image_info_t *b) {
-    if (a->ver_major != b->ver_major) {
-        return a->ver_major < b->ver_major;
-    }
-    if (a->ver_minor != b->ver_minor) {
-        return a->ver_minor < b->ver_minor;
-    }
-    return a->ver_rev < b->ver_rev;
-}
-
-// Records what boot_go() did, from the swap type before it ran and the primary slot before and
-// after. cand is the header of the update image that was in the secondary slot before.
-static void log_after_boot_go(int swap_before, const mcuboot_image_info_t *pre, const mcuboot_image_info_t *cand) {
-    mcuboot_image_info_t post;
-    const struct flash_area *pri = primary_area();
-    if (pri == NULL) {
-        return;
-    }
-    mcuboot_image_info_read(pri, &post);
-    bool changed = !info_equal(pre, &post);
-    uint32_t detail = (uint32_t)swap_before;
-
-    if (swap_before == BOOT_SWAP_TYPE_TEST || swap_before == BOOT_SWAP_TYPE_PERM) {
-        if (!changed) {
-            MCUBOOT_LOG_WRN("update image rejected by boot_go()");
-            mcuboot_updatelog_append(LOG_SLOT_REJECTED_AT_BOOT, MCUBOOT_RES_OK, SRC_BOOT, cand, detail);
-            return;
-        }
-        mcuboot_updatelog_append(swap_before == BOOT_SWAP_TYPE_TEST ? LOG_SWAP_DONE : LOG_SWAP_DONE_PERM, MCUBOOT_RES_OK, SRC_BOOT, &post, detail);
-    } else if (swap_before == BOOT_SWAP_TYPE_REVERT) {
-        if (changed) {
-            mcuboot_updatelog_append(LOG_REVERTED, MCUBOOT_RES_OK, SRC_BOOT, &post, detail);
-        }
-    } else if (changed) {
-        // An interrupted swap completed, or an image was installed over an empty primary header.
-        int after = boot_swap_type_multi(0);
-        uint8_t type = after == BOOT_SWAP_TYPE_REVERT ? LOG_SWAP_DONE : (pre->valid && info_older(&post, pre)) ? LOG_REVERTED : LOG_SWAP_DONE_PERM;
-        mcuboot_updatelog_append(type, MCUBOOT_RES_OK, SRC_BOOT, &post, detail);
-    }
-}
 
 #if !MCUBOOT_POLICY_SINGLE
 // A pending update that this layout cannot take is not swapped in: one built for another flash
@@ -213,7 +165,7 @@ static void log_after_boot_go(int swap_before, const mcuboot_image_info_t *pre, 
 // counter stay with boot_go(). The rejection erases the pending state and the image headers of
 // the secondary slot, trailer first, so an interrupted rejection leaves either the update still
 // pending (rejected again) or a slot with no pending update.
-static bool update_layout_rejected(const struct flash_area *sec, const mcuboot_image_info_t *cand, int swap_before) {
+static bool update_layout_rejected(const struct flash_area *sec) {
     mcuboot_validate_result_t r = mcuboot_validate_view(sec, VALIDATE_CHECK_TARGET | VALIDATE_STRUCTURE_ONLY);
     if (r.code == MCUBOOT_RES_ERR_LAYOUT) {
         MCUBOOT_LOG_ERR("update image has layout id %08x, this bootloader has %08x: rejected", (unsigned)r.detail, (unsigned)MCUBOOT_LAYOUT_ID);
@@ -231,7 +183,6 @@ static bool update_layout_rejected(const struct flash_area *sec, const mcuboot_i
         MCUBOOT_LOG_ERR("erase of the rejected update failed rc=%d", rc);
         enter_recovery(REC_FAULT);
     }
-    mcuboot_updatelog_append(LOG_SLOT_REJECTED_AT_BOOT, (uint8_t)r.code, SRC_BOOT, cand, (uint32_t)swap_before);
     return true;
 }
 #endif
@@ -268,9 +219,8 @@ static void drop_stale_secondary_header(void) {
 
 #if MCUBOOT_POLICY_OVERWRITE_EXTERNAL
 // A copy cut after the secondary slot header was erased and before its pending state was
-// cleared leaves a pending update on a slot with no image. bootutil finds nothing to install
-// on every boot and the update log would get a record each time, so the pending state is
-// dropped.
+// cleared leaves a pending update on a slot with no image. bootutil finds nothing to install on
+// every boot, so the pending state is dropped.
 static void drop_pending_without_image(void) {
     const struct flash_area *sec;
     struct image_header hdr;
@@ -327,7 +277,6 @@ int mcuboot_main(void) {
     if (FIH_NOT_EQ(cnt_rc, FIH_SUCCESS)) {
         MCUBOOT_LOG_ERR("security counter init failed, the counter area is damaged or unreadable");
         s_seccnt_failed = true;
-        mcuboot_updatelog_append(LOG_SECCNT_FAILED, MCUBOOT_RES_ERR_FLASH, SRC_BOOT, NULL, 0);
     }
     #endif
 
@@ -350,10 +299,8 @@ int mcuboot_main(void) {
 
     if (!recovery || settle) {
         mcuboot_image_info_t pre;
-        mcuboot_image_info_t cand;
         const struct flash_area *pri = primary_area();
         memset(&pre, 0, sizeof(pre));
-        memset(&cand, 0, sizeof(cand));
         if (pri != NULL) {
             mcuboot_image_info_read(pri, &pre);
         }
@@ -366,8 +313,7 @@ int mcuboot_main(void) {
         if (swap_before == BOOT_SWAP_TYPE_TEST || swap_before == BOOT_SWAP_TYPE_PERM) {
             const struct flash_area *sec;
             if (flash_area_open(FLASH_AREA_IMAGE_SECONDARY(0), &sec) == 0) {
-                mcuboot_image_info_read(sec, &cand);
-                if (update_layout_rejected(sec, &cand, swap_before)) {
+                if (update_layout_rejected(sec)) {
                     swap_before = BOOT_SWAP_TYPE_NONE;
                 }
             }
@@ -384,7 +330,6 @@ int mcuboot_main(void) {
                 enter_recovery(REC_FAULT);
             }
             #endif
-            log_after_boot_go(swap_before, &pre, &cand);
             if (!recovery) {
                 mcuboot_port_deinit();
                 mcuboot_port_jump(mcuboot_dev_base(rsp.br_flash_dev_id) + rsp.br_image_off + rsp.br_hdr->ih_hdr_size);
@@ -392,7 +337,6 @@ int mcuboot_main(void) {
             // Recovery was requested and the pending swap or revert is now complete: stay in the bootloader.
         } else {
             MCUBOOT_LOG_ERR("no bootable image");
-            mcuboot_updatelog_append(LOG_NO_IMAGE, MCUBOOT_RES_ERR_NO_IMAGE, SRC_BOOT, NULL, 0);
             recover_primary();
             why = REC_NO_IMAGE;
             #if MCUBOOT_POLICY_SINGLE && MCUBOOT_FSLOAD_ENABLE

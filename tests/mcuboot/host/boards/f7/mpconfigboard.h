@@ -25,14 +25,13 @@
  */
 
 // The configuration that the PYBD_SF6 ships with, as a host test model: the single slot policy, the
-// bootloader in the first two 32 KiB sectors, the update log in the next two, the intent area of
-// fsload in the 128 KiB sector, the primary slot in five of the 256 KiB sectors, the security
-// counter in the last two, and a FAT filesystem on the SPI flash for fsload.
+// bootloader in the first two 32 KiB sectors, the next two unused, the intent area in the 128 KiB
+// sector, the primary slot in five of the 256 KiB sectors, the security counter in the last two,
+// and a FAT filesystem on the SPI flash for fsload.
 
 #define MCUBOOT_POLICY (MCUBOOT_POLICY_SEL_SINGLE)
 #define MCUBOOT_PRIMARY_ADDR (0x08040000)
 #define MCUBOOT_PRIMARY_SIZE (5 * 0x40000)
-#define MCUBOOT_LOG_ADDR (0x08010000)
 #define MCUBOOT_INTENT_ADDR (0x08020000)
 #define MCUBOOT_SECCNT_ADDR (0x08180000)
 #define MCUBOOT_ROLLBACK_COUNTER (1)

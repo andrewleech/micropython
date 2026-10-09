@@ -53,7 +53,6 @@
 #include "mboot_usbd.h"
 #include "mcuboot_dfu.h"
 #include "mcuboot_types.h"
-#include "mcuboot_updatelog.h"
 #include "test_main.h"
 
 // fk_wrange_t must match mcuboot_wrange_t.
@@ -191,15 +190,10 @@ static bool ends_with(const char *s, const char *suffix) {
 
 static int test_g1_regions_init(int *failures) {
     TEST_ASSERT_EQ(fk_setup(), 0);
-    TEST_ASSERT_EQ(mboot_region_count(), 2);
+    TEST_ASSERT_EQ(mboot_region_count(), 1);
     char s[160];
     alt_string(0, s);
-    // The image alt is read/erase/write ('g'), the log alt read-only ('a'). The
-    // log is below the image in the address space but is still alt 1.
     TEST_ASSERT(ends_with(s, "*008Kg"));
-    alt_string(1, s);
-    TEST_ASSERT(ends_with(s, "*008Ka"));
-    TEST_ASSERT(strstr(s, "Update log") != NULL);
     return 0;
 }
 
@@ -314,7 +308,7 @@ static int test_g3_session_begin_order(int *failures) {
     size_t i = 0;
     #if !MCUBOOT_POLICY_SINGLE
     // Trailer sector (the last sector of the slot holds the magic), spare sector,
-    // DFU_BEGIN, then the core's erase and write of the first data sector.
+    // then the core's erase and write of the first data sector.
     EV_IS(i, EV_ERASE, AREA_HI - FK_ES, FK_ES);
     i++;
     #if FK_SPARE_SIZE != 0
@@ -322,8 +316,6 @@ static int test_g3_session_begin_order(int *failures) {
     i++;
     #endif
     #endif
-    EV_IS(i, EV_LOG, LOG_DFU_BEGIN, MCUBOOT_RES_OK);
-    i++;
     EV_IS(i, EV_ERASE, FK_IMAGE_OFF, FK_ES);
     i++;
     EV_IS(i, EV_WRITE, FK_IMAGE_OFF, 112);   // 100 bytes padded to the write unit
@@ -333,15 +325,14 @@ static int test_g3_session_begin_order(int *failures) {
     TEST_ASSERT_EQ(fk_flash[FK_IMAGE_OFF + 100], 0xFF);
     TEST_ASSERT_EQ(fk_flash[FK_IMAGE_OFF + 111], 0xFF);
 
-    // Next block of the same session: no hook.
-    size_t before = fk_count(EV_LOG);
+    // A second block in the same session does not erase its sector again.
+    size_t erases = fk_count(EV_ERASE);
     TEST_ASSERT_EQ(dnload(0, 1, 2048), DFU_STATUS_OK);
-    TEST_ASSERT_EQ(fk_count(EV_LOG), before);
+    TEST_ASSERT_EQ(fk_count(EV_ERASE), erases);
 
     // DFU_ABORT starts a new session, so the hook runs again on the next block.
     tud_dfu_abort_cb(0);
     TEST_ASSERT_EQ(dnload(0, 0, 16), DFU_STATUS_OK);
-    TEST_ASSERT_EQ(fk_count(EV_LOG), before + 1);
     // Two session begins, and the first image sector is erased once per session.
     TEST_ASSERT_EQ(fk_count(EV_ERASE), 2 * BEGIN_ERASES + 2);
     return 0;
@@ -352,18 +343,14 @@ static int test_g4_begin_failure(int *failures) {
     #if MCUBOOT_POLICY_SINGLE
     // Nothing is erased at session begin for policy single.
     TEST_ASSERT_EQ(dnload(0, 0, 16), DFU_STATUS_OK);
-    TEST_ASSERT_EQ(fk_count(EV_LOG), 1);
     #else
     // The trailer erase fails. The request fails with errERASE, nothing is
-    // written, the failure goes in the log and the 0x81 result, and the next
-    // block retries.
+    // written, the failure goes in the 0x81 result, and the next block retries.
     fk_fail_erase_off = AREA_HI - FK_ES;
     TEST_ASSERT_EQ(dnload(0, 0, 16), DFU_STATUS_ERR_ERASE);
     TEST_ASSERT_EQ(fk_count(EV_WRITE), 0);
     size_t i = 0;
     EV_IS(i, EV_ERASE, AREA_HI - FK_ES, FK_ES);
-    i++;
-    EV_IS(i, EV_LOG, LOG_DFU_BEGIN, MCUBOOT_RES_ERR_FLASH);
     i++;
     TEST_ASSERT_EQ(fk_event_count, i);
 
@@ -371,7 +358,7 @@ static int test_g4_begin_failure(int *failures) {
     TEST_ASSERT_EQ(vendor_result(r, 0xC1, 16), 16);
     TEST_ASSERT(le32(r) >= 1);
     TEST_ASSERT_EQ(le16(r + 4), MCUBOOT_RES_ERR_FLASH);
-    TEST_ASSERT_EQ(r[6], SRC_DFU);
+    TEST_ASSERT_EQ(r[6], MCUBOOT_DFU_RESULT_SOURCE_DFU);
     TEST_ASSERT_EQ(r[7], MCUBOOT_DFU_PHASE_BEGIN);
     TEST_ASSERT_EQ(le32(r + 8), AREA_HI - FK_ES);
 
@@ -399,42 +386,32 @@ static int test_g5_trailer_sectors(int *failures) {
     EV_IS(2, EV_ERASE, AREA_HI - 3 * FK_ES, FK_ES);
     #if FK_SPARE_SIZE != 0
     EV_IS(3, EV_ERASE, FK_SECONDARY_OFF, FK_ES);
-    EV_IS(4, EV_LOG, LOG_DFU_BEGIN, MCUBOOT_RES_OK);
-    #else
-    EV_IS(3, EV_LOG, LOG_DFU_BEGIN, MCUBOOT_RES_OK);
     #endif
     return 0;
     #endif
 }
 
 // ---------------------------------------------------------------------------
-// Read-only region
+// Invalid alt setting
 // ---------------------------------------------------------------------------
 
-static int test_g6_read_only_alt(int *failures) {
+static int test_g6_invalid_alt(int *failures) {
     TEST_ASSERT_EQ(fk_setup(), 0);
-    for (uint32_t i = 0; i < FK_LOG_SIZE; i++) {
-        fk_flash[FK_LOG_OFF + i] = (uint8_t)(i * 7 + 1);
-    }
     uint32_t prot = fk_hash_protected();
     fill_data(0x22);
 
-    // Write to the log alt: address error, no flash access, no hook.
-    TEST_ASSERT_EQ(dnload(1, 0, 64), DFU_STATUS_ERR_ADDRESS);
-    // Mass and range erase of the log alt stall.
+    // The image is the only alt. Invalid alt requests are refused without I/O or a hook.
+    TEST_ASSERT_EQ(dnload(1, 0, 64), DFU_STATUS_ERR_TARGET);
     TEST_ASSERT(!vendor_erase(1, 0, 0xFFFFFFFFu));
-    TEST_ASSERT(!vendor_erase(1, FK_ADDR(FK_LOG_OFF), FK_ES));
+    TEST_ASSERT(!vendor_erase(1, FK_ADDR(FK_IMAGE_OFF), FK_ES));
     TEST_ASSERT_EQ(fk_event_count, 0);
     TEST_ASSERT_EQ(fk_hash_protected(), prot);
 
-    // Upload from the log alt returns its contents.
     uint8_t buf[2048];
     fake_tusb_reset();
-    TEST_ASSERT_EQ(tud_dfu_upload_cb(1, 0, buf, sizeof(buf)), 2048);
-    TEST_ASSERT(memcmp(buf, &fk_flash[FK_LOG_OFF], 2048) == 0);
+    TEST_ASSERT_EQ(tud_dfu_upload_cb(1, 0, buf, sizeof(buf)), 0);
     TEST_ASSERT_EQ(fk_event_count, 0);
 
-    // The image alt still works.
     TEST_ASSERT_EQ(dnload(0, 0, 16), DFU_STATUS_OK);
     return 0;
 }
@@ -476,13 +453,12 @@ static int test_g8_shims_refuse_outside(int *failures) {
     mboot_addr_t next = 0;
     uint32_t prot = fk_hash_protected();
 
-    // Areas that must never be reachable: boot, seccnt, shadow, FS, log, a gap,
+    // Areas that must never be reachable: boot, seccnt, shadow, FS, a gap,
     // the device start and end, and the primary slot unless it is the single slot.
     mboot_addr_t bad[] = {
         FK_ADDR(FK_BOOT_OFF), FK_ADDR(FK_BOOT_OFF + FK_ES),
         FK_ADDR(FK_SECCNT_OFF), FK_ADDR(FK_SHADOW_OFF),
         FK_ADDR(FK_FS_OFF), FK_ADDR(FK_FS_OFF + FK_FS_SIZE - FK_ES),
-        FK_ADDR(FK_LOG_OFF), FK_ADDR(FK_LOG_OFF + FK_ES),
         FK_ADDR(AREA_LO - FK_ES),
         FK_ADDR(FK_DEV_SIZE), FK_ADDR(FK_DEV_SIZE - FK_ES),
         0, 0xFFFFFFF0u, FK_BASE - 16,
@@ -524,10 +500,9 @@ static int test_g8_shims_refuse_outside(int *failures) {
     TEST_ASSERT_EQ(mboot_port_flash_write(in + 64, unit, 8), -EINVAL);
     TEST_ASSERT(events_confined());
 
-    // Reads are limited to the device, not the write ranges (the log alt is
-    // uploaded).
+    // Reads are limited to the device, not the write ranges.
     uint8_t rd[16];
-    TEST_ASSERT_EQ(mboot_port_flash_read(FK_ADDR(FK_LOG_OFF), rd, 16), 0);
+    TEST_ASSERT_EQ(mboot_port_flash_read(FK_ADDR(FK_FS_OFF), rd, 16), 0);
     TEST_ASSERT_EQ(mboot_port_flash_read(FK_ADDR(FK_DEV_SIZE - 8), rd, 16), -EINVAL);
     TEST_ASSERT_EQ(mboot_port_flash_read(0, rd, 16), -EINVAL);
     return 0;
@@ -577,7 +552,7 @@ static int test_g10_range_erase(int *failures) {
     // Starts outside the region: refused, nothing happens (not even the begin hook).
     mboot_addr_t starts[] = {
         FK_ADDR(FK_BOOT_OFF), FK_ADDR(FK_SECCNT_OFF), FK_ADDR(FK_SHADOW_OFF), FK_ADDR(FK_FS_OFF),
-        FK_ADDR(FK_LOG_OFF), FK_ADDR(FK_IMAGE_OFF - FK_ES),
+        FK_ADDR(FK_IMAGE_OFF - FK_ES),
         FK_ADDR(FK_DEV_SIZE), FK_BASE - FK_ES, 0,
         #if !MCUBOOT_POLICY_SINGLE
         FK_ADDR(FK_PRIMARY_OFF), FK_ADDR(FK_PRIMARY_OFF + FK_PRIMARY_SIZE - FK_ES),
@@ -658,12 +633,9 @@ static int test_g11_manifest_rejected(int *failures) {
         TEST_ASSERT(fake_tusb_last_finish_called);
         TEST_ASSERT_EQ(fake_tusb_last_finish_status, k_status_map[k].status);
 
-        // Validated once with every check, never marked pending, logged as
-        // rejected, and the header sector erased so the image cannot linger.
+        // Validation runs before the rejection, then the header sector is erased.
         size_t i = 0;
         EV_IS(i, EV_VALIDATE, VIEW_ID, VALIDATE_FULL | VALIDATE_CHECK_TARGET | VALIDATE_CHECK_DOWNGRADE);
-        i++;
-        EV_IS(i, EV_LOG, LOG_IMAGE_REJECTED, k_status_map[k].code);
         i++;
         EV_IS(i, EV_ERASE, FK_IMAGE_OFF, FK_ES);
         i++;
@@ -675,7 +647,7 @@ static int test_g11_manifest_rejected(int *failures) {
         TEST_ASSERT_EQ(vendor_result(r, 0xC1, 16), 16);
         TEST_ASSERT_EQ(le32(r), seq_begin + 1);
         TEST_ASSERT_EQ(le16(r + 4), k_status_map[k].code);
-        TEST_ASSERT_EQ(r[6], SRC_DFU);
+        TEST_ASSERT_EQ(r[6], MCUBOOT_DFU_RESULT_SOURCE_DFU);
         TEST_ASSERT_EQ(r[7], MCUBOOT_DFU_PHASE_VALIDATE);
         TEST_ASSERT_EQ(le32(r + 8), 0x1234 + (uint32_t)k);
         TEST_ASSERT_EQ(le32(r + 12), 0);
@@ -700,8 +672,9 @@ static int test_g12_pending_failure(int *failures) {
     tud_dfu_manifest_cb(0);
     TEST_ASSERT_EQ(fake_tusb_last_finish_status, DFU_STATUS_ERR_WRITE);
     TEST_ASSERT_EQ(fk_count(EV_PENDING), 1);
-    size_t i = 2;
-    EV_IS(i, EV_LOG, LOG_IMAGE_REJECTED, MCUBOOT_RES_ERR_PENDING);
+    EV_IS(0, EV_VALIDATE, VIEW_ID, VALIDATE_FULL | VALIDATE_CHECK_TARGET | VALIDATE_CHECK_DOWNGRADE);
+    EV_IS(1, EV_PENDING, 0, MCUBOOT_POLICY_OVERWRITE_EXTERNAL);
+    TEST_ASSERT_EQ(fk_event_count, 2);
     // The image was valid, so its header is not erased.
     TEST_ASSERT_EQ(fk_count(EV_ERASE), 0);
     TEST_ASSERT_EQ(fk_flash[FK_IMAGE_OFF], 0x66);
@@ -726,7 +699,7 @@ static int test_g13_result_request(int *failures) {
     TEST_ASSERT_EQ(vendor_result(r, 0xC1, 16), 16);
     TEST_ASSERT_EQ(le32(r), seq + 1);
     TEST_ASSERT_EQ(le16(r + 4), MCUBOOT_RES_OK);
-    TEST_ASSERT_EQ(r[6], SRC_DFU);
+    TEST_ASSERT_EQ(r[6], MCUBOOT_DFU_RESULT_SOURCE_DFU);
     TEST_ASSERT_EQ(r[7], MCUBOOT_DFU_PHASE_BEGIN);
     TEST_ASSERT_EQ(le32(r + 12), 0);
     // A wLength other than 16, or the wrong direction, stalls.
@@ -781,7 +754,7 @@ static void loop_hook(unsigned call) {
     }
     if (s_upload_at != 0 && (call == s_upload_at || call == s_upload_at + 100)) {
         fake_tusb_reset();
-        tud_dfu_upload_cb(1, 0, buf, sizeof(buf));
+        tud_dfu_upload_cb(0, 0, buf, sizeof(buf));
     }
     if (s_manifest_at != 0 && call == s_manifest_at) {
         fake_tusb_reset();
@@ -834,7 +807,7 @@ static int test_g15_timeout(int *failures) {
         TEST_ASSERT_EQ(fk_count(EV_RESET), 0);
     }
 
-    // DFU activity (an upload from the log alt) restarts the idle timer.
+    // DFU activity (an upload from the image alt) restarts the idle timer.
     loop_setup(100000, 0, 100, 0);
     TEST_ASSERT_EQ(run_loop(REC_FORCED), LOOP_RESET);
     // Last activity at call 200 (the hook's second upload), then the full timeout.
@@ -894,21 +867,13 @@ static int test_g17_manifest_accepted_and_leave(int *failures) {
     EV_IS(i, EV_PENDING, 0, 1);
     i++;
     #endif
-    EV_IS(i, EV_LOG, LOG_IMAGE_ACCEPTED, MCUBOOT_RES_OK);
-    i++;
     TEST_ASSERT_EQ(fk_event_count, i);   // header not erased, nothing else touched
     TEST_ASSERT_EQ(fk_flash[FK_IMAGE_OFF], 0x88);
     uint8_t r[16];
     TEST_ASSERT_EQ(vendor_result(r, 0xC1, 16), 16);
     TEST_ASSERT_EQ(le16(r + 4), MCUBOOT_RES_OK);
     TEST_ASSERT_EQ(r[7], MCUBOOT_DFU_PHASE_VALIDATE);
-
-    // Manifest of the read-only log alt does nothing.
-    fk_event_count = 0;
-    fake_tusb_reset();
-    tud_dfu_manifest_cb(1);
-    TEST_ASSERT_EQ(fake_tusb_last_finish_status, DFU_STATUS_OK);
-    TEST_ASSERT_EQ(fk_event_count, 0);
+    TEST_ASSERT_EQ(le32(r + 12), 0);
 
     // After the manifest and the bus reset the session loop leaves by reset. The
     // loop initialises the core, so the download, manifest and reset all happen
@@ -994,7 +959,7 @@ int main(void) {
     RUN_TEST(test_g3_session_begin_order);
     RUN_TEST(test_g4_begin_failure);
     RUN_TEST(test_g5_trailer_sectors);
-    RUN_TEST(test_g6_read_only_alt);
+    RUN_TEST(test_g6_invalid_alt);
     RUN_TEST(test_g7_dnload_confinement);
     RUN_TEST(test_g8_shims_refuse_outside);
     RUN_TEST(test_g9_mass_erase);

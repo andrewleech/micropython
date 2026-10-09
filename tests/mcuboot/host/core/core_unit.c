@@ -42,7 +42,6 @@
 #include "mcuboot_log.h"
 #include "mcuboot_request.h"
 #include "mcuboot_seccnt.h"
-#include "mcuboot_updatelog.h"
 #include "fake_flash.h"
 #include "core.h"
 
@@ -74,19 +73,19 @@ void core_flash_fresh(void) {
         cfg[i].write_unit = d->write_unit;
         cfg[i].erased_val = d->erased_val;
         if (i == 0) {
-#if defined(CORE_MAP_FLASH)
+            #if defined(CORE_MAP_FLASH)
             cfg[i].map_base = d->base;    // place the memory at the device base address for builds that hash in place
-#else
+            #else
             cfg[i].map_base = d->mapped ? d->base : 0;
-#endif
-#if defined(MCUBOOT_ECC_SHADOW)
+            #endif
+            #if defined(MCUBOOT_ECC_SHADOW)
             cfg[i].ecc = true;
-#else
+            #else
             cfg[i].ecc = core_force_ecc;
             // Without the ECC policy the glue relies on what bootutil relies on: a write unit is
             // programmed or not.
             cfg[i].atomic_program = !core_force_ecc;
-#endif
+            #endif
         } else {
             cfg[i].atomic_program = true;
         }
@@ -731,89 +730,6 @@ static void test_shadow_erase_scrub(void) {
 
 #endif // MCUBOOT_ECC_SHADOW
 
-// ---- update log ----
-
-static void test_updatelog(void) {
-    printf("update log\n");
-    core_flash_fresh();
-    mcuboot_log_rec_t rec;
-    CORE_CHECK(mcuboot_updatelog_read(0, &rec) == -ENOENT);
-
-    mcuboot_image_info_t info = {.valid = 1, .ver_major = 2, .ver_minor = 3, .ver_rev = 4, .ver_build = 5, .sec_cnt = 6, .hash_prefix = 0x11223344};
-    CORE_CHECK(mcuboot_updatelog_append(LOG_DFU_BEGIN, MCUBOOT_RES_OK, SRC_DFU, NULL, 99) == 0);
-    CORE_CHECK(mcuboot_updatelog_append(LOG_IMAGE_ACCEPTED, MCUBOOT_RES_OK, SRC_DFU, &info, 7) == 0);
-    CORE_CHECK(mcuboot_updatelog_read(0, &rec) == 0);
-    CORE_CHECK(rec.type == LOG_IMAGE_ACCEPTED && rec.source == SRC_DFU && rec.seq == 2 && rec.detail == 7);
-    CORE_CHECK(rec.ver_major == 2 && rec.ver_minor == 3 && rec.ver_rev == 4 && rec.ver_build == 5 && rec.hash_prefix == 0x11223344);
-    CORE_CHECK(mcuboot_updatelog_read(1, &rec) == 0 && rec.type == LOG_DFU_BEGIN && rec.seq == 1 && rec.detail == 99 && rec.hash_prefix == 0);
-    CORE_CHECK(mcuboot_updatelog_read(2, &rec) == -ENOENT);
-
-    // Ping-pong: more records than one unit holds. The newest records stay readable in order and
-    // at least one full unit of history is kept.
-    const struct flash_area *log = area(MCUBOOT_AREA_LOG);
-    uint32_t per_unit = mcuboot_area_erase(log) / sizeof(mcuboot_log_rec_t);
-    uint32_t units = log->fa_size / mcuboot_area_erase(log);
-    uint32_t total = 3 * per_unit * units / 2 + 5;
-    for (uint32_t i = 3; i <= total; i++) {
-        if (mcuboot_updatelog_append(LOG_BOOT_OK, MCUBOOT_RES_OK, SRC_BOOT, NULL, i) != 0) {
-            CORE_CHECK(false);
-            break;
-        }
-    }
-    uint32_t n = 0;
-    uint32_t expect = total;
-    while (mcuboot_updatelog_read(n, &rec) == 0) {
-        if (rec.seq != expect || rec.detail != expect) {
-            CORE_CHECK(false);
-            printf("  record %u has seq %u detail %u, expected %u\n", n, rec.seq, rec.detail, expect);
-            break;
-        }
-        n++;
-        expect--;
-    }
-    CORE_CHECK(n >= per_unit && n <= per_unit * units);
-    CORE_CHECK(fake_flash_stats()->overprograms == 0 && fake_flash_stats()->violations == 0);
-
-    // A record torn by a power cut (partly programmed, bad CRC) is skipped; the next append goes
-    // into the following slot and the sequence continues.
-    core_flash_fresh();
-    for (uint32_t i = 1; i <= 5; i++) {
-        mcuboot_updatelog_append(LOG_BOOT_OK, 0, SRC_BOOT, NULL, i);
-    }
-    uint8_t torn[32];
-    memset(torn, 0xFF, sizeof(torn));
-    torn[0] = 0x4D;
-    torn[1] = 0x42;
-    uint32_t slot5 = log->fa_off + 5 * sizeof(mcuboot_log_rec_t);
-    fake_flash_poke(0, slot5, torn, sizeof(torn));
-    CORE_CHECK(mcuboot_updatelog_read(0, &rec) == 0 && rec.seq == 5);
-    CORE_CHECK(mcuboot_updatelog_append(LOG_NO_IMAGE, 0, SRC_BOOT, NULL, 6) == 0);
-    CORE_CHECK(mcuboot_updatelog_read(0, &rec) == 0 && rec.seq == 6 && rec.type == LOG_NO_IMAGE);
-    CORE_CHECK(mcuboot_updatelog_read(1, &rec) == 0 && rec.seq == 5);
-#if defined(MCUBOOT_ECC_SHADOW)
-    // A slot that reads corrected as erased is skipped the same way.
-    unit_set(log->fa_off + 7 * sizeof(mcuboot_log_rec_t), ST_WEAK_ERASED);
-    CORE_CHECK(mcuboot_updatelog_append(LOG_NO_IMAGE, 0, SRC_BOOT, NULL, 7) == 0);
-    CORE_CHECK(mcuboot_updatelog_read(0, &rec) == 0 && rec.seq == 7);
-#endif
-    fake_flash_peek(0, log->fa_off + 6 * sizeof(mcuboot_log_rec_t), torn, 8);
-    CORE_CHECK(torn[0] == 0x4D || torn[0] == 0x4E);   // record landed in slot 6
-
-#if defined(MCUBOOT_ECC_SHADOW)
-    // A record with an ECC-invalid word is also skipped.
-    core_flash_fresh();
-    for (uint32_t i = 1; i <= 3; i++) {
-        mcuboot_updatelog_append(LOG_BOOT_OK, 0, SRC_BOOT, NULL, i);
-    }
-    unit_set(log->fa_off + 3 * sizeof(mcuboot_log_rec_t) + 16, ST_INVALID);
-    CORE_CHECK(mcuboot_updatelog_read(0, &rec) == 0 && rec.seq == 3);
-    CORE_CHECK(mcuboot_updatelog_append(LOG_BOOT_OK, 0, SRC_BOOT, NULL, 4) == 0);
-    CORE_CHECK(mcuboot_updatelog_read(0, &rec) == 0 && rec.seq == 4);
-    CORE_CHECK(mcuboot_updatelog_read(1, &rec) == 0 && rec.seq == 3);
-    CORE_CHECK(fake_flash_stats()->overprograms == 1);   // only the unit_set() above
-#endif
-    core_flash_fresh();
-}
 
 // ---- security counter ----
 
@@ -910,7 +826,7 @@ static void test_seccnt(void) {
     // Another image id does not see the value.
     fih_int c;
     CORE_CHECK(FIH_EQ(boot_nv_security_counter_get(1, &c), FIH_SUCCESS) && fih_int_decode(c) == 0);
-#if defined(MCUBOOT_ECC_SHADOW)
+    #if defined(MCUBOOT_ECC_SHADOW)
     unit_set(sc->fa_off + 4 * rec, ST_INVALID);   // slot 3 holds the value 7, slot 4 is free
     CORE_CHECK(counter_get() == 7);
     CORE_CHECK(boot_nv_security_counter_update(0, 8) == 0 && counter_get() == 8);
@@ -919,7 +835,7 @@ static void test_seccnt(void) {
     unit_set(sc->fa_off + 6 * rec, ST_WEAK_ERASED);   // slot 5 holds the value 8, slot 6 is next
     CORE_CHECK(counter_get() == 8);
     CORE_CHECK(boot_nv_security_counter_update(0, 9) == 0 && counter_get() == 9);
-#endif
+    #endif
     core_flash_fresh();
 }
 
@@ -1085,11 +1001,11 @@ static void test_seccnt_corrupt(void) {
     seccnt_put(sc, 1, 5, junk);
     seccnt_expect_closed("partial first record and zeros in unit 1", sc);
     core_flash_fresh();
-    bytes[0] &= (uint8_t)~0x01;     // a bit programmed that the first record leaves erased
+    bytes[0] &= (uint8_t) ~0x01;     // a bit programmed that the first record leaves erased
     seccnt_put(sc, 0, 0, bytes);
     CASE_CHECK("setup", init_rec[0] & 0x01);
     seccnt_expect_closed("not a partial first record", sc);
-#if defined(MCUBOOT_ECC_SHADOW)
+    #if defined(MCUBOOT_ECC_SHADOW)
     core_flash_fresh();
     unit_set(seccnt_slot_off(sc, 0, 0), ST_INVALID);
     unit_set(seccnt_slot_off(sc, 0, 1), ST_INVALID);
@@ -1101,7 +1017,7 @@ static void test_seccnt_corrupt(void) {
     unit_set(seccnt_slot_off(sc, 0, 0), ST_INVALID);
     unit_set(seccnt_slot_off(sc, 1, 0), ST_INVALID);
     seccnt_expect_closed("invalid slot 0 of both units", sc);
-#endif
+    #endif
 
     // Garbage next to valid records does not matter.
     core_flash_fresh();
@@ -1134,7 +1050,7 @@ static void test_seccnt_corrupt(void) {
     memcpy(bytes, init_rec, sizeof(bytes));
     for (unsigned i = 0; i < 16; i++) {
         if (bytes[i] != 0xFF) {
-            uint8_t z = (uint8_t)~bytes[i];
+            uint8_t z = (uint8_t) ~bytes[i];
             bytes[i] |= z & (uint8_t)-z;    // the lowest bit that should be programmed is not
             break;
         }
@@ -1143,7 +1059,7 @@ static void test_seccnt_corrupt(void) {
     core_flash_fresh();
     seccnt_put(sc, 0, 0, bytes);
     seccnt_expect_recovered("partial first record, one bit short", sc);
-#if defined(MCUBOOT_ECC_SHADOW)
+    #if defined(MCUBOOT_ECC_SHADOW)
     core_flash_fresh();
     unit_set(seccnt_slot_off(sc, 0, 0), ST_INVALID);
     seccnt_expect_recovered("invalid first record", sc);
@@ -1153,7 +1069,7 @@ static void test_seccnt_corrupt(void) {
     core_flash_fresh();
     unit_set(seccnt_slot_off(sc, 0, 0), ST_WEAK_DATA);
     seccnt_expect_recovered("corrected first record", sc);
-#endif
+    #endif
 
     // Power cut inside the write of the first record, every cut model, tear point and seed:
     // whatever it left, the next init gives a working counter that starts at 0.
@@ -1274,7 +1190,7 @@ static void test_request(void) {
     CORE_CHECK(core_shared->retention == (MCUBOOT_RET_KEY | MCUBOOT_RET_FSLOAD) || MCUBOOT_RETENTION_BITS < 32);
     mcuboot_request_take(&req, MCUBOOT_RESET_SOFT);
     CORE_CHECK(req.mode == MCUBOOT_REQ_FSLOAD && req.elems_len == sizeof(k_elems) && memcmp(req.elems, k_elems, sizeof(k_elems)) == 0);
-    CORE_CHECK(req.magic == MCUBOOT_REQ_MAGIC && req.version == MCUBOOT_REQ_VERSION && req.seq >= 1);
+    CORE_CHECK(req.magic == MCUBOOT_REQ_MAGIC && req.version == MCUBOOT_REQ_VERSION && req.seq == 0);
     // One shot: the request and the retention word are gone and the test state is kept.
     CORE_CHECK(core_shared->retention == 0);
     bool zero = true;
@@ -1353,9 +1269,9 @@ static void test_request(void) {
     // A bare retention key with no request struct.
     core_shared->retention = MCUBOOT_RET_KEY | MCUBOOT_RET_FSLOAD;
     mcuboot_request_take(&req, MCUBOOT_RESET_SOFT);
-#if MCUBOOT_RETENTION_BITS >= 32
+    #if MCUBOOT_RETENTION_BITS >= 32
     CORE_CHECK(req.mode == MCUBOOT_REQ_DFU && req.elems_len == 0);
-#endif
+    #endif
     core_shared->retention = 0x70AD0000u ^ 0x00010000u;
     mcuboot_request_take(&req, MCUBOOT_RESET_SOFT);
     CORE_CHECK(req.mode == MCUBOOT_REQ_NONE);
@@ -1394,17 +1310,16 @@ int core_unit_run(void) {
     test_flash_map();
     test_policy_areas();
     test_erase_trailer();
-#if defined(MCUBOOT_ECC_SHADOW)
+    #if defined(MCUBOOT_ECC_SHADOW)
     test_shadow_read_rule();
     test_shadow_header_window();
     test_shadow_write_rule();
     test_shadow_erase_scrub();
-#endif
-    test_updatelog();
-#if defined(MCUBOOT_SECCNT_FLASH)
+    #endif
+    #if defined(MCUBOOT_SECCNT_FLASH)
     test_seccnt();
     test_seccnt_corrupt();
-#endif
+    #endif
     test_request();
     test_fi_counter();
     printf("unit tests: %s (%d failed checks)\n", core_failures == 0 ? "PASS" : "FAIL", core_failures);

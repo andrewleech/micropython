@@ -914,12 +914,11 @@ static bool verdict_failed(const verdict_t *v) {
 
 // Operation classes of the trace, by area.
 typedef enum {
-    CL_PRI_BODY, CL_PRI_TRAILER, CL_SEC_SPARE, CL_SEC_BODY, CL_SEC_TRAILER, CL_SHADOW, CL_SECCNT, CL_LOG, CL_SCRATCH, CL_INTENT,
-    CL_OTHER, CL_COUNT
+    CL_PRI_BODY, CL_PRI_TRAILER, CL_SEC_SPARE, CL_SEC_BODY, CL_SEC_TRAILER, CL_SHADOW, CL_SECCNT, CL_SCRATCH, CL_INTENT, CL_OTHER, CL_COUNT
 } op_class_t;
 
 static const char *const class_name[CL_COUNT] = {
-    "primary body", "primary trailer", "secondary spare", "secondary body", "secondary trailer", "shadow", "seccnt", "log", "scratch", "intent", "other",
+    "primary body", "primary trailer", "secondary spare", "secondary body", "secondary trailer", "shadow", "seccnt", "scratch", "intent", "other",
 };
 
 static op_class_t classify(const fake_flash_op_t *op) {
@@ -948,10 +947,6 @@ static op_class_t classify(const fake_flash_op_t *op) {
     a = area(MCUBOOT_AREA_SECCNT);
     if (a != NULL && o >= a->fa_off && o < a->fa_off + a->fa_size) {
         return CL_SECCNT;
-    }
-    a = area(MCUBOOT_AREA_LOG);
-    if (a != NULL && o >= a->fa_off && o < a->fa_off + a->fa_size) {
-        return CL_LOG;
     }
     a = area(FLASH_AREA_IMAGE_SCRATCH);
     if (a != NULL && o >= a->fa_off && o < a->fa_off + a->fa_size) {
@@ -1075,23 +1070,23 @@ static void sweep(const scenario_t *s, bool clean, bool torn_group) {
             int n = opts.torn_variants;
             if (op->kind == FAKE_FLASH_OP_WRITE && op->len == wu) {
                 for (int i = 0; i < 5; i++) {
-                    vs[i] = (variant_t){FAKE_FLASH_CUT_DURING, 128, (uint32_t)i + 1};
+                    vs[i] = (variant_t) {FAKE_FLASH_CUT_DURING, 128, (uint32_t)i + 1};
                 }
             } else if (op->kind == FAKE_FLASH_OP_WRITE) {
                 static const uint32_t q[5] = {32, 128, 224, 1, 255};
                 for (int i = 0; i < 5; i++) {
-                    vs[i] = (variant_t){FAKE_FLASH_CUT_DURING, q[i], (uint32_t)i + 1};
+                    vs[i] = (variant_t) {FAKE_FLASH_CUT_DURING, q[i], (uint32_t)i + 1};
                 }
             } else {
                 static const uint32_t q[5] = {1, 128, 255, 64, 192};
                 for (int i = 0; i < 5; i++) {
-                    vs[i] = (variant_t){FAKE_FLASH_CUT_DURING, q[i], (uint32_t)i + 1};
+                    vs[i] = (variant_t) {FAKE_FLASH_CUT_DURING, q[i], (uint32_t)i + 1};
                 }
             }
             // A cut at the start of a program pulse leaves a unit that reads corrected, with the
             // erased value (odd seed) or a partial program (even seed): always run both.
-            vs[5] = (variant_t){FAKE_FLASH_CUT_WEAK, 0, 2};
-            vs[6] = (variant_t){FAKE_FLASH_CUT_WEAK, 0, 3};
+            vs[5] = (variant_t) {FAKE_FLASH_CUT_WEAK, 0, 2};
+            vs[6] = (variant_t) {FAKE_FLASH_CUT_WEAK, 0, 3};
             for (int j = 0; j < n + 2; j++) {
                 int i = j < n ? j : 5 + (j - n);
                 bool dfu = opts.stride_dfu != 0 && (idx % (unsigned)opts.stride_dfu) == 0;

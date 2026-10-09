@@ -30,7 +30,7 @@
 #include <stdint.h>
 
 // Result codes shared by the bootloader status channels (DFU status mapping, vendor
-// request, update log, log text).
+// request and log text).
 typedef enum {
     MCUBOOT_RES_OK = 0,
     MCUBOOT_RES_ERR_FLASH = 1,      // flash read/erase/write failure (detail = offset)

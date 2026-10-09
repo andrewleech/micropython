@@ -30,27 +30,16 @@
 #include "bootutil/image.h"
 #include "flash_map_backend/flash_map_backend.h"
 #include "mcuboot_fsload.h"
-#include "mcuboot_updatelog.h"
 #include "mcuboot_validate.h"
 #include "stub_fuzz.h"
 
-// Doubles for the parts of the bootloader that fsload calls but that are not part of fsload: the
-// update log, the bootutil pending call and the validator. The validator only checks structure
+// Doubles for the bootutil pending call and the validator. The validator only checks structure
 // (header, TLV chain). It reads the whole image through the stream area in the access pattern of
 // bootutil, so every byte of a stream goes through the wrapper under the sanitizers. It does not
 // hash or verify signatures.
 
 stub_state_t stub_state;
 
-int mcuboot_updatelog_append(uint8_t type, uint8_t result, uint8_t source, const mcuboot_image_info_t *info, uint32_t detail) {
-    (void)source;
-    (void)info;
-    (void)detail;
-    stub_state.log_records++;
-    stub_state.last_type = type;
-    stub_state.last_result = result;
-    return 0;
-}
 
 int boot_set_pending_multi(int image_index, int permanent) {
     stub_state.pending_calls++;

@@ -42,7 +42,6 @@
 #define FLASH_AREA_IMAGE_SCRATCH        3
 
 // Areas outside bootutil's view.
-#define MCUBOOT_AREA_LOG                4
 #define MCUBOOT_AREA_SECCNT             5
 #define MCUBOOT_AREA_FS                 6
 #define MCUBOOT_AREA_INTENT             7

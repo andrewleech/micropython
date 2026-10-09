@@ -25,7 +25,7 @@
  */
 
 // DFU front end of the bootloader: the mboot_port_* shims and DFU hooks that bind
-// shared/tinyusb/mboot to the flash map, bootutil and the update log.
+// shared/tinyusb/mboot to the flash map and bootutil.
 
 #include <errno.h>
 #include <stdbool.h>
@@ -48,7 +48,6 @@
 #include "mcuboot_port.h"
 #include "mcuboot_types.h"
 #include "mcuboot_update.h"
-#include "mcuboot_updatelog.h"
 #include "mcuboot_validate.h"
 
 #ifndef MCUBOOT_DFU_TIMEOUT_S
@@ -289,7 +288,7 @@ static mcuboot_dfu_result_t s_result;
 static void set_last_result(uint16_t code, uint8_t phase, uint32_t detail) {
     s_result.seq++;
     s_result.code = code;
-    s_result.source = SRC_DFU;
+    s_result.source = MCUBOOT_DFU_RESULT_SOURCE_DFU;
     s_result.phase = phase;
     s_result.detail = detail;
     s_result.reserved = 0;
@@ -358,8 +357,7 @@ static int prepare_secondary(uint32_t *fail_off) {
 #endif
 
 // First write or erase of a session on a writable alt setting. Prepares the update slot
-// (trailer and spare sector erased, for the policies that have a secondary slot) and logs the
-// start of the session.
+// (trailer and spare sector erased, for the policies that have a secondary slot).
 int mboot_hook_session_begin(uint8_t alt) {
     if (!alt_is_image(alt)) {
         return 0;
@@ -374,7 +372,6 @@ int mboot_hook_session_begin(uint8_t alt) {
     }
     #endif
     set_last_result(code, MCUBOOT_DFU_PHASE_BEGIN, detail);
-    mcuboot_updatelog_append(LOG_DFU_BEGIN, (uint8_t)code, SRC_DFU, NULL, detail);
     if (rc != 0) {
         MCUBOOT_LOG_ERR("session begin failed rc=%d off=0x%x", rc, (unsigned)detail);
         mcuboot_port_led(LED_ALIVE | LED_ERROR);
@@ -447,8 +444,6 @@ uint8_t mboot_hook_manifest(uint8_t alt) {
         }
     }
 
-    mcuboot_updatelog_append(r.code == MCUBOOT_RES_OK ? LOG_IMAGE_ACCEPTED : LOG_IMAGE_REJECTED,
-        (uint8_t)r.code, SRC_DFU, &r.info, r.detail);
     set_last_result(r.code, phase, r.detail);
 
     if (r.code != MCUBOOT_RES_OK) {

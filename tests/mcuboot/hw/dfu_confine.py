@@ -38,8 +38,8 @@ erase must not reach but which are otherwise blank: the spare sector in front of
 data range, the first sector after the secondary slot and the last sector of the device. Without
 markers, an erase of a blank sector cannot be seen.
 
-The areas are the ones of the layout JSON (boot, primary, log, seccnt, shadow, fs, the spare sector,
-the data range and the trailer of the secondary slot) plus the unassigned rest of the device after
+The areas are the ones of the layout JSON (boot, primary, seccnt, shadow, fs, the spare sector, the
+data range and the trailer of the secondary slot) plus the unassigned rest of the device after
 the secondary slot. The data range ends where the secondary trailer begins, so blocks and erases
 that address the trailer are refused like any other address outside the region. Each attempt has
 an expected outcome:
@@ -54,11 +54,9 @@ an expected outcome:
   partial   a range erase that starts inside the region and runs past its end: it fails, and only
             the sectors of the data range, the spare sector and the shadow words may have changed
 
-Any change to an area outside the secondary slot (boot, primary, fs, seccnt, the unassigned tail)
-is a failure in every case, as is a change to anything in the secondary slot other than the
-allowed areas above. The shadow area is hashed too; it only changes when the secondary trailer
-sectors were erased by a session begin. The update log may change only by appending a record (the
-session begin record).
+A change outside the secondary slot (boot, primary, fs, seccnt, the unassigned tail) fails every
+attempt. Inside the slot, only the data, spare, trailer and corresponding shadow sectors may
+change; the shadow is updated when session begin erases the secondary trailer.
 """
 
 import argparse
@@ -75,13 +73,8 @@ sys.path.insert(0, os.path.join(HERE, ".."))
 import dfu_raw  # noqa: E402
 
 # A session begin (the first write or erase of a session on the secondary alt) erases the spare
-# sector and the trailer sectors (their shadow words) and appends one record to the update log.
-ALLOWED_IN_REGION = ("sec_spare", "sec_data", "sec_trailer", "shadow", "log")
-
-
-def log_append_only(old, new):
-    """True if new differs from old only by programming erased (0xFF) bytes, as when a log record is appended."""
-    return all(o == 0xFF or o == n for o, n in zip(old, new))
+# sector and the trailer sectors (their shadow words).
+ALLOWED_IN_REGION = ("sec_spare", "sec_data", "sec_trailer", "shadow")
 
 
 def areas_from_layout(path):
@@ -95,7 +88,7 @@ def areas_from_layout(path):
     # The counter and the shadow area exist only on a board that has them.
     out = [
         (name, a[name]["addr"], a[name]["size"])
-        for name in ("boot", "primary", "log", "seccnt", "shadow", "fs")
+        for name in ("boot", "primary", "seccnt", "shadow", "fs")
         if name in a
     ]
     out.append(("sec_spare", sec["addr"], erase))
@@ -125,20 +118,17 @@ class Swd:
         self.sess.close()
 
     def snap(self, areas):
-        """({area: hash}, {area: bytes of the update log}) with the core halted for the reads."""
+        """Hash the listed areas with the core halted for the reads."""
         self.t.halt()
         try:
             out = {}
-            raw = {}
             for name, addr, size in areas:
                 words = self.t.read_memory_block32(addr, size // 4)
                 data = struct.pack("<%dI" % len(words), *words)
                 out[name] = hashlib.sha256(data).hexdigest()[:16]
-                if name == "log":
-                    raw[name] = data
         finally:
             self.t.resume()
-        return out, raw
+        return out
 
     def read(self, addr, n):
         self.t.halt()
@@ -211,7 +201,6 @@ def main():
     sec_size = regions[0]["size"]
     xfer = 2048
     nblk = sec_size // xfer
-    log_addr = doc["areas"]["log"]["addr"]
     base = doc["devices"][0]["base"]
     a = doc["areas"]
     erase = a["secondary"]["erase"]
@@ -227,7 +216,7 @@ def main():
     def sector_is_blank(addr):
         return all(b == 0xFF for b in swd.read(addr, erase))
 
-    def attempt(name, expect, fn, alt=0, pre=None, check=None, idle=True):
+    def attempt(name, expect, fn, pre=None, check=None, idle=True):
         """pre() runs before the first snapshot (staging through DFU); check() returns a list of failures.
 
         idle=False skips the DFU_ABORT that returns the device to dfuIDLE. A vendor erase does not need it,
@@ -237,14 +226,12 @@ def main():
             return
         if pre:
             pre()
-        before, before_raw = swd.snap(areas)
+        before = swd.snap(areas)
         if idle:
             try:
                 dfu.to_idle()
             except Exception as e:
                 print("  (to_idle: %s)" % e)
-        if dfu.alt != alt:
-            dfu.set_alt(alt)
         try:
             outcome = fn()
         except Exception as e:
@@ -254,9 +241,8 @@ def main():
             tail = "%s/%s" % (dfu_raw.status_name(st), dfu_raw.state_name(state))
         except Exception as e:
             tail = "status? %s" % e
-        after, after_raw = swd.snap(areas)
+        after = swd.snap(areas)
         changed = sorted(k for k in before if before[k] != after[k])
-        log_ok = "log" not in changed or log_append_only(before_raw["log"], after_raw["log"])
         refused = (
             outcome.startswith("stall")
             or outcome.startswith("err")
@@ -268,9 +254,6 @@ def main():
         if outside:
             ok = False
             why.append("changed outside the secondary range: %s" % outside)
-        if not log_ok:
-            ok = False
-            why.append("update log changed other than by appending")
         if expect == "refused":
             if not refused:
                 ok = False
@@ -319,9 +302,9 @@ def main():
 
         return f
 
-    def er(addr, length, alt=0):
+    def er(addr, length):
         def f():
-            r = dfu.erase(addr, length, alt)
+            r = dfu.erase(addr, length)
             return "ok" if r == "ok" else "stall"
 
         return f
@@ -332,8 +315,6 @@ def main():
         def f():
             dfu.to_idle()
             dfu.abort()  # new session: the touched-sector bitmap is cleared, so each sector is erased before it is written
-            if dfu.alt != 0:
-                dfu.set_alt(0)
             for idx in idx_list:
                 for b in range(per_sector):
                     st, state = dfu.dnload(idx * per_sector + b, bytes([0x5A]) * xfer)
@@ -376,44 +357,12 @@ def main():
     attempt("dnload alt0 block 65535", "refused", dn(65535))
     attempt("dnload alt0 block 0x8000", "refused", dn(0x8000))
 
-    def blk(addr):
-        return (addr - log_addr) // xfer
-
     other = [name for name in ("seccnt", "shadow") if name in a]
-    attempt("dnload alt1 block 0 (log)", "refused", dn(0), alt=1)
-    for name in other:
-        attempt(
-            "dnload alt1 block %d (%s)" % (blk(a[name]["addr"]), name),
-            "refused",
-            dn(blk(a[name]["addr"])),
-            alt=1,
-        )
-    attempt(
-        "dnload alt1 block %d (fs)" % blk(a["fs"]["addr"]),
-        "refused",
-        dn(blk(a["fs"]["addr"])),
-        alt=1,
-    )
-    attempt(
-        "dnload alt1 block %d (fs end-1)" % (blk(a["fs"]["addr"] + a["fs"]["size"]) - 1),
-        "refused",
-        dn(blk(a["fs"]["addr"] + a["fs"]["size"]) - 1),
-        alt=1,
-    )
-    attempt("dnload alt1 block 65535", "refused", dn(65535), alt=1)
-    attempt("erase alt1 mass erase", "refused", er(0, 0xFFFFFFFF, 1), alt=1)
-    attempt("erase alt1 range erase log", "refused", er(log_addr, erase, 1), alt=1)
-    for name in other:
-        attempt(
-            "erase alt1 range erase %s" % name, "refused", er(a[name]["addr"], erase, 1), alt=1
-        )
-    attempt("erase alt1 range erase fs", "refused", er(a["fs"]["addr"], erase, 1), alt=1)
     targets = [
         ("boot", a["boot"]["addr"]),
         ("boot last sector", a["boot"]["addr"] + a["boot"]["size"] - erase),
         ("primary", a["primary"]["addr"]),
         ("primary last sector", a["primary"]["addr"] + a["primary"]["size"] - erase),
-        ("log", a["log"]["addr"]),
     ]
     targets += [(name, a[name]["addr"]) for name in other]
     targets += [
@@ -459,9 +408,9 @@ def main():
         "dnload alt0 last block %d (0x5A)" % (nblk - 1),
         "accepted",
         dn(nblk - 1, xfer, 0x5A),
-        check=lambda: []
-        if not sector_is_blank(secondary_sector(nsect - 1))
-        else ["last sector still blank"],
+        check=lambda: (
+            [] if not sector_is_blank(secondary_sector(nsect - 1)) else ["last sector still blank"]
+        ),
     )
     attempt(
         "dnload alt0 last block, 16 bytes short",

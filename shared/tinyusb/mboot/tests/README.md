@@ -122,27 +122,27 @@ Built as `test_runner_align` with `-DMBOOT_DFU_WRITE_ALIGN=16` (it defines its o
 
 ### glue/test_glue.c - shared/mcuboot/src/dfu_glue.c
 
-`glue/Makefile` builds the glue with the NUCLEO-H563ZI configuration (its `mpconfigboard.h` and `ports/stm32/mcuboot/mcuboot_dev.h`, through `shared/mcuboot/mcuboot_common.mk`), so the layout, the device table (`flash_map.c`) and the DFU region and write range tables (`dfu_regions.c`) are the ones the real build uses. The slot policy comes from `BOARD`: `h5` (swap), `glue_ow` (overwrite-external) or `glue_single` (see `tests/mcuboot/host/boards.mk`), and `make test` runs all three. `glue/fake_mcuboot.c` is an in-memory MCUboot environment around them: the 2 MiB flash device, a writable copy of the write range table that the tests can corrupt, and recording fakes for the update log, validation, the update slot functions, the port and the TinyUSB task. `glue/stubs/tusb.h` stubs the TinyUSB functions `dfu_glue.c` uses. The output is `glue/build/<BOARD>/test_glue` and, with the core built for a different write align, `glue/build/<BOARD>/test_glue_align_mismatch`.
+`glue/Makefile` builds the glue with the NUCLEO-H563ZI configuration (its `mpconfigboard.h` and `ports/stm32/mcuboot/mcuboot_dev.h`, through `shared/mcuboot/mcuboot_common.mk`), so the layout, the device table (`flash_map.c`) and the DFU region and write range tables (`dfu_regions.c`) are the ones the real build uses. The slot policy comes from `BOARD`: `h5` (swap), `glue_ow` (overwrite-external) or `glue_single` (see `tests/mcuboot/host/boards.mk`), and `make test` runs all three. `glue/fake_mcuboot.c` is an in-memory MCUboot environment around them: the 2 MiB flash device, a writable copy of the write range table that the tests can corrupt, and recording fakes for validation, the update slot functions, the port and the TinyUSB task. `glue/stubs/tusb.h` stubs the TinyUSB functions `dfu_glue.c` uses. The output is `glue/build/<BOARD>/test_glue` and, with the core built for a different write align, `glue/build/<BOARD>/test_glue_align_mismatch`.
 
 | Name | Description |
 |------|-------------|
-| test_g1_regions_init | Tables are accepted; the image alt is 'g' and the log alt below it is 'a' |
+| test_g1_regions_init | Tables are accepted; the image is the only DFU alt |
 | test_g2_regions_init_rejects | Rejected: boot area as a region, sector size mismatch, region off the device, image not inside a write range, empty write range table, write range beyond the device, misaligned, or on a bad device, and a trailer that DFU could write |
-| test_g3_session_begin_order | Trailer sector, spare sector, DFU_BEGIN log, then the core's erase and write, once per session |
-| test_g4_begin_failure | A failed trailer erase gives errERASE, is logged and reported by vendor 0x81, and the next block retries |
+| test_g3_session_begin_order | Trailer sector, spare sector, then the core's erase and write, once per session |
+| test_g4_begin_failure | A failed trailer erase gives errERASE and is reported by vendor 0x81; the next block retries |
 | test_g5_trailer_sectors | A trailer spanning three sectors is erased last sector first |
-| test_g6_read_only_alt | Log alt: write gives errADDRESS, mass and range erase stall, upload returns the log, no flash writes or erases |
+| test_g6_invalid_alt | Out-of-range download, erase and upload requests are rejected without flash operations; the image alt still works |
 | test_g7_dnload_confinement | The last block is accepted; the first block past the end, a far block and block 65535 are refused; nothing outside the slot changes |
-| test_g8_shims_refuse_outside | The flash shims refuse boot, primary, seccnt, shadow, FS, log, gaps, device ends, spanning and wrapping requests, without any flash operation |
+| test_g8_shims_refuse_outside | The flash shims refuse boot, primary, seccnt, shadow, FS, gaps, device ends, spanning and wrapping requests, without any flash operation |
 | test_g9_mass_erase | Mass erase blanks the data region (plus the begin-hook sectors inside the slot) and nothing outside the slot |
 | test_g10_range_erase | Ranges starting outside the alt, or wrapping, are refused and change nothing; a range running past the end erases only the inside part |
-| test_g11_manifest_rejected | Each validation result code maps to its DFU status; the image header is erased, nothing is marked pending, and the rejection is logged and reported by 0x81 without requesting the leave |
-| test_g12_pending_failure | A failed mark-pending gives errWRITE, is logged as ERR_PENDING, and the header is kept |
+| test_g11_manifest_rejected | Each validation result code maps to its DFU status; the image header is erased, nothing is marked pending, and the result is reported by 0x81 without requesting the leave |
+| test_g12_pending_failure | A failed mark-pending gives errWRITE and ERR_PENDING through vendor 0x81, and the header is kept |
 | test_g13_result_request | The 0x81 reply is 16 bytes, little endian; a wrong length or direction stalls |
 | test_g14_target_view | The target view (the update slot without its spare sector) matches the DFU region |
 | test_g15_timeout | Idle timeout for forced and app-requested recovery, none for no-image, fsload-failed and fault. Activity restarts it and an open write session suppresses it |
 | test_g16_init_failure | Inconsistent tables end in a reset without running the USB loop |
-| test_g17_manifest_accepted_and_leave | Good image: validate, mark pending (a test swap for the swap policy, permanent for overwrite-external), log; the loop leaves by reset |
+| test_g17_manifest_accepted_and_leave | Good image: validate, mark pending (a test swap for the swap policy, permanent for overwrite-external); the loop leaves by reset |
 | test_g18_trailer_confinement | The update slot trailer is refused by the shims, blocks and range erases, and is erased only once, at session begin |
 
 ### test_pydfu_wire.py - pydfu wire-protocol contract test

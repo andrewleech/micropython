@@ -71,14 +71,6 @@ typedef struct {
     uint32_t api;
 } mcuboot_app_bl_info_t;
 
-typedef struct {
-    uint32_t seq;
-    uint8_t type;                   // mcuboot_log_type_t
-    uint8_t result;                 // mcuboot_result_t
-    uint8_t source;                 // mcuboot_log_source_t
-    mcuboot_app_version_t version;
-    uint32_t detail;
-} mcuboot_app_log_entry_t;
 
 typedef struct {
     const char *name;               // static string
@@ -119,12 +111,10 @@ int mcuboot_app_state(mcuboot_app_state_t *state);
 size_t mcuboot_app_slot_count(void);
 int mcuboot_app_slot_get(size_t index, mcuboot_app_slot_t *slot);
 
-// Newest-first: n = 0 is the newest record. -ENOENT past the end.
-int mcuboot_app_log_get(uint32_t n, mcuboot_app_log_entry_t *entry);
 
 // ---- actions ----
 
-// Confirms the running image. Idempotent. Writes an APP_CONFIRMED log record when the state changed.
+// Confirms the running image. Idempotent.
 int mcuboot_app_confirm(void);
 
 // Confirms the running image if it is a test image that has not been confirmed yet. Port main()
@@ -138,7 +128,7 @@ int mcuboot_app_request_upgrade(bool permanent);
 // Reset into normal boot with the request region and retention word cleared.
 void mcuboot_app_reset(void) __attribute__((noreturn));
 
-// Reset into the bootloader DFU mode. Logs APP_DFU_REQUESTED first.
+// Reset into the bootloader DFU mode.
 void mcuboot_app_request_dfu(void) __attribute__((noreturn));
 
 // Reset into the bootloader with a fsload request. Returns -EINVAL if the stream is malformed.

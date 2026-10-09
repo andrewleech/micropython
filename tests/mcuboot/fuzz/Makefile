@@ -114,8 +114,7 @@ fuzz-all: fuzz-build
 # ---- host tests (install and refuse cases, power cut sweep) ----
 #
 # test_fsload links the real bootutil (hash and tinycrypt ECDSA P-256 validation), the shared
-# flash map backend and update log, and all of fsload, over the host flash of harness/host_env.c.
-# One binary per update policy.
+# flash map backend and fsload, over the host flash of harness/host_env.c.
 
 BUTIL := $(TOP)/lib/mcuboot/boot/bootutil
 TC := $(TOP)/lib/mcuboot/ext/tinycrypt/lib
@@ -129,8 +128,7 @@ BOOTUTIL_SWAP_SRC := $(addprefix $(BUTIL)/src/,loader.c swap_misc.c swap_offset.
 CRYPTO_SRC := $(addprefix $(TC)/source/,ecc.c ecc_dsa.c sha256.c utils.c) $(addprefix $(AS1)/src/,asn1parse.c platform_util.c)
 
 TEST_SRC := $(HERE)/test_fsload.c $(HERE)/harness/host_env.c $(HERE)/harness/validate_bootutil.c \
-	$(FSLOAD_SRC) $(LIB_SRC) $(SRC_DIR)/fsload.c $(SRC_DIR)/update.c $(SRC_DIR)/mcuboot_crc32.c $(SRC_DIR)/updatelog.c $(SRC_DIR)/record_ring.c $(SRC_DIR)/flash_map_backend.c \
-	$(TOP)/shared/tinyusb/mboot/common/mboot_elem.c $(BOOTUTIL_SRC) $(CRYPTO_SRC) $(BUILD)/testdata/pubkey.c
+	$(FSLOAD_SRC) $(LIB_SRC) $(SRC_DIR)/fsload.c $(SRC_DIR)/update.c $(SRC_DIR)/mcuboot_crc32.c $(SRC_DIR)/record_ring.c $(SRC_DIR)/flash_map_backend.c \
 
 TEST_CFLAGS := -std=gnu99 -O1 -g -w -fno-omit-frame-pointer -I$(TC)/include -I$(AS1)/include $(INC) $(LIB_DEFS) \
 	-DMBEDTLS_CONFIG_FILE=\"mbedtls_config_asn1.h\" -fsanitize=address,undefined -fno-sanitize-recover=undefined \

@@ -25,7 +25,7 @@
  */
 
 // The plain flash with swap using scratch: two slots of equal size and a scratch area of two erase
-// units behind the update log.
+// units directly after the primary slot.
 
 #define MCUBOOT_PRIMARY_SIZE (0x40000)
 #define MCUBOOT_SECONDARY_ADDR (0x90080000)

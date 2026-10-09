@@ -36,7 +36,6 @@
 #include "mcuboot_port.h"
 #include "mcuboot_types.h"
 #include "mcuboot_update.h"
-#include "mcuboot_updatelog.h"
 #include "mcuboot_dfu.h"
 #include "flash_map_backend/flash_map_backend.h"
 #include "sysflash/sysflash.h"
@@ -170,16 +169,8 @@ int mcuboot_flash_dev_erase(uint8_t dev, uint32_t off, uint32_t len) {
     return 0;
 }
 
-// ---- update log, validation, bootutil ----
+// ---- validation, bootutil ----
 
-int mcuboot_updatelog_append(uint8_t type, uint8_t result, uint8_t source,
-    const mcuboot_image_info_t *info, uint32_t detail) {
-    (void)source;
-    (void)info;
-    (void)detail;
-    ev(EV_LOG, type, result);
-    return 0;
-}
 
 mcuboot_validate_result_t fk_validate_result;
 

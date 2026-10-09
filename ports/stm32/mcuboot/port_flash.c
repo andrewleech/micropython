@@ -54,10 +54,9 @@
 // Without ECC (STM32F7) a unit is one 32-bit word. A unit that reads erased is programmed, a
 // unit that holds other data is never programmed over, as on the STM32H5. The glue relies on the
 // program of one word being atomic across a power cut: a word that is not atomic can read as
-// neither erased nor the new value. Such a word is refused by the policy (it is not blank), a
-// torn counter record is rejected by its CRC and a torn log record is skipped. A torn word in
-// the body of an image fails the image validation and the device ends in DFU. Nothing here
-// shadows a word.
+// neither erased nor the new value. Such a word is refused by the policy (it is not blank). A
+// torn counter record is rejected by its CRC. A torn word in the body of an image fails image
+// validation and the device ends in DFU. Nothing here shadows a word.
 
 #include <errno.h>
 #include <string.h>
