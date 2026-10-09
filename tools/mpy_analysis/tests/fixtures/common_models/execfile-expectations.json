@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "positive": [
+    {"root": "fixture", "path": "flows.py", "rule": "3101", "callable": "flows.positive_input_eval"},
+    {"root": "fixture", "path": "flows.py", "rule": "3101", "callable": "flows.positive_input_exec"},
+    {"root": "fixture", "path": "flows.py", "rule": "3101", "callable": "flows.positive_cross_module"},
+    {"root": "fixture", "path": "flows.py", "rule": "3101", "callable": "flows.positive_datagram"},
+    {"root": "fixture", "path": "file_flows.py", "rule": "3101", "callable": "file_flows.positive_controlled_file"}
+  ],
+  "negative": [
+    {"root": "fixture", "path": "flows.py", "rule": "3101", "callable": "flows.negative_constant"},
+    {"root": "fixture", "path": "flows.py", "rule": "3101", "callable": "flows.negative_received_but_unused"},
+    {"root": "fixture", "path": "flows.py", "rule": "3101", "callable": "flows.negative_literal_selection"},
+    {"root": "fixture", "path": "file_flows.py", "rule": "3101", "callable": "file_flows.negative_constant_file"}
+  ],
+  "required_common_models": ["builtins", "socket", "execfile"],
+  "required_capabilities": ["MICROPY_PY_BUILTINS_EXECFILE", "MICROPY_PY_BUILTINS_EVAL_EXEC"],
+  "sanitizer_contract": "literal_expression returns only one of two fixed expressions; ordinary source inference, not a broad taint sanitizer model",
+  "remaining_gaps": ["No supported full target-aware Pyrefly prerequisite", "Execfile requires verified target capability and typing", "No common general-purpose code-execution sanitizer", "Unmodelled stream, UART, filesystem, and micropython-lib sources"]
+}

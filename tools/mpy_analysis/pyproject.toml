@@ -24,9 +24,12 @@ sast-cppcheck-coverage = "mpy_analysis.coverage:main"
 sast-codechecker-coverage = "mpy_analysis.codechecker_coverage:main"
 sast-fanalyzer = "mpy_analysis.fanalyzer:main"
 sast-compdb = "mpy_analysis.compdb:main"
+sast-run = "mpy_analysis.runner:main"
+sast-scope = "mpy_analysis.scope:main"
+sast-check-fixtures = "mpy_analysis.fixtures:main"
 
 [tool.setuptools]
 packages = ["mpy_analysis"]
 
 [tool.setuptools.package-data]
-mpy_analysis = ["data/*"]
+mpy_analysis = ["data/*", "data/pysa/*/*.pysa", "data/pysa/*/*.json", "data/fixtures/*.py"]

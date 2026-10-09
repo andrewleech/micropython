@@ -69,6 +69,7 @@ def test_interrupted_install_is_removed_before_installing_again(tmp_path, monkey
     def cmake(cmd, **kw):
         if cmd[1] == "--install":
             fake_binary(tmp_path / "prefix/cppcheck/bin/cppcheck", "Cppcheck 9.9.9")
+
     monkeypatch.setattr(install, "run", cmake)
     install.cppcheck(tmp_path / "prefix", "9.9.9", archive, 1)
     assert not (tmp_path / "prefix/cppcheck/share/Cppcheck/addons/misra.py").exists()
@@ -94,6 +95,7 @@ def test_arm_gcc_archive_not_matching_arms_digest_is_refused(tmp_path, monkeypat
 def test_main_reports_a_filesystem_error_without_a_traceback(tmp_path, monkeypatch, capsys):
     def fail(*args):
         raise PermissionError("denied")
+
     monkeypatch.setattr(install, "cppcheck", fail)
     assert install.main(["--prefix", str(tmp_path), "--skip-arm-gcc"]) == 1
     assert "denied" in capsys.readouterr().err
@@ -117,9 +119,14 @@ def llvm_release(tmp_path, members):
     return archive
 
 
-CLANG_RELEASE = {"bin/clang": ("link", "clang-9"), "bin/clang-9": "#!/bin/sh\necho 9.9.9\n",
-                 "bin/clang-tidy": "#!/bin/sh\n", "lib/libclang-cpp.so.9": "",
-                 "lib/clang/9/include/stddef.h": "", "lib/clang/9/lib/rt.a": ""}
+CLANG_RELEASE = {
+    "bin/clang": ("link", "clang-9"),
+    "bin/clang-9": "#!/bin/sh\necho 9.9.9\n",
+    "bin/clang-tidy": "#!/bin/sh\n",
+    "lib/libclang-cpp.so.9": "",
+    "lib/clang/9/include/stddef.h": "",
+    "lib/clang/9/lib/rt.a": "",
+}
 
 
 @pytest.fixture
@@ -135,11 +142,15 @@ def test_llvm_unpacks_only_clang_and_its_headers(tmp_path, monkeypatch, x64):
     home = tmp_path / "prefix/llvm-9.9.9"
     assert binary == home / "bin/clang"
     assert sorted(str(p.relative_to(home)) for p in home.rglob("*") if not p.is_dir()) == [
-        "bin/clang", "bin/clang-9", "lib/clang/9/include/stddef.h"]
+        "bin/clang",
+        "bin/clang-9",
+        "lib/clang/9/include/stddef.h",
+    ]
 
 
-def test_llvm_archive_not_matching_the_pin_is_refused_and_nothing_installed(tmp_path, monkeypatch,
-                                                                            x64):
+def test_llvm_archive_not_matching_the_pin_is_refused_and_nothing_installed(
+    tmp_path, monkeypatch, x64
+):
     archive = llvm_release(tmp_path, CLANG_RELEASE)
     monkeypatch.setitem(install.LLVM_SHA256, ("9.9.9", "X64"), "0" * 64)
     (tmp_path / "prefix").mkdir()
@@ -173,8 +184,9 @@ def test_installed_clang_of_another_version_is_refused(tmp_path):
 
 
 def test_installed_codechecker_of_another_version_is_refused(tmp_path):
-    fake_binary(tmp_path / "codechecker-6.25.1/bin/CodeChecker",
-                '{"base_package_version": "6.29.1"}')
+    fake_binary(
+        tmp_path / "codechecker-6.25.1/bin/CodeChecker", '{"base_package_version": "6.29.1"}'
+    )
     with pytest.raises(InstallError) as err:
         install.codechecker(tmp_path, "6.25.1")
     assert "6.29.1" in str(err.value)

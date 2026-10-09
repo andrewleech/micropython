@@ -42,11 +42,21 @@ from pathlib import Path
 # Preprocessor::reportOutput in lib/preprocessor.cpp returns as the unit's error, of which only
 # missingIncludeExplicit, a forced include cppcheck cannot open, is not also critical. Recheck both
 # when the cppcheck pin moves.
-COVERAGE_FAILURE_IDS = {"cppcheckError", "cppcheckLimit", "directiveAsMacroParameter",
-                        "includeNestedTooDeeply", "internalAstError", "instantiationError",
-                        "internalError", "missingFile", "missingIncludeExplicit",
-                        "preprocessorErrorDirective", "syntaxError", "unhandledChar",
-                        "unknownMacro"}
+COVERAGE_FAILURE_IDS = {
+    "cppcheckError",
+    "cppcheckLimit",
+    "directiveAsMacroParameter",
+    "includeNestedTooDeeply",
+    "internalAstError",
+    "instantiationError",
+    "internalError",
+    "missingFile",
+    "missingIncludeExplicit",
+    "preprocessorErrorDirective",
+    "syntaxError",
+    "unhandledChar",
+    "unknownMacro",
+}
 
 
 def location_of(result):
@@ -54,12 +64,17 @@ def location_of(result):
         physical = result["locations"][0]["physicalLocation"]
     except (KeyError, IndexError, TypeError):
         return None, None
-    return physical.get("artifactLocation", {}).get("uri"), physical.get("region", {}).get("startLine")
+    return physical.get("artifactLocation", {}).get("uri"), physical.get("region", {}).get(
+        "startLine"
+    )
 
 
 def matches(entry, rule, uri, line):
-    return (entry["id"] == rule and entry["file"] == uri
-            and ("line" not in entry or entry["line"] == line))
+    return (
+        entry["id"] == rule
+        and entry["file"] == uri
+        and ("line" not in entry or entry["line"] == line)
+    )
 
 
 RECORD = re.compile(r".+\.a[0-9]+")
@@ -73,16 +88,20 @@ def unit_errors(inputs, cache_stem, root):
     it lies inside ROOT, and a relative unit is taken relative to ROOT, cppcheck's working directory."""
     found, failures = {}, []
     root = os.path.abspath(root)
-    groups = sorted(Path(db).name[len("compile_commands-"):-len(".json")]
-                    for db in glob.glob(os.path.join(glob.escape(inputs), "compile_commands-*.json")))
+    groups = sorted(
+        Path(db).name[len("compile_commands-") : -len(".json")]
+        for db in glob.glob(os.path.join(glob.escape(inputs), "compile_commands-*.json"))
+    )
     for group in groups:
         directory = f"{cache_stem}-{group}"
         listing = Path(directory, "files.txt")
         try:
             lines = listing.read_text().splitlines()
         except OSError as exc:
-            failures.append(f"{listing}: unreadable ({exc}), so the coverage of group {group}'s "
-                            f"units is unknown")
+            failures.append(
+                f"{listing}: unreadable ({exc}), so the coverage of group {group}'s "
+                f"units is unknown"
+            )
             continue
         for record in lines:
             name, _, _, unit = (record.split(":", 3) + ["", "", ""])[:4]
@@ -90,12 +109,14 @@ def unit_errors(inputs, cache_stem, root):
                 continue
             unit = os.path.normpath(os.path.join(root, unit))
             if unit.startswith(root + os.sep):
-                unit = unit[len(root) + 1:].replace(os.sep, "/")
+                unit = unit[len(root) + 1 :].replace(os.sep, "/")
             path = Path(directory, name)
             try:
                 errors = ET.parse(path).getroot().iter("error")
             except (OSError, ET.ParseError) as exc:
-                failures.append(f"{path}: unreadable ({exc}), so the coverage of {unit} is unknown")
+                failures.append(
+                    f"{path}: unreadable ({exc}), so the coverage of {unit} is unknown"
+                )
                 continue
             for error in errors:
                 rule = error.get("id")
@@ -133,8 +154,11 @@ def check(accepted_path, configuration, sarif_paths, inputs, cache_stem, root=".
     """(failures, matched): each failure a printable line."""
     failures = []
     try:
-        accepted = [e for e in json.loads(Path(accepted_path).read_text()).get("accepted", [])
-                    if configuration in e["configurations"]]
+        accepted = [
+            e
+            for e in json.loads(Path(accepted_path).read_text()).get("accepted", [])
+            if configuration in e["configurations"]
+        ]
         for entry in accepted:
             missing = {"id", "file"} - set(entry)
             if missing:
@@ -149,8 +173,9 @@ def check(accepted_path, configuration, sarif_paths, inputs, cache_stem, root=".
             runs = json.loads(Path(sarif).read_text())["runs"]
             results = [r for run in runs for r in run.get("results", [])]
         except (OSError, ValueError, KeyError, TypeError) as exc:
-            failures.append(f"{sarif}: missing or not SARIF ({exc}), so the run's coverage is "
-                            f"unknown")
+            failures.append(
+                f"{sarif}: missing or not SARIF ({exc}), so the run's coverage is unknown"
+            )
             continue
         for result in results:
             rule = result.get("ruleId")
@@ -175,13 +200,17 @@ def check(accepted_path, configuration, sarif_paths, inputs, cache_stem, root=".
         place = where(uri, line)
         hit = next((i for i, e in enumerate(accepted) if matches(e, rule, uri, line)), None)
         if hit is None and uri is None:
-            failures.append(f"{place}: {rule}: in the build record of {', '.join(sorted(reached))} "
-                            f"without a location, which cppcheck's SARIF leaves out; not an "
-                            f"accepted gap")
+            failures.append(
+                f"{place}: {rule}: in the build record of {', '.join(sorted(reached))} "
+                f"without a location, which cppcheck's SARIF leaves out; not an "
+                f"accepted gap"
+            )
         elif hit is None:
-            failures.append(f"{place}: {rule}: in the build record of {', '.join(sorted(reached))} "
-                            f"but not in the SARIF and not an accepted gap; a suppression does not "
-                            f"accept a coverage gap")
+            failures.append(
+                f"{place}: {rule}: in the build record of {', '.join(sorted(reached))} "
+                f"but not in the SARIF and not an accepted gap; a suppression does not "
+                f"accept a coverage gap"
+            )
         else:
             used.add(hit)
             matched.append(f"{place}: {rule} (accepted, build record only)")
@@ -190,44 +219,69 @@ def check(accepted_path, configuration, sarif_paths, inputs, cache_stem, root=".
         reached = units.get((rule, uri, line))
         place = where(uri, line)
         if not reached:
-            failures.append(f"{place}: {rule}: no build record of this run's cppcheck groups "
-                            f"({cache_stem}-<n>) attributes it to a unit, so the entry cannot be "
-                            f"held to its translation_units")
+            failures.append(
+                f"{place}: {rule}: no build record of this run's cppcheck groups "
+                f"({cache_stem}-<n>) attributes it to a unit, so the entry cannot be "
+                f"held to its translation_units"
+            )
             continue
         for unit in sorted(reached - set(entry.get("translation_units", []))):
-            failures.append(f"{place}: {rule}: costs {unit}, which the accepted entry does not "
-                            f"list; an entry accepts only the translation units it names")
+            failures.append(
+                f"{place}: {rule}: costs {unit}, which the accepted entry does not "
+                f"list; an entry accepts only the translation units it names"
+            )
     for i, entry in enumerate(accepted):
         if i not in used:
             place = f"{entry['file']}:{entry['line']}" if "line" in entry else entry["file"]
-            failures.append(f"{place}: {entry['id']}: accepted for {configuration} but not "
-                            f"observed; remove the entry if the gap has closed")
+            failures.append(
+                f"{place}: {entry['id']}: accepted for {configuration} but not "
+                f"observed; remove the entry if the gap has closed"
+            )
     return failures, matched
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="sast-cppcheck-coverage", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--accepted", required=True, metavar="FILE",
-                    help="the project's accepted coverage gaps (analysis/coverage-gaps.json)")
+    ap = argparse.ArgumentParser(
+        prog="sast-cppcheck-coverage",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument(
+        "--accepted",
+        required=True,
+        metavar="FILE",
+        help="the project's accepted coverage gaps (analysis/coverage-gaps.json)",
+    )
     ap.add_argument("--configuration", required=True, metavar="NAME")
-    ap.add_argument("--inputs", required=True, metavar="DIR",
-                    help="the run's inputs directory; its compile_commands-<n>.json name the groups")
-    ap.add_argument("--cache-stem", required=True, metavar="STEM",
-                    help="the run's cppcheck build directories are STEM-<n>; they attribute each "
-                         "coverage failure to the translation units it cost")
-    ap.add_argument("--root", default=".",
-                    help="repository the units are made relative to (default: .)")
+    ap.add_argument(
+        "--inputs",
+        required=True,
+        metavar="DIR",
+        help="the run's inputs directory; its compile_commands-<n>.json name the groups",
+    )
+    ap.add_argument(
+        "--cache-stem",
+        required=True,
+        metavar="STEM",
+        help="the run's cppcheck build directories are STEM-<n>; they attribute each "
+        "coverage failure to the translation units it cost",
+    )
+    ap.add_argument(
+        "--root", default=".", help="repository the units are made relative to (default: .)"
+    )
     ap.add_argument("sarif", nargs="+", metavar="SARIF")
     args = ap.parse_args(argv)
-    failures, matched = check(args.accepted, args.configuration, args.sarif,
-                              args.inputs, args.cache_stem, args.root)
+    failures, matched = check(
+        args.accepted, args.configuration, args.sarif, args.inputs, args.cache_stem, args.root
+    )
     for line in matched:
         print(line)
     for line in failures:
         print(f"FAIL {line}", file=sys.stderr)
-    print(f"{args.configuration}: {len(args.sarif)} SARIF file(s), {len(matched)} accepted gap "
-          f"result(s), {len(failures)} failure(s)")
+    print(
+        f"{args.configuration}: {len(args.sarif)} SARIF file(s), {len(matched)} accepted gap "
+        f"result(s), {len(failures)} failure(s)"
+    )
     return 1 if failures else 0
 
 

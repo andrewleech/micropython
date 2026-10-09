@@ -23,9 +23,16 @@ def entry(root, source, deps, directory=None, obj=None, write_dep=True):
     obj = obj or f"{root}/build/{stem}.o"
     dep = os.path.splitext(obj)[0] + ".d"
     if write_dep:
-        write(directory, dep, f"{obj}: {source} " + " ".join(str(Path(root) / d) for d in deps) + "\n")
-    return {"directory": str(directory), "file": str(source),
-            "arguments": ["gcc", "-c", "-MD", "-MF", dep, "-o", obj, str(source)]}
+        write(
+            directory,
+            dep,
+            f"{obj}: {source} " + " ".join(str(Path(root) / d) for d in deps) + "\n",
+        )
+    return {
+        "directory": str(directory),
+        "file": str(source),
+        "arguments": ["gcc", "-c", "-MD", "-MF", dep, "-o", obj, str(source)],
+    }
 
 
 def write_db(path, entries):

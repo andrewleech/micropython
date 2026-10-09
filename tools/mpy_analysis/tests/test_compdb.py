@@ -10,8 +10,10 @@ def port_build(tmp_path):
     write(top, "port/main.c")
     write(top, "py/map.c")
     write(top, "py/mpconfig.h")
-    entries = [entry(top, "main.c", [], directory=top / "port", obj="build/main.o"),
-               entry(top, "../py/map.c", [], directory=top / "port", obj="build/py/map.o")]
+    entries = [
+        entry(top, "main.c", [], directory=top / "port", obj="build/main.o"),
+        entry(top, "../py/map.c", [], directory=top / "port", obj="build/py/map.o"),
+    ]
     for obj in ("main.o", "py/map.o"):
         write(build, obj)
     return top, build, entries
@@ -44,8 +46,10 @@ def test_assembly_object_with_its_source_on_the_build_path_is_explained(tmp_path
     write(build, "lib/startup.o")
     report = compdb.completeness(entries, build)
     assert report["complete"]
-    assert report["assembly"] == {str(build / "resethandler.o"): str(top / "port/resethandler.s"),
-                                  str(build / "lib/startup.o"): str(top / "lib/startup.S")}
+    assert report["assembly"] == {
+        str(build / "resethandler.o"): str(top / "port/resethandler.s"),
+        str(build / "lib/startup.o"): str(top / "lib/startup.S"),
+    }
 
 
 def test_entry_whose_object_is_missing_fails(tmp_path):
@@ -65,11 +69,16 @@ def test_object_of_a_deleted_absolute_source_is_stale_not_unexplained(tmp_path):
     # A board source is compiled by absolute path; deleting it leaves its object and .P behind.
     top, build, entries = port_build(tmp_path)
     write(build, "board/gone.o")
-    write(build, "board/gone.P", f"{build}/board/gone.o: {top}/board/gone.c \\\n {top}/py/mpconfig.h\n")
+    write(
+        build,
+        "board/gone.P",
+        f"{build}/board/gone.o: {top}/board/gone.c \\\n {top}/py/mpconfig.h\n",
+    )
     report = compdb.completeness(entries, build)
     assert report["complete"]
     assert report["stale_objects_of_deleted_sources"] == {
-        str(build / "board/gone.o"): f"{top}/board/gone.c"}
+        str(build / "board/gone.o"): f"{top}/board/gone.c"
+    }
     assert check(tmp_path, entries, build) == 0
 
 

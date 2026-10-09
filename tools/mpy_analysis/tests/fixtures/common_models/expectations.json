@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "positive": [
+    {"root": "fixture", "path": "flows.py", "rule": "3101", "callable": "flows.positive_input_eval"},
+    {"root": "fixture", "path": "flows.py", "rule": "3101", "callable": "flows.positive_input_exec"},
+    {"root": "fixture", "path": "flows.py", "rule": "3101", "callable": "flows.positive_cross_module"},
+    {"root": "fixture", "path": "flows.py", "rule": "3101", "callable": "flows.positive_datagram"}
+  ],
+  "negative": [
+    {"root": "fixture", "path": "flows.py", "rule": "3101", "callable": "flows.negative_constant"},
+    {"root": "fixture", "path": "flows.py", "rule": "3101", "callable": "flows.negative_received_but_unused"},
+    {"root": "fixture", "path": "flows.py", "rule": "3101", "callable": "flows.negative_literal_selection"}
+  ],
+  "required_common_models": ["builtins", "socket"],
+  "sanitizer_contract": "literal_expression returns only one of two fixed expressions; ordinary source inference, not a broad taint sanitizer model",
+  "remaining_gaps": ["No supported full target-aware Pyrefly prerequisite", "No common general-purpose code-execution sanitizer", "Unmodelled stream, UART, filesystem, and micropython-lib sources"]
+}

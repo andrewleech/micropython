@@ -1,0 +1,15 @@
+{
+  "family": "builtins",
+  "model_version": 1,
+  "micropython_revision": "09f5bb447504a058376c62fe991b3613531837e6",
+  "sources": [
+    {"path": "py/modbuiltins.c", "lines": "224-239,696-714", "behavior": "input returns the line read from the port's readline provider; input/eval/exec are capability gated"},
+    {"path": "py/builtinevex.c", "lines": "138-188", "behavior": "eval and exec compile and execute source in positional argument zero; optional globals/locals must be actual dicts"}
+  ],
+  "typing_signature_reference": "micropython-stdlib-stubs==1.29.0.post2 stdlib/builtins.pyi",
+  "model_signature_contract": "eval/exec source is positional index zero; all three positional-only parameters are retained in models, with optional globals/locals defaults elided",
+  "required_capabilities": ["MICROPY_PY_BUILTINS_INPUT", "MICROPY_PY_BUILTINS_EVAL_EXEC"],
+  "taint_kinds": {"sources": ["UserControlled"], "sinks": ["RemoteCodeExecution"]},
+  "sanitizers": [],
+  "coverage_gaps": ["Unverified against supported target-aware Pyrefly/Pysa output", "Other input channels and dynamic code entry points are not modelled", "No general code-execution sanitizer guarantee is established"]
+}

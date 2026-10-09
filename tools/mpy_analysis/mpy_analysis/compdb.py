@@ -52,7 +52,7 @@ def _make_tokens(line):
             current.append(line[i + 1])
             i += 2
             continue
-        if c == "$" and line[i + 1:i + 2] == "$":
+        if c == "$" and line[i + 1 : i + 2] == "$":
             current.append("$")
             i += 2
             continue
@@ -78,7 +78,7 @@ def first_rule(text):
         tokens = _make_tokens(line)
         for i, token in enumerate(tokens):
             if token.endswith(":"):
-                return tokens[i + 1:]
+                return tokens[i + 1 :]
     return None
 
 
@@ -112,7 +112,7 @@ def source_roots(entries, build_dir):
         stem = os.path.splitext(os.path.relpath(obj, base))[0]
         source = os.path.splitext(entry_file(entry))[0]
         if source.endswith(os.sep + stem):
-            roots.add(source[:-len(stem) - 1] or os.sep)
+            roots.add(source[: -len(stem) - 1] or os.sep)
     return sorted(roots)
 
 
@@ -161,8 +161,11 @@ def deleted_source(obj, directories):
         relative_others = [p for p in others if not os.path.isabs(p)]
         if not relative_others:
             return None
-        compiled_in = [d for d in directories
-                       if all(os.path.exists(os.path.join(d, p)) for p in relative_others)]
+        compiled_in = [
+            d
+            for d in directories
+            if all(os.path.exists(os.path.join(d, p)) for p in relative_others)
+        ]
         if compiled_in and not any(os.path.exists(os.path.join(d, source)) for d in compiled_in):
             return os.path.normpath(os.path.join(compiled_in[0], source))
         return None
@@ -210,14 +213,25 @@ def completeness(entries, build_dir, exclude=()):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="sast-compdb", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--check-db", required=True, metavar="DB",
-                    help="the compile_commands.json to reconcile against the build directory")
-    ap.add_argument("--build-dir", required=True,
-                    help="the build output directory it describes")
-    ap.add_argument("--exclude", action="append", default=[], metavar="SUBDIR",
-                    help="build subdirectory belonging to another configuration, repeatable")
+    ap = argparse.ArgumentParser(
+        prog="sast-compdb",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument(
+        "--check-db",
+        required=True,
+        metavar="DB",
+        help="the compile_commands.json to reconcile against the build directory",
+    )
+    ap.add_argument("--build-dir", required=True, help="the build output directory it describes")
+    ap.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="SUBDIR",
+        help="build subdirectory belonging to another configuration, repeatable",
+    )
     args = ap.parse_args(argv)
 
     path = Path(args.check_db)
@@ -237,15 +251,21 @@ def main(argv=None):
     report = completeness(entries, args.build_dir, exclude)
     print(f"{path}")
     print(f"  {'excluding':32s} {', '.join(exclude) if exclude else 'nothing'}")
-    for key in ("translation_units", "object_files_on_disk", "explained_by_database",
-                "explained_by_assembly_source"):
+    for key in (
+        "translation_units",
+        "object_files_on_disk",
+        "explained_by_database",
+        "explained_by_assembly_source",
+    ):
         print(f"  {key:32s} {report[key]}")
     for obj, source in report["assembly"].items():
         print(f"      {obj} <- {source}")
     if report["stale_objects_of_deleted_sources"]:
-        print(f"  {'stale objects (source deleted)':32s} "
-              f"{len(report['stale_objects_of_deleted_sources'])}; not part of this build, "
-              f"removed by make clean")
+        print(
+            f"  {'stale objects (source deleted)':32s} "
+            f"{len(report['stale_objects_of_deleted_sources'])}; not part of this build, "
+            f"removed by make clean"
+        )
         for obj, source in report["stale_objects_of_deleted_sources"].items():
             print(f"      {obj} <- {source} (deleted)")
     for key in ("objects_unexplained", "entries_with_no_object", "entries_with_no_output"):

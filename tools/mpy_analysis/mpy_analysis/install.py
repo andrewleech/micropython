@@ -55,11 +55,15 @@ CPPCHECK_URL = "https://github.com/cppcheck-opensource/cppcheck/archive/refs/tag
 CPPCHECK_SHA256 = {
     "2.22.0": "d74945deb2d50393430e07596b766f8a779512c7f60dac2a30ea64e059ece57b",
 }
-ARM_GCC_URL = ("https://developer.arm.com/-/media/Files/downloads/gnu/{version}/binrel/"
-               "arm-gnu-toolchain-{version}-{host}-arm-none-eabi.tar.xz")
+ARM_GCC_URL = (
+    "https://developer.arm.com/-/media/Files/downloads/gnu/{version}/binrel/"
+    "arm-gnu-toolchain-{version}-{host}-arm-none-eabi.tar.xz"
+)
 ARM_GCC_HOSTS = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}
-LLVM_URL = ("https://github.com/llvm/llvm-project/releases/download/llvmorg-{version}/"
-            "LLVM-{version}-Linux-{arch}.tar.xz")
+LLVM_URL = (
+    "https://github.com/llvm/llvm-project/releases/download/llvmorg-{version}/"
+    "LLVM-{version}-Linux-{arch}.tar.xz"
+)
 LLVM_ARCHES = {"x86_64": "X64", "amd64": "X64"}
 # SHA-256 of LLVM_URL per release and host architecture: the digest GitHub reports for the release
 # asset, and that of the archive downloaded when the release was adopted. A release or host without
@@ -100,8 +104,10 @@ def sha256_of(path):
 def clear_partial(home, binary):
     """Remove what an interrupted install left: the component's directory without its binary."""
     if home.exists() and not binary.exists():
-        print(f"{home} has no {binary.name}, so an earlier install did not finish; removing it",
-              flush=True)
+        print(
+            f"{home} has no {binary.name}, so an earlier install did not finish; removing it",
+            flush=True,
+        )
         shutil.rmtree(home)
 
 
@@ -143,15 +149,19 @@ def cppcheck(prefix, version, archive, jobs):
     if binary.exists():
         found = first_line([str(binary), "--version"])
         if found != f"Cppcheck {version}":
-            raise InstallError(f"{binary} is {found!r}, not Cppcheck {version}. Remove {home} to "
-                               f"install the requested version.")
+            raise InstallError(
+                f"{binary} is {found!r}, not Cppcheck {version}. Remove {home} to "
+                f"install the requested version."
+            )
         print(f"cppcheck already installed: {found}")
         return binary, found
     pinned = CPPCHECK_SHA256.get(version)
     if pinned is None:
-        raise InstallError(f"no SHA-256 is pinned for cppcheck {version}, so its source cannot be "
-                           f"checked. Add the release to CPPCHECK_SHA256 in {__file__} once its "
-                           f"archive has been measured.")
+        raise InstallError(
+            f"no SHA-256 is pinned for cppcheck {version}, so its source cannot be "
+            f"checked. Add the release to CPPCHECK_SHA256 in {__file__} once its "
+            f"archive has been measured."
+        )
     clear_partial(home, binary)
     work = Path(tempfile.mkdtemp(prefix="cppcheck-", dir=prefix))
     try:
@@ -160,16 +170,29 @@ def cppcheck(prefix, version, archive, jobs):
             archive = download(url, work / f"{version}.tar.gz")
         found_digest = sha256_of(archive)
         if found_digest != pinned:
-            raise InstallError(f"{archive} has SHA-256 {found_digest}, but {pinned} is pinned for "
-                               f"cppcheck {version} ({url})")
+            raise InstallError(
+                f"{archive} has SHA-256 {found_digest}, but {pinned} is pinned for "
+                f"cppcheck {version} ({url})"
+            )
         print(f"SHA-256 matches the pin for cppcheck {version}")
         source = extract(Path(archive), work / "src")
         if source.name != f"cppcheck-{version}":
             raise InstallError(f"{archive} unpacks to {source.name}, not cppcheck-{version}")
         build = work / "build"
-        run(["cmake", "-S", str(source), "-B", str(build), "-DCMAKE_BUILD_TYPE=Release",
-             "-DUSE_MATCHCOMPILER=ON", "-DHAVE_RULES=OFF", f"-DCMAKE_INSTALL_PREFIX={home}",
-             f"-DFILESDIR={home / 'share' / 'Cppcheck'}"])
+        run(
+            [
+                "cmake",
+                "-S",
+                str(source),
+                "-B",
+                str(build),
+                "-DCMAKE_BUILD_TYPE=Release",
+                "-DUSE_MATCHCOMPILER=ON",
+                "-DHAVE_RULES=OFF",
+                f"-DCMAKE_INSTALL_PREFIX={home}",
+                f"-DFILESDIR={home / 'share' / 'Cppcheck'}",
+            ]
+        )
         run(["cmake", "--build", str(build), f"-j{jobs}"])
         run(["cmake", "--install", str(build)])
     finally:
@@ -197,8 +220,10 @@ def arm_gcc(prefix, version, archive):
     if binary.exists():
         found = first_line([str(binary), "-dumpversion"])
         if not (found + ".").startswith(expected):
-            raise InstallError(f"{binary} is GCC {found}, not the {version} release. Remove {home} "
-                               f"to install the requested version.")
+            raise InstallError(
+                f"{binary} is GCC {found}, not the {version} release. Remove {home} "
+                f"to install the requested version."
+            )
         print(f"arm-none-eabi-gcc already installed: GCC {found}")
         return binary, first_line([str(binary), "--version"])
     host = ARM_GCC_HOSTS.get(platform.machine().lower())
@@ -213,8 +238,9 @@ def arm_gcc(prefix, version, archive):
         found_digest = sha256_of(archive)
         expected_digest = published_sha256(url)
         if found_digest != expected_digest:
-            raise InstallError(f"{archive} has SHA-256 {found_digest}, Arm publishes "
-                               f"{expected_digest}")
+            raise InstallError(
+                f"{archive} has SHA-256 {found_digest}, Arm publishes {expected_digest}"
+            )
         print(f"SHA-256 matches {url}.sha256asc")
         top = extract(Path(archive), work / "unpacked")
         top.replace(home)
@@ -253,11 +279,15 @@ def unpack_member(tar, member, into, wanted):
     if member.name.startswith("/") or ".." in parts:
         raise InstallError(f"archive member {member.name} escapes the target")
     if member.issym() or member.islnk():
-        target = os.path.normpath(os.path.join(os.path.dirname(member.name), member.linkname)
-                                  if member.issym() else member.linkname)
+        target = os.path.normpath(
+            os.path.join(os.path.dirname(member.name), member.linkname)
+            if member.issym()
+            else member.linkname
+        )
         if target not in wanted:
-            raise InstallError(f"archive member {member.name} links to {member.linkname}, which "
-                               f"is not unpacked")
+            raise InstallError(
+                f"archive member {member.name} links to {member.linkname}, which is not unpacked"
+            )
     elif not (member.isfile() or member.isdir()):
         raise InstallError(f"archive member {member.name} is not a file, directory or link")
     if hasattr(tarfile, "data_filter"):
@@ -274,16 +304,20 @@ def llvm(prefix, version, archive):
     if binary.exists():
         found = first_line([str(binary), "-dumpversion"])
         if found != version:
-            raise InstallError(f"{binary} is clang {found}, not {version}. Remove {home} to "
-                               f"install the requested version.")
+            raise InstallError(
+                f"{binary} is clang {found}, not {version}. Remove {home} to "
+                f"install the requested version."
+            )
         print(f"clang already installed: {found}")
         return binary, first_line([str(binary), "--version"])
     arch = LLVM_ARCHES.get(platform.machine().lower())
     pinned = LLVM_SHA256.get((version, arch))
     if pinned is None:
-        raise InstallError(f"no SHA-256 is pinned for LLVM {version} on {platform.machine()}, so "
-                           f"its release cannot be checked. Add it to LLVM_SHA256 in {__file__} "
-                           f"once the release asset has been measured.")
+        raise InstallError(
+            f"no SHA-256 is pinned for LLVM {version} on {platform.machine()}, so "
+            f"its release cannot be checked. Add it to LLVM_SHA256 in {__file__} "
+            f"once the release asset has been measured."
+        )
     url = LLVM_URL.format(version=version, arch=arch)
     top = f"LLVM-{version}-Linux-{arch}"
     major = version.split(".")[0]
@@ -308,8 +342,10 @@ def llvm(prefix, version, archive):
         except (OSError, tarfile.TarError, EOFError) as exc:
             raise InstallError(f"reading {archive or url} failed: {exc}")
         if found_digest != pinned:
-            raise InstallError(f"{archive or url} has SHA-256 {found_digest}, but {pinned} is "
-                               f"pinned for LLVM {version}")
+            raise InstallError(
+                f"{archive or url} has SHA-256 {found_digest}, but {pinned} is "
+                f"pinned for LLVM {version}"
+            )
         print(f"SHA-256 matches the pin for LLVM {version}")
         if not (work / top / "bin" / "clang").exists():
             raise InstallError(f"{archive or url} holds no {top}/bin/clang")
@@ -329,8 +365,12 @@ def without_pythonpath():
 
 
 def codechecker_version(binary):
-    proc = subprocess.run([str(binary), "analyzer-version", "--output", "json"],
-                          capture_output=True, text=True, env=without_pythonpath())
+    proc = subprocess.run(
+        [str(binary), "analyzer-version", "--output", "json"],
+        capture_output=True,
+        text=True,
+        env=without_pythonpath(),
+    )
     try:
         return json.loads(proc.stdout)["base_package_version"]
     except (ValueError, KeyError, TypeError):
@@ -343,20 +383,33 @@ def codechecker(prefix, version):
     if binary.exists():
         found = codechecker_version(binary)
         if found != version:
-            raise InstallError(f"{binary} is CodeChecker {found}, not {version}. Remove {home} to "
-                               f"install the requested version.")
+            raise InstallError(
+                f"{binary} is CodeChecker {found}, not {version}. Remove {home} to "
+                f"install the requested version."
+            )
         print(f"CodeChecker already installed: {found}")
         return binary, f"CodeChecker {found}"
     requirements = DATA / f"codechecker-{version}.txt"
     build_requirements = DATA / f"codechecker-{version}-build.txt"
     if not (requirements.exists() and build_requirements.exists()):
-        raise InstallError(f"no pinned requirements for CodeChecker {version}: add "
-                           f"{requirements.name} and {build_requirements.name} to {DATA}, every "
-                           f"package with its SHA-256")
+        raise InstallError(
+            f"no pinned requirements for CodeChecker {version}: add "
+            f"{requirements.name} and {build_requirements.name} to {DATA}, every "
+            f"package with its SHA-256"
+        )
     clear_partial(home, binary)
     env = without_pythonpath()
-    pip = [sys.executable, "-m", "pip", "--python", str(home / "bin" / "python"), "install",
-           "--disable-pip-version-check", "--no-cache-dir", "--require-hashes"]
+    pip = [
+        sys.executable,
+        "-m",
+        "pip",
+        "--python",
+        str(home / "bin" / "python"),
+        "install",
+        "--disable-pip-version-check",
+        "--no-cache-dir",
+        "--require-hashes",
+    ]
     try:
         run([sys.executable, "-m", "venv", "--without-pip", str(home)], env=env)
         run(pip + ["-r", str(build_requirements)], env=env)
@@ -371,28 +424,49 @@ def codechecker(prefix, version):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="sast-install-tools", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        prog="sast-install-tools",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument("--prefix", required=True, metavar="DIR")
     ap.add_argument("--cppcheck", default="2.22.0", metavar="VERSION")
     ap.add_argument("--arm-gcc", default="15.2.rel1", metavar="VERSION")
     ap.add_argument("--codechecker", default="6.25.1", metavar="VERSION")
-    ap.add_argument("--llvm", default="20.1.8", metavar="VERSION",
-                    help="the LLVM release whose clang CodeChecker drives")
-    ap.add_argument("--skip-arm-gcc", action="store_true",
-                    help="do not install the analysis GCC (pull request runs do not use it)")
-    ap.add_argument("--skip-codechecker", action="store_true",
-                    help="do not install CodeChecker and clang (the MISRA and licence jobs do not "
-                         "use them)")
-    ap.add_argument("--cppcheck-archive", metavar="FILE",
-                    help="use this already-downloaded release tarball instead of downloading it; "
-                         "it is still checked against the pinned SHA-256")
-    ap.add_argument("--arm-gcc-archive", metavar="FILE",
-                    help="use this already-downloaded toolchain tarball instead of downloading it; "
-                         "it is still checked against Arm's published SHA-256")
-    ap.add_argument("--llvm-archive", metavar="FILE",
-                    help="use this already-downloaded LLVM release tarball instead of downloading "
-                         "it; it is still checked against the pinned SHA-256")
+    ap.add_argument(
+        "--llvm",
+        default="20.1.8",
+        metavar="VERSION",
+        help="the LLVM release whose clang CodeChecker drives",
+    )
+    ap.add_argument(
+        "--skip-arm-gcc",
+        action="store_true",
+        help="do not install the analysis GCC (pull request runs do not use it)",
+    )
+    ap.add_argument(
+        "--skip-codechecker",
+        action="store_true",
+        help="do not install CodeChecker and clang (the MISRA and licence jobs do not use them)",
+    )
+    ap.add_argument(
+        "--cppcheck-archive",
+        metavar="FILE",
+        help="use this already-downloaded release tarball instead of downloading it; "
+        "it is still checked against the pinned SHA-256",
+    )
+    ap.add_argument(
+        "--arm-gcc-archive",
+        metavar="FILE",
+        help="use this already-downloaded toolchain tarball instead of downloading it; "
+        "it is still checked against Arm's published SHA-256",
+    )
+    ap.add_argument(
+        "--llvm-archive",
+        metavar="FILE",
+        help="use this already-downloaded LLVM release tarball instead of downloading "
+        "it; it is still checked against the pinned SHA-256",
+    )
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     args = ap.parse_args(argv)
 
@@ -400,11 +474,13 @@ def main(argv=None):
     prefix.mkdir(parents=True, exist_ok=True)
     installed = []
     try:
-        installed.append(("cppcheck", *cppcheck(prefix, args.cppcheck, args.cppcheck_archive,
-                                                args.jobs)))
+        installed.append(
+            ("cppcheck", *cppcheck(prefix, args.cppcheck, args.cppcheck_archive, args.jobs))
+        )
         if not args.skip_arm_gcc:
-            installed.append(("arm-none-eabi-gcc", *arm_gcc(prefix, args.arm_gcc,
-                                                            args.arm_gcc_archive)))
+            installed.append(
+                ("arm-none-eabi-gcc", *arm_gcc(prefix, args.arm_gcc, args.arm_gcc_archive))
+            )
         if not args.skip_codechecker:
             installed.append(("clang", *llvm(prefix, args.llvm, args.llvm_archive)))
             installed.append(("CodeChecker", *codechecker(prefix, args.codechecker)))
