@@ -18,6 +18,8 @@ This package supplies compiler-analysis checks, explicit MicroPython source inve
 
 A project installs it from its MicroPython checkout, like mpremote:
 
+The package requires Python 3.10 or newer, matching its pinned REUSE dependency.
+
     python3 -m pip install --target build/analysis-tools tools/mpy_analysis
 
 Projects call these entry points from their build systems and own their scanner policy, dependencies, suppressions and accepted coverage gaps. Scanner findings retain their rule/message content; staged source locations are rebased to physical files before SARIF or JSON is consumed by CI.

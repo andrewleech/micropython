@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "mpy-analysis"
 version = "0.1.0"
 description = "Static analysis and SBOM tooling for MicroPython firmware projects"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 # compiledb generates the compilation databases; pinned because its entry format is what the
 # completeness check and the cppcheck inputs were proved against.
 # reuse is the REUSE tool, which checks the licence and origin declarations (REUSE.toml) of the
