@@ -28,6 +28,7 @@ def policy(
             f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
         )
     entry = {
+        "port": port,
         "directory": "stubs",
         "typeshed": "stubs",
         "target": target,
@@ -40,7 +41,7 @@ def policy(
         "provenance": {"firmware_version": firmware, "source_revision": "fixture-source"},
         "common_models": ["builtins", "socket"],
     }
-    (tmp_path / "typing.json").write_text(json.dumps({port: entry}))
+    (tmp_path / "typing.json").write_text(json.dumps({"environments": [entry]}))
     return stubs, entry
 
 
@@ -97,7 +98,7 @@ def test_missing_builtin_dependency_fails_without_host_fallback(tmp_path):
 def test_package_pin_is_enforced(tmp_path):
     _, entry = policy(tmp_path)
     entry["packages"]["micropython-unix-stubs"] = "1.28.0"
-    (tmp_path / "typing.json").write_text(json.dumps({"unix": entry}))
+    (tmp_path / "typing.json").write_text(json.dumps({"environments": [entry]}))
     with pytest.raises(ValueError, match="expected '1.28.0'"):
         load(tmp_path)
 
@@ -113,7 +114,7 @@ def test_board_specific_target_package_is_explicit(tmp_path):
 def test_target_package_field_is_required(tmp_path):
     _, entry = policy(tmp_path)
     del entry["target_package"]
-    (tmp_path / "typing.json").write_text(json.dumps({"unix": entry}))
+    (tmp_path / "typing.json").write_text(json.dumps({"environments": [entry]}))
     with pytest.raises(ValueError, match="target_package"):
         load(tmp_path)
 
@@ -121,7 +122,7 @@ def test_target_package_field_is_required(tmp_path):
 def test_selected_target_package_must_have_explicit_pin(tmp_path):
     _, entry = policy(tmp_path)
     del entry["packages"][entry["target_package"]]
-    (tmp_path / "typing.json").write_text(json.dumps({"unix": entry}))
+    (tmp_path / "typing.json").write_text(json.dumps({"environments": [entry]}))
     with pytest.raises(ValueError, match="explicitly pin both target and stdlib"):
         load(tmp_path)
 
@@ -130,15 +131,15 @@ def test_unknown_release_requires_evidence_not_a_policy_boolean(tmp_path):
     _, entry = policy(tmp_path, legacy=False)
     entry["pyrefly_version"] = "99.0.0"
     entry["typing_coverage_complete"] = True
-    (tmp_path / "typing.json").write_text(json.dumps({"unix": entry}))
+    (tmp_path / "typing.json").write_text(json.dumps({"environments": [entry]}))
     receipt = load(tmp_path).prerequisite_info
     assert receipt["typing_coverage_complete"] is False
     assert any("99.0.0" in blocker for blocker in receipt["compatibility_blockers"])
 
 
-def test_scalar_port_policy_is_not_a_target_environment(tmp_path):
-    (tmp_path / "typing.json").write_text(json.dumps({"unix": "stubs"}))
-    with pytest.raises(ValueError, match="explicit environment object"):
+def test_non_object_environment_is_rejected(tmp_path):
+    (tmp_path / "typing.json").write_text(json.dumps({"environments": ["stubs"]}))
+    with pytest.raises(ValueError, match="explicit environment objects"):
         load(tmp_path)
 
 
@@ -150,3 +151,33 @@ def test_common_models_are_opt_in_and_have_source_provenance():
         common_model_paths(["unjustified-sanitizer"])
     with pytest.raises(ValueError, match="more than once"):
         common_model_paths(["builtins", "builtins"])
+
+
+def test_same_port_selects_exact_target_and_variant(tmp_path):
+    _, first = policy(tmp_path)
+    cli = dict(first, target="linux-x64", variant="cli", python_platform="linux")
+    gui = dict(first, target="linux-x64", variant="gui", python_platform="darwin")
+    alternate = dict(first, target="linux-arm64", variant="cli", python_platform="linux")
+    (tmp_path / "typing.json").write_text(json.dumps({"environments": [cli, gui, alternate]}))
+    selected = load_typing_environment(tmp_path, "unix", target="linux-x64", variant="gui")
+    assert selected.prerequisite_info["port"] == "unix"
+    assert selected.prerequisite_info["target"] == "linux-x64"
+    assert selected.prerequisite_info["variant"] == "gui"
+    assert selected.python_platform == "darwin"
+    assert selected.prerequisite_info["typing_coverage_complete"] is False
+
+
+def test_other_port_is_not_a_fallback_for_target(tmp_path):
+    _, entry = policy(tmp_path)
+    (tmp_path / "typing.json").write_text(
+        json.dumps({"environments": [dict(entry, port="windows")]})
+    )
+    with pytest.raises(ValueError, match="no typing environment"):
+        load(tmp_path)
+
+
+def test_duplicate_typing_selection_is_ambiguous(tmp_path):
+    _, entry = policy(tmp_path)
+    (tmp_path / "typing.json").write_text(json.dumps({"environments": [entry, entry]}))
+    with pytest.raises(ValueError, match="duplicate typing environment"):
+        load(tmp_path)
