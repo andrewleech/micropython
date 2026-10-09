@@ -42,6 +42,7 @@
 #define FLASH_AREA_IMAGE_SCRATCH        3
 
 // Areas outside bootutil's view.
+#define MBOOT_AREA_LOG                4
 #define MBOOT_AREA_SECCNT             5
 #define MBOOT_AREA_FS                 6
 #define MBOOT_AREA_INTENT             7

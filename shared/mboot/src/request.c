@@ -31,6 +31,7 @@
 #include "mboot_crc32.h"
 #include "mboot_port.h"
 #include "mboot_request.h"
+#include "mboot_updatelog.h"
 
 // The request struct (1008 bytes) is followed by the 16 bytes of the test fault injection
 // state, which must survive a request being taken.
@@ -110,12 +111,17 @@ void mboot_request_set_and_reset(mboot_req_mode_t mode, const uint8_t *elems, si
         mode = MBOOT_REQ_DFU;
     }
 
+    // The sequence number follows the update audit log so that it increases from request to
+    // request across resets.
+    mboot_log_rec_t last;
+    uint32_t seq = mboot_updatelog_read(0, &last) == 0 ? last.seq + 1 : 1;
 
     mboot_request_t req;
     memset(&req, 0, sizeof(req));
     req.magic = MBOOT_REQ_MAGIC;
     req.version = MBOOT_REQ_VERSION;
     req.mode = (uint16_t)mode;
+    req.seq = seq;
     req.elems_len = (uint16_t)len;
     if (len != 0) {
         memcpy(req.elems, elems, len);
