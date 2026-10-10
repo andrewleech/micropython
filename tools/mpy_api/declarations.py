@@ -16,7 +16,7 @@ _DYNAMIC = {
     "extensible-contributor-gap", "dynamic", "open",
 }
 _ATOMS = {"None": "None", "none": "None", "bool": "bool", "int": "int",
-          "str": "str", "bytes": "bytes", "float": "float", "complex": "complex",
+          "str": "str", "bytes": "bytes", "bytearray": "bytearray", "float": "float", "complex": "complex",
           "object": "object", "list": "list", "dict": "dict",
           "set": "set", "tuple": "tuple"}
 
@@ -103,6 +103,11 @@ class _Renderer:
         if kind in ("argument", "argument-table"):
             name = contract.get("exported_argument")
             return (relations or {}).get(name, self.any_name)
+        if kind in ("integer-conversion-capability", "readable-buffer-capability", "writable-buffer-capability", "tuple-or-list/exact-length"):
+            self.representation_gap(self.module, f"{kind} is source-qualified; target native acceptance has no qualified declaration representation")
+            return self.any_name
+        if kind == "str-or-bytes":
+            return self.contract({"kind": "union", "alternatives": [{"kind": "str"}, {"kind": "bytes"}]}, relations)
         if kind == "tuple" and "elements" in contract:
             self.representation_gap(self.module, "tuple element contracts are retained in inventory; target builtin type parameters are unqualified")
         if kind == "union":
@@ -136,14 +141,19 @@ class _Renderer:
         semantics = symbol.get("semantics", {})
         if _status(semantics.get("return_resolution")) not in _RESOLVED:
             return {}
-        names = {parameter["name"] for parameter in parameters
-                 if parameter.get("kind") not in ("var_positional", "var_keyword") and parameter.get("required") is True}
+        required = {parameter["name"]: parameter for parameter in parameters
+                    if parameter.get("kind") not in ("var_positional", "var_keyword") and parameter.get("required") is True}
+        names = set(required)
         found: set[str] = set()
 
         def visit(contract: dict) -> None:
             if contract.get("kind") == "argument" or contract.get("kind") == "argument-table" and contract.get("storage_field") == "u_obj":
                 name = contract.get("exported_argument")
-                if name in names:
+                parameter = required.get(name)
+                broad = parameter and (_status(parameter.get("type_resolution")) in _RESOLVED
+                                       and (parameter.get("type_contract") or {}).get("kind") == "object")
+                frozen_identity = contract.get("authority") == "unchanged Python parameter on a straight-line successful return"
+                if name in names and (broad or frozen_identity):
                     found.add(name)
             if name := contract.get("exported_argument"):
                 if name not in names and any(p["name"] == name and p.get("required") is not True for p in parameters):
@@ -154,6 +164,11 @@ class _Renderer:
         for contract in semantics.get("returns", []):
             visit(contract)
         result = {}
+        for parameter in parameters:
+            if parameter["name"] not in found and _status(parameter.get("type_resolution")) in _RESOLVED:
+                annotation = self.contract(parameter.get("type_contract"))
+                if annotation != self.any_name:
+                    result[parameter["name"]] = annotation
         for name in sorted(found):
             key = _stable([self.module.get("identity"), symbol.get("identity"), name])
             variable = self.support_name("_T_" + hashlib.sha256(key.encode()).hexdigest()[:16])
@@ -180,8 +195,42 @@ class _Renderer:
         while receiver in parameter_names:
             receiver = "_" + receiver
         prefix = [receiver] if bound else []
+        receiver_contract = symbol.get("receiver_contract")
+        if bound and isinstance(receiver_contract, dict):
+            annotation = self.any_name
+            native_type = receiver_contract.get("native_type")
+            if (_status(receiver_contract.get("nominal_authority_resolution")) in _RESOLVED
+                    and native_type in ("str", "bytes", "bytearray")):
+                annotation = self.contract({"kind": native_type})
+            prefix = [f"{receiver}: {annotation}"]
         gaps: list[str] = []
         if isinstance(parameters, list) and _status(shape.get("parameters_resolution")) in _RESOLVED:
+            if len(parameter_names) != len(parameters):
+                gaps.append("callshape: repeated runtime parameter names cannot be represented by one Python signature")
+            optional_positional = False
+            keyword_only_seen = False
+            for parameter in parameters:
+                if parameter.get("kind") == "keyword_only":
+                    keyword_only_seen = True
+                    continue
+                if parameter.get("kind") not in ("positional_only", "positional_or_keyword"):
+                    continue
+                if keyword_only_seen:
+                    gaps.append("callshape: positional parameter follows a keyword-only runtime parameter")
+                    break
+                if parameter.get("required", True):
+                    if optional_positional:
+                        gaps.append("callshape: required positional parameter follows an optional positional parameter")
+                        break
+                else:
+                    optional_positional = True
+            if gaps:
+                for reason in gaps:
+                    self.representation_gap(symbol, reason)
+                fallback = [f"*args: {self.any_name}"]
+                if shape.get("keywords") is not False:
+                    fallback.append(f"**kwargs: {self.any_name}")
+                return ", ".join(prefix + fallback), gaps, {}
             if any(not _identifier(p.get("name")) for p in parameters):
                 gaps.append("callshape: a runtime keyword name is not a Python declaration identifier")
                 self.representation_gap(symbol, gaps[-1])

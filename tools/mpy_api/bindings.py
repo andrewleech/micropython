@@ -18,8 +18,11 @@ def split_args(text):
 
 
 def call_parts(expression):
-    match = re.match(r'(\w+) \( (.*) \)$', expression)
-    return (match[1], split_args(match[2])) if match else (None, [])
+    match = re.fullmatch(r'(\w+) \( (.*?)\)', expression)
+    if not match:
+        return None, []
+    arguments = match[2].strip()
+    return match[1], split_args(arguments) if arguments else []
 
 
 def intersect(a, b):
@@ -117,7 +120,8 @@ def wrapper(declaration, interfaces=(), contracts=None):
         arity = int(fixed[1])
         target = strip_outer(functions.get('_' + str(arity), {}).get('expression', ''))
         return {'minimum': arity, 'maximum': arity, 'keywords': False,
-                'function': target if re.fullmatch(r'[A-Za-z_]\w*', target) else None, 'descriptor': 'function'}
+                'function': target if re.fullmatch(r'[A-Za-z_]\w*', target) else None,
+                'native_wrapper_type': reference, 'descriptor': 'function'}
     if type_name == 'mp_obj_fun_builtin_var_t' and reference == 'mp_type_fun_builtin_var':
         signature = members.get('sig', {}).get('expression', '')
         outer = re.fullmatch(r'\( uint32_t \) (.*)', strip_outer(signature))
@@ -135,7 +139,7 @@ def wrapper(declaration, interfaces=(), contracts=None):
             target = strip_outer(functions.get(member, {}).get('expression', ''))
             if re.fullmatch(r'[A-Za-z_]\w*', target):
                 return {'minimum': bits >> 17, 'maximum': (bits >> 1) & 65535, 'keywords': keywords,
-                        'function': target, 'descriptor': 'function',
+                        'function': target, 'native_wrapper_type': reference, 'descriptor': 'function',
                         'signature_expression': signature, 'signature_storage': storage}
         return {'descriptor': 'function', 'unresolved': ['unsupported packed wrapper signature/storage/function binding'],
                 'expression': declaration['expression']}

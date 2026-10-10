@@ -54,6 +54,7 @@ The output directory must not exist, including as a symlink. Generation stages t
 | `modules/**/*.pyi` | Selected runtime module/frozen declarations; packages use `__init__.pyi` |
 | `typeshed/stdlib/builtins.pyi` | Generated selected-runtime builtin replacement, not an additive overlay |
 | `generation.json` | Schema-v1 producer/input identities, artifact sizes/hashes/roles, coverage and generation ID |
+| `enrichment-notices/**` | Captured third-party licence notices, when an enrichment manifest is supplied |
 
 `generation_id` hashes the canonical receipt before adding its own ID. Artifact hashes cover the inventory and declarations, not the receipt itself. Consumers should verify the receipt and all artifact hashes before using a generation, and retain its build/input identity alongside checker results.
 
@@ -65,7 +66,33 @@ Call shapes compose actual wrapper bounds, receiver/class/static binding and qua
 
 Protocol slots describe runtime behaviour. They do not invent public C-named methods or `__new__`, `__init__` or metaclass calls absent from the runtime. Native class lookup and native instance lookup are not assumed equivalent. Genuine dynamic providers retain their own uncertainty, they do not make every omitted name valid.
 
-`--enrichment` records a pinned external file identity only. It does not merge documentation-derived declarations or types.
+### Bounded native semantic inference
+
+Input acceptance, storage conversion and result identity are separate source contracts. Selected helper bodies can qualify truth testing, integer conversion and buffer access; a helper name or prototype alone cannot. Parser-table types require the selected parser protocol and its forwarding/storage path, not just an `MP_ARG_*` spelling.
+
+Alias analysis follows source declarations and their lexical scopes. Reassignment, escaping object carriers, unknown offsets and unsupported effects retain barriers rather than proving an arbitrary-object domain. A result can still preserve an input's identity when its accepted domain is unknown; that does not justify emitting an unrestricted identity `TypeVar`.
+
+Conservative origin tracking retains unknown input consumers when unchanged-value identity is unavailable, it does not recover a precise value or domain. Private-storage exemptions require bounded unescaped automatic slots; static, extern, thread-local and unsupported heap stores remain escape barriers. Nested scalar conversions require their exact selected helper/body evidence before passing a result to a recognised constructor.
+
+Mutable nonautomatic initializers do not prove current-call values, constants or identity, including forwarded helper modes and per-call allocation/MPZ temporaries. Readonly static data needs its own immutable source certificate, a skipped opposite-branch write does not make persistent state an automatic local.
+
+Connected native receiver checks depend on the selected runtime dispatch, wrapper flags, type call slot and allocator. `receiver_contract` retains that per-occurrence evidence independently of result inference. Source-unknown native receivers get an explicit `Any` annotation, including fallback signatures, rather than an implicit containing-class restriction. Configurations without the connected check do not inherit another build's receiver precision. Native builder families describe concrete base-type results, not subclass-preserving constructors.
+
+Receiver qualification also requires the selected type-getter and object-tag predicate bodies, complete fixed callback ABI and captured wrapper/dispatch flags. Unsupported calling conventions, attributes or variadic callbacks retain an unresolved receiver rather than inheriting a nominal class annotation.
+
+Fresh-object qualification follows a bounded selected `m_malloc`/`gc_alloc` allocation protocol under the allocator's normal area, bitmap and synchronisation invariants. It does not prove GC liveness, thread safety or memory safety; unsupported allocation/control-flow paths retain gaps.
+
+Supported return evidence includes bounded tuple elements, list append paths, selected JSON modes and selected integer conversion implementations. Unsupported paths remain explicit gaps. This is not a general C interpreter or a promise that every successful native return has a precise annotation.
+
+### Pinned reference comparison
+
+`--enrichment <manifest.json>` accepts a schema-v1 `mpy-api-pyi-enrichment` manifest. It pins a `.pyi` tree, producer/source versions and revisions, file sizes/SHA-256 hashes, source roles, evidence files and licence notices. Every declaration file must identify its module, sources and licences; the tree must contain exactly the declared `.pyi` files. A null target records an unmatched reference; a non-null target is an exact-build claim, and any mismatch with the selected build or its consumed/producer inputs fails generation.
+
+The adapter compares qualified source fields with bounded Python annotation/default/call-shape facts and records the results in `inventory.enrichment` and `provenance.enrichment`. It does not add excluded APIs, narrow accepted inputs, replace defaults or change generated runtime declarations. Source inference works without a reference tree. Unresolved source fields remain `documentation-unverified`; unsupported or shadowed annotations are not typing authority.
+
+Comparison records retain reference evidence and point to shared source lineage. Licence notices are published as `enrichment-license-notice` artifacts and covered by the generation receipt. Metadata and copied notices do not establish permission to redistribute third-party material.
+
+Generation verifies captured inputs again after staging all artifacts, immediately before publishing the output directory. Changed declaration/evidence/notice bytes or tree membership abort publication rather than producing a successful receipt.
 
 ## Coverage and failure boundaries
 

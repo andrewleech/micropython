@@ -46,6 +46,8 @@ PROJECTION_AUTHORITY = {
     'rules': {
         'sizeof_expression': 'grammar.js:1097-1100: sizeof accepts a parenthesized type_descriptor',
         'attribute_declaration': 'grammar.js:317-327: [[ identifier optional(argument_list) ]]',
+        'type_definition': 'grammar.js:280-290: typedef type/declarators followed by GNU attributes, not prefix attributes',
+        'storage_class_specifier': 'grammar.js:555-566: includes __thread and thread_local, not C11 _Thread_local',
         'attributed_declarator': 'grammar.js:441-444: declarator followed by standard attribute declarations',
         'field_declaration': 'grammar.js:738-743: declaration specifiers with optional declarators',
         'compound_statement': 'compound_statement: braces surrounding native block items',
@@ -291,6 +293,18 @@ def adapt_source(code: str, origins: list) -> tuple[str, dict]:
     for index, (token, start, end) in enumerate(tokens):
         if start < hidden_until:
             continue
+        if token == b'_Thread_local' and (not index or tokens[index - 1][0] not in (b'.', b'->')):
+            keyword = b'__thread'
+            fact = _projection(
+                data, line_starts, origins, start, end, keyword + b' ' * (end - start - len(keyword)),
+                'c11_thread_local_keyword', 'C11 storage keyword parsed with supported GNU storage-class spelling',
+                storage_keyword={'original': '_Thread_local', 'parser_spelling': '__thread'},
+                abi_semantics={'state': 'unassessed', 'reason': 'parser spelling does not qualify TLS ABI, linkage or placement'},
+            )
+            fact['transformed_token_end_byte'] = start + len(keyword)
+            fact['original_token_end_byte'] = end
+            replacements.append(fact)
+            continue
         if token == b'__builtin_va_arg' and index + 1 < len(tokens) and tokens[index + 1][0] == b'(' and (not index or tokens[index - 1][0] not in (b'.', b'->')):
             close, comma = _invocation(tokens, index)
             if comma == index + 2 or comma + 1 == close:
@@ -316,6 +330,32 @@ def adapt_source(code: str, origins: list) -> tuple[str, dict]:
             replacements.append(fact)
             hidden_until = expression_end
             continue
+        if token in (b'__attribute__', b'__attribute') and index and tokens[index - 1][0] == b'typedef':
+            if [entry[0] for entry in tokens[index + 1:index + 3]] == [b'(', b'(']:
+                close = _balanced_end(tokens, index + 1)
+                tail = tokens[close + 1:close + 8]
+                if (len(tail) >= 7 and re.fullmatch(rb'[A-Za-z_][A-Za-z_0-9]*', tail[0][0])
+                        and [entry[0] for entry in tail[1:3]] == [b'(', b'*']
+                        and re.fullmatch(rb'[A-Za-z_][A-Za-z_0-9]*', tail[3][0])
+                        and [entry[0] for entry in tail[4:6]] == [b')', b'(']):
+                    parameters_end = _balanced_end(tokens, close + 6)
+                    if parameters_end + 1 < len(tokens) and tokens[parameters_end + 1][0] == b';':
+                        attribute_end = tokens[close][2]
+                        content_start, content_end = tokens[index + 2][2], tokens[close - 1][1]
+                        fact = _projection(
+                            data, line_starts, origins, start, attribute_end, _blank(data[start:attribute_end]),
+                            'gnu_typedef_prefix_attribute', 'direct function-pointer typedef prefix attributes retained outside parser spelling',
+                            attribute_list={'expression': data[content_start:content_end].decode('utf-8'),
+                                            'source_span': _location(line_starts, origins, content_start, content_end)},
+                            source_binding={'position': 'between typedef and type specifier',
+                                            'authority': 'original selected compiler-expanded attribute spelling and position'},
+                            abi_semantics={'state': 'unassessed', 'reason': 'original typedef attributes require qualified calling-convention authority'},
+                            parser_semantics='attribute projection supplies syntax only, never ABI equivalence',
+                        )
+                        fact['semantic_barrier'] = 'GNU function-pointer typedef prefix attributes require original source ABI qualification'
+                        replacements.append(fact)
+                        hidden_until = attribute_end
+                        continue
         if token in (b'__attribute__', b'__attribute') and index and (tokens[index - 1][0] == b']' or index - 1 in attribute_ends):
             if [t[0] for t in tokens[index + 1:index + 3]] != [b'(', b'(']:
                 raise ValueError(f'unsupported post-declarator GNU attribute at expanded byte {start}')
