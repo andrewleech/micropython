@@ -1,7 +1,10 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
+import sys
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -211,19 +214,19 @@ def test_generated_source_does_not_inherit_committed_content_provenance(tmp_path
     ]
 
 
-def test_asf4_family_retains_actual_containing_repository_origin(tmp_path):
+def test_nested_native_project_retains_containing_repository_origin(tmp_path):
     mpy = repository(
         tmp_path / "micropython", {"tools/manifestfile.py": "# fixture authority identity\n"}
     )
-    (mpy / "lib").mkdir()
-    asf4 = repository(
-        mpy / "lib/asf4",
+    (mpy / "vendor").mkdir()
+    dependency = repository(
+        mpy / "vendor/component",
         {
-            "samd21/src/main.c": "int selected;\n",
-            "samd21/include/component-version.h": '#define COMPONENT_VERSION_STRING "1.2"\n#define BUILD_NUMBER 10\n',
+            "family/src/main.c": "int selected;\n",
+            "family/CMakeLists.txt": "project(portable_native VERSION 1.2 LANGUAGES C)\n",
         },
     )
-    file = "lib/asf4/samd21/src/main.c"
+    file = "vendor/component/family/src/main.c"
     database = tmp_path / "compile_commands.json"
     database.write_text(
         json.dumps([{"directory": str(mpy), "file": file, "arguments": ["cc", "-c", file]}])
@@ -243,10 +246,10 @@ def test_asf4_family_retains_actual_containing_repository_origin(tmp_path):
         },
     }
     document, receipt = sbom.generate_sbom(inventory, micropython_root=mpy)
-    family = next(item for item in document["components"] if item["name"] == "asf4-samd21")
-    assert family["version"] == "1.2+build.10"
-    assert family["externalReferences"] == [
-        {"type": "vcs", "url": git(asf4, "remote", "get-url", "origin")}
+    component = next(item for item in document["components"] if item["name"] == "portable_native")
+    assert component["version"] == "1.2"
+    assert component["externalReferences"] == [
+        {"type": "vcs", "url": git(dependency, "remote", "get-url", "origin")}
     ]
 
 
@@ -337,4 +340,248 @@ def test_cli_invalidates_stale_success_on_early_scope_failure(tmp_path, failure)
         == 2
     )
     assert not (output / "sbom.json").exists()
+    assert not (output / "sbom-summary.json").exists()
+
+
+@pytest.mark.parametrize("alias", [False, True])
+@pytest.mark.parametrize("malformed", [False, True])
+@pytest.mark.parametrize("invalid_scope", [False, True])
+def test_cli_preserves_referenced_license_output_and_hardlink(
+    tmp_path, alias, malformed, invalid_scope
+):
+    inventory, app, library = selection(tmp_path)
+    if invalid_scope:
+        inventory["schema_version"] = 999
+    legal = app / "legal"
+    legal.mkdir()
+    license_input = legal / ("license.txt" if alias else "sbom.json")
+    content = b"\xff invalid UTF-8" if malformed else b"Retain this licence text.\n"
+    license_input.write_bytes(content)
+    if alias:
+        (legal / "sbom.json").hardlink_to(license_input)
+    (app / "pyproject.toml").write_text(
+        '[project]\nname="application"\nversion="1"\nlicense="MIT"\n'
+        f'license-files=["legal/{license_input.name}"]\n'
+    )
+    summary = legal / "sbom-summary.json"
+    summary.write_text("existing summary")
+    scope_path = tmp_path / "scope.json"
+    scope_path.write_text(json.dumps(inventory))
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = os.pathsep.join(
+        filter(None, [str(Path(sbom.__file__).parents[1]), environment.get("PYTHONPATH")])
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mpy_analysis.sbom",
+            "--scope",
+            str(scope_path),
+            "--micropython-root",
+            str(MPY_ROOT),
+            "--output-dir",
+            str(legal),
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 2
+    assert "must not overwrite" in result.stderr
+    assert license_input.read_bytes() == content
+    assert (legal / "sbom.json").read_bytes() == content
+    assert summary.read_text() == "existing summary"
+
+
+def test_cli_supports_output_inside_project_build_directory(tmp_path):
+    inventory, app, library = selection(tmp_path)
+    path = tmp_path / "scope.json"
+    path.write_text(json.dumps(inventory))
+    output = app / "build"
+    assert (
+        sbom.main(
+            [
+                "--scope",
+                str(path),
+                "--micropython-root",
+                str(MPY_ROOT),
+                "--output-dir",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    sbom.validate_cyclonedx(json.loads((output / "sbom.json").read_text()))
+    assert json.loads((output / "sbom-summary.json").read_text())["status"] == "generated"
+
+
+@pytest.mark.parametrize("failure", ["scope", "profile"])
+def test_cli_invalidates_safe_project_build_output_on_malformed_input(tmp_path, failure):
+    inventory, app, library = selection(tmp_path)
+    if failure == "scope":
+        inventory["schema_version"] = 999
+    path = tmp_path / "scope.json"
+    path.write_text(json.dumps(inventory))
+    output = app / "build"
+    output.mkdir()
+    for name in ("sbom.json", "sbom-summary.json"):
+        (output / name).write_text("stale success")
+    arguments = [
+        "--scope",
+        str(path),
+        "--micropython-root",
+        str(MPY_ROOT),
+        "--output-dir",
+        str(output),
+    ]
+    if failure == "profile":
+        declaration = tmp_path / "declaration.json"
+        declaration.write_text(
+            '{"bomFormat": "CycloneDX", "specVersion": "1.6", "version": "bad"}'
+        )
+        arguments += ["--dependency-metadata", str(declaration)]
+    assert sbom.main(arguments) == 2
+    assert not (output / "sbom.json").exists()
+    assert not (output / "sbom-summary.json").exists()
+
+
+@pytest.mark.parametrize(
+    "origin,canonical",
+    [
+        ("git@example.invalid:team/component.git", "ssh://git@example.invalid/team/component.git"),
+        ("example.invalid:team/component.git", "ssh://example.invalid/team/component.git"),
+        ("git@example.invalid:team/a b.git", "ssh://git@example.invalid/team/a%20b.git"),
+        ("git@[2001:db8::1]:team/component.git", "ssh://git@[2001:db8::1]/team/component.git"),
+        (
+            "https://example.invalid/team/component.git",
+            "https://example.invalid/team/component.git",
+        ),
+        (
+            "ssh://git@example.invalid:2222/team/component.git",
+            "ssh://git@example.invalid:2222/team/component.git",
+        ),
+    ],
+)
+def test_repository_origins_are_canonical_uris_with_raw_evidence(tmp_path, origin, canonical):
+    inventory, app, library = selection(tmp_path)
+    git(library, "remote", "set-url", "origin", origin)
+    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    record = next(item for item in receipt["repositories"] if item["directory"] == str(library))
+    assert record["origin"] == origin
+    assert record["vcs_url"] == canonical
+    repository_component = next(
+        item for item in document["components"] if item["bom-ref"] == record["ref"]
+    )
+    assert properties(repository_component)["mpy:origin"] == origin
+    assert repository_component["externalReferences"] == [{"type": "vcs", "url": canonical}]
+    assert parse_qs(urlparse(repository_component["purl"]).query)["vcs_url"] == [canonical]
+    alpha = next(item for item in document["components"] if item["name"] == "alpha")
+    assert {"type": "vcs", "url": canonical} in alpha["externalReferences"]
+    sbom.validate_cyclonedx(document)
+
+
+def test_invalid_origin_remains_explicit_without_invalid_vcs_reference(tmp_path):
+    inventory, app, library = selection(tmp_path)
+    origin = "https://example.invalid/a b.git"
+    git(library, "remote", "set-url", "origin", origin)
+    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    record = next(item for item in receipt["repositories"] if item["directory"] == str(library))
+    assert record["origin"] == origin
+    assert record["vcs_url"] is None
+    assert any(
+        gap["kind"] == "repository-origin-unsupported" and gap["origin"] == origin
+        for gap in receipt["gaps"]
+    )
+    repository_component = next(
+        item for item in document["components"] if item["bom-ref"] == record["ref"]
+    )
+    assert "externalReferences" not in repository_component
+    assert "purl" not in repository_component
+    sbom.validate_cyclonedx(document)
+
+
+def test_cli_rejects_final_bom_schema_failure_without_success_output(tmp_path, monkeypatch):
+    inventory, app, library = selection(tmp_path)
+    original_assemble = sbom.assemble
+
+    def invalid_component(builder, *args):
+        result = original_assemble(builder, *args)
+        next(iter(builder.components.values()))["externalReferences"] = [
+            {"type": "website", "url": "https://example.invalid/invalid url"}
+        ]
+        return result
+
+    monkeypatch.setattr(sbom, "assemble", invalid_component)
+    with pytest.raises(ValueError):
+        sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    path = tmp_path / "scope.json"
+    path.write_text(json.dumps(inventory))
+    output = app / "build"
+    output.mkdir()
+    for name in ("sbom.json", "sbom-summary.json"):
+        (output / name).write_text("stale success")
+    assert (
+        sbom.main(
+            [
+                "--scope",
+                str(path),
+                "--micropython-root",
+                str(MPY_ROOT),
+                "--output-dir",
+                str(output),
+            ]
+        )
+        == 2
+    )
+    assert not (output / "sbom.json").exists()
+    assert not (output / "sbom-summary.json").exists()
+
+
+@pytest.mark.parametrize("invalid_scope", [False, True])
+@pytest.mark.parametrize("invalid_bom", [None, "json", "schema"])
+def test_cli_preserves_selected_license_sidecar_output_alias(tmp_path, invalid_scope, invalid_bom):
+    inventory, app, library = selection(tmp_path)
+    (app / "pyproject.toml").write_text("[project]\nname='fixture'\nversion='1'\n")
+    output = app / "legal"
+    output.mkdir()
+    terms = output / "sbom.json"
+    content = "# SPDX-License-Identifier: MIT\n# SPDX-FileCopyrightText: 2026 Fixture\n"
+    terms.write_text(content)
+    (app / "main.py.license").symlink_to("legal/sbom.json")
+    if invalid_bom:
+        (app / "bom.json").write_text(
+            "{"
+            if invalid_bom == "json"
+            else json.dumps(
+                {
+                    "bomFormat": "CycloneDX",
+                    "specVersion": "1.6",
+                    "version": 1,
+                    "components": [{"type": "library"}],
+                }
+            )
+        )
+    if invalid_scope:
+        inventory["schema_version"] = 999
+    scope_file = tmp_path / "scope.json"
+    scope_file.write_text(json.dumps(inventory))
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mpy_analysis.sbom",
+            "--scope",
+            str(scope_file),
+            "--micropython-root",
+            str(MPY_ROOT),
+            "--output-dir",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 2
+    assert terms.read_text() == content
+    assert (app / "main.py.license").is_symlink()
     assert not (output / "sbom-summary.json").exists()
