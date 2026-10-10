@@ -286,7 +286,8 @@ def _validate_report(path: Path, kind: str) -> None:
             raise AnalysisToolError(f"Pysa produced invalid errors.json: {file}")
 
 
-def _sarif_coverage_gaps(report):
+def _sarif_coverage_gaps(report, source_keys_by_uri=None):
+    """Collect invocation gaps and optional Ruff syntax gaps keyed by physical URI."""
     payload = json.loads(report.read_text(encoding="utf-8"))
     gaps = []
     for run_index, sarif_run in enumerate(payload["runs"]):
@@ -331,6 +332,27 @@ def _sarif_coverage_gaps(report):
                             "notification": notification,
                         }
                     )
+        if source_keys_by_uri is not None:
+            for result_index, result in enumerate(sarif_run.get("results", [])):
+                if not isinstance(result, dict) or result.get("ruleId") != "invalid-syntax":
+                    continue
+                locations = result.get("locations")
+                if not isinstance(locations, list) or not locations:
+                    locations = [None]
+                for location in locations:
+                    physical = location.get("physicalLocation") if isinstance(location, dict) else None
+                    artifact = physical.get("artifactLocation") if isinstance(physical, dict) else None
+                    uri = artifact.get("uri") if isinstance(artifact, dict) else None
+                    gap = {
+                        "run": run_index,
+                        "result": result_index,
+                        "reason": "Ruff reported invalid syntax",
+                        "uri": uri,
+                    }
+                    keys = source_keys_by_uri.get(uri) if isinstance(uri, str) else None
+                    if keys:
+                        gap["source_keys"] = keys
+                    gaps.append(gap)
     return gaps
 
 
@@ -486,6 +508,16 @@ def _run_ruff(scope, policy_dir, output_dir, executable, invocations):
         _rebase_after_invocation(
             report, {file: file for file in files}, policy_dir, policy_dir, invocations
         )
+        if invocations and invocations[-1]["report_valid"] and not invocations[-1].get(
+            "report_rebase_error"
+        ):
+            source_keys_by_uri = {}
+            for group, record in records:
+                uri = source_path(scope, record).as_uri()
+                source_keys_by_uri.setdefault(uri, []).append(
+                    [group, source_identity(record), record.get("target_path")]
+                )
+            invocations[-1]["coverage_gaps"] = _sarif_coverage_gaps(report, source_keys_by_uri)
 
 
 def _run_pattern(scanner, scope, policy_dir, output_dir, executable, invocations):
@@ -756,17 +788,22 @@ def _findings(output_dir):
 
 
 def _coverage(scope, scanner, invocations):
+    """Assess submitted keys, applying source-key gaps or whole-invocation gaps."""
     submitted = set()
     assessed = set()
     for invocation in invocations:
         if not invocation["started"]:
             continue
+        gaps = invocation.get("coverage_gaps", [])
+        invocation_gap = any(not gap.get("source_keys") for gap in gaps)
+        source_gaps = {tuple(key) for gap in gaps for key in gap.get("source_keys", [])}
         for source in invocation.get("sources", []):
             key = (source["group"], source["identity"], source["target_path"])
             submitted.add(key)
             if (
                 invocation["report_valid"]
-                and not invocation.get("coverage_gaps")
+                and not invocation_gap
+                and key not in source_gaps
                 and not invocation.get("report_rebase_error")
             ):
                 assessed.add(key)
