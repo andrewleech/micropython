@@ -185,7 +185,7 @@ def qualify_frozen_payload(inventory, modules):
             "status": "resolved", "sha256": source["sha256"], "source": source["source"]}
 
 
-def write_generation(output, inventory, declarations, identities):
+def write_generation(output, inventory, declarations, identities, *, notices, verify):
     if output.exists() or output.is_symlink():
         raise FileExistsError(f"output already exists; use a fresh generation directory: {output}")
     artifacts = {"inventory.json": canonical_bytes(inventory)}
@@ -196,8 +196,17 @@ def write_generation(output, inventory, declarations, identities):
         if path.suffix != ".pyi" or name in artifacts or name == "generation.json":
             raise ValueError(f"invalid or duplicate declaration output path: {name}")
         artifacts[name] = content.encode("utf-8")
+    for name, data in sorted(notices.items()):
+        path = Path(name)
+        if (not isinstance(data, bytes) or path.is_absolute() or
+                len(path.parts) < 2 or path.parts[0] != "enrichment-notices" or
+                any(part in ("", ".", "..") for part in path.parts) or
+                path.as_posix() != name or name in artifacts):
+            raise ValueError(f"invalid enrichment notice output path or bytes: {name}")
+        artifacts[name] = data
     records = [{"path": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
                 "role": "inventory" if name == "inventory.json" else
+                "enrichment-license-notice" if name.startswith("enrichment-notices/") else
                 "runtime-builtins" if name == "typeshed/stdlib/builtins.pyi" else "runtime-module"}
                for name, data in sorted(artifacts.items())]
     body = {"schema_version": 1, "producer": "mpy-api", "build": inventory["build"],
@@ -215,6 +224,7 @@ def write_generation(output, inventory, declarations, identities):
             destination.write_bytes(data)
         if output.exists() or output.is_symlink():
             raise FileExistsError(f"output appeared during generation: {output}")
+        verify()
         os.replace(staging, output)
     return body
 
@@ -235,7 +245,7 @@ def argument_parser():
     parser.add_argument("--path-var", action="append", default=[], metavar="NAME=PATH")
     parser.add_argument("--source-root", action="append", default=[], metavar="NAME=PATH")
     parser.add_argument("--source-owner", action="append", default=[], metavar="NAME=OWNER")
-    parser.add_argument("--enrichment", type=Path, help="optional pinned identity only; enrichment merge is not performed")
+    parser.add_argument("--enrichment", type=Path, help="optional schema-v1 manifest pinning a .pyi enrichment tree and its source/licence inputs")
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--output", required=True, type=Path)
     return parser
@@ -258,7 +268,8 @@ def generate(args):
     tools = producer_tools(root)
     inputs = {"compdb": file_identity(args.compdb), "elf": file_identity(args.elf),
               "map": file_identity(args.map_path), "link_command": file_identity(args.link_command)}
-    enrichment = file_identity(args.enrichment) if args.enrichment else None
+    from .enrichment import load_enrichment, merge_enrichment, verify_enrichment
+    enrichment = load_enrichment(args.enrichment) if args.enrichment else None
     parser = parser_identity()
     revision = source_revision(root)
     compdb, scope = authority_modules(root)
@@ -298,20 +309,32 @@ def generate(args):
                                          "records": [module["provenance"] for module in frozen]}
     identities = {**inputs, "tool_version": __version__, "python": sys.version,
                   "tools": tools, "parser": parser, "frozen": frozen_inputs,
-                  "enrichment": enrichment}
+                  "enrichment": {"provenance": enrichment["provenance"], "inputs": enrichment["inputs"]} if enrichment else None}
     inventory.setdefault("provenance", {})["producer_inputs"] = identities
+    if enrichment:
+        merge_enrichment(inventory, enrichment)
     declarations = render_declarations(inventory)
     if "typeshed/stdlib/builtins.pyi" not in declarations:
         raise ValueError("selected inventory has no generated builtin replacement")
-    verify_identities([*inputs.values(), *frozen_inputs["manifests"],
-                       *frozen_inputs["sources"], *([enrichment] if enrichment else [])])
-    if producer_tools(root) != tools:
-        raise RuntimeError("producer code graph changed during generation")
-    if parser_identity() != parser:
-        raise RuntimeError("parser installation changed during generation")
-    if source_revision(root) != revision:
-        raise RuntimeError("source revision changed during generation")
-    return output, write_generation(output, inventory, declarations, identities)
+    def verify_publication_inputs():
+        verify_identities([*inputs.values(), *frozen_inputs["manifests"],
+                           *frozen_inputs["sources"]])
+        from . import compiler
+        consumed = inventory["build"]["consumed_inputs"]
+        if compiler.public_inputs(compiler.capture_inputs(consumed)) != consumed:
+            raise RuntimeError("selected compiler/link inputs changed during generation")
+        if producer_tools(root) != tools:
+            raise RuntimeError("producer code graph changed during generation")
+        if parser_identity() != parser:
+            raise RuntimeError("parser installation changed during generation")
+        if source_revision(root) != revision:
+            raise RuntimeError("source revision changed during generation")
+        if enrichment:
+            verify_enrichment(enrichment)
+
+    return output, write_generation(output, inventory, declarations, identities,
+                                    notices=enrichment["notice_artifacts"] if enrichment else {},
+                                    verify=verify_publication_inputs)
 
 
 def main(argv=None):
