@@ -180,6 +180,8 @@ def compiler_contracts(record):
                     {'module_getattr': 'MICROPY_MODULE_GETATTR',
                      'module_delegation': 'MICROPY_MODULE_ATTR_DELEGATION',
                      'instance_type_flag': 'MP_TYPE_FLAG_INSTANCE_TYPE',
+                     'binds_self_flag': 'MP_TYPE_FLAG_BINDS_SELF',
+                     'builtin_fun_flag': 'MP_TYPE_FLAG_BUILTIN_FUN',
                      'iterator_mask': 'MP_TYPE_FLAG_ITER_IS_ITERNEXT | MP_TYPE_FLAG_ITER_IS_CUSTOM | MP_TYPE_FLAG_ITER_IS_STREAM'}.items()})
     samples.update({name: ('unsigned', expression) for name, expression in
                     {'arg_required': 'MP_ARG_REQUIRED', 'arg_kw_only': 'MP_ARG_KW_ONLY',

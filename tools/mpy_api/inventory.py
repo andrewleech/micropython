@@ -11,7 +11,7 @@ import subprocess
 from . import compiler
 from .frontend import syntax_adapter, constant
 from .bindings import definitions, registration_records, call_parts, scalar_field, strip_outer, constant_value
-from .semantics import semantics, direct_parameter
+from .semantics import semantics, direct_parameter, bind_public_contracts, checked_receiver_authority, input_helper_authority, lexical_constant
 from .link import collect_ownership, join
 from .frozen_payload import collect_frozen_payload
 
@@ -64,11 +64,13 @@ def _extract_impl(record, compdb, root):
         raise RuntimeError(f'C syntax frontend failed for {physical}: {type(exc).__name__}: {exc}') from exc
     if errors:
         raise RuntimeError(f'C syntax frontend failed for {physical}: ' + json.dumps(errors, sort_keys=True))
-    template_sources = [str(root / name) for name in ('py/obj.h', 'py/runtime.h', 'py/objstr.h', 'py/objmodule.h',
-                                                     'py/objstr.c', 'py/objint.c', 'py/objint_mpz.c',
-                                                     'py/objint_longlong.c', 'py/objmodule.c')]
+    template_sources = [str(root / name) for name in (
+        'py/obj.h', 'py/runtime.h', 'py/objstr.h', 'py/objint.h', 'py/objmodule.h', 'py/objlist.h', 'py/objtuple.h', 'py/mpz.h',
+        'py/obj.c', 'py/argcheck.c', 'py/objstr.c', 'py/objint.c',
+        'py/objint_mpz.c', 'py/objint_longlong.c', 'py/objmodule.c')]
     for function in functions:
         function['id'] = record['identity'] + function['id'][len(physical):]
+        function['translation_unit'] = record['identity']
         for call in function['events']['calls']:
             call['qualified_template_sources'] = template_sources
     by_name = {}
@@ -80,14 +82,13 @@ def _extract_impl(record, compdb, root):
                  for condition in (function['events']['conditions'] if not function['events'].get('semantic_unassessed') else [])
                  for name in re.findall(r'MP_QSTR_(\w+)', condition['expression'])]
         normalized.append({**{key: function[key] for key in ('id', 'declaration_identity', 'name', 'linkage', 'source_span')},
+                           'translation_unit': record['identity'],
                            'parameters': function['parameters'], 'constants': function['constants'],
                            'events': function['events'], 'body_expression': function['body_expression'],
                            'parameter_source_contract': function['parameter_source_contract'],
+                           '_semantic_function': function,
                            'semantics': semantics(function, by_name, errors, contracts),
                            'handler_attributes': sorted({test['name'] for test in tests}), 'handler_attribute_tests': tests})
-    for function in functions:
-        for call in function['events']['calls']:
-            call.pop('qualified_template_sources', None)
     prepared['frontend'] = frontend
     object_definitions = definitions(declarations, functions, errors, record['identity'], directive_code, directive_origins, prepared)
     registrations = registration_records(directive_code, directive_origins, physical, prepared)
@@ -120,8 +121,376 @@ def _extract_impl(record, compdb, root):
                       'receipts': [*prepared['receipts'], expansion_receipt, directive_receipt, contract_receipt]}}
 
 
-def _parameters(shape, semantic, facts, parser_owner=None):
-    """Expose parameters only for direct wrappers and complete indexed tables."""
+def _parameter_declaration(function, index):
+    contract = function.get('parameter_source_contract', {})
+    if contract.get('declaration_binding_resolution') != 'resolved':
+        return None
+    declarations = contract.get('declarations', [])
+    name = function['parameters'][index] if index < len(function['parameters']) else None
+    candidates = [entry for entry in declarations if entry.get('name') == name]
+    return candidates[0] if name and len(candidates) == 1 else None
+
+
+def _parameter_family(function):
+    """Qualify object-vector ABI relations from original C declarators."""
+    declarations = [_parameter_declaration(function, index) for index in range(len(function['parameters']))]
+    if any(entry is None for entry in declarations):
+        return None
+    spellings = [entry.get('expression', entry.get('declaration_expression', '')) for entry in declarations]
+    counts = [index for index, spelling in enumerate(spellings)
+              if re.fullmatch(r'(?:const )?size_t \w+', spelling)]
+    vectors = [index for index, spelling in enumerate(spellings)
+               if re.fullmatch(r'const mp_obj_t \* \w+', spelling)]
+    keywords = [index for index, spelling in enumerate(spellings)
+                if re.fullmatch(r'mp_map_t \* \w+', spelling)]
+    if len(counts) != 1 or len(vectors) != 1 or len(keywords) > 1:
+        return None
+    return {'count': counts[0], 'vector': vectors[0],
+            'keywords': keywords[0] if keywords else None,
+            'declarations': declarations}
+
+
+def _parser_forwarding(parser, function, public_function, shape):
+    function = function.get('_semantic_function', function)
+    public_function = public_function.get('_semantic_function', public_function)
+    family = _parameter_family(function)
+    public_family = _parameter_family(public_function)
+    args = parser['arguments']
+    if not family or not public_family or len(args) != 6 or parser.get('guards'):
+        return None
+    params = function['parameters']
+    bindings = parser.get('caller_parameter_bindings', {})
+    argument_nodes = parser.get('argument_nodes', [])
+    if len(argument_nodes) != len(args):
+        return None
+    specialization = dict(parser.get('constant_bindings', {}))
+    for name, binding in bindings.items():
+        if binding.get('constant') is not None:
+            if name in specialization and specialization[name] != binding['constant']:
+                return None
+            specialization[name] = binding['constant']
+    environment = dict(function['constants'])
+    for name in specialization:
+        value = lexical_constant(function, name, argument_nodes[0], specialization)
+        if value is not None:
+            environment[name] = value
+    count_name, vector_name = params[family['count']], params[family['vector']]
+    count_arg, vector_arg = strip_outer(args[0]), strip_outer(args[1])
+    if count_arg == count_name and vector_arg == vector_name:
+        shift = 0
+    else:
+        count = re.fullmatch(re.escape(count_name) + r' - (.+)', count_arg)
+        vector = re.fullmatch(re.escape(vector_name) + r' \+ (.+)', vector_arg)
+        if not count or not vector or strip_outer(count[1]) != strip_outer(vector[1]):
+            return None
+        shift = lexical_constant(function, count[1], argument_nodes[0], specialization)
+        vector_shift = lexical_constant(function, vector[1], argument_nodes[1], specialization)
+        if type(shift) is not int or shift not in (1, 2) or vector_shift != shift:
+            return None
+    if any(direct_parameter(function, params[family[role]], argument_nodes[argument]) != family[role]
+           for role, argument in (('count', 0), ('vector', 1))):
+        return None
+    keyword = family['keywords']
+    if (keyword is None or args[2] != params[keyword]
+            or direct_parameter(function, params[keyword], argument_nodes[2]) != keyword):
+        return None
+    if function['id'] != public_function['id']:
+        for role in ('count', 'vector', 'keywords'):
+            binding = bindings.get(params[family[role]], {})
+            if binding.get('direct_outer_parameter') != public_family[role]:
+                return None
+    if type(shape.get('minimum')) is not int or shape['minimum'] < shift:
+        return None
+    return {'shift': shift, 'family': family, 'public_family': public_family,
+            'environment': environment, 'specialization': specialization, 'parser_scope': function['id'],
+            'public_scope': public_function['id'],
+            'authority': 'selected unchanged count/vector/keyword declarations with equal bounded parser offset'}
+
+
+def _parser_protocol(facts, function):
+    """Certify the selected indexed parser loop and its forwarding branches."""
+    events, params = function['events'], function['parameters']
+    if len(params) != 6 or events.get('semantic_unassessed'):
+        return None
+    types = ('size_t', 'const mp_obj_t *', 'mp_map_t *', 'size_t', 'const mp_arg_t *', 'mp_arg_val_t *')
+    if any(not (declaration := _parameter_declaration(function, index))
+           or declaration.get('declaration_expression') != c_type + ' ' + params[index]
+           for index, c_type in enumerate(types)):
+        return None
+    n_pos, pos, kws, n_allowed, allowed, out = params
+    root = events.get('flow', {})
+
+    def walk(node):
+        yield node
+        for key in ('then', 'else', 'body'):
+            if isinstance(node.get(key), dict):
+                yield from walk(node[key])
+        for child in node.get('children', []):
+            yield from walk(child)
+
+    nodes = list(walk(root))
+    loops = [node for node in nodes if node.get('kind') == 'loop']
+    if len(loops) != 1:
+        return None
+    loop = loops[0]
+    if (loop.get('loop_kind') != 'for_statement'
+            or loop.get('initializer_expression') != 'size_t i = 0 ;'
+            or loop.get('condition_expression') != 'i < ' + n_allowed
+            or loop.get('update_expression') != 'i ++'):
+        return None
+
+    def children(block):
+        while (block.get('kind') == 'block' and len(block.get('children', [])) == 1
+               and block['children'][0].get('kind') == 'block'):
+            block = block['children'][0]
+        return block.get('children', [])
+
+    def branch(block, condition):
+        candidates = [block] if block.get('kind') == 'if' else children(block)
+        matches = [node for node in candidates if node.get('kind') == 'if'
+                   and strip_outer(node['condition']) == condition]
+        return matches[0] if len(matches) == 1 else None
+
+    def guard_key(guards):
+        return [(guard.get('condition_id'), guard['branch']) for guard in guards]
+
+    def guarded_write(expression, expected):
+        matches = [write for write in events['writes'] if write['expression'] == expression]
+        return matches[0] if len(matches) == 1 and guard_key(matches[0].get('guards', [])) == expected else None
+
+    positional = branch(loop['body'], 'i < ' + n_pos)
+    conversion = branch(loop['body'], '( ' + allowed + ' [ i ] . flags & MP_ARG_KIND_MASK ) == MP_ARG_BOOL')
+    if not positional or not conversion:
+        return None
+    integer = branch(conversion['else'], '( ' + allowed + ' [ i ] . flags & MP_ARG_KIND_MASK ) == MP_ARG_INT')
+    if not integer:
+        return None
+    boolean_guard = [(conversion['byte_start'], 'then')]
+    integer_guard = [(conversion['byte_start'], 'else'), (integer['byte_start'], 'then')]
+    object_guard = [(conversion['byte_start'], 'else'), (integer['byte_start'], 'else')]
+    if (not guarded_write(out + ' [ i ] . u_bool = mp_obj_is_true ( given_arg )', boolean_guard)
+            or not guarded_write(out + ' [ i ] . u_int = mp_obj_get_int ( given_arg )', integer_guard)
+            or not guarded_write(out + ' [ i ] . u_obj = given_arg', object_guard)):
+        return None
+    top_ifs = [node for node in loop['body'].get('children', []) if node.get('kind') == 'if']
+    if len(top_ifs) != 2:
+        return None
+    keyword_only = branch(positional['then'], allowed + ' [ i ] . flags & MP_ARG_KW_ONLY')
+    missing_candidates = [node for node in children(positional['else']) if node.get('kind') == 'if'
+                          and strip_outer(node['condition']) in ('kw == 0', 'kw == ( ( void * ) 0 )')]
+    if not keyword_only or len(missing_candidates) != 1:
+        return None
+    missing = missing_candidates[0]
+    required = branch(missing['then'], allowed + ' [ i ] . flags & MP_ARG_REQUIRED')
+    if not required:
+        return None
+    positional_guard = [(positional['byte_start'], 'then')]
+    keyword_guard = [(positional['byte_start'], 'else'), (missing['byte_start'], 'else')]
+    default_guard = [(positional['byte_start'], 'else'), (missing['byte_start'], 'then')]
+    given_pos = guarded_write('given_arg = ' + pos + ' [ i ]', positional_guard)
+    given_kw = guarded_write('given_arg = kw -> value', keyword_guard)
+    default = guarded_write(out + ' [ i ] = ' + allowed + ' [ i ] . defval', default_guard)
+    if not given_pos or not given_kw or not default:
+        return None
+    continues = [node for node in nodes if node.get('kind') == 'continue']
+    if (len(continues) != 1 or not any(node is continues[0] for node in missing['then'].get('children', []))
+            or continues[0]['byte_start'] <= default.get('byte_end', -1)
+            or missing['then']['children'][-1] is not continues[0]):
+        return None
+    gotos = [node for node in nodes if node.get('kind') == 'goto']
+    labels = [node for node in nodes if node.get('kind') == 'label']
+    if (len(gotos) != 1 or gotos[0].get('target') != 'extra_positional'
+            or len(labels) != 1 or labels[0].get('name') != 'extra_positional'
+            or not any(node is gotos[0] for node in keyword_only['then'].get('children', []))):
+        return None
+    pos_excess = branch(root, 'pos_found < ' + n_pos)
+    kw_excess = branch(root, 'kws_found < ' + kws + ' -> used')
+    if not pos_excess or not kw_excess or not any(node is labels[0] for node in pos_excess['then'].get('children', [])):
+        return None
+    root_control = [node for node in children(root) if node.get('kind') != 'fallthrough']
+    if root_control != [loop, pos_excess, kw_excess]:
+        return None
+    if any(node.get('kind') in ('return', 'break') for node in nodes):
+        return None
+    variables = {name: [variable for variable in events['variables'] if variable['name'] == name]
+                 for name in ('pos_found', 'kws_found', 'i', 'given_arg', 'kw')}
+    if any(len(values) != 1 for values in variables.values()):
+        return None
+    if any((variables[name][0].get('initializer_node') or {}).get('expression') != '0'
+           or variables[name][0].get('type_expression') != 'size_t'
+           or not 0 <= variables[name][0].get('byte_start', -1) < loop['byte_start']
+           for name in ('pos_found', 'kws_found')):
+        return None
+    if not guarded_write('pos_found ++', positional_guard) or not guarded_write('kws_found ++', keyword_guard):
+        return None
+    index_writes = [write for write in events['writes'] if write['target'] == 'i']
+    if (len(index_writes) != 1 or index_writes[0]['expression'] != 'i ++'
+            or index_writes[0].get('guards') or index_writes[0].get('loops') != [loop['byte_start']]
+            or index_writes[0].get('byte_start', -1) >= given_pos.get('byte_start', -1)):
+        return None
+    expected_writes = {'i ++', 'pos_found ++', 'kws_found ++',
+                       'given_arg = ' + pos + ' [ i ]', 'given_arg = kw -> value',
+                       out + ' [ i ] = ' + allowed + ' [ i ] . defval',
+                       out + ' [ i ] . u_bool = mp_obj_is_true ( given_arg )',
+                       out + ' [ i ] . u_int = mp_obj_get_int ( given_arg )',
+                       out + ' [ i ] . u_obj = given_arg'}
+    if (len(events['writes']) != len(expected_writes)
+            or {write['expression'] for write in events['writes']} != expected_writes):
+        return None
+    lookups = [call for call in events['calls'] if call_parts(call['expression'])[0] == 'mp_map_lookup']
+    if len(lookups) != 1 or guard_key(lookups[0].get('guards', [])) != [(positional['byte_start'], 'else')]:
+        return None
+    lookup = lookups[0]
+    callee = lookup.get('callee') or {}
+    source_dir = Path(function['source_span']['source']).parent
+    if callee.get('kind') != 'FUNCTION_DECL' or callee.get('source_span', {}).get('source') not in {
+            str(source_dir / 'runtime.h'), str(source_dir / 'obj.h')}:
+        return None
+    arguments = call_parts(lookup['expression'])[1]
+    environment = {**facts.get('frontend', {}).get('contract_constants', {}), **function['constants']}
+    lookup_mode = constant('MP_MAP_LOOKUP', environment)
+    qstr_template = facts.get('contracts', {}).get('rom_qstr', '')
+    expected_key = qstr_template.replace('MP_QSTR___name__', allowed + ' [ i ] . qst').replace('mp_rom_obj_t', 'mp_obj_t')
+    if (len(arguments) != 3 or arguments[0] != kws or arguments[1] != expected_key
+            or lookup_mode is None or constant(arguments[2], environment) != lookup_mode):
+        return None
+    if (variables['kw'][0].get('type_expression') != 'mp_map_elem_t'
+            or (variables['kw'][0].get('initializer_node') or {}).get('expression') != lookup['expression']):
+        return None
+    errors = []
+    error_calls = []
+    error_names = {'mp_arg_error_terse_mismatch', 'mp_raise_msg_varg', 'mp_raise_msg', 'mp_raise_TypeError'}
+    expected_errors = [
+        [(positional['byte_start'], 'else'), (missing['byte_start'], 'then'), (required['byte_start'], 'then')],
+        [(pos_excess['byte_start'], 'then')], [(kw_excess['byte_start'], 'then')]]
+    for expected in expected_errors:
+        matches = [call for call in events['calls'] if call_parts(call['expression'])[0] in error_names
+                   and guard_key(call.get('guards', [])) == expected]
+        if len(matches) != 1:
+            return None
+        call = matches[0]
+        helper, error_arguments = call_parts(call['expression'])
+        declaration = call.get('callee') or {}
+        if (declaration.get('kind') != 'FUNCTION_DECL'
+                or declaration.get('source_span', {}).get('source') not in {
+                    str(source_dir / 'runtime.h'), str(source_dir / 'argcheck.c')}):
+            return None
+        if helper in ('mp_raise_msg', 'mp_raise_msg_varg') and (not error_arguments or error_arguments[0] != '& mp_type_TypeError'):
+            return None
+        errors.append(call['source_span'])
+        error_calls.append(call)
+    payloads = []
+    for error in error_calls:
+        helper, _ = call_parts(error['expression'])
+        message_index = 1 if helper in ('mp_raise_msg', 'mp_raise_msg_varg') else 0
+        message_arguments = error.get('expression_node', {}).get('arguments', {}).get('children', [])
+        if message_index >= len(message_arguments):
+            continue
+        message = message_arguments[message_index]
+        while message.get('kind') in ('cast_expression', 'parenthesized_expression'):
+            message = (message.get('value') if message['kind'] == 'cast_expression'
+                       else (message.get('children') or [None])[0])
+            if not isinstance(message, dict):
+                break
+        if not isinstance(message, dict) or message.get('kind') != 'call_expression':
+            continue
+        candidates = [call for call in events['calls']
+                      if call['byte_start'] == message['byte_start'] and call['byte_end'] == message['byte_end']]
+        if len(candidates) != 1:
+            return None
+        payload = candidates[0]
+        declaration = payload.get('callee') or {}
+        operands = message.get('arguments', {}).get('children', [])
+        if (declaration.get('kind') != 'FUNCTION_DECL' or declaration.get('name') != 'MP_COMPRESSED_ROM_TEXT'
+                or declaration.get('source_span', {}).get('source') != str(source_dir / 'misc.h')
+                or guard_key(payload.get('guards', [])) != guard_key(error.get('guards', []))
+                or not error['byte_start'] < payload['byte_start'] < payload['byte_end'] < error['byte_end']
+                or len(operands) != 1 or operands[0].get('kind') != 'string_literal'):
+            return None
+        payloads.append(payload)
+    known_calls = error_names | {'mp_map_lookup', 'mp_obj_is_true', 'mp_obj_get_int',
+                                 '__assert_fail', '__assert_func', 'mp_assert_fail'}
+    if any(call_parts(call['expression'])[0] not in known_calls and not any(call is payload for payload in payloads)
+           for call in events['calls']):
+        return None
+    return {'resolution': 'bounded-resolved', 'kind': 'selected-indexed-parser-protocol',
+            'parser_identity': function['id'], 'source': function['source_span'],
+            'loop': {key: loop[key] for key in ('byte_start', 'initializer_expression', 'condition_expression', 'update_expression')},
+            'lookup': {'source': lookup['source_span'], 'callee': callee, 'arguments': arguments,
+                       'qstr_template': qstr_template, 'lookup_mode': lookup_mode},
+            'supplied_writes': [given_pos['source_span'], given_kw['source_span']],
+            'default_write': default['source_span'], 'default_continue': continues[0]['byte_start'],
+            'required_and_excess_errors': errors,
+            'terminal_literal_message_payloads': [payload['source_span'] for payload in payloads]}
+
+
+def _parser_conversions(facts, function, linked_functions=None, protocol=None):
+    """Require conversion operations in the selected parser, not flag names."""
+    params = function['parameters']
+    if len(params) != 6 or function['events'].get('semantic_unassessed'):
+        return None
+    allowed, out = params[4], params[5]
+    writes = function['events']['writes']
+    supplied = [variable for variable in function['events']['variables'] if variable['name'] == 'given_arg']
+    if len(supplied) != 1 or supplied[0].get('type_expression') != 'mp_obj_t':
+        return None
+    supplied_writes = {write['expression'] for write in writes if write['target'] == 'given_arg'}
+    if supplied_writes != {'given_arg = ' + params[1] + ' [ i ]', 'given_arg = kw -> value'}:
+        return None
+    destination_writes = {out + ' [ i ] = ' + allowed + ' [ i ] . defval',
+                          out + ' [ i ] . u_bool = mp_obj_is_true ( given_arg )',
+                          out + ' [ i ] . u_int = mp_obj_get_int ( given_arg )',
+                          out + ' [ i ] . u_obj = given_arg'}
+    if any(re.search(r'\b' + re.escape(out) + r'\b', write['target'])
+           and write['expression'] not in destination_writes for write in writes):
+        return None
+    for call in function['events']['calls']:
+        _, arguments = call_parts(call['expression'])
+        for argument in arguments:
+            argument = strip_outer(argument)
+            if re.match(r'(?:& )?(?:' + re.escape(out) + '|' + re.escape(allowed) + r')\b', argument):
+                if argument not in (allowed + ' [ i ] . qst', allowed + ' [ i ] . flags'):
+                    return None
+    conversions = {}
+    functions = {}
+    for definition in facts['functions']:
+        functions.setdefault(definition['name'], []).append(definition.get('_semantic_function', definition))
+    for kind, field, helper in (('bool', 'u_bool', 'mp_obj_is_true'),
+                                ('int', 'u_int', 'mp_obj_get_int')):
+        expression = out + ' [ i ] . ' + field + ' = ' + helper + ' ( given_arg )'
+        matches = [write for write in writes if write['expression'] == expression
+                   and any(guard['branch'] == 'then' and
+                           strip_outer(guard['condition']) == '( ' + allowed + ' [ i ] . flags & MP_ARG_KIND_MASK ) == MP_ARG_' + kind.upper()
+                           for guard in write.get('guards', []))]
+        calls = [call for call in function['events']['calls']
+                 if call['expression'] == helper + ' ( given_arg )'
+                 and (call.get('callee') or {}).get('kind') == 'FUNCTION_DECL'
+                 and call['callee']['source_span']['source'] in {
+                     str(Path(function['source_span']['source']).parent / 'runtime.h'),
+                     str(Path(function['source_span']['source']).parent / 'obj.h')}]
+        if len(matches) != 1 or len(calls) != 1:
+            return None
+        helper_authority = input_helper_authority(
+            calls[0], function.get('_semantic_function', function), functions,
+            facts.get('contracts', {}), linked_functions)
+        conversions[kind] = {'kind': 'object' if kind == 'bool' else 'integer-conversion-capability',
+                             'resolution': 'bounded-resolved', 'helper': helper,
+                             'parser_identity': function['id'], 'write': matches[0],
+                             'callee': calls[0]['callee'], 'helper_contract_authority': helper_authority}
+    carriers = [write for write in writes if write['expression'] == out + ' [ i ] . u_obj = given_arg']
+    if len(carriers) != 1:
+        return None
+    conversions['obj'] = {'kind': 'object-carrier', 'resolution': 'bounded-resolved',
+                          'parser_identity': function['id'], 'write': carriers[0],
+                          'helper_contract_authority': {
+                              'resolution': 'bounded-resolved' if protocol else 'unresolved',
+                              'kind': 'object', 'parser_protocol': protocol,
+                              'source': carriers[0]['source_span']}}
+    return conversions
+
+
+def _parameters(shape, semantic, facts, parser_owner=None, linked_functions=None):
+    """Compose a complete parser table with selected count/vector relations."""
     rows = semantic.get('argument_tables', []) if semantic else []
     parsers = semantic.get('parser_calls', []) if semantic else []
     if not rows:
@@ -140,13 +509,12 @@ def _parameters(shape, semantic, facts, parser_owner=None):
     if not function:
         unresolved('forwarded parser count/vector/default mapping unassessed')
         return
-    params = function['parameters']
-    if (len(args) != 6 or len(params) != 3 or args[:3] != params or parser.get('guards')
-            or any(row.get('via_helper') for row in rows)
-            or args[4] != rows[0]['table_id'].rsplit('::', 1)[-1]):
-        unresolved('parser count/vector/keyword/table relation is not direct unchanged wrapper forwarding')
+    public_function = next((fn for fn in facts['functions'] if fn['id'] == semantic['function_id']), None)
+    forwarding = _parser_forwarding(parser, function, public_function, shape) if public_function else None
+    if not forwarding or args[4] != rows[0]['table_id'].rsplit('::', 1)[-1]:
+        unresolved('parser count/vector/keyword/table relation is not qualified equal-offset forwarding')
         return
-    env = function['constants']
+    env = forwarding['environment']
     if not parser_owner:
         unresolved('selected allocated argument parser body is unavailable')
         return
@@ -158,13 +526,13 @@ def _parameters(shape, semantic, facts, parser_owner=None):
     if len(parser_params) != 6:
         unresolved('argument parser parameter family is unsupported')
         return
-    n_pos, pos, kws, n_allowed, allowed, out_vals = parser_params
-    conditions = {strip_outer(condition['expression']) for condition in parser_function['events']['conditions']}
-    writes = {write['expression'] for write in parser_function['events']['writes']}
-    expected = {'i < ' + n_pos, allowed + ' [ i ] . flags & MP_ARG_KW_ONLY',
-                allowed + ' [ i ] . flags & MP_ARG_REQUIRED'}
-    if not expected <= conditions or out_vals + ' [ i ] = ' + allowed + ' [ i ] . defval' not in writes:
-        unresolved('selected parser positional/keyword/required/default forwarding family is unsupported')
+    protocol = _parser_protocol(parser_facts, parser_function)
+    if not protocol:
+        unresolved('selected parser complete extent/lookup/default/required/excess protocol is unsupported')
+        return
+    conversions = _parser_conversions(parser_facts, parser_function, linked_functions, protocol)
+    if not conversions or parser.get('callee') != parser_function['declaration_identity']:
+        unresolved('selected parser conversion operations or caller declaration identity are unqualified')
         return
     storage = []
     for owner in (facts, parser_facts):
@@ -182,8 +550,10 @@ def _parameters(shape, semantic, facts, parser_owner=None):
         unresolved('actual selected parser flag values are unresolved/outside the qualified flag field')
         return
     required_flag, keyword_flag = flags_values['required'], flags_values['kw_only']
-    shape['parameters_authority'] = {'parser_identity': parser_function['id'], 'source': parser_function['source_span'],
-                                     'flags': flags_values, 'scalar_storage': storage}
+    shape['parameters_authority'] = {'resolution': 'bounded-resolved',
+                                     'parser_identity': parser_function['id'], 'source': parser_function['source_span'],
+                                     'flags': flags_values, 'scalar_storage': storage,
+                                     'forwarding': forwarding, 'conversions': conversions, 'protocol': protocol}
     counts = {row.get('row_count') for row in rows}
     if len(counts) != 1:
         unresolved('argument table complete row count is conflicting')
@@ -199,10 +569,23 @@ def _parameters(shape, semantic, facts, parser_owner=None):
     sizeof_pattern = (r'sizeof \( ' + re.escape(table_name)
                       + r' \) / sizeof \( \( ' + re.escape(table_name) + r' \) \[ 0 \] \)')
     count_expr = re.sub(sizeof_pattern, str(row_count), args[3])
-    if constant(count_expr, env) != row_count:
+    if lexical_constant(function.get('_semantic_function', function), count_expr,
+                        parser['argument_nodes'][3], forwarding['specialization']) != row_count:
         unresolved('parser table count is not the complete selected table')
         return
+    shift = forwarding['shift']
+    offset = shape.get('implicit_argument_offset', 0)
     parameters = []
+    if type(offset) is not int or offset < 0 or offset > shape['minimum']:
+        unresolved('implicit receiver offset is not guaranteed by the wrapper minimum')
+        return
+    for index in range(shift):
+        parameters.append({'name': 'self' if index < offset else 'arg' + str(index - offset),
+                           'kind': 'positional_only', 'required': True, 'default_contract': None,
+                           'source_refs': [{'kind': 'vector-item', 'scope': public_function['id'],
+                                            'vector_parameter': forwarding['public_family']['vector'], 'index': index}],
+                           'source': public_function['source_span'],
+                           'binding_authority': shape['parameters_authority']})
     positional_prefix = row_count
     for row in rows:
         if row.get('row_resolution') != 'resolved' or not row.get('name'):
@@ -237,32 +620,129 @@ def _parameters(shape, semantic, facts, parser_owner=None):
         if not required and row.get('default_omitted'):
             default = {'kind': 'unresolved', 'reason': 'omitted zero-initialized storage has no qualified Python default interpretation',
                        'storage_contract': default}
+        conversion_key = ('bool' if parsed_kind == flags_values['bool'] else
+                          'int' if parsed_kind == flags_values['int'] else
+                          'obj' if parsed_kind == flags_values['obj'] else None)
+        if conversion_key is None:
+            unresolved('selected parser kind has no qualified conversion operation')
+            return
+        field = {'bool': 'u_bool', 'int': 'u_int', 'obj': 'u_obj'}[conversion_key]
+        refs = [{'kind': 'parser-field', 'scope': function['id'], 'table_id': row['table_id'],
+                 'table_entry_index': index, 'storage_field': field}]
+        if index < positional_prefix:
+            refs.append({'kind': 'vector-item', 'scope': public_function['id'],
+                         'vector_parameter': forwarding['public_family']['vector'], 'index': shift + index})
         parameters.append({'name': row['name'],
                            'kind': 'positional_or_keyword' if index < positional_prefix else 'keyword_only',
                            'table_entry_index': index, 'required': required,
                            'default_contract': None if required else default,
+                           'source_refs': refs, 'parser_conversion': conversions[conversion_key],
+                           'result_storage': {'kind': {'bool': 'bool', 'int': 'int', 'obj': 'object-carrier'}[conversion_key],
+                                              'authority': conversions[conversion_key]},
+                           'binding_authority': shape['parameters_authority'],
                            'source': row['source_span'],
-                           'resolution': _resolution('resolved', authority='selected direct mp_arg_parse_all table and actual enum flags')})
-        row['python_parameter_default_resolution'] = ('required-no-python-default' if required else
-            'unresolved-storage-default' if default.get('kind') == 'unresolved' else 'selected-direct-parser-default')
+                           'resolution': _resolution('resolved', authority='selected complete mp_arg_parse_all table and conversion body')})
     minimum, maximum = shape.get('minimum'), shape.get('maximum')
-    if (not isinstance(minimum, int) or minimum < 0 or minimum > positional_prefix
+    if (not isinstance(minimum, int) or minimum < shift or minimum > shift + positional_prefix
             or not isinstance(maximum, int) or maximum < minimum):
         unresolved('wrapper positional bounds cannot be composed with the parser table prefix')
         return
     for parameter in parameters:
-        index = parameter['table_entry_index']
+        index = shift + parameter['table_entry_index'] if 'table_entry_index' in parameter else parameters.index(parameter)
         if index < minimum:
             parameter.update(kind='positional_only', required=True, default_contract=None)
         elif index >= maximum:
             parameter['kind'] = 'keyword_only'
     offset = shape.get('implicit_argument_offset', 0)
-    if not isinstance(offset, int) or offset < 0 or offset > min(positional_prefix, minimum):
+    if not isinstance(offset, int) or offset < 0 or offset > min(shift + positional_prefix, minimum):
         unresolved('implicit receiver is not guaranteed in the parser positional prefix')
         return
+    conversions['obj']['consumer_authority'] = {
+        'resolution': 'bounded-resolved',
+        'parser_scope': parser['scope'],
+        'public_scope': public_function['id'],
+        'vector_parameter': forwarding['family']['vector'],
+        'operand': 1,
+        'callee': parser['callee'],
+        'source_span': parser['source_span'],
+        'byte_start': parser.get('byte_start'),
+        'byte_end': parser.get('byte_end'),
+        'guards': parser.get('guards', []),
+        'helper_contract_authority': {
+            'resolution': protocol['resolution'],
+            'kind': protocol['kind'],
+            'parser_identity': protocol['parser_identity'],
+            'source': protocol['source']}}
     shape['parser_parameters'] = parameters
     shape['parameters'] = parameters[offset:]
     shape['parameters_resolution'] = 'resolved'
+
+
+def _public_contracts(shape, semantic, function, identity, receiver=None):
+    """Supply source references only after wrapper and C declarations agree."""
+    minimum, maximum = shape.get('minimum'), shape.get('maximum')
+    offset = shape.get('implicit_argument_offset')
+    authority = {'resolution': 'bounded-resolved', 'wrapper_identity': identity.get('object_id'),
+                 'wrapper_source': identity.get('object_source_span'),
+                 'function_identity': function['id'],
+                 'parameter_source_contract': function.get('parameter_source_contract'),
+                 'minimum': minimum, 'maximum': maximum, 'keywords': shape.get('keywords'),
+                 'implicit_argument_offset': offset, 'ownership': shape.get('function_ownership')}
+    complete = shape.get('parser_parameters')
+    if not isinstance(complete, list) or shape.get('parameters_resolution') != 'resolved':
+        complete = []
+        valid_bounds = (type(minimum) is int and type(maximum) is int
+                        and 0 <= minimum <= maximum <= 64 and type(offset) is int
+                        and 0 <= offset <= minimum and not shape.get('unresolved'))
+        family = _parameter_family(function)
+        fixed = (valid_bounds and shape.get('keywords') is False and minimum == maximum
+                 and len(function['parameters']) == maximum
+                 and all((entry := _parameter_declaration(function, index)) is not None
+                         and re.fullmatch(r'mp_obj_t \w+', entry.get('declaration_expression', entry.get('expression', '')))
+                         for index in range(maximum)))
+        if valid_bounds and (fixed or family and (shape.get('keywords') is False or family['keywords'] is not None)):
+            for index in range(maximum if shape.get('keywords') is False else minimum):
+                reference = ({'kind': 'c-parameter', 'scope': function['id'], 'parameter': index}
+                             if fixed else {'kind': 'vector-item', 'scope': function['id'],
+                                            'vector_parameter': family['vector'], 'index': index})
+                complete.append({'name': 'self' if index < offset else 'arg' + str(index - offset),
+                                 'kind': 'positional_only', 'required': index < minimum,
+                                 'default_contract': None, 'source_refs': [reference],
+                                 'source': function['source_span'], 'binding_authority': authority})
+            shape['parser_parameters'] = complete
+            if shape.get('keywords') is False:
+                shape['parameters'] = complete[offset:]
+                shape['parameters_resolution'] = 'resolved'
+                shape['parameters_authority'] = authority
+    if not complete or type(offset) is not int or not 0 <= offset <= len(complete):
+        return bind_public_contracts(semantic, {'function_id': function['id'], 'parameters': [], 'receiver': None})
+    public = []
+    for parameter in complete[offset:]:
+        public.append({**parameter, 'role': 'public', 'binding_authority': parameter.get('binding_authority', authority)})
+    receiver_binding = None
+    if offset == 1 and receiver:
+        receiver_binding = {**complete[0], **receiver, 'role': 'receiver',
+                            'binding_authority': complete[0].get('binding_authority', authority)}
+    mapped = bind_public_contracts(semantic, {'function_id': function['id'],
+                                            'parameters': public, 'receiver': receiver_binding})
+    public_parameters = mapped.get('public_parameters', [])
+    for index, parameter in enumerate(shape.get('parameters', [])):
+        evidence = public_parameters[index] if index < len(public_parameters) else {}
+        if evidence.get('name') != parameter['name']:
+            evidence = {}
+        domain = evidence.get('accepted_domain', {})
+        parameter['accepted_domain'] = domain
+        parameter['constraints'] = evidence.get('constraints', [])
+        if evidence.get('result_storage'):
+            parameter['result_storage'] = evidence['result_storage']
+        parameter['type_contract'] = domain.get('contract')
+        parameter['type_resolution'] = domain.get('resolution', 'unresolved')
+        if (domain.get('contract') or {}).get('kind') in (
+                'integer-conversion-capability', 'readable-buffer-capability', 'writable-buffer-capability',
+                'tuple-or-list/exact-length'):
+            parameter['representation_resolution'] = 'unresolved'
+            parameter['representation_unresolved'] = ['target native capability has no qualified declaration representation']
+    return mapped
 
 
 def _receiver_offset(shape, offset):
@@ -355,7 +835,7 @@ def _handler_write_contract(write, function, contracts, dispatch, resolve, prese
                if re.search(r'\bdest\b', call['expression']) and compatible(write, call)]
     if escaped:
         reasons.append('handler destination escapes to a call with unassessed value/binding effects')
-    receiver_presence = all(other['expression'] != sentinel and direct_parameter(function, other['expression']) == 0
+    receiver_presence = all(other['expression'] != sentinel and direct_parameter(function.get('_semantic_function', function), other['expression']) == 0
                             for other in receivers)
     if not receiver_presence:
         reasons.append('handler destination[1] may request fallback or supply an unqualified receiver')
@@ -385,6 +865,215 @@ def _handler_write_contract(write, function, contracts, dispatch, resolve, prese
             'value_contract': value, 'getter': getter}
 
 
+def _linked_functions(inputs, present):
+    """Join exact declarations to allocated bodies and their direct static helpers."""
+    selected, anchors = [], {}
+    for facts in inputs:
+        functions = facts['functions']
+        statics = {}
+        for function in functions:
+            if function['linkage'] == 'static' and not function['events'].get('semantic_unassessed'):
+                statics.setdefault(function['name'], []).append(function)
+        roots = [function for function in functions
+                 if present(facts, {'name': function['name']})
+                 and not function['events'].get('semantic_unassessed')]
+        pending = [(function, {'allocated_function': function['id'], 'source': function['source_span'],
+                               'direct_static_call_path': []}) for function in roots]
+        while pending:
+            function, anchor = pending.pop()
+            if function['id'] in anchors:
+                continue
+            anchors[function['id']] = anchor
+            selected.append((facts, function))
+            for call in function['events']['calls']:
+                declaration = call.get('callee') or {}
+                candidates = [child for child in statics.get(declaration.get('name'), [])
+                              if child['declaration_identity'] == declaration]
+                if len(candidates) == 1:
+                    pending.append((candidates[0], {
+                        **anchor, 'direct_static_call_path': [*anchor['direct_static_call_path'], call['source_span']]}))
+    locals_by_name, externals_by_name = {}, {}
+    for facts, function in selected:
+        locals_by_name.setdefault((facts['translation_unit'], function['name']), []).append((facts, function))
+        if function['linkage'] == 'external':
+            externals_by_name.setdefault(function['name'], []).append((facts, function))
+    linked, seen = {}, set()
+    for caller_facts in inputs:
+        for caller in caller_facts['functions']:
+            for call in caller['events']['calls']:
+                declaration = call.get('callee') or {}
+                if declaration.get('kind') != 'FUNCTION_DECL':
+                    continue
+                name = declaration.get('name')
+                local = locals_by_name.get((caller_facts['translation_unit'], name), [])
+                candidates = local if local else externals_by_name.get(name, [])
+                if len(candidates) != 1:
+                    continue
+                facts, function = candidates[0]
+                if declaration != function['declaration_identity']:
+                    continue
+                key = (function['id'], json.dumps(declaration, sort_keys=True))
+                if key in seen:
+                    continue
+                seen.add(key)
+                linked.setdefault(name, []).append({
+                    'function': function.get('_semantic_function', function),
+                    'declaration_identity': declaration,
+                    'authority': {'resolution': 'bounded-resolved',
+                                  'function_identity': function['id'],
+                                  'translation_unit': facts['translation_unit'],
+                                  'object': facts.get('input', {}).get('object'),
+                                  'source': function['source_span'],
+                                  'ownership': 'selected allocated body or exact declaration-bound direct static helper',
+                                  'allocated_caller_authority': anchors[function['id']],
+                                  'contracts': facts.get('contracts', {})}})
+    return linked
+
+
+def _header_helper_authority(facts, function, caller, linked_functions, present, *, terminal_literal=False):
+    """Keep source-inline exceptions distinct from allocated/static-call bodies."""
+    raw = function.get('_semantic_function', function)
+    caller_function = caller['function']
+    if (caller['authority'].get('translation_unit') != facts['translation_unit']
+            or not any(call.get('callee') == function['declaration_identity']
+                       for call in caller_function['events']['calls'])):
+        return None
+    authority = {'resolution': 'bounded-resolved', 'function_identity': function['id'],
+                 'translation_unit': facts['translation_unit'], 'source': function['source_span'],
+                 'header_declaration_identity': function['declaration_identity'],
+                 'selected_caller_identity': caller_function['id'], 'contracts': facts.get('contracts', {})}
+    if present(facts, {'name': function['name']}):
+        return {**authority, 'selection': 'selected allocated header helper body'}
+    contract = raw.get('parameter_source_contract', {})
+    modifiers = contract.get('declaration_modifiers', [])
+    inline = (contract.get('declaration_modifiers_resolution') == 'resolved'
+              and any(modifier in modifiers for modifier in ('inline', '__inline__', '__inline')))
+    if inline and raw['linkage'] == 'static' and 'static' in modifiers and contract.get('signature_resolution') == 'resolved':
+        return {**authority, 'selection': 'source-qualified static inline body in the exact caller translation unit',
+                'inline_declaration': {'modifiers': modifiers, 'source': contract['declaration_modifiers_source']}}
+    if terminal_literal and inline and raw['linkage'] == 'external':
+        prefix = contract.get('declaration_prefix_expression', '')
+        if (re.fullmatch(r'inline __attribute__ \( \( always_inline \) \) const char', prefix)
+                and facts.get('input', {}).get('compiler_expanded_sha256')
+                and function['source_span']['source'] in facts.get('input', {}).get('dependencies', {})):
+            return {**authority, 'selection': 'source-forced inline literal terminal-message body in the exact compiled caller translation unit',
+                    'domain_scope': 'literal terminal-error payload only; no normal return or input domain authority',
+                    'inline_declaration': {'modifiers': modifiers, 'prefix': prefix,
+                                           'source': contract['declaration_modifiers_source']}}
+    if raw['linkage'] == 'static':
+        rows = [row for row in linked_functions.get(function['name'], [])
+                if row['function']['id'] == function['id']
+                and row['authority']['translation_unit'] == facts['translation_unit']
+                and row.get('declaration_identity') == function['declaration_identity']]
+        if len(rows) == 1:
+            return {**rows[0]['authority'], **authority,
+                    'selection': 'exact declaration-bound direct static caller path'}
+    return None
+
+
+def _checked_wrapper_type_authority(native_definition, receiver_definitions, native_contracts=None):
+    """Match both selected lookup masks against the actual wrapper type flags."""
+    probes = {'MP_TYPE_FLAG_BINDS_SELF': 'binds_self_flag', 'MP_TYPE_FLAG_BUILTIN_FUN': 'builtin_fun_flag'}
+    native_contracts = native_contracts or {}
+    lookup_row = receiver_definitions.get('mp_convert_member_lookup', {})
+    lookup = lookup_row.get('function', {})
+    runtime_contracts = lookup_row.get('authority', {}).get('contracts', {})
+    masks = {name: constant(native_contracts[probe], native_definition.get('constant_environment', {})) if probe in native_contracts
+             else constant(name, native_definition.get('constant_environment', {}))
+             for name, probe in probes.items()}
+    runtime_masks = {name: constant(runtime_contracts[probe], lookup.get('constants', {})) if probe in runtime_contracts
+                     else constant(name, lookup.get('constants', {})) for name, probe in probes.items()}
+    flags = native_definition.get('type_flags_value')
+    if (all(type(mask) is int and mask > 0 and runtime_masks[name] == mask
+            and type(flags) is int and flags & mask for name, mask in masks.items())
+            and native_definition.get('type_flags_storage')):
+        return {'identity': native_definition['id'], 'source': native_definition['source_span'],
+                'flags': flags, 'masks': masks, 'lookup_masks': runtime_masks,
+                'scalar_storage': native_definition['type_flags_storage']}
+    return None
+
+
+def _call_slot_binding(facts, definition, slot):
+    """Resolve a call-slot reference through its actual vector and typedef ABI."""
+    source_dir = Path(definition['source_span']['source']).parent
+    interfaces = facts.get('frontend', {}).get('aggregate_interfaces', [])
+    names = re.findall(r'\bmp_obj_(?:full_|empty_)?type_t\b', definition.get('declaration_specifiers', ''))
+    selected = [interface for interface in interfaces
+                if len(names) == 1 and interface['name'] == names[0] and interface['status'] == 'resolved']
+    if len(selected) != 1 or not slot.get('storage_authority'):
+        return None
+    fields = [field for field in selected[0]['fields'] if field['name'] == 'slots']
+    if (len(fields) != 1 or fields[0]['type_expression'] != 'void'
+            or not re.fullmatch(r'\* slots \[ (?:\d+ )?\]', fields[0]['declarator_expression'])
+            or fields[0]['source_span']['source'] != str(source_dir / 'obj.h')):
+        return None
+    expression = strip_outer(slot.get('expression') or '')
+    if expression.startswith('( const void * ) '):
+        expression = strip_outer(expression[len('( const void * ) '):])
+    typed = re.fullmatch(r'\( ([A-Za-z_]\w*) \) (.*)', expression)
+    abi = None
+    if typed:
+        candidates = [interface for interface in facts.get('frontend', {}).get('function_pointer_interfaces', [])
+                      if interface['name'] == typed[1] and interface['status'] == 'resolved'
+                      and interface['source_span']['source'] == str(source_dir / 'obj.h')]
+        if len(candidates) != 1:
+            return None
+        abi = candidates[0]
+        expression = strip_outer(typed[2])
+    if not re.fullmatch(r'[A-Za-z_]\w*', expression):
+        return None
+    return {'function': expression, 'vector_storage': fields[0], 'typedef_abi': abi}
+
+
+def _call_slot_abi_matches(function, binding):
+    abi = binding['typedef_abi']
+    if abi is None:
+        return False
+    contract = function.get('parameter_source_contract', {})
+    declarations = contract.get('declarations', [])
+    parameters = abi['parameters']
+    if (contract.get('declaration_binding_resolution') != 'resolved'
+            or contract.get('prototype_resolution') != 'resolved'
+            or contract.get('variadic') is not False
+            or contract.get('signature_resolution') != 'resolved'
+            or contract.get('return_type_resolution') != 'resolved'
+            or contract.get('return_type_expression') != abi['return_type_expression']
+            or len(declarations) != len(parameters)):
+        return False
+    def declaration_type(parameter):
+        expression = parameter.get('declaration_expression', '')
+        name = parameter.get('name')
+        return re.sub(r'\b' + re.escape(name) + r'$', '', expression).strip() if name else expression
+    return all(declaration_type(actual) == declaration_type(expected)
+               for actual, expected in zip(declarations, parameters))
+
+
+def _native_receiver_contract(owner, shape, wrapper_definition, receiver_check, receiver_definitions, root, wrapper_contracts=None):
+    """Keep native receiver source qualification independent of return contracts."""
+    if not owner or owner['kind'] != 'type':
+        return None
+    contract = {'native_type_identity': owner['id'],
+                'nominal_authority_resolution': 'unresolved',
+                'authority': {'resolution': 'bounded-resolved', 'type_identity': owner['id'],
+                              'source': owner['source_span'],
+                              'selection': 'selected allocated native type containing this method occurrence',
+                              'domain_scope': 'bound occurrence; complete unbound acceptance unqualified'}}
+    native = {'mp_type_str': 'str', 'mp_type_bytes': 'bytes', 'mp_type_bytearray': 'bytearray'}
+    if (owner['name'] not in native or owner['source_span']['source'] not in {
+            str(root / path) for path in ('py/objstr.c', 'py/objstrunicode.c', 'py/objarray.c')}):
+        return contract
+    witness = (_checked_wrapper_type_authority(wrapper_definition, receiver_definitions, wrapper_contracts)
+               if wrapper_definition and wrapper_definition['kind'] == 'type' else None)
+    checked = (receiver_check.get('resolution') in ('resolved', 'bounded-resolved')
+               and witness is not None and shape.get('descriptor') == 'function')
+    contract.update({'native_type': native[owner['name']],
+                     'nominal_authority_resolution': 'bounded-resolved' if checked else 'unresolved',
+                     'selected_receiver_check': receiver_check, 'wrapper_type_authority': witness})
+    if checked:
+        contract['authority']['domain_scope'] = 'selected checked native receiver'
+    return contract
+
+
 def _normal_surface(raw, inputs, resolve, present, root):
     containers = {c['id']: c for c in raw['containers']}
     facts_by_tu = {f['translation_unit']: f for f in inputs}
@@ -394,6 +1083,22 @@ def _normal_surface(raw, inputs, resolve, present, root):
         bindings_by_container.setdefault(key, []).append(binding)
     types, diagnostics = {}, []
     constructing = set()
+    linked_functions = _linked_functions(inputs, present)
+    semantic_cache = {}
+
+    def selected_semantics(facts, function):
+        if function['id'] not in semantic_cache:
+            raw_function = function.get('_semantic_function')
+            if raw_function is None:
+                semantic_cache[function['id']] = function['semantics']
+            else:
+                functions = {}
+                for item in facts['functions']:
+                    functions.setdefault(item['name'], []).append(item.get('_semantic_function', item))
+                semantic_cache[function['id']] = semantics(
+                    raw_function, functions, facts.get('errors', []), facts.get('contracts', {}),
+                    linked_functions=linked_functions)
+        return semantic_cache[function['id']]
 
     def symbol(binding):
         identity = binding['identity']
@@ -413,14 +1118,32 @@ def _normal_surface(raw, inputs, resolve, present, root):
             facts = facts_by_tu.get(identity['translation_unit'])
             function_id = (binding.get('semantics') or {}).get('function_id')
             semantic_facts = next((f for f in inputs if any(fn['id'] == function_id for fn in f['functions'])), facts)
-            _parameters(shape, binding.get('semantics'), semantic_facts,
-                        selected_function('mp_arg_parse_all', source='py/argcheck.c'))
+            function = next((fn for fn in semantic_facts['functions'] if fn['id'] == function_id), None) if semantic_facts else None
+            summary = selected_semantics(semantic_facts, function) if function else binding.get('semantics')
+            _parameters(shape, summary, semantic_facts,
+                        selected_function('mp_arg_parse_all', source='py/argcheck.c'), linked_functions)
+            owner = containers.get(identity.get('container_id'))
+            if owner is None:
+                owner = next((container for container in raw['containers']
+                              if container['translation_unit'] == identity['container_translation_unit']
+                              and container['name'] == identity['container']), None)
+            wrapper_type = None
+            if owner and owner['kind'] == 'type' and shape.get('native_wrapper_type'):
+                wrapper_type, _ = resolve(shape['native_wrapper_type'], identity['translation_unit'])
+            wrapper_definition = wrapper_type[1] if wrapper_type and present(*wrapper_type) else None
+            receiver = _native_receiver_contract(owner, shape, wrapper_definition, receiver_check,
+                                                 receiver_definitions, root,
+                                                 wrapper_type[0].get('contracts', {}) if wrapper_definition else None)
+            if receiver is not None:
+                result['receiver_contract'] = receiver
+            if function and summary:
+                summary = _public_contracts(shape, summary, function, identity, receiver)
             result['callshape'] = shape
-            result['semantics'] = binding.get('semantics')
+            result['semantics'] = summary
             shape_status = 'non-callable' if shape.get('callable') is False else 'resolved' if isinstance(shape.get('minimum'), int) and isinstance(shape.get('maximum'), int) and isinstance(shape.get('keywords'), bool) and not shape.get('unresolved') else 'unresolved'
             result['resolution']['callshape'] = _resolution(shape_status, shape.get('unresolved', []))
-            result['resolution']['types'] = {'inputs': (binding.get('semantics') or {}).get('input_resolution', 'unresolved'),
-                                             'returns': (binding.get('semantics') or {}).get('return_resolution', 'unresolved')}
+            result['resolution']['types'] = {'inputs': (summary or {}).get('input_resolution', 'unresolved'),
+                                             'returns': (summary or {}).get('return_resolution', 'unresolved')}
         target = containers.get(target_id)
         if target and target['kind'] == 'type':
             definition = class_symbol(target)
@@ -460,6 +1183,124 @@ def _normal_surface(raw, inputs, resolve, present, root):
     type_framework = selected_function('type_attr', source='py/objtype.c')
     module_framework = selected_function('module_attr', source='py/objmodule.c')
     handler_dispatch = _handler_dispatch_authority(framework)
+    receiver_definitions = {}
+    for name, source_path in (('checked_fun_call', 'py/runtime.c'),
+                              ('mp_obj_new_checked_fun', 'py/runtime.c'),
+                              ('mp_convert_member_lookup', 'py/runtime.c'),
+                              ('mp_obj_malloc_helper', 'py/obj.c'),
+                              ('mp_obj_get_type', 'py/obj.c'),
+                              ('m_malloc', 'py/malloc.c'),
+                              ('m_malloc_fail', 'py/runtime.c'),
+                              ('gc_alloc', 'py/gc.c'),
+                              ('mp_load_method_maybe', 'py/runtime.c')):
+        selected = selected_function(name, source=source_path)
+        if selected:
+            facts, function = selected
+            receiver_definitions[name] = {
+                'function': function.get('_semantic_function', function),
+                'authority': {'resolution': 'bounded-resolved', 'function_identity': function['id'],
+                              'translation_unit': facts['translation_unit'],
+                              'object': facts.get('input', {}).get('object'),
+                              'source': function['source_span'], 'contracts': facts.get('contracts', {}),
+                              'header_declaration_identity': function['declaration_identity'],
+                              'selection': 'selected allocated helper body'}}
+        else:
+            candidates = [row for row in linked_functions.get(name, [])
+                          if row['function']['source_span']['source'] == str(root / source_path)]
+            if len(candidates) == 1:
+                receiver_definitions[name] = candidates[0]
+        row = receiver_definitions.get(name)
+        if row:
+            row['authority']['header_declaration_identity'] = row['function'].get('declaration_identity')
+    checked_call = receiver_definitions.get('checked_fun_call')
+    if checked_call:
+        checked_tu = checked_call['authority'].get('translation_unit')
+        facts = facts_by_tu.get(checked_tu)
+        candidates = [function for function in facts.get('functions', []) if
+                      function['name'] == 'MP_COMPRESSED_ROM_TEXT'
+                      and function['source_span']['source'] == str(root / 'py/misc.h')] if facts else []
+        if len(candidates) == 1:
+            function = candidates[0]
+            authority = _header_helper_authority(
+                facts, function, checked_call, linked_functions, present, terminal_literal=True)
+            if authority:
+                receiver_definitions['MP_COMPRESSED_ROM_TEXT'] = {
+                    'function': function.get('_semantic_function', function), 'authority': authority}
+    if checked_call and 'mp_obj_get_type' not in receiver_definitions:
+        candidates = []
+        for call in checked_call['function']['events']['calls']:
+            declaration = call.get('callee') or {}
+            if (declaration.get('kind') != 'FUNCTION_DECL'
+                    or declaration.get('source_span', {}).get('source') != str(root / 'py/obj.h')):
+                continue
+            selected = selected_function(declaration['name'], source='py/obj.c')
+            if selected and selected[1]['declaration_identity'] == declaration:
+                candidates.append(selected)
+        if len(candidates) == 1:
+            facts, function = candidates[0]
+            receiver_definitions['mp_obj_get_type'] = {
+                'function': function.get('_semantic_function', function),
+                'authority': {'resolution': 'bounded-resolved', 'function_identity': function['id'],
+                              'translation_unit': facts['translation_unit'], 'source': function['source_span'],
+                              'object': facts.get('input', {}).get('object'),
+                              'header_declaration_identity': function['declaration_identity'],
+                              'selected_caller_identity': checked_call['function']['id'],
+                              'selection': 'selected allocated body connected to the checked callback header declaration',
+                              'contracts': facts.get('contracts', {})}}
+    type_getter = receiver_definitions.get('mp_obj_get_type')
+    if type_getter:
+        getter_tu = type_getter['authority'].get('translation_unit')
+        facts = facts_by_tu.get(getter_tu)
+        type_getter['authority']['header_declaration_identity'] = type_getter['function'].get('declaration_identity')
+        for name in ('mp_obj_is_obj', 'mp_obj_is_small_int', 'mp_obj_is_qstr', 'mp_obj_is_immediate_obj'):
+            candidates = [function for function in facts.get('functions', []) if
+                          function['name'] == name and function['source_span']['source'] == str(root / 'py/obj.h')] if facts else []
+            if len(candidates) != 1:
+                continue
+            function = candidates[0]
+            authority = _header_helper_authority(facts, function, type_getter, linked_functions, present)
+            if authority:
+                receiver_definitions[name] = {
+                    'function': function.get('_semantic_function', function), 'authority': authority}
+    dispatch = receiver_definitions.get('mp_convert_member_lookup')
+    if dispatch:
+        dispatch_tu = dispatch['authority'].get('translation_unit')
+        facts = facts_by_tu.get(dispatch_tu)
+        candidates = [function for function in facts.get('functions', []) if
+                      function['name'] == 'mp_obj_is_obj'
+                      and function['source_span']['source'] == str(root / 'py/obj.h')] if facts else []
+        if len(candidates) == 1:
+            function = candidates[0]
+            authority = _header_helper_authority(facts, function, dispatch, linked_functions, present)
+            if authority:
+                receiver_definitions['dispatch_mp_obj_is_obj'] = {
+                    'function': function.get('_semantic_function', function), 'authority': authority}
+    factory = receiver_definitions.get('mp_obj_new_checked_fun')
+    if factory:
+        factory_tu = factory['authority']['translation_unit']
+        checked_type, ownership = resolve('mp_type_checked_fun', factory_tu)
+        if checked_type and present(*checked_type) and checked_type[1]['kind'] == 'type':
+            facts, definition = checked_type
+            slot_authority = None
+            slots = [slot for slot in definition.get('slots', []) if slot['slot'] == 'call']
+            slot_binding = _call_slot_binding(facts, definition, slots[0]) if len(slots) == 1 else None
+            slot_name = slot_binding['function'] if slot_binding else None
+            if slot_name:
+                selected = selected_function(slot_name, translation_unit=facts['translation_unit'])
+                if selected and _call_slot_abi_matches(selected[1], slot_binding):
+                    call_facts, call_function = selected
+                    slot_authority = {'resolution': 'bounded-resolved', 'function_id': call_function['id'],
+                                      'declaration_identity': call_function['declaration_identity'],
+                                      'expression': slots[0]['expression'], 'binding': slot_binding,
+                                      'object': call_facts.get('input', {}).get('object'),
+                                      'source': call_function['source_span']}
+            receiver_definitions['mp_type_checked_fun'] = {
+                'definition': definition, 'call_slot_authority': slot_authority,
+                'authority': {'resolution': 'bounded-resolved', 'identity': definition['id'],
+                              'translation_unit': facts['translation_unit'],
+                              'object': facts.get('input', {}).get('object'),
+                              'source': definition['source_span'], 'ownership': ownership}}
+    receiver_check = checked_receiver_authority(receiver_definitions)
 
     def compose_policy(container, members):
         policy = copy.deepcopy(container['attribute_policy'])
@@ -485,6 +1326,8 @@ def _normal_surface(raw, inputs, resolve, present, root):
                     member = attribute('__next__', framework[1]['id'], next_tests[0]['source_span'],
                                        ['iterator result contract unassessed'])
                     member.update(kind='function', callshape=next_shape, attribute_scope='instance')
+                    member['receiver_contract'] = _native_receiver_contract(
+                        container, next_shape, None, receiver_check, receiver_definitions, root)
                     framework_attributes.append(member)
                 else:
                     policy['unresolved'].append('generic iterator wrapper ownership ' + status)
@@ -591,7 +1434,8 @@ def _normal_surface(raw, inputs, resolve, present, root):
             if (helper != 'mp_arg_check_num' or len(args) != 5 or event.get('guards')
                     or callee.get('kind') != 'FUNCTION_DECL'
                     or callee.get('source_span', {}).get('source') != str(root / 'py/runtime.h')
-                    or direct_parameter(function, args[0]) != 1 or direct_parameter(function, args[1]) != 2):
+                    or direct_parameter(function.get('_semantic_function', function), args[0]) != 1
+                    or direct_parameter(function.get('_semantic_function', function), args[1]) != 2):
                 continue
             bounds = [constant(expression, function['constants']) for expression in args[2:]]
             if all(value is not None for value in bounds):
@@ -810,7 +1654,7 @@ def collect_inventory(*, database: Path, root: Path, build_dir: Path, port: str,
             for item in value:
                 normalize_names(item)
         elif isinstance(value, dict):
-            for field in ('name', 'export', 'alias_of', 'qstr'):
+            for field in ('name', 'export', 'alias_of', 'qstr', 'exported_argument'):
                 if isinstance(value.get(field), str):
                     encoded = value[field]
                     decoded = runtime_name(encoded)

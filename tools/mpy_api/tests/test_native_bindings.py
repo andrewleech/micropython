@@ -48,8 +48,7 @@ def linked_c(tmp_path, source, filename="fixture.c"):
     return facts, raw, resolve, present
 
 
-def parsed_definitions(source):
-    physical = "/fixture/declarations.c"
+def parsed_definitions(source, physical="/fixture/declarations.c"):
     origins = [(physical, line) for line in range(1, len(source.splitlines()) + 1)]
     declarations, functions, errors, frontend = syntax_adapter(
         source, origins, physical, {"dependencies": {physical: "fixture"}})
@@ -257,7 +256,8 @@ typedef struct { uint16_t qst, flags; mp_arg_val_t defval; } mp_arg_t;
 typedef struct { mp_obj_t key, value; } mp_map_elem_t;
 typedef struct { size_t used; mp_map_elem_t *table; } mp_map_t;
 #define MP_OBJ_NEW_QSTR(value) (((mp_obj_t)(value) << 3) | 2)
-#define MP_MAP_LOOKUP 0
+#define MP_ROM_QSTR(value) MP_OBJ_NEW_QSTR(value)
+enum { MP_MAP_LOOKUP = 0 };
 #define MICROPY_ERROR_REPORTING 0
 #define MICROPY_ERROR_REPORTING_TERSE 0
 mp_map_elem_t *mp_map_lookup(mp_map_t *, mp_obj_t, unsigned);
