@@ -128,11 +128,15 @@ Pattern scanners submit `runtime_frozen_python`, `host_and_example_python` and `
 
 Interfile staging also retains selected companion files in the supported groups, including native headers, without counting companions as directly assessed translation units.
 
-The policy directory owns `scanners.json` (`project` and `native-c` lists of rule paths or scanner registry URLs), `ruff.toml`, `typing.json` and `pysa/` models plus `taint.config`. Relative policy paths resolve from that directory. No application rules are bundled. For Pysa, `--executable` overrides `pyre`; `--pyrefly-executable` independently overrides its prerequisite.
+The policy directory owns `scanners.json` (`project` and `native-c` lists of rule paths or scanner registry URLs), `ruff.toml`, `typing.json` and application `pysa/` inputs. Relative policy paths resolve from that directory. No application rules are bundled. For Pysa, `--executable` overrides `pyre`; `--pyrefly-executable` independently overrides its prerequisite.
 
 Typing policy is `{"environments": [...]}`. Each object names `port`, `target`, `variant`, `directory`, `typeshed`, `python_version`, `python_platform`, `pyrefly_version`, `target_package`, `packages` and `provenance` including `firmware_version` and `source_revision`. Selection matches the exact `(port, target, variant)` tuple; duplicate tuples and absent selections fail. Multiple variants may share a real port without replacing its identity with a target key. Paths are relative to the policy directory; package pins and the selected target distribution are validated against installed metadata. A custom typeshed is mandatory; module stubs alone do not provide builtin coverage. **No Pyrefly release currently has an approved target-aware environment in this package. Pyrefly and Pysa therefore stop at the prerequisite, return `1` with `status: operation_failed`, and retain available prerequisite/version receipts instead of running normal analysis.** Pyrefly 1.3.2 is blocked for known bundled-typeshed fallback and bootstrap defects; other releases are blocked as unverified, not accepted by changing a pin. Typing coverage remains `incomplete`. No tool or stub mutation bypasses these blockers.
 
-The typing object can explicitly opt into `common_models` families `builtins`, `socket` and `execfile`. These declarations and their provenance are packaged with the tool; the consumer still owns `pysa/taint.config`, application extensions and acceptance policy. The runner passes selected common model directories alongside the external model directory and records their provenance. Select `execfile` only when that firmware enables it; no family selection proves builtin API fidelity or overrides a compatibility blocker.
+The typing object can explicitly opt into `common_models` families `input`, `eval_exec`, `socket` and `execfile`. `input` provides the `UserControlled` interactive input source and requires `MICROPY_PY_BUILTINS_INPUT`; `eval_exec` provides the `RemoteCodeExecution` eval/exec sinks and requires `MICROPY_PY_BUILTINS_EVAL_EXEC`. Socket payload sources and optional file-execution sinks remain independently selectable. Each receipt records source/signature provenance, required capabilities, provided kinds and `model_files` entries with the selected `models.pysa` byte SHA256. Typing receipts consume this common provenance authority. Select `execfile` only when that firmware enables it; no family selection or hash proves target API fidelity, evaluates firmware capabilities or overrides a compatibility blocker.
+
+`mpy_analysis.common_models.resolve_model_policy(policy_dir, families)` returns `model_paths`, `config_paths` and `common_model_provenance`. Paths are real `Path` objects: an existing application `policy_dir/pysa` directory comes first, followed by requested family directories in selection order. Config paths are recursive `*.config` files, sorted within each model directory and deduplicated by real path. At least one config and one `.pysa` must exist across all inputs; an application config with only shared model files is valid. No family is selected implicitly. Unknown names (including `builtins`), duplicate selections, invalid checked config structures and selected-kind mismatches raise `ValueError`; missing policy/config/model resources raise `FileNotFoundError`.
+
+Declarations combine across all discovered configs. Each selected provided source/sink kind must be declared on its matching side and occur on that side in at least one ordinary `rules` entry. App-owned kinds, model extensions, filters and unrelated engine settings remain engine-owned. `string_combine_rules` and `combined_source_rules` are preserved when ordinary participation suffices; if selected-kind validation needs these forms, the resolver fails naming the unsupported form. This check does not establish effective rule pairings, filter effects, source reachability, model signature validity or target completeness. Execution-only composition can use an explicit application source; its useful flows require actual engine qualification. Pysa runner composition occurs only after the unchanged typing compatibility gate and Pyrefly export; the production branch is not accepted without supported real-runner and missing-import admission evidence.
 
 Interfile and typing runs stage only selected sources. Frozen Python uses its import identity; other interfile inputs use `_roots/<root>/<path>`. Traversal, file/directory collisions and different physical files claiming the same destination fail rather than overwrite. SARIF source locations become actual source `file:` URIs, including external roots; Pysa JSON path fields become actual source paths. Rebasing matches exact source locations only, never message text, snippets or arbitrary string suffixes. Partial valid JSON reports are rebased even when the tool exits operationally unsuccessfully.
 
@@ -216,10 +220,10 @@ if not (stubs / "socket.pyi").is_file():
     raise SystemExit("Selected module-stub directory does not contain socket.pyi")
 fixtures = Path(os.environ["MPY_MODEL_CHECKOUT"]) / "tools/mpy_analysis/tests/fixtures/common_models"
 (work / "src").mkdir()
-(work / "policy").mkdir()
+(work / "policy/pysa").mkdir(parents=True)
 for name in ("flows.py", "transport.py"):
     shutil.copy2(fixtures / name, work / "src" / name)
-shutil.copy2(fixtures / "taint.config", work / "policy/taint.config")
+shutil.copy2(fixtures / "taint.config", work / "policy/pysa/taint.config")
 config = {
     "project-includes": [str(work / "src/**/*.py")],
     "search-path": [str(work / "src"), str(stubs)],
@@ -244,17 +248,18 @@ python3 - <<'PY'
 import os
 from pathlib import Path
 import subprocess
-from mpy_analysis.common_models import common_model_paths
+from mpy_analysis.common_models import resolve_model_policy
 
 work = Path(os.environ["MPY_MODEL_WORK"])
 command = ["pyre", "--noninteractive", "--dot-pyre-directory", str(work / ".pyre"), "analyze"]
-for path in [work / "policy", *common_model_paths(["builtins", "socket"])]:
+for path in resolve_model_policy(work / "policy", ["input", "eval_exec", "socket"])["model_paths"]:
     command.extend(["--taint-models-path", str(path)])
 command.extend(["--save-results-to", str(work / "results"), "--output-format", "json",
                 "--pyrefly-results", str(work / "pyrefly-pysa.json")])
 raise SystemExit(subprocess.run(command, cwd=work).returncode)
 PY
 python3 - <<'PY'
+from collections import Counter
 import json
 import os
 from pathlib import Path
@@ -263,10 +268,10 @@ work = Path(os.environ["MPY_MODEL_WORK"])
 fixtures = Path(os.environ["MPY_MODEL_CHECKOUT"]) / "tools/mpy_analysis/tests/fixtures/common_models"
 expectations = json.loads((fixtures / "expectations.json").read_text())
 issues = json.loads((work / "results/errors.json").read_text())
-observed = {(issue["define"], str(issue["code"])) for issue in issues}
-expected = {(item["callable"], item["rule"]) for item in expectations["positive"]}
+observed = Counter((issue["define"], str(issue["code"])) for issue in issues)
+expected = Counter((item["callable"], item["rule"]) for item in expectations["positive"])
 forbidden = {(item["callable"], item["rule"]) for item in expectations["negative"]}
-if observed != expected or observed & forbidden:
+if observed != expected or set(observed) & forbidden:
     raise SystemExit(f"Fixture findings differ: observed={sorted(observed)}, expected={sorted(expected)}")
 print(f"Matched {len(issues)} fixture issues; {len(forbidden)} negative selectors absent")
 PY

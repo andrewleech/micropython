@@ -683,13 +683,13 @@ def _run_types(
         if scanner == "pyrefly":
             return rc
         _validate_report(pysa_input, "json")
-        models = policy_dir / "pysa"
-        if (
-            not models.is_dir()
-            or not (models / "taint.config").is_file()
-            or not any(models.rglob("*.pysa"))
-        ):
-            raise FileNotFoundError(f"Pysa models/config missing: {models}")
+        from .common_models import resolve_model_policy
+
+        resolved_policy = resolve_model_policy(
+            policy_dir, prerequisites.get("common_models", [])
+        )
+        prerequisites["common_model_provenance"] = resolved_policy["common_model_provenance"]
+        _write_json(output_dir / "analysis-prerequisites.json", prerequisites)
         _write_json(
             work / ".pyre_configuration",
             {
@@ -705,8 +705,6 @@ def _run_types(
             "--dot-pyre-directory",
             str(work / ".pyre"),
             "analyze",
-            "--taint-models-path",
-            str(models),
             "--save-results-to",
             str(results),
             "--output-format",
@@ -714,12 +712,8 @@ def _run_types(
             "--pyrefly-results",
             str(pysa_input),
         ]
-        families = prerequisites.get("common_models", [])
-        if families:
-            from .common_models import common_model_paths
-
-            for model_path in common_model_paths(families):
-                command.extend(["--taint-models-path", str(model_path)])
+        for model_path in resolved_policy["model_paths"]:
+            command.extend(["--taint-models-path", str(model_path)])
         try:
             return _invoke(
                 command,

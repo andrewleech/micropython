@@ -2,7 +2,6 @@ import json
 
 import pytest
 
-from mpy_analysis.common_models import common_model_paths, common_model_provenance
 from mpy_analysis.typing_environment import load_typing_environment
 
 
@@ -39,7 +38,7 @@ def policy(
         "packages": packages,
         "target_package": target_package,
         "provenance": {"firmware_version": firmware, "source_revision": "fixture-source"},
-        "common_models": ["builtins", "socket"],
+        "common_models": ["input", "eval_exec", "socket"],
     }
     (tmp_path / "typing.json").write_text(json.dumps({"environments": [entry]}))
     return stubs, entry
@@ -58,10 +57,6 @@ def test_prerequisite_receipt_retains_bootstrap_and_fallback_blockers(tmp_path):
     assert any("Any = object()" in gap for gap in receipt["compatibility_blockers"])
     assert receipt["stub_files"]
     assert all(len(item["sha256"]) == 64 for item in receipt["stub_files"])
-    assert [item["family"] for item in receipt["common_model_provenance"]] == [
-        "builtins",
-        "socket",
-    ]
     config = environment.pyrefly_config(tmp_path / "sources")
     assert "typeshed-path = " + json.dumps(str(tmp_path / "stubs")) in config
     assert "skip-interpreter-query = true" in config
@@ -141,16 +136,6 @@ def test_non_object_environment_is_rejected(tmp_path):
     (tmp_path / "typing.json").write_text(json.dumps({"environments": ["stubs"]}))
     with pytest.raises(ValueError, match="explicit environment objects"):
         load(tmp_path)
-
-
-def test_common_models_are_opt_in_and_have_source_provenance():
-    assert common_model_paths([]) == []
-    assert common_model_paths(["execfile"])[0].name == "execfile"
-    assert common_model_provenance(["socket"])[0]["sanitizers"] == []
-    with pytest.raises(ValueError, match="selected from"):
-        common_model_paths(["unjustified-sanitizer"])
-    with pytest.raises(ValueError, match="more than once"):
-        common_model_paths(["builtins", "builtins"])
 
 
 def test_same_port_selects_exact_target_and_variant(tmp_path):
