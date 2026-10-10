@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mpy-api"
+version = "0.1.0"
+description = "Compiler-derived API inventory and declarations for MicroPython builds"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+dependencies = ["tree-sitter==0.25.2", "tree-sitter-c==0.24.1"]
+
+[project.scripts]
+mpy-api = "mpy_api.cli:main"
+
+[tool.setuptools]
+packages = ["mpy_api"]
+package-dir = {mpy_api = "."}
