@@ -79,6 +79,26 @@ def summary(output):
     return json.loads((output / "analysis-summary.json").read_text())
 
 
+def ruff_report(monkeypatch, results, *, invocations=(), uri_bases=None):
+    def invoke(command, **kwargs):
+        report = Path(command[command.index("--output-file") + 1])
+        run = {"results": results, "invocations": list(invocations)}
+        if uri_bases is not None:
+            run["originalUriBaseIds"] = uri_bases
+        report.write_text(json.dumps({"runs": [run]}))
+        return subprocess.CompletedProcess(command, 1, "", "")
+
+    monkeypatch.setattr(runner.subprocess, "run", invoke)
+
+
+def sarif_result(rule_id, artifact):
+    return {
+        "ruleId": rule_id,
+        "message": {"text": "diagnostic"},
+        "locations": [{"physicalLocation": {"artifactLocation": artifact}}],
+    }
+
+
 @pytest.mark.parametrize(
     "name", ["opengrep-stable", "opengrep-interfile-alpha", "semgrep-ce", "ruff-s"]
 )
@@ -606,7 +626,8 @@ def test_file_uri_conversion_preserves_platform_source_location(tmp_path):
     assert json.loads(report.read_text())["uri"] == source.as_uri()
 
 
-def test_rebase_failure_does_not_override_original_scanner_exit(tmp_path, monkeypatch):
+@pytest.mark.parametrize("name", ["ruff-s", "opengrep-interfile-alpha"])
+def test_rebase_failure_does_not_override_original_scanner_exit(tmp_path, monkeypatch, name):
     scope, policy, output, _ = inputs(tmp_path)
     scanner(monkeypatch, exit_code=2, findings=1)
 
@@ -614,56 +635,167 @@ def test_rebase_failure_does_not_override_original_scanner_exit(tmp_path, monkey
         raise ValueError("rebase failure")
 
     monkeypatch.setattr(runner, "_rebase_report_paths", broken)
-    assert runner.run("opengrep-interfile-alpha", scope, policy, output) == 1
+    assert runner.run(name, scope, policy, output) == 1
     result = summary(output)
     assert result["scanner_exit_code"] == 2
     assert "exit 2" in result["operation_error"]
     assert result["invocations"][0]["report_rebase_error"] == "rebase failure"
+    assert result["coverage_status"] == "not_assessed"
+    assert result["groups"]["runtime_frozen_python"]["unassessed"] == [
+        "repo/main.py",
+        "repo/companion.py",
+    ]
+
+
+@pytest.mark.parametrize("uri_form", ["path", "file-uri", "uri-base"])
+def test_ruff_syntax_gap_marks_physical_aliases_without_losing_valid_coverage(
+    tmp_path, monkeypatch, uri_form
+):
+    scope_path, policy, output, scope = inputs(
+        tmp_path,
+        {
+            "runtime_frozen_python": [
+                record("broken input.py", target="broken.py"),
+                record("broken input.py", target="pkg/broken.py"),
+                record("main.py"),
+                record("companion.py", target="companion.py"),
+            ],
+            "host_and_example_python": [
+                record("broken input.py", root="alias", target="host/broken.py")
+            ],
+        },
+    )
+    root = Path(scope["roots"]["repo"])
+    malformed = root / "broken input.py"
+    malformed.write_text("def broken(:\n")
+    (root / "main.py").write_text('eval("1")\n')
+    (root / "companion.py").write_text("value = 1\n")
+    scope["roots"]["alias"] = str(root)
+    scope_path.write_text(json.dumps(scope))
+    positive = sarif_result("S307", {"uri": (root / "main.py").as_uri()})
+
+    ruff_report(monkeypatch, [positive])
+    assert runner.run("ruff-s", scope_path, policy, output) == 0
+    assert summary(output)["coverage_status"] == "assessed"
+
+    if uri_form == "path":
+        artifact = {"uri": str(malformed)}
+    elif uri_form == "file-uri":
+        artifact = {"uri": malformed.as_uri()}
+    else:
+        artifact = {"uri": "broken%20input.py", "uriBaseId": "ROOT"}
+    syntax = sarif_result("invalid-syntax", artifact)
+    results = [syntax, syntax, positive]
+    ruff_report(
+        monkeypatch,
+        results,
+        uri_bases={"ROOT": {"uri": root.as_uri() + "/"}} if uri_form == "uri-base" else None,
+    )
+    assert runner.run("ruff-s", scope_path, policy, output) == 0
+    result = summary(output)
+    assert result["status"] == "findings"
+    assert result["scanner_exit_code"] == 1
+    assert result["findings_count"] == 3
+    assert result["coverage_status"] == "not_assessed"
+    assert result["groups"]["runtime_frozen_python"] == {
+        "selected": 4,
+        "submitted": 4,
+        "unassessed": ["repo/broken input.py", "repo/broken input.py"],
+        "status": "not_assessed",
+    }
+    assert result["groups"]["host_and_example_python"] == {
+        "selected": 1,
+        "submitted": 1,
+        "unassessed": ["alias/broken input.py"],
+        "status": "not_assessed",
+    }
+    report = json.loads((output / "ruff-s.sarif").read_text())
+    assert [entry["ruleId"] for entry in report["runs"][0]["results"]] == [
+        "invalid-syntax", "invalid-syntax", "S307"
+    ]
+    assert report["runs"][0]["results"][0]["locations"][0]["physicalLocation"][
+        "artifactLocation"
+    ] == {"uri": malformed.as_uri()}
 
 
 @pytest.mark.parametrize(
-    "notification",
+    "artifact",
     [
-        {"level": "warning", "message": {"text": "unable to parse selected input"}},
+        {"uri": "missing.py"},
+        {"uri": "https://example.invalid/main.py"},
+        {"uri": 1},
+        {},
+        None,
+    ],
+)
+def test_ruff_unmappable_syntax_location_leaves_whole_invocation_unassessed(
+    tmp_path, monkeypatch, artifact
+):
+    scope_path, policy, output, scope = inputs(tmp_path)
+    syntax = sarif_result("invalid-syntax", artifact)
+    if artifact is None:
+        syntax.pop("locations")
+    positive = sarif_result(
+        "S307", {"uri": (Path(scope["roots"]["repo"]) / "main.py").as_uri()}
+    )
+    ruff_report(monkeypatch, [syntax, positive])
+    assert runner.run("ruff-s", scope_path, policy, output) == 0
+    result = summary(output)
+    assert result["status"] == "findings"
+    assert result["scanner_exit_code"] == 1
+    assert result["findings_count"] == 2
+    assert result["coverage_status"] == "not_assessed"
+    assert result["groups"]["runtime_frozen_python"] == {
+        "selected": 2,
+        "submitted": 2,
+        "unassessed": ["repo/main.py", "repo/companion.py"],
+        "status": "not_assessed",
+    }
+
+
+@pytest.mark.parametrize(
+    "sarif_invocation",
+    [
         {
-            "level": "note",
-            "descriptor": {"id": "skipped-input"},
-            "message": {"text": "large file"},
+            "executionSuccessful": True,
+            "toolExecutionNotifications": [
+                {"level": "warning", "message": {"text": "unable to parse selected input"}}
+            ],
         },
+        {
+            "executionSuccessful": True,
+            "toolExecutionNotifications": [
+                {
+                    "level": "note",
+                    "descriptor": {"id": "skipped-input"},
+                    "message": {"text": "large file"},
+                }
+            ],
+        },
+        {"executionSuccessful": False},
     ],
 )
 def test_reported_execution_gap_preserves_findings_but_not_coverage(
-    tmp_path, monkeypatch, notification
+    tmp_path, monkeypatch, sarif_invocation
 ):
-    scope, policy, output, _ = inputs(tmp_path)
-
-    def invoke(command, **kwargs):
-        report = Path(command[command.index("--output-file") + 1])
-        report.write_text(
-            json.dumps(
-                {
-                    "runs": [
-                        {
-                            "results": [],
-                            "invocations": [
-                                {
-                                    "executionSuccessful": True,
-                                    "toolExecutionNotifications": [notification],
-                                }
-                            ],
-                        }
-                    ]
-                }
-            )
-        )
-        return subprocess.CompletedProcess(command, 0, "", "")
-
-    monkeypatch.setattr(runner.subprocess, "run", invoke)
-    assert runner.run("ruff-s", scope, policy, output) == 0
+    scope_path, policy, output, scope = inputs(tmp_path)
+    root = Path(scope["roots"]["repo"])
+    results = [
+        sarif_result("invalid-syntax", {"uri": (root / "main.py").as_uri()}),
+        sarif_result("S307", {"uri": (root / "companion.py").as_uri()}),
+    ]
+    ruff_report(monkeypatch, results, invocations=[sarif_invocation])
+    assert runner.run("ruff-s", scope_path, policy, output) == 0
     result = summary(output)
+    assert result["status"] == "findings"
+    assert result["findings_count"] == 2
     assert result["coverage_status"] == "not_assessed"
-    assert result["invocations"][0]["coverage_gaps"]
-    assert result["groups"]["runtime_frozen_python"]["submitted"] == 2
+    assert result["groups"]["runtime_frozen_python"] == {
+        "selected": 2,
+        "submitted": 2,
+        "unassessed": ["repo/main.py", "repo/companion.py"],
+        "status": "not_assessed",
+    }
 
 
 def test_pattern_json_skipped_file_cannot_be_called_assessed(tmp_path, monkeypatch):
