@@ -13,7 +13,14 @@ requires-python = ">=3.10"
 # code copied into an analysed repository; pinned so what it checks does not move between runs.
 # Its charset-normalizer extra gives it an encoding detector that needs no system library: without
 # one, reuse finds libmagic or refuses to start, and the build image has no libmagic.
-dependencies = ["compiledb==0.10.7", "reuse[charset-normalizer]==6.2.0"]
+dependencies = [
+    "compiledb==0.10.7",
+    "reuse[charset-normalizer]==6.2.0",
+    "license-expression>=30.4,<31",
+    "jsonschema[format]>=4.18,<5",
+    "referencing>=0.30,<1",
+    "tomli>=2; python_version < '3.11'",
+]
 
 # The analysed project calls these; it does not carry them. A project installs this package from
 # its MicroPython checkout and calls these entry points; it holds its own analysis policy.
