@@ -44,9 +44,9 @@ _Static_assert(MICROPY_MBOOT_MAX_ALT_SETTINGS <= MICROPY_MBOOT_USBD_MAX_ALT_SETT
     "region-layer alt-setting limit exceeds usbd descriptor buffer capacity");
 
 // The target build includes the TinyUSB headers.  The host test harness builds
-// with MBOOT_TESTS_FAKE_TUSB=1 and gets the minimum types and stubs from
+// with MICROPY_MBOOT_TEST_FAKE_TUSB=1 and gets the minimum types and stubs from
 // fake_tusb.h.
-#ifdef MBOOT_TESTS_FAKE_TUSB
+#ifdef MICROPY_MBOOT_TEST_FAKE_TUSB
 #include "fake_tusb.h"
 #else
 #include "tusb.h"

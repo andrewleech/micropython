@@ -229,10 +229,17 @@ int mboot_port_flash_dev_erase(uint8_t dev, uint32_t off, uint32_t len);
 int mboot_flash_internal_read(uint32_t off, void *dst, uint32_t len);
 int mboot_flash_internal_write(uint32_t off, const void *src, uint32_t len);
 int mboot_flash_internal_erase(uint32_t off, uint32_t len);
+// The fault-injection builds (MICROPY_MBOOT_TEST_FI) of an Arm port run both primitives from RAM,
+// which flash code reaches only with a long call.
+#if defined(MICROPY_MBOOT_TEST_FI) && defined(__arm__)
+#define MBOOT_PORT_FLASH_PRIM __attribute__((long_call))
+#else
+#define MBOOT_PORT_FLASH_PRIM
+#endif
 // Erases the sector that starts at device 0 offset off.
-int mboot_port_flash_erase_sector(uint32_t off);
+int mboot_port_flash_erase_sector(uint32_t off) MBOOT_PORT_FLASH_PRIM;
 // Programs one write unit of device 0 at offset off from w. The unit is erased.
-int mboot_port_flash_program_unit(uint32_t off, const uint32_t *w);
+int mboot_port_flash_program_unit(uint32_t off, const uint32_t *w) MBOOT_PORT_FLASH_PRIM;
 // Called before a read of device 0 that has to report ECC errors, so that no cache hides them.
 // Both primitives above leave the caches without stale flash content. 0 or a negative errno.
 int mboot_port_flash_cache_prepare(void);
@@ -282,5 +289,14 @@ uint32_t mboot_ecc_last_info(void);     // info of the last double error
 uint32_t mboot_port_ecc_events(void);   // count of ECC double-error events
 void     mboot_port_ecc_clear(void);    // consume a pending double-error flag
 uint32_t mboot_port_ecc_corrected(void);// count of "corrected" reads
+
+// ---- test hook (only if MICROPY_MBOOT_TEST_FI=1, never in release builds) ----
+// Called by flash_map_backend.c around every flash write and erase while the fault-injection
+// state in the last 16 bytes of the request region (MBOOT_REQ_START + MBOOT_FI_STATE_OFFSET,
+// see mboot_request.h) is armed. phase 0 = before the operation, phase 1 = after it completed.
+// The port reads its trigger from that state (the words magic, target, counter and mode) and may
+// abort via mboot_port_reset() or, for "during" cuts, start the operation and reset while the
+// controller is busy.
+void mboot_port_fi_hook(int op /*0 write,1 erase*/, uint8_t dev, uint32_t off, uint32_t len, int phase);
 
 #endif

@@ -12,8 +12,11 @@ on:
       - 'lib/uzlib/**'
       - 'lib/stm32lib'
       - 'ports/stm32/**'
+      - 'ports/unix/variants/mboot*/**'
+      - 'docs/library/index.rst'
+      - 'docs/library/mboot.rst'
       - 'shared/mboot/**'
-      - 'tests/mboot/keys/**'
+      - 'tests/mboot/**'
       - 'tools/ci.sh'
       - 'tools/mboot_*.py'
       - 'tools/pydfu.py'
@@ -23,14 +26,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  protocol:
+  host_tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        ci_func:  # names are functions in ci.sh
+          - mboot_python_test
+          - mboot_dfu_test
+          - mboot_host_core_test
+          - mboot_host_bootloader_test
+          - mboot_host_sweep_test
+          - mboot_fuzz_test
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
     - name: Install packages
       run: tools/ci.sh mboot_setup
-    - name: Check pydfu protocol
-      run: tools/ci.sh mboot_python_test
+    - name: Run ci_${{ matrix.ci_func }}
+      run: tools/ci.sh ${{ matrix.ci_func }}
+
+  unix_module:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install packages
+      run: tools/ci.sh mboot_setup
+    - name: Build Unix variants
+      run: tools/ci.sh mboot_unix_build
+    - name: Run module tests
+      run: tools/ci.sh mboot_unix_run_tests
+    - name: Print failures
+      if: failure()
+      run: tests/run-tests.py --print-failures
 
   stm32:
     strategy:

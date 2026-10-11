@@ -15,6 +15,8 @@ The optional :mod:`mboot` module provides access to update state and control fun
   (STM32H5, two slots with swap using offset) and PYBD_SF6 (STM32F7, one slot
   with the ``single`` policy).
 
+* The unix port's ``mboot`` and ``mboot_single`` variants, which keep flash in a file for module tests. They do not include a bootloader.
+
 The module is opt-in and off by default. It writes image data and update
 requests but does not verify signatures or hashes. The MCUboot bootloader validates an
 image before starting it, so an image written through this module is checked at

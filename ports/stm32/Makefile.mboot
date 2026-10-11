@@ -3,6 +3,7 @@
 #
 #   make -f Makefile.mboot BOARD=NUCLEO_H563ZI                  builds build-NUCLEO_H563ZI-mboot/firmware.{elf,bin,hex}
 #   make -f Makefile.mboot BOARD=NUCLEO_H563ZI PROBE=<serial> deploy-bootloader   programs the bootloader through pyocd
+#   make -f Makefile.mboot BOARD=NUCLEO_H563ZI MBOOT_TEST_FI=1  adds the fault-injection hook for the test campaigns (STM32H5 only)
 #
 # The board's mpconfigboard.h holds the MICROPY_*MBOOT_* settings (slot placement and the choices
 # listed in shared/mboot/include/mboot_layout.h), mboot_dev.h describes the flash. The clocks, pins,
@@ -87,6 +88,15 @@ SRC_C = \
 ifeq ($(MBOOT_SPIFLASH_ENABLE),1)
 SRC_C += drivers/bus/softspi.c drivers/bus/softqspi.c drivers/memory/spiflash.c \
 	qspi.c spibdev.c xspi.c $(wildcard $(BOARD_DIR)/*.c)
+endif
+
+# The fault-injection builds of the hardware tests program the flash with a register level driver
+# that can be reset inside the program pulse.
+ifeq ($(MBOOT_TEST_FI),1)
+ifneq ($(MCU_SERIES),h5)
+$(error MBOOT_TEST_FI=1 is implemented for STM32H5 only (tests/mboot/hw/fi_flash.c programs the STM32H5 flash controller), board $(BOARD) is MCU_SERIES=$(MCU_SERIES))
+endif
+SRC_C += tests/mboot/hw/fi_flash.c
 endif
 
 # The HAL: the tick, the clock, power and cache drivers of the clock configuration and the flash
