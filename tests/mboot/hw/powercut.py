@@ -44,7 +44,7 @@ cut unless the ST-LINK with the given serial number sits on exactly that port.
       --hub-bus 3 --hub-path 1 --hub-port 2 --tty /dev/serial/by-id/... --old-image old.hex \
       --new-image new.hex --scenario swap --trials 200 --window-ms 20:600 --out powercut.jsonl
 
---elf is the bootloader ELF built with MBOOT_TEST_FI=1 (see fi_sweep.py); --fi-addr can be given instead.
+--elf is the bootloader ELF built with MICROPY_MBOOT_TEST_FI=1 (see fi_sweep.py); --fi-addr can be given instead.
 """
 
 import argparse

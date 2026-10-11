@@ -23,7 +23,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-"""Flash operation trace lines of a MBOOT_TEST_FI bootloader.
+"""Flash operation trace lines of a MICROPY_MBOOT_TEST_FI bootloader.
 
 One line per flash write or erase, printed through the log sink before the
 operation (and before the fault-injection hook):

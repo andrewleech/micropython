@@ -29,5 +29,5 @@
 #define STM32H573xx
 #include "../../../../../ports/stm32/mboot_dev.h"
 
-#undef MBOOT_DEV0_ECC
-#define MBOOT_DEV0_ECC 0
+#undef MICROPY_HW_MBOOT_DEV0_ECC
+#define MICROPY_HW_MBOOT_DEV0_ECC 0

@@ -166,7 +166,7 @@ $(BUILD)/measure_cache: $(TEST_SRC) $(BOOTUTIL_SWAP_SRC) $(HERE)/harness/trace_w
 	$(CC) $(TEST_CFLAGS) $(MEASURE_FLAGS) $(filter %.c,$(TEST_SRC)) $(BOOTUTIL_SWAP_SRC) $(HERE)/harness/trace_wrap.c $(TEST_LDFLAGS) -o $@
 
 $(BUILD)/measure_nocache: $(TEST_SRC) $(BOOTUTIL_SWAP_SRC) $(HERE)/harness/trace_wrap.c $(BUILD)/testdata/cases.txt | $(BUILD)
-	$(CC) $(TEST_CFLAGS) $(MEASURE_FLAGS) -DMBOOT_FSLOAD_HEAD_CACHE=0 -DMBOOT_FSLOAD_TAIL_CACHE=0 \
+	$(CC) $(TEST_CFLAGS) $(MEASURE_FLAGS) -DMICROPY_MBOOT_FSLOAD_HEAD_CACHE=0 -DMICROPY_MBOOT_FSLOAD_TAIL_CACHE=0 \
 		$(filter %.c,$(TEST_SRC)) $(BOOTUTIL_SWAP_SRC) $(HERE)/harness/trace_wrap.c $(TEST_LDFLAGS) -o $@
 
 measure: $(BUILD)/measure_cache $(BUILD)/measure_nocache

@@ -29,9 +29,9 @@
 // Rollback protection is the security counter: with only a version check, an interrupted revert
 // looks like an upgrade to an older version and is refused, so the new image stays.
 
-#define MBOOT_PRIMARY_SIZE (0x40000)
-#define MBOOT_SECONDARY_ADDR (0x90080000)
-#define MBOOT_ROLLBACK_COUNTER (1)
-#define MBOOT_SWAP_MODE (MBOOT_SWAP_MODE_SEL_MOVE)
-#define MBOOT_DFU (0)
-#define MBOOT_TMPBUF_SZ (256)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (0x40000)
+#define MICROPY_HW_MBOOT_SECONDARY_ADDR (0x90080000)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (1)
+#define MICROPY_MBOOT_SWAP_MODE (MICROPY_MBOOT_SWAP_MODE_MOVE)
+#define MICROPY_MBOOT_DFU (0)
+#define MICROPY_MBOOT_TMPBUF_SZ (256)

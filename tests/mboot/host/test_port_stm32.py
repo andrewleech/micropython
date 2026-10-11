@@ -115,10 +115,10 @@ class LayoutAgreement(unittest.TestCase):
             with open(header) as f:
                 text = f.read()
             with open(header, "w") as f:
+                f.write(text)
                 f.write(
-                    re.sub(
-                        r"^(#define MBOOT_PRIMARY_SIZE\s+).*$", r"\1(0x40001)", text, flags=re.M
-                    )
+                    "\n#undef MICROPY_HW_MBOOT_PRIMARY_SIZE\n"
+                    "#define MICROPY_HW_MBOOT_PRIMARY_SIZE (0x40001)\n"
                 )
             for make in (BOOTLOADER_MAKE, ["make"]):
                 with self.subTest(makefile=" ".join(make)):
@@ -255,7 +255,10 @@ class F7Board(unittest.TestCase):
             header = os.path.join(board, "mpconfigboard.h")
             with open(header) as f:
                 text = f.read()
-            text = text.replace("(0x08040000)", "(0x08020000)")
+            text += (
+                "\n#undef MICROPY_HW_MBOOT_PRIMARY_ADDR\n"
+                "#define MICROPY_HW_MBOOT_PRIMARY_ADDR (0x08020000)\n"
+            )
             with open(header, "w") as f:
                 f.write(text)
             proc = subprocess.run(

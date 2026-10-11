@@ -26,7 +26,7 @@
 
 // test_usbd.c - tests for mboot_usbd.c (descriptors and USB callbacks).
 //
-// Built with MBOOT_TESTS_FAKE_TUSB=1 so mboot_usbd.c uses the fake_tusb.h stubs.
+// Built with MICROPY_MBOOT_TEST_FAKE_TUSB=1 so mboot_usbd.c uses the fake_tusb.h stubs.
 
 #include <stdint.h>
 #include <string.h>

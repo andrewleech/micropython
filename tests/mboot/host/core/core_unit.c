@@ -300,7 +300,7 @@ static void test_policy_areas(void) {
     #else
     CORE_CHECK(scratch == NULL);
     #endif
-    #if defined(MBOOT_INTENT_ADDR)
+    #if defined(MICROPY_HW_MBOOT_INTENT_ADDR)
     CORE_CHECK(intent != NULL && intent->fa_size == mboot_area_erase(intent));
     #else
     CORE_CHECK(intent == NULL);
@@ -1271,7 +1271,7 @@ static void test_request(void) {
     fi[1] = 5;
     int st = run_in_child(child_request_fsload);
     CORE_CHECK(st == CORE_EXIT_RESET);
-    CORE_CHECK(core_shared->retention == (MBOOT_RET_KEY | MBOOT_RET_FSLOAD) || MBOOT_RETENTION_BITS < 32);
+    CORE_CHECK(core_shared->retention == (MBOOT_RET_KEY | MBOOT_RET_FSLOAD) || MICROPY_HW_MBOOT_RETENTION_BITS < 32);
     mboot_request_take(&req, MBOOT_RESET_SOFT);
     CORE_CHECK(req.mode == MBOOT_REQ_FSLOAD && req.elems_len == sizeof(k_elems) && memcmp(req.elems, k_elems, sizeof(k_elems)) == 0);
     CORE_CHECK(req.magic == MBOOT_REQ_MAGIC && req.version == MBOOT_REQ_VERSION && req.seq >= 1);
@@ -1353,7 +1353,7 @@ static void test_request(void) {
     // A bare retention key with no request struct.
     core_shared->retention = MBOOT_RET_KEY | MBOOT_RET_FSLOAD;
     mboot_request_take(&req, MBOOT_RESET_SOFT);
-    #if MBOOT_RETENTION_BITS >= 32
+    #if MICROPY_HW_MBOOT_RETENTION_BITS >= 32
     CORE_CHECK(req.mode == MBOOT_REQ_DFU && req.elems_len == 0);
     #endif
     core_shared->retention = 0x70AD0000u ^ 0x00010000u;

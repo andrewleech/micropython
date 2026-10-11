@@ -392,7 +392,7 @@ static int test_68_dnload_status(int *failures) {
     setup();
     memset(s_data, 0x42, sizeof(s_data));
     // Past the end of the alt, and the maximum block number: errADDRESS, no flash access.
-    TEST_ASSERT_EQ(dnload_cb(0, (uint16_t)(A_SECTORS * SECT / MBOOT_DFU_XFER_SIZE), 64), DFU_STATUS_ERR_ADDRESS);
+    TEST_ASSERT_EQ(dnload_cb(0, (uint16_t)(A_SECTORS * SECT / MICROPY_MBOOT_DFU_XFER_SIZE), 64), DFU_STATUS_ERR_ADDRESS);
     TEST_ASSERT_EQ(dnload_cb(0, 65535, 64), DFU_STATUS_ERR_ADDRESS);
     TEST_ASSERT_EQ(th_begin_calls, 0u);
     // Read-only alt: errADDRESS, no hook.
@@ -401,7 +401,7 @@ static int test_68_dnload_status(int *failures) {
     TEST_ASSERT_EQ(fake_flash_total_erases(), 0u);
     TEST_ASSERT_EQ(fake_flash_total_writes(), 0u);
     // The last block inside the alt works.
-    TEST_ASSERT_EQ(dnload_cb(0, (uint16_t)(A_SECTORS * SECT / MBOOT_DFU_XFER_SIZE - 1), 64), DFU_STATUS_OK);
+    TEST_ASSERT_EQ(dnload_cb(0, (uint16_t)(A_SECTORS * SECT / MICROPY_MBOOT_DFU_XFER_SIZE - 1), 64), DFU_STATUS_OK);
     return 0;
 }
 
@@ -484,7 +484,7 @@ static int test_70_result_request(int *failures) {
 static int test_71_session_ends(int *failures) {
     setup();
     memset(s_data, 0x42, sizeof(s_data));
-    const uint16_t past_end = (uint16_t)(A_SECTORS * SECT / MBOOT_DFU_XFER_SIZE);
+    const uint16_t past_end = (uint16_t)(A_SECTORS * SECT / MICROPY_MBOOT_DFU_XFER_SIZE);
 
     TEST_ASSERT_EQ(dnload_cb(0, 0, 64), DFU_STATUS_OK);
     TEST_ASSERT(mboot_dfu_session_active());

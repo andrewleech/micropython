@@ -436,7 +436,7 @@ static int test_38_read_not_readable(int *failures) {
 // ---------------------------------------------------------------------------
 
 #define CAP_SECTOR (256u)
-#define CAP_HALF (MBOOT_DFU_MAX_SECTOR_COUNT / 2)
+#define CAP_HALF (MICROPY_MBOOT_DFU_MAX_SECTOR_COUNT / 2)
 
 static uint8_t s_buf_cap_a[CAP_SECTOR * CAP_HALF];
 static uint8_t s_buf_cap_b[CAP_SECTOR * (CAP_HALF + 1)];
@@ -476,7 +476,7 @@ static int cap_init(uint32_t count_b, size_t alts_expected, int *failures) {
 }
 
 static int test_39_init_group_sector_total(int *failures) {
-    // MBOOT_DFU_MAX_SECTOR_COUNT sectors in one alt setting is accepted.
+    // MICROPY_MBOOT_DFU_MAX_SECTOR_COUNT sectors in one alt setting is accepted.
     int rc = cap_init(CAP_HALF, 1, failures);
     TEST_ASSERT_EQ(rc, 0);
 

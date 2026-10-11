@@ -24,8 +24,8 @@
  * THE SOFTWARE.
  */
 
-// test_align.c - MBOOT_DFU_WRITE_ALIGN: DNLOAD blocks are padded with 0xFF up
-// to the write unit. Built as its own binary with -DMBOOT_DFU_WRITE_ALIGN=16.
+// test_align.c - MICROPY_HW_MBOOT_DFU_WRITE_ALIGN: DNLOAD blocks are padded with 0xFF up
+// to the write unit. Built as its own binary with -DMICROPY_HW_MBOOT_DFU_WRITE_ALIGN=16.
 
 #include <stdint.h>
 #include <string.h>
@@ -38,7 +38,7 @@
 #include "test_main.h"
 #include "test_regions_config.h"
 
-_Static_assert(MBOOT_DFU_WRITE_ALIGN == 16, "built with -DMBOOT_DFU_WRITE_ALIGN=16");
+_Static_assert(MICROPY_HW_MBOOT_DFU_WRITE_ALIGN == 16, "built with -DMICROPY_HW_MBOOT_DFU_WRITE_ALIGN=16");
 
 void test_fail(const char *file, int line, const char *expr) {
     printf("  FAIL %s:%d: %s\n", file, line, expr);

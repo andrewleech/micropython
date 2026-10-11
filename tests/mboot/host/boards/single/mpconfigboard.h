@@ -27,9 +27,9 @@
 // The plain flash with the single slot policy: one slot that an update overwrites in place, a security
 // counter in flash for the rollback protection and an intent area for fsload.
 
-#define MBOOT_PRIMARY_SIZE (0x80000)
-#define MBOOT_ROLLBACK_COUNTER (1)
-#define MBOOT_POLICY (MBOOT_POLICY_SEL_SINGLE)
-#define MBOOT_FSLOAD_FAT (1)
-#define MBOOT_DFU (0)
-#define MBOOT_TMPBUF_SZ (256)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (0x80000)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (1)
+#define MICROPY_MBOOT_UPDATE_MODE (MICROPY_MBOOT_UPDATE_MODE_SINGLE_SLOT)
+#define MICROPY_MBOOT_FSLOAD_FAT (1)
+#define MICROPY_MBOOT_DFU (0)
+#define MICROPY_MBOOT_TMPBUF_SZ (256)

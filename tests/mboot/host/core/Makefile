@@ -43,9 +43,9 @@ GEN_SRC := $(MBOOT_GEN_SRC_C)
 HOST_SRC := $(CURDIR)/core_test.c $(CURDIR)/core_port.c $(CURDIR)/core_unit.c $(TOP)/tests/mboot/host/fake_flash.c
 
 WARN := -Wall -Wextra -Wundef -Werror -Wno-unused-parameter -Wno-ignored-qualifiers
-CFLAGS := -std=gnu99 -O1 -g $(WARN) $(MBOOT_INC) $(MBOOT_CPP_FLAGS) $(MBOOT_CFLAGS) -DMBOOT_TEST_FI=1 \
+CFLAGS := -std=gnu99 -O1 -g $(WARN) $(MBOOT_INC) $(MBOOT_CPP_FLAGS) $(MBOOT_CFLAGS) -DMICROPY_MBOOT_TEST_FI=1 \
 	-I$(TOP)/tests/mboot/host -ffunction-sections -fdata-sections -MMD -MP $(EXTRA_CFLAGS)
-LIB_CFLAGS := -std=gnu99 -O1 -g -w $(MBOOT_INC) $(MBOOT_CPP_FLAGS) $(MBOOT_CFLAGS) -DMBOOT_TEST_FI=1 -ffunction-sections -fdata-sections -MMD -MP $(EXTRA_CFLAGS)
+LIB_CFLAGS := -std=gnu99 -O1 -g -w $(MBOOT_INC) $(MBOOT_CPP_FLAGS) $(MBOOT_CFLAGS) -DMICROPY_MBOOT_TEST_FI=1 -ffunction-sections -fdata-sections -MMD -MP $(EXTRA_CFLAGS)
 LDFLAGS := -Wl,--gc-sections
 ifdef SAN
 CFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer

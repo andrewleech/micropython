@@ -53,7 +53,7 @@
 
 // ---- fault injection (test builds only) ----
 
-#if defined(MBOOT_TEST_FI)
+#if defined(MICROPY_MBOOT_TEST_FI)
 
 #define FI_MAGIC 0x4A4E4946u    // bytes "FINJ"
 #define FI_MODE_TRACE (0x80u)   // bit 7 of the mode word: print every operation before the hook
@@ -86,7 +86,7 @@ static int fi_run(int op, uint8_t dev, uint32_t off, uint32_t len, const void *s
     return rc;
 }
 
-#endif // MBOOT_TEST_FI
+#endif // MICROPY_MBOOT_TEST_FI
 
 // ---- device access without ECC policy ----
 
@@ -123,7 +123,7 @@ int mboot_flash_raw_write(uint8_t dev, uint32_t off, const void *src, uint32_t l
     if (len == 0) {
         return 0;
     }
-    #if defined(MBOOT_TEST_FI)
+    #if defined(MICROPY_MBOOT_TEST_FI)
     return fi_run(0, dev, off, len, src);
     #else
     return mboot_port_flash_dev_write(dev, off, src, len);
@@ -141,7 +141,7 @@ int mboot_flash_raw_erase(uint8_t dev, uint32_t off, uint32_t len) {
     if (len == 0) {
         return 0;
     }
-    #if defined(MBOOT_TEST_FI)
+    #if defined(MICROPY_MBOOT_TEST_FI)
     return fi_run(1, dev, off, len, NULL);
     #else
     return mboot_port_flash_dev_erase(dev, off, len);

@@ -48,32 +48,32 @@
 // 16 byte write units, as on the NUCLEO-H563ZI. The slot policy comes from the
 // board: swap (using offset), overwrite-external, or single (no secondary slot,
 // the update goes to the primary slot).
-#if !defined(MBOOT_SECCNT_FLASH) || !defined(MBOOT_ECC_SHADOW) || MBOOT_DEV0_WRITE != 16 \
+#if !defined(MBOOT_SECCNT_FLASH) || !defined(MBOOT_ECC_SHADOW) || MICROPY_HW_MBOOT_DEV0_WRITE != 16 \
     || MBOOT_SECONDARY_DEV != 0 || !MBOOT_DFU_ENABLE || MBOOT_TRAILER_SECTORS != 1
 #error "the glue tests need device 0 with 16 byte writes, ECC, the counter area, one trailer sector and the DFU front end"
 #endif
 
-#define FK_BASE MBOOT_DEV0_BASE
+#define FK_BASE MICROPY_HW_MBOOT_DEV0_BASE
 #define FK_ES MBOOT_SLOT_UNIT
-#define FK_DEV_SIZE MBOOT_DEV0_SIZE
+#define FK_DEV_SIZE MICROPY_HW_MBOOT_DEV0_SIZE
 
 #define FK_OFF(addr) ((uint32_t)((addr) - FK_BASE))
 
 #define FK_BOOT_OFF 0u
-#define FK_BOOT_SIZE MBOOT_BOOT_SIZE
-#define FK_PRIMARY_OFF FK_OFF(MBOOT_PRIMARY_ADDR)
-#define FK_PRIMARY_SIZE MBOOT_PRIMARY_SIZE
-#define FK_LOG_OFF FK_OFF(MBOOT_LOG_ADDR)
+#define FK_BOOT_SIZE MICROPY_HW_MBOOT_BOOT_SIZE
+#define FK_PRIMARY_OFF FK_OFF(MICROPY_HW_MBOOT_PRIMARY_ADDR)
+#define FK_PRIMARY_SIZE MICROPY_HW_MBOOT_PRIMARY_SIZE
+#define FK_LOG_OFF FK_OFF(MICROPY_HW_MBOOT_LOG_ADDR)
 #define FK_LOG_SIZE MBOOT_LOG_SIZE
-#define FK_SECCNT_OFF FK_OFF(MBOOT_SECCNT_ADDR)
+#define FK_SECCNT_OFF FK_OFF(MICROPY_HW_MBOOT_SECCNT_ADDR)
 #define FK_SECCNT_SIZE MBOOT_SECCNT_SIZE
-#define FK_SHADOW_OFF FK_OFF(MBOOT_SHADOW_ADDR)
+#define FK_SHADOW_OFF FK_OFF(MICROPY_HW_MBOOT_SHADOW_ADDR)
 #define FK_SHADOW_SIZE MBOOT_SHADOW_SIZE
-#define FK_FS_OFF FK_OFF(MBOOT_FS_ADDR)
-#define FK_FS_SIZE MBOOT_FS_SIZE
+#define FK_FS_OFF FK_OFF(MICROPY_HW_MBOOT_FS_ADDR)
+#define FK_FS_SIZE MICROPY_HW_MBOOT_FS_SIZE
 
 // Write unit of the device.
-#define FK_WRITE MBOOT_DEV0_WRITE
+#define FK_WRITE MICROPY_HW_MBOOT_DEV0_WRITE
 
 #if MBOOT_POLICY_SINGLE
 // The only slot is the primary slot; there is no secondary area.
@@ -82,7 +82,7 @@
 #define FK_SPARE_SIZE 0u
 #define FK_IMAGE_OFF FK_PRIMARY_OFF
 #else
-#define FK_SECONDARY_OFF FK_OFF(MBOOT_SECONDARY_ADDR)
+#define FK_SECONDARY_OFF FK_OFF(MICROPY_HW_MBOOT_SECONDARY_ADDR)
 #define FK_SECONDARY_SIZE MBOOT_SECONDARY_SIZE
 // Spare sector at the start of the secondary slot (swap using offset).
 #define FK_SPARE_SIZE (MBOOT_UPDATE_SPARE)

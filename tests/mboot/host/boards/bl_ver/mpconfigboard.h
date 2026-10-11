@@ -28,5 +28,5 @@
 
 #include "../bl/mpconfigboard.h"
 
-#undef MBOOT_ROLLBACK_COUNTER
-#define MBOOT_ROLLBACK_COUNTER (0)
+#undef MICROPY_MBOOT_ROLLBACK_COUNTER
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (0)

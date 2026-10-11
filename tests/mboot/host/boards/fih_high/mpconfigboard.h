@@ -26,9 +26,9 @@
 
 // The plain flash with the high FIH profile (random delays from mboot_port_entropy_u8).
 
-#define MBOOT_PRIMARY_SIZE (0x40000)
-#define MBOOT_SECONDARY_ADDR (0x90080000)
-#define MBOOT_ROLLBACK_COUNTER (0)
-#define MBOOT_FIH_LEVEL (3)
-#define MBOOT_DFU (0)
-#define MBOOT_TMPBUF_SZ (256)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (0x40000)
+#define MICROPY_HW_MBOOT_SECONDARY_ADDR (0x90080000)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (0)
+#define MICROPY_MBOOT_FIH_LEVEL (3)
+#define MICROPY_MBOOT_DFU (0)
+#define MICROPY_MBOOT_TMPBUF_SZ (256)

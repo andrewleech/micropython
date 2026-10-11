@@ -26,8 +26,8 @@
 
 // A flash without ECC: 1 MiB, 4 KiB sectors, 8 byte write unit, version check, no DFU.
 
-#define MBOOT_PRIMARY_SIZE (0x40000)
-#define MBOOT_SECONDARY_ADDR (0x90080000)
-#define MBOOT_ROLLBACK_COUNTER (0)
-#define MBOOT_DFU (0)
-#define MBOOT_TMPBUF_SZ (256)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (0x40000)
+#define MICROPY_HW_MBOOT_SECONDARY_ADDR (0x90080000)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (0)
+#define MICROPY_MBOOT_DFU (0)
+#define MICROPY_MBOOT_TMPBUF_SZ (256)

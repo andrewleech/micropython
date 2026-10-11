@@ -30,5 +30,5 @@
 
 #include "../spi/mpconfigboard.h"
 
-#undef MBOOT_PRIMARY_SIZE
-#define MBOOT_PRIMARY_SIZE (1536 * 1024)
+#undef MICROPY_HW_MBOOT_PRIMARY_SIZE
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (1536 * 1024)

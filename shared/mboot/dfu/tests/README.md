@@ -26,8 +26,8 @@ make -C shared/mboot/dfu/tests clean
 | Name | Description |
 |------|-------------|
 | test_1_dnload_eot | Zero-length DNLOAD returns 0 and does not touch flash |
-| test_2_dnload_too_large | DNLOAD with wLength > MBOOT_DFU_XFER_SIZE returns negative and does not touch flash |
-| test_3_dnload_padding | DNLOAD length that is not a multiple of 4 is padded with 0xFF (default MBOOT_DFU_WRITE_ALIGN) |
+| test_2_dnload_too_large | DNLOAD with wLength > MICROPY_MBOOT_DFU_XFER_SIZE returns negative and does not touch flash |
+| test_3_dnload_padding | DNLOAD length that is not a multiple of 4 is padded with 0xFF (default MICROPY_HW_MBOOT_DFU_WRITE_ALIGN) |
 | test_4_implicit_erase | 4 sequential writes across 2 sectors give 2 erase calls |
 | test_5_notify_set_interface | notify_set_interface clears the bitmap, so the same sector is erased again |
 | test_6_mixed_sector_sizes_dnload | One alt of 4 x 4 KiB + 2 x 8 KiB regions: a sector of the second region is erased although a sector of the first at the same offset index is touched |
@@ -60,7 +60,7 @@ make -C shared/mboot/dfu/tests clean
 | test_36_init_gap_rejected | A gap between same-name regions is rejected |
 | test_37_multi_region_fold | Two adjacent same-name regions fold into one alt, with comma-separated geometry runs and the 'M' unit in the alt string |
 | test_38_read_not_readable | mboot_region_read on a region without READABLE fails |
-| test_39_init_group_sector_total | Two folded regions totalling MBOOT_DFU_MAX_SECTOR_COUNT sectors are accepted; one sector more is rejected |
+| test_39_init_group_sector_total | Two folded regions totalling MICROPY_MBOOT_DFU_MAX_SECTOR_COUNT sectors are accepted; one sector more is rejected |
 | test_40_sector_index_mixed | mboot_region_sector_index numbers sectors across regions with different sector sizes and refuses addresses outside the alt |
 
 ### test_elem.c - element stream (TLV) parser
@@ -77,7 +77,7 @@ make -C shared/mboot/dfu/tests clean
 
 ### test_usbd.c - descriptors and USB callbacks
 
-Built with `MBOOT_TESTS_FAKE_TUSB=1`, so `mboot_usbd.c` includes `fake_tusb.h` instead of the TinyUSB headers. `fake_tusb.{c,h}` has the few types `mboot_usbd.c` needs and recording stubs for `tud_control_xfer`, `tud_control_status` and `tud_dfu_finish_flashing`, plus `tud_mounted`.
+Built with `MICROPY_MBOOT_TEST_FAKE_TUSB=1`, so `mboot_usbd.c` includes `fake_tusb.h` instead of the TinyUSB headers. `fake_tusb.{c,h}` has the few types `mboot_usbd.c` needs and recording stubs for `tud_control_xfer`, `tud_control_status` and `tud_dfu_finish_flashing`, plus `tud_mounted`.
 
 | Name | Description |
 |------|-------------|
@@ -116,9 +116,9 @@ The `mboot_hook_*` functions record their calls and return configurable values. 
 | test_71_session_ends | A failed block, a rejected manifest and a bus reset each end the session; the next block runs the begin hook and erases again |
 | test_72_bus_reset_is_polled | A bus reset is seen by polling mboot_usbd_leave_requested() through tud_mounted(); it requests the leave only after a successful manifest |
 
-### test_align.c - MBOOT_DFU_WRITE_ALIGN (separate binary)
+### test_align.c - MICROPY_HW_MBOOT_DFU_WRITE_ALIGN (separate binary)
 
-Built as `test_runner_align` with `-DMBOOT_DFU_WRITE_ALIGN=16` (it defines its own `mboot_hook_session_begin`). DNLOAD blocks are padded with 0xFF to 16 bytes and consecutive blocks stay aligned.
+Built as `test_runner_align` with `-DMICROPY_HW_MBOOT_DFU_WRITE_ALIGN=16` (it defines its own `mboot_hook_session_begin`). DNLOAD blocks are padded with 0xFF to 16 bytes and consecutive blocks stay aligned.
 
 ### glue/test_glue.c - shared/mboot/src/dfu_glue.c
 
@@ -168,7 +168,7 @@ Tests call `TEST_REGIONS_SET(array, count)` (from `test_regions_config.h`) to in
 Lines the host tests do not reach:
 
 - `block_to_addr()` overflow path (`result < base`). The region bounds check rejects the block before `base + wBlockNum * XFER_SIZE` can overflow a 32-bit address.
-- `bitmap_set()` guard `sector_idx < MBOOT_DFU_MAX_SECTOR_COUNT`. `mboot_region_init()` already rejects an alt setting with more sectors than that.
+- `bitmap_set()` guard `sector_idx < MICROPY_MBOOT_DFU_MAX_SECTOR_COUNT`. `mboot_region_init()` already rejects an alt setting with more sectors than that.
 - `mboot_region_init()` check for `s_regions == NULL` after `mboot_port_get_regions()`. The test version never returns NULL.
 
 A real bus reset after a manifest is not modelled on the host. The stubs fake it with `fake_tusb_mounted` (`test_72_bus_reset_is_polled`, `test_g17_manifest_accepted_and_leave`); `tests/mboot/hw/dfu_confine.py` and `tests/mboot/dfu_raw.py` do it against a board.

@@ -52,9 +52,9 @@ endif
 
 WARN := -Wall -Wextra -Werror -Wno-unused-parameter
 INC := -I$(CURDIR)/include -I$(HOST)/spi_nor/include -I$(TOP) -I$(HOST) -I$(MBOOT_TESTS) $(MBOOT_INC)
-CFLAGS := -std=gnu99 -O1 -g $(WARN) $(INC) $(MBOOT_CPP_FLAGS) $(MBOOT_CFLAGS) -DMBOOT_TESTS_FAKE_TUSB=1 \
+CFLAGS := -std=gnu99 -O1 -g $(WARN) $(INC) $(MBOOT_CPP_FLAGS) $(MBOOT_CFLAGS) -DMICROPY_MBOOT_TEST_FAKE_TUSB=1 \
 	-DFAKE_FLASH_NO_PORT=1 -ffunction-sections -fdata-sections -MMD -MP $(EXTRA_CFLAGS)
-LIB_CFLAGS := -std=gnu99 -O1 -g -w $(INC) $(MBOOT_CPP_FLAGS) $(MBOOT_CFLAGS) -DMBOOT_TESTS_FAKE_TUSB=1 \
+LIB_CFLAGS := -std=gnu99 -O1 -g -w $(INC) $(MBOOT_CPP_FLAGS) $(MBOOT_CFLAGS) -DMICROPY_MBOOT_TEST_FAKE_TUSB=1 \
 	-ffunction-sections -fdata-sections -MMD -MP $(EXTRA_CFLAGS)
 LDFLAGS := -Wl,--gc-sections -Wl,--wrap=mboot_dfu_recovery_run
 ifdef SAN

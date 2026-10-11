@@ -30,7 +30,7 @@
 // fake_tusb.h - minimal TinyUSB surface for the mboot_usbd host test build.
 //
 // mboot_usbd.c includes this instead of the TinyUSB headers when
-// MBOOT_TESTS_FAKE_TUSB=1. It has just the types and stubs mboot_usbd.c uses.
+// MICROPY_MBOOT_TEST_FAKE_TUSB=1. It has just the types and stubs mboot_usbd.c uses.
 // mboot_usbd.c compiles against either set.
 //
 // The tud_control_xfer, tud_control_status and tud_dfu_finish_flashing stubs

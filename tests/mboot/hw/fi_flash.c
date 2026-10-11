@@ -24,7 +24,7 @@
  * THE SOFTWARE.
  */
 
-// Register level flash driver of the fault-injection builds of the bootloader (MBOOT_TEST_FI,
+// Register level flash driver of the fault-injection builds of the bootloader (MICROPY_MBOOT_TEST_FI,
 // used by the hardware campaigns in this directory). It replaces the two controller primitives
 // of ports/stm32/mboot_port.c with versions that execute from RAM, so the CPU is not held
 // while the flash works and a software reset can land inside the program pulse of a flash word,

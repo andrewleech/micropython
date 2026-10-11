@@ -25,7 +25,7 @@
  */
 
 // Host test of the two optional port hooks that the core harness boards do not use: the
-// security counter backend of the port (MBOOT_SECCNT_PORT, security_cnt.c over
+// security counter backend of the port (MICROPY_MBOOT_SECCNT_PORT, security_cnt.c over
 // mboot_port_seccnt_*) and the entropy source of the high FIH profile (fih_delay_rng.c over
 // mboot_port_entropy_u8). The port side is a counter variable with a limited number of
 // increments, like fuses, and a fixed byte sequence.
@@ -40,7 +40,7 @@
 #include "bootutil/security_cnt.h"
 #include "mboot_port.h"
 
-#if !defined(MBOOT_SECCNT_PORT) || !defined(MCUBOOT_HW_ROLLBACK_PROT_LOCK) || !defined(MCUBOOT_HW_ROLLBACK_PROT_COUNTER_LIMITED) \
+#if !MICROPY_MBOOT_SECCNT_PORT || !defined(MCUBOOT_HW_ROLLBACK_PROT_LOCK) || !defined(MCUBOOT_HW_ROLLBACK_PROT_COUNTER_LIMITED) \
     || !defined(MCUBOOT_FIH_PROFILE_HIGH)
 #error "this test is built for a board with the port security counter and the high FIH profile"
 #endif

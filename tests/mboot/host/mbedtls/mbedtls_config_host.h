@@ -27,7 +27,7 @@
 #ifndef MICROPY_INCLUDED_TESTS_MBOOT_HOST_MBEDTLS_MBEDTLS_CONFIG_HOST_H
 #define MICROPY_INCLUDED_TESTS_MBOOT_HOST_MBEDTLS_MBEDTLS_CONFIG_HOST_H
 
-// The Mbed TLS configuration of the host build with MBOOT_CRYPTO_SEL_MBEDTLS: what bootutil
+// The Mbed TLS configuration of the host build with MICROPY_MBOOT_CRYPTO_MBEDTLS: what bootutil
 // uses to verify an ECDSA P-256 signature over a SHA-256 hash, and nothing else.
 
 #define MBEDTLS_SHA256_C

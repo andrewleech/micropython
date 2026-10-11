@@ -222,13 +222,14 @@ int mboot_port_flash_dev_erase(uint8_t dev, uint32_t off, uint32_t len);
 int mboot_flash_internal_read(uint32_t off, void *dst, uint32_t len);
 int mboot_flash_internal_write(uint32_t off, const void *src, uint32_t len);
 int mboot_flash_internal_erase(uint32_t off, uint32_t len);
-// Erases the sector that starts at device 0 offset off. The fault-injection builds (MBOOT_TEST_FI)
-// run both primitives from RAM, which flash code reaches only with a long call.
-#if defined(MBOOT_TEST_FI)
+// The fault-injection builds (MICROPY_MBOOT_TEST_FI) of an Arm port run both primitives from RAM,
+// which flash code reaches only with a long call.
+#if defined(MICROPY_MBOOT_TEST_FI) && defined(__arm__)
 #define MBOOT_PORT_FLASH_PRIM __attribute__((long_call))
 #else
 #define MBOOT_PORT_FLASH_PRIM
 #endif
+// Erases the sector that starts at device 0 offset off.
 int mboot_port_flash_erase_sector(uint32_t off) MBOOT_PORT_FLASH_PRIM;
 // Programs one write unit of device 0 at offset off from w. The unit is erased.
 int mboot_port_flash_program_unit(uint32_t off, const uint32_t *w) MBOOT_PORT_FLASH_PRIM;
@@ -282,7 +283,7 @@ uint32_t mboot_port_ecc_events(void);   // count of ECC double-error events
 void     mboot_port_ecc_clear(void);    // consume a pending double-error flag
 uint32_t mboot_port_ecc_corrected(void);// count of "corrected" reads
 
-// ---- test hook (only if MBOOT_TEST_FI=1, never in release builds) ----
+// ---- test hook (only if MICROPY_MBOOT_TEST_FI=1, never in release builds) ----
 // Called by flash_map_backend.c around every flash write and erase while the fault-injection
 // state in the last 16 bytes of the request region (MBOOT_REQ_START + MBOOT_FI_STATE_OFFSET,
 // see mboot_request.h) is armed. phase 0 = before the operation, phase 1 = after it completed.

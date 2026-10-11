@@ -7,17 +7,17 @@ SRCS_COMMON = ../core/mboot_dfu.c ../core/mboot_region.c \
 SRCS_SUPPORT = fake_flash.c fake_transport.c test_regions_config.c
 SRCS_TESTS = test_main.c test_dfu.c test_region.c test_elem.c test_vendor.c test_hooks.c
 
-# mboot_usbd.c is built with MBOOT_TESTS_FAKE_TUSB=1 so it picks up the
+# mboot_usbd.c is built with MICROPY_MBOOT_TEST_FAKE_TUSB=1 so it picks up the
 # fake_tusb.h stubs instead of the TinyUSB headers. No submodule needed.
 SRCS_USBD = ../core/mboot_usbd.c fake_tusb.c test_usbd.c
 
 test_runner: $(SRCS_COMMON) $(SRCS_SUPPORT) $(SRCS_TESTS) $(SRCS_USBD)
-	$(CC) $(CFLAGS) -DMBOOT_TESTS_FAKE_TUSB=1 -o $@ $^
+	$(CC) $(CFLAGS) -DMICROPY_MBOOT_TEST_FAKE_TUSB=1 -o $@ $^
 
-# Write unit of 16 bytes (MBOOT_DFU_WRITE_ALIGN) instead of the default 4.
+# Write unit of 16 bytes (MICROPY_HW_MBOOT_DFU_WRITE_ALIGN) instead of the default 4.
 test_runner_align: ../core/mboot_dfu.c ../core/mboot_region.c fake_flash.c \
                    fake_transport.c test_regions_config.c test_align.c
-	$(CC) $(CFLAGS) -DMBOOT_DFU_WRITE_ALIGN=16 -o $@ $^
+	$(CC) $(CFLAGS) -DMICROPY_HW_MBOOT_DFU_WRITE_ALIGN=16 -o $@ $^
 
 # The core on its own: nothing here needs shared/mboot.
 check_core: test_runner test_runner_align

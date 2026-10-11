@@ -27,8 +27,8 @@
 // Host test configuration: an 8 MiB flash with 4 KiB sectors and a 4 byte write unit, FAT for
 // fsload.
 
-#define MBOOT_PRIMARY_SIZE (0x1B0000)
-#define MBOOT_SECONDARY_ADDR (0x60200000)
-#define MBOOT_ROLLBACK_COUNTER (0)
-#define MBOOT_DFU_PID (0xDFA7)
-#define MBOOT_FSLOAD_FAT (1)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (0x1B0000)
+#define MICROPY_HW_MBOOT_SECONDARY_ADDR (0x60200000)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (0)
+#define MICROPY_HW_MBOOT_DFU_PID (0xDFA7)
+#define MICROPY_MBOOT_FSLOAD_FAT (1)

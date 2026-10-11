@@ -27,11 +27,11 @@
 // Host test configuration: a 1 MiB flash with 4 KiB sectors and a 4 byte write unit, a 0x200 byte
 // image header and littlefs2 for fsload.
 
-#define MBOOT_PRIMARY_SIZE (0x60000)
-#define MBOOT_SECONDARY_ADDR (0x80000)
-#define MBOOT_ROLLBACK_COUNTER (0)
-#define MBOOT_HEADER_SIZE (0x200)
-#define MBOOT_TMPBUF_SZ (1024)
-#define MBOOT_DFU_PID (0xDFA6)
-#define MBOOT_FSLOAD_LFS2 (1)
-#define MBOOT_LOG_LEVEL (0)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (0x60000)
+#define MICROPY_HW_MBOOT_SECONDARY_ADDR (0x80000)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (0)
+#define MICROPY_MBOOT_HEADER_SIZE (0x200)
+#define MICROPY_MBOOT_TMPBUF_SZ (1024)
+#define MICROPY_HW_MBOOT_DFU_PID (0xDFA6)
+#define MICROPY_MBOOT_FSLOAD_LFS2 (1)
+#define MICROPY_MBOOT_LOG_LEVEL (0)

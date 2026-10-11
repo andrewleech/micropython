@@ -29,10 +29,10 @@
 // unit in front of the update image), which fills the 256 KiB run. The largest image is two
 // sectors, 512 KiB. The update audit log is in the 32 KiB sectors.
 
-#define MBOOT_PRIMARY_ADDR (0x08040000)
-#define MBOOT_PRIMARY_SIZE (3 * 0x40000)
-#define MBOOT_SECONDARY_ADDR (0x08100000)
-#define MBOOT_LOG_ADDR (0x08010000)
-#define MBOOT_ROLLBACK_COUNTER (0)
-#define MBOOT_FS_ADDR (0x80000000)
-#define MBOOT_FS_SIZE (2 * 1024 * 1024)
+#define MICROPY_HW_MBOOT_PRIMARY_ADDR (0x08040000)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (3 * 0x40000)
+#define MICROPY_HW_MBOOT_SECONDARY_ADDR (0x08100000)
+#define MICROPY_HW_MBOOT_LOG_ADDR (0x08010000)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (0)
+#define MICROPY_HW_MBOOT_FS_ADDR (0x80000000)
+#define MICROPY_HW_MBOOT_FS_SIZE (2 * 1024 * 1024)

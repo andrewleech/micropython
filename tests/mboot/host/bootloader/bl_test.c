@@ -282,7 +282,7 @@ static uint32_t put_file(const char *name) {
     return put_volume(name, ".fat");
 }
 
-#if defined(MBOOT_FSLOAD_RAW)
+#if MICROPY_MBOOT_FSLOAD_RAW
 // The file itself in the raw window at file_off() of the SPI flash. Returns the length of the
 // window, the file rounded up to the erase unit.
 static uint32_t put_raw(const blob_t *img, uint32_t off) {
@@ -533,7 +533,7 @@ static bool app_request_fsload(const char *name) {
     return request_reset();
 }
 
-#if defined(MBOOT_FSLOAD_GZIP)
+#if MICROPY_MBOOT_FSLOAD_GZIP
 // The FAT volume that holds the gzip compressed named variant as /update.bin.
 static bool app_request_fsload_gz(const char *name) {
     build_fsload(put_volume(name, ".gz.fat"));
@@ -541,7 +541,7 @@ static bool app_request_fsload_gz(const char *name) {
 }
 #endif
 
-#if defined(MBOOT_FSLOAD_RAW)
+#if MICROPY_MBOOT_FSLOAD_RAW
 // MOUNT of the raw window [base, base + len), with a second window [base2, base2 + len2) when
 // len2 is not 0 (the 18 byte form), and FSLOAD of a path that is ignored, then END.
 static void build_fsload_raw(uint32_t base, uint32_t len, uint32_t base2, uint32_t len2) {
@@ -731,7 +731,7 @@ static void test_dfu_trailer_forged(void) {
     CHECK(in_dfu(&r));
     CHECK(r.out.dfu.block_status == DFU_STATUS_ERR_ADDRESS);
     // The blocks of the image area were accepted, the first block of the trailer was refused.
-    CHECK(r.out.dfu.blocks_sent == (trailer_off - spare) / MBOOT_DFU_XFER_SIZE + 1);
+    CHECK(r.out.dfu.blocks_sent == (trailer_off - spare) / MICROPY_MBOOT_DFU_XFER_SIZE + 1);
     CHECK(is_erased(sec->fa_device_id, sec->fa_off + trailer_off, sec->fa_size - trailer_off));
 
     r = boot();
@@ -939,7 +939,7 @@ static void test_fsload_rejections(void) {
     }
 }
 
-#if defined(MBOOT_FSLOAD_RAW)
+#if MICROPY_MBOOT_FSLOAD_RAW
 // The same files from a raw window of the SPI flash.
 static void test_fsload_raw_rejections(void) {
     printf("negative images through fsload (raw window)\n");
@@ -981,7 +981,7 @@ static void test_fsload_raw_windows(void) {
 }
 #endif
 
-#if defined(MBOOT_FSLOAD_GZIP)
+#if MICROPY_MBOOT_FSLOAD_GZIP
 // The same files, compressed, in a FAT volume: the reader finds the gzip magic and inflates.
 static void test_fsload_gz_rejections(void) {
     printf("negative images through fsload (gzip)\n");
@@ -1026,7 +1026,7 @@ static void test_fsload_good(void) {
     expect_fsload_installed();
 }
 
-#if defined(MBOOT_FSLOAD_RAW)
+#if MICROPY_MBOOT_FSLOAD_RAW
 static void test_fsload_raw_good(void) {
     printf("good image through fsload (raw window)\n");
     settled_primary(&v1_initial, 1);
@@ -1052,7 +1052,7 @@ static void test_fsload_raw_two_windows(void) {
 }
 #endif
 
-#if defined(MBOOT_FSLOAD_GZIP)
+#if MICROPY_MBOOT_FSLOAD_GZIP
 static void test_fsload_gz_good(void) {
     printf("good image through fsload (gzip)\n");
     settled_primary(&v1_initial, 1);
@@ -1499,7 +1499,7 @@ static void test_single_region(void) {
     memcpy(big.data, v2.data, v2.len);
     run_t r = dfu_session(&big, 0, false);
     CHECK(r.out.dfu.block_status == DFU_STATUS_OK);
-    CHECK(r.out.dfu.blocks_sent == (pri->fa_size + MBOOT_DFU_XFER_SIZE - 1) / MBOOT_DFU_XFER_SIZE);
+    CHECK(r.out.dfu.blocks_sent == (pri->fa_size + MICROPY_MBOOT_DFU_XFER_SIZE - 1) / MICROPY_MBOOT_DFU_XFER_SIZE);
     CHECK(r.out.dfu.manifest_status == DFU_STATUS_OK);
     r = boot();
     CHECK(jumped_to(&r, 2));
@@ -2035,13 +2035,13 @@ static const test_t tests[] = {
     #endif
     {"fsload", test_fsload_rejections},
     {"fsload_good", test_fsload_good},
-    #if defined(MBOOT_FSLOAD_RAW)
+    #if MICROPY_MBOOT_FSLOAD_RAW
     {"fsload_raw", test_fsload_raw_rejections},
     {"fsload_raw_windows", test_fsload_raw_windows},
     {"fsload_raw_good", test_fsload_raw_good},
     {"fsload_raw_two", test_fsload_raw_two_windows},
     #endif
-    #if defined(MBOOT_FSLOAD_GZIP)
+    #if MICROPY_MBOOT_FSLOAD_GZIP
     {"fsload_gz", test_fsload_gz_rejections},
     {"fsload_gz_good", test_fsload_gz_good},
     #endif

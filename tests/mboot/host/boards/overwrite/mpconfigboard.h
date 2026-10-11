@@ -27,9 +27,9 @@
 // The plain flash with the overwrite-external policy: two slots of equal size, the update is copied
 // over the primary slot and cannot be reverted.
 
-#define MBOOT_PRIMARY_SIZE (0x40000)
-#define MBOOT_SECONDARY_ADDR (0x90080000)
-#define MBOOT_ROLLBACK_COUNTER (1)
-#define MBOOT_POLICY (MBOOT_POLICY_SEL_OVERWRITE_EXTERNAL)
-#define MBOOT_DFU (0)
-#define MBOOT_TMPBUF_SZ (256)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (0x40000)
+#define MICROPY_HW_MBOOT_SECONDARY_ADDR (0x90080000)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (1)
+#define MICROPY_MBOOT_UPDATE_MODE (MICROPY_MBOOT_UPDATE_MODE_OVERWRITE)
+#define MICROPY_MBOOT_DFU (0)
+#define MICROPY_MBOOT_TMPBUF_SZ (256)

@@ -25,7 +25,7 @@
 
 """Hardware power-cut sweep with deterministic "reset at operation N".
 
-The bootloader and the app are built with MBOOT_TEST_FI=1. The 16 bytes at
+The bootloader and the app are built with MICROPY_MBOOT_TEST_FI=1. The 16 bytes at
 mboot_req_start + 0x3F0 (the linker symbol of the request region) hold
 { magic 0x4A4E4946, target, counter, mode }. The backend increments counter before every
 flash write and erase and the port hook resets the device when counter == target:
@@ -126,7 +126,7 @@ def add_fi_arguments(ap):
     group = ap.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "--elf",
-        help="ELF of the bootloader (built with MBOOT_TEST_FI=1); the fault injection state "
+        help="ELF of the bootloader (built with MICROPY_MBOOT_TEST_FI=1); the fault injection state "
         "is at its symbol %s + 0x%X" % (REQ_SYMBOL, FI_OFFSET),
     )
     group.add_argument(

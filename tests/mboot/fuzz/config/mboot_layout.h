@@ -43,7 +43,7 @@
 #define MCUBOOT_IMAGE_NUMBER 1
 #define MCUBOOT_BOOT_MAX_ALIGN 16
 #define MCUBOOT_BOOT_TMPBUF_SZ 256
-#define MBOOT_HEADER_SIZE 0x400
+#define MICROPY_MBOOT_HEADER_SIZE 0x400
 #define MCUBOOT_HAVE_ASSERT_H 1
 #define MCUBOOT_HAVE_LOGGING 1
 #ifndef MCUBOOT_LOG_LEVEL
@@ -55,7 +55,7 @@
 // and 16 byte write units), or for single the slot minus its 80 byte trailer reservation. Swap
 // using offset takes no image of one sector or less.
 // The policy macros are always defined, to 0 or 1.
-#define MBOOT_PRIMARY_SIZE 0x20000
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE 0x20000
 #define MBOOT_POLICY_OVERWRITE_EXTERNAL 0
 #if defined(FUZZ_POLICY_SINGLE)
 #define MCUBOOT_SINGLE_APPLICATION_SLOT 1
@@ -78,9 +78,9 @@
 #define MBOOT_STATUS_RAM_END 0x20010000u
 
 #define MBOOT_FSLOAD_ENABLE 1
-#define MBOOT_FSLOAD_RAW 1
-#define MBOOT_FSLOAD_FAT 1
-#define MBOOT_FSLOAD_LFS2 1
-#define MBOOT_FSLOAD_GZIP 1
+#define MICROPY_MBOOT_FSLOAD_RAW 1
+#define MICROPY_MBOOT_FSLOAD_FAT 1
+#define MICROPY_MBOOT_FSLOAD_LFS2 1
+#define MICROPY_MBOOT_FSLOAD_GZIP 1
 
 #endif // MICROPY_INCLUDED_TESTS_MBOOT_FUZZ_CONFIG_MBOOT_LAYOUT_H

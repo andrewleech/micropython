@@ -599,7 +599,7 @@ static void test_functional(void) {
 
 #endif
 
-// The fault injection state in the request RAM (MBOOT_TEST_FI) must cut at the same place as
+// The fault injection state in the request RAM (MICROPY_MBOOT_TEST_FI) must cut at the same place as
 // the fake flash does: the same operations are counted, and a reset before or after operation k
 // leaves the same flash contents as a power cut before or after it.
 static void test_fi_equivalence(void) {

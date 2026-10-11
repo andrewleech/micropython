@@ -31,10 +31,10 @@
 // (see shared/mboot/include/mboot_layout.h). The flash is the file backed device of
 // mboot_dev.h.
 
-#define MBOOT_PRIMARY_SIZE (0x40000)
-#define MBOOT_SECONDARY_ADDR (0x90080000)
-#define MBOOT_ROLLBACK_COUNTER (0)
-#define MBOOT_DFU (0)
-#define MBOOT_FSLOAD_LFS2 (1)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (0x40000)
+#define MICROPY_HW_MBOOT_SECONDARY_ADDR (0x90080000)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (0)
+#define MICROPY_MBOOT_DFU (0)
+#define MICROPY_MBOOT_FSLOAD_LFS2 (1)
 
 #endif // MICROPY_INCLUDED_UNIX_VARIANTS_MBOOT_MPCONFIGBOARD_H

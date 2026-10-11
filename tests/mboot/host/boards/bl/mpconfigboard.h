@@ -28,10 +28,10 @@
 
 #include "../../../../../ports/stm32/boards/NUCLEO_H563ZI/mpconfigboard.h"
 
-#define MBOOT_SPIFLASH_ADDR (0x90000000)
-#define MBOOT_SPIFLASH_BYTE_SIZE (1024 * 1024)
-#define MBOOT_SPIFLASH_ERASE_BLOCKS_PER_PAGE (1)
+#define MICROPY_HW_MBOOT_SPIFLASH_ADDR (0x90000000)
+#define MICROPY_HW_MBOOT_SPIFLASH_BYTE_SIZE (1024 * 1024)
+#define MICROPY_HW_MBOOT_SPIFLASH_ERASE_BLOCKS_PER_PAGE (1)
 
 // The readers for a raw flash window and gzip compressed files, on top of FAT.
-#define MBOOT_FSLOAD_RAW (1)
-#define MBOOT_FSLOAD_GZIP (1)
+#define MICROPY_MBOOT_FSLOAD_RAW (1)
+#define MICROPY_MBOOT_FSLOAD_GZIP (1)

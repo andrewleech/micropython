@@ -31,10 +31,10 @@
 // mpconfigboard.h (see shared/mboot/include/mboot_layout.h): the single slot policy with the
 // security counter in flash. The flash is the file backed device of mboot_dev.h.
 
-#define MBOOT_PRIMARY_SIZE (0x40000)
-#define MBOOT_ROLLBACK_COUNTER (1)
-#define MBOOT_POLICY (MBOOT_POLICY_SEL_SINGLE)
-#define MBOOT_DFU (0)
-#define MBOOT_FSLOAD_LFS2 (1)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (0x40000)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (1)
+#define MICROPY_MBOOT_UPDATE_MODE (MICROPY_MBOOT_UPDATE_MODE_SINGLE_SLOT)
+#define MICROPY_MBOOT_DFU (0)
+#define MICROPY_MBOOT_FSLOAD_LFS2 (1)
 
 #endif // MICROPY_INCLUDED_UNIX_VARIANTS_MBOOT_SINGLE_MPCONFIGBOARD_H

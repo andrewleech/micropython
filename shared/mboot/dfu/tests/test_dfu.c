@@ -93,13 +93,13 @@ static int test_1_dnload_eot(int *failures) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 2: DNLOAD wLength > MBOOT_DFU_XFER_SIZE is rejected.
+// Test 2: DNLOAD wLength > MICROPY_MBOOT_DFU_XFER_SIZE is rejected.
 // ---------------------------------------------------------------------------
 
 static int test_2_dnload_too_large(int *failures) {
     setup();
     uint8_t payload[4] = {0};
-    int rc = fake_dfu_dnload(0, payload, (uint16_t)(MBOOT_DFU_XFER_SIZE + 1));
+    int rc = fake_dfu_dnload(0, payload, (uint16_t)(MICROPY_MBOOT_DFU_XFER_SIZE + 1));
     TEST_ASSERT(rc < 0);
     TEST_ASSERT_EQ(s_ff.erase_calls, 0u);
     TEST_ASSERT_EQ(s_ff.write_calls, 0u);
@@ -126,7 +126,7 @@ static int test_3_dnload_padding(int *failures) {
 
 // ---------------------------------------------------------------------------
 // Test 4: Each sector is erased once, on first touch.
-//   sector_size = 4096, MBOOT_DFU_XFER_SIZE = 2048
+//   sector_size = 4096, MICROPY_MBOOT_DFU_XFER_SIZE = 2048
 //   Blocks 0,1 land in sector 0 (offsets 0, 2048).
 //   Blocks 2,3 land in sector 1 (offsets 4096, 6144).
 //   4 writes across 2 sectors -> 2 erase calls.
@@ -212,11 +212,11 @@ static const mboot_region_t k_mix_regions[] = {
     },
 };
 
-// DNLOAD block numbers (MBOOT_DFU_XFER_SIZE = 2048) of the first byte of the
+// DNLOAD block numbers (MICROPY_MBOOT_DFU_XFER_SIZE = 2048) of the first byte of the
 // third sector of region A (offset 8 KiB) and of the two sectors of region B.
-#define MIX_BLOCK_A2 (MIX_SECTOR_A * 2u / MBOOT_DFU_XFER_SIZE)
-#define MIX_BLOCK_B0 (MIX_SIZE_A / MBOOT_DFU_XFER_SIZE)
-#define MIX_BLOCK_B1 ((MIX_SIZE_A + MIX_SECTOR_B) / MBOOT_DFU_XFER_SIZE)
+#define MIX_BLOCK_A2 (MIX_SECTOR_A * 2u / MICROPY_MBOOT_DFU_XFER_SIZE)
+#define MIX_BLOCK_B0 (MIX_SIZE_A / MICROPY_MBOOT_DFU_XFER_SIZE)
+#define MIX_BLOCK_B1 ((MIX_SIZE_A + MIX_SECTOR_B) / MICROPY_MBOOT_DFU_XFER_SIZE)
 
 static int mix_setup(void) {
     fake_flash_reset_registry();

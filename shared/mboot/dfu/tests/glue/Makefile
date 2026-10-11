@@ -25,7 +25,7 @@ TESTS := $(TOP)/shared/mboot/dfu/tests
 OUT := $(abspath $(BUILD))
 
 CFLAGS := -Wall -Werror -std=gnu99 -ffreestanding -fno-builtin -g -O1 -MMD -MP \
-	-I$(MBOOT)/include -I$(TESTS) -DMBOOT_TESTS_FAKE_TUSB=1
+	-I$(MBOOT)/include -I$(TESTS) -DMICROPY_MBOOT_TEST_FAKE_TUSB=1
 GLUE_CFLAGS := $(CFLAGS) -I$(CURDIR)/stubs -I$(CURDIR) $(MBOOT_INC) $(MBOOT_CPP_FLAGS) $(MBOOT_CFLAGS)
 
 SRC := $(MBOOT)/core/mboot_dfu.c $(MBOOT)/core/mboot_region.c $(MBOOT)/core/mboot_usbd.c \

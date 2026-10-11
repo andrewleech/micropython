@@ -25,14 +25,14 @@
  */
 
 // The NUCLEO-H563ZI layout with the secondary slot in a 16 MiB SPI NOR flash (device 1): 4 KiB
-// erase blocks, two of them per 8 KiB erase unit, as the MBOOT_SPIFLASH_* macros of a board
+// erase blocks, two of them per 8 KiB erase unit, as the MICROPY_HW_MBOOT_SPIFLASH_* board inputs
 // describe it.
 
 #include "../../../../../ports/stm32/boards/NUCLEO_H563ZI/mpconfigboard.h"
 
-#undef MBOOT_SECONDARY_ADDR
-#define MBOOT_SECONDARY_ADDR (0x90000000)
+#undef MICROPY_HW_MBOOT_SECONDARY_ADDR
+#define MICROPY_HW_MBOOT_SECONDARY_ADDR (0x90000000)
 
-#define MBOOT_SPIFLASH_ADDR (0x90000000)
-#define MBOOT_SPIFLASH_BYTE_SIZE (16 * 1024 * 1024)
-#define MBOOT_SPIFLASH_ERASE_BLOCKS_PER_PAGE (2)
+#define MICROPY_HW_MBOOT_SPIFLASH_ADDR (0x90000000)
+#define MICROPY_HW_MBOOT_SPIFLASH_BYTE_SIZE (16 * 1024 * 1024)
+#define MICROPY_HW_MBOOT_SPIFLASH_ERASE_BLOCKS_PER_PAGE (2)

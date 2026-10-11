@@ -27,10 +27,10 @@
 // The plain flash with swap using scratch: two slots of equal size and a scratch area of two erase
 // units behind the update audit log.
 
-#define MBOOT_PRIMARY_SIZE (0x40000)
-#define MBOOT_SECONDARY_ADDR (0x90080000)
-#define MBOOT_ROLLBACK_COUNTER (0)
-#define MBOOT_SWAP_MODE (MBOOT_SWAP_MODE_SEL_SCRATCH)
-#define MBOOT_SCRATCH_SIZE (0x2000)
-#define MBOOT_DFU (0)
-#define MBOOT_TMPBUF_SZ (256)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (0x40000)
+#define MICROPY_HW_MBOOT_SECONDARY_ADDR (0x90080000)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (0)
+#define MICROPY_MBOOT_SWAP_MODE (MICROPY_MBOOT_SWAP_MODE_SCRATCH)
+#define MICROPY_HW_MBOOT_SCRATCH_SIZE (0x2000)
+#define MICROPY_MBOOT_DFU (0)
+#define MICROPY_MBOOT_TMPBUF_SZ (256)

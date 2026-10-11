@@ -445,7 +445,7 @@ static int test_g6_read_only_alt(int *failures) {
 static int test_g7_dnload_confinement(int *failures) {
     TEST_ASSERT_EQ(fk_setup(), 0);
     uint32_t prot = fk_hash_protected();
-    uint16_t last_block = (uint16_t)(FK_IMAGE_SIZE / MBOOT_DFU_XFER_SIZE - 1);
+    uint16_t last_block = (uint16_t)(FK_IMAGE_SIZE / MICROPY_MBOOT_DFU_XFER_SIZE - 1);
     fill_data(0x33);
 
     TEST_ASSERT_EQ(dnload(0, last_block, 2048), DFU_STATUS_OK);
@@ -814,23 +814,23 @@ static void loop_setup(unsigned stop, unsigned dnload_at, unsigned upload_at, un
 }
 
 static int test_g15_timeout(int *failures) {
-    // Forced entry with an idle host resets after MBOOT_DFU_TIMEOUT_S seconds,
+    // Forced entry with an idle host resets after MICROPY_MBOOT_DFU_TIMEOUT_S seconds,
     // after tearing down the bootloader state.
     loop_setup(100000, 0, 0, 0);
     TEST_ASSERT_EQ(run_loop(REC_FORCED), LOOP_RESET);
-    TEST_ASSERT_EQ(fk_task_calls, MBOOT_DFU_TIMEOUT_S);
+    TEST_ASSERT_EQ(fk_task_calls, MICROPY_MBOOT_DFU_TIMEOUT_S);
     TEST_ASSERT_EQ(fk_event_count, 2);
     TEST_ASSERT_EQ(fk_events[0].kind, EV_DEINIT);
     TEST_ASSERT_EQ(fk_events[1].kind, EV_RESET);
 
     loop_setup(100000, 0, 0, 0);
     TEST_ASSERT_EQ(run_loop(REC_APP_REQUEST), LOOP_RESET);
-    TEST_ASSERT_EQ(fk_task_calls, MBOOT_DFU_TIMEOUT_S);
+    TEST_ASSERT_EQ(fk_task_calls, MICROPY_MBOOT_DFU_TIMEOUT_S);
 
     // Recovery from a missing or failed image never times out.
     mboot_recovery_cause_t no_timeout[] = { REC_NO_IMAGE, REC_FSLOAD_FAILED, REC_FAULT };
     for (size_t i = 0; i < sizeof(no_timeout) / sizeof(no_timeout[0]); i++) {
-        loop_setup(2 * MBOOT_DFU_TIMEOUT_S + 50, 0, 0, 0);
+        loop_setup(2 * MICROPY_MBOOT_DFU_TIMEOUT_S + 50, 0, 0, 0);
         TEST_ASSERT_EQ(run_loop(no_timeout[i]), LOOP_STOP);
         TEST_ASSERT_EQ(fk_count(EV_RESET), 0);
     }
@@ -839,25 +839,25 @@ static int test_g15_timeout(int *failures) {
     loop_setup(100000, 0, 100, 0);
     TEST_ASSERT_EQ(run_loop(REC_FORCED), LOOP_RESET);
     // Last activity at call 200 (the hook's second upload), then the full timeout.
-    TEST_ASSERT_EQ(fk_task_calls, 200 + MBOOT_DFU_TIMEOUT_S);
+    TEST_ASSERT_EQ(fk_task_calls, 200 + MICROPY_MBOOT_DFU_TIMEOUT_S);
 
     // An open write session suppresses the timeout. An abort ends the session
     // and the idle timer restarts from the abort.
-    loop_setup(3 * MBOOT_DFU_TIMEOUT_S, 10, 0, 0);
+    loop_setup(3 * MICROPY_MBOOT_DFU_TIMEOUT_S, 10, 0, 0);
     TEST_ASSERT_EQ(run_loop(REC_FORCED), LOOP_STOP);
     TEST_ASSERT_EQ(fk_count(EV_RESET), 0);
 
     loop_setup(100000, 10, 0, 20);
     TEST_ASSERT_EQ(run_loop(REC_FORCED), LOOP_RESET);
-    TEST_ASSERT_EQ(fk_task_calls, 20 + MBOOT_DFU_TIMEOUT_S);
+    TEST_ASSERT_EQ(fk_task_calls, 20 + MICROPY_MBOOT_DFU_TIMEOUT_S);
 
     // A bus reset ends an open session that has been idle for longer than the
     // timeout. It counts as activity, so the timeout restarts from the reset and
     // the bootloader does not reset when the session ends.
     loop_setup(100000, 10, 0, 0);
-    s_unmount_at = 3 * MBOOT_DFU_TIMEOUT_S;
+    s_unmount_at = 3 * MICROPY_MBOOT_DFU_TIMEOUT_S;
     TEST_ASSERT_EQ(run_loop(REC_FORCED), LOOP_RESET);
-    TEST_ASSERT_EQ(fk_task_calls, 3 * MBOOT_DFU_TIMEOUT_S + MBOOT_DFU_TIMEOUT_S);
+    TEST_ASSERT_EQ(fk_task_calls, 3 * MICROPY_MBOOT_DFU_TIMEOUT_S + MICROPY_MBOOT_DFU_TIMEOUT_S);
     return 0;
 }
 
@@ -957,9 +957,9 @@ static int test_g18_trailer_confinement(int *failures) {
     TEST_ASSERT_EQ(fk_event_count, 0);
 
     // Blocks past the end of the data region address the trailer and are refused.
-    uint16_t first_trailer_block = (uint16_t)(FK_IMAGE_SIZE / MBOOT_DFU_XFER_SIZE);
+    uint16_t first_trailer_block = (uint16_t)(FK_IMAGE_SIZE / MICROPY_MBOOT_DFU_XFER_SIZE);
     fill_data(0x77);
-    for (uint16_t b = first_trailer_block; b < first_trailer_block + FK_TRAILER_SIZE / MBOOT_DFU_XFER_SIZE; b++) {
+    for (uint16_t b = first_trailer_block; b < first_trailer_block + FK_TRAILER_SIZE / MICROPY_MBOOT_DFU_XFER_SIZE; b++) {
         TEST_ASSERT_EQ(dnload(0, b, 2048), DFU_STATUS_ERR_ADDRESS);
     }
     TEST_ASSERT_EQ(fk_event_count, 0);

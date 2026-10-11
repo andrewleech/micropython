@@ -128,7 +128,7 @@ int mboot_stream_area_read(uint32_t off, void *dst, uint32_t len) {
     return -ENOTSUP;
 }
 
-// Fault injection hook (MBOOT_TEST_FI). The 16 bytes at +0x3F0 of the request RAM are
+// Fault injection hook (MICROPY_MBOOT_TEST_FI). The 16 bytes at +0x3F0 of the request RAM are
 // { magic, target, counter, mode } (mode bits 0-1: 0 before, 1 after; bit 7: trace). The hook
 // resets when the counter reaches the target, before the operation (mode 0) or after it (mode 1).
 void mboot_port_fi_hook(int op, uint8_t dev, uint32_t off, uint32_t len, int phase) {

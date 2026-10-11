@@ -29,4 +29,4 @@
 
 #include "../../../../../ports/stm32/boards/NUCLEO_H563ZI/mpconfigboard.h"
 
-#define MBOOT_POLICY (MBOOT_POLICY_SEL_OVERWRITE_EXTERNAL)
+#define MICROPY_MBOOT_UPDATE_MODE (MICROPY_MBOOT_UPDATE_MODE_OVERWRITE)

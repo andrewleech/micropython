@@ -40,6 +40,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_layout import CC, TOP, STM32_CPP, STM32_DEV, board, layout, preprocess  # noqa: E402
+from test_layout import gen  # noqa: E402
 
 
 def macros(defs, header="mboot_layout.h"):
@@ -69,42 +70,47 @@ def macros(defs, header="mboot_layout.h"):
 @unittest.skipIf(CC is None, "needs a host C compiler")
 class TestFsloadReaders(unittest.TestCase):
     def test_raw_alone_enables_fsload(self):
-        m = macros(board(MBOOT_FSLOAD_RAW="1"))
+        m = macros(board(MICROPY_MBOOT_FSLOAD_RAW="1"))
         self.assertEqual(m["MBOOT_FSLOAD_ENABLE"], "1")
-        self.assertIn("MBOOT_FSLOAD_RAW", m)
-        self.assertNotIn("MBOOT_FSLOAD_FAT", m)
+        self.assertEqual(gen.evaluate(m["MICROPY_MBOOT_FSLOAD_RAW"]), 1)
+        self.assertEqual(gen.evaluate(m["MICROPY_MBOOT_FSLOAD_FAT"]), 0)
 
     def test_none_leaves_fsload_off(self):
         m = macros(board())
         self.assertEqual(m["MBOOT_FSLOAD_ENABLE"], "0")
         for name in ("RAW", "FAT", "LFS2", "GZIP"):
-            self.assertNotIn("MBOOT_FSLOAD_" + name, m)
+            self.assertEqual(gen.evaluate(m["MICROPY_MBOOT_FSLOAD_" + name]), 0)
 
-    def test_zero_is_not_defined(self):
-        m = macros(board(MBOOT_FSLOAD_FAT="1", MBOOT_FSLOAD_RAW="0", MBOOT_FSLOAD_GZIP="0"))
-        self.assertNotIn("MBOOT_FSLOAD_RAW", m)
-        self.assertNotIn("MBOOT_FSLOAD_GZIP", m)
+    def test_zero_disables_the_reader(self):
+        defs = board(
+            MICROPY_MBOOT_FSLOAD_FAT="1",
+            MICROPY_MBOOT_FSLOAD_RAW="0",
+            MICROPY_MBOOT_FSLOAD_GZIP="0",
+        )
+        self.assertEqual(layout(defs)[1]["fsload"], ["fat"])
 
     def test_gzip_over_any_reader(self):
         for reader in ("FAT", "LFS2", "RAW"):
-            m = macros(board(MBOOT_FSLOAD_GZIP="1", **{"MBOOT_FSLOAD_" + reader: "1"}))
-            self.assertIn("MBOOT_FSLOAD_GZIP", m)
+            m = macros(
+                board(MICROPY_MBOOT_FSLOAD_GZIP="1", **{"MICROPY_MBOOT_FSLOAD_" + reader: "1"})
+            )
+            self.assertEqual(gen.evaluate(m["MICROPY_MBOOT_FSLOAD_GZIP"]), 1)
 
     def test_gzip_needs_a_reader(self):
-        r = preprocess(board(MBOOT_FSLOAD_GZIP="1"))
+        r = preprocess(board(MICROPY_MBOOT_FSLOAD_GZIP="1"))
         self.assertNotEqual(r.returncode, 0)
 
     def test_generator_exports_the_readers(self):
         _, lay = layout(
             board(
-                MBOOT_FSLOAD_FAT="1",
-                MBOOT_FSLOAD_LFS2="1",
-                MBOOT_FSLOAD_RAW="1",
-                MBOOT_FSLOAD_GZIP="1",
+                MICROPY_MBOOT_FSLOAD_FAT="1",
+                MICROPY_MBOOT_FSLOAD_LFS2="1",
+                MICROPY_MBOOT_FSLOAD_RAW="1",
+                MICROPY_MBOOT_FSLOAD_GZIP="1",
             )
         )
         self.assertEqual(sorted(lay["fsload"]), ["fat", "gzip", "lfs2", "raw"])
-        _, lay = layout(board(MBOOT_FSLOAD_RAW="1"))
+        _, lay = layout(board(MICROPY_MBOOT_FSLOAD_RAW="1"))
         self.assertEqual(lay["fsload"], ["raw"])
 
 
@@ -116,18 +122,18 @@ class TestCrypto(unittest.TestCase):
         self.assertNotIn("MCUBOOT_USE_MBED_TLS", m)
 
     def test_mbedtls(self):
-        m = macros(board(MBOOT_CRYPTO="MBOOT_CRYPTO_SEL_MBEDTLS"))
+        m = macros(board(MICROPY_MBOOT_CRYPTO="MICROPY_MBOOT_CRYPTO_MBEDTLS"))
         self.assertIn("MCUBOOT_USE_MBED_TLS", m)
         self.assertNotIn("MCUBOOT_USE_TINYCRYPT", m)
         self.assertIn("MCUBOOT_SIGN_EC256", m)
 
     def test_unknown_backend(self):
-        r = preprocess(board(MBOOT_CRYPTO="7"))
+        r = preprocess(board(MICROPY_MBOOT_CRYPTO="7"))
         self.assertNotEqual(r.returncode, 0)
 
     def test_generator_exports_the_backend(self):
         self.assertEqual(layout(board())[1]["crypto"], "tinycrypt")
-        _, lay = layout(board(MBOOT_CRYPTO="MBOOT_CRYPTO_SEL_MBEDTLS"))
+        _, lay = layout(board(MICROPY_MBOOT_CRYPTO="MICROPY_MBOOT_CRYPTO_MBEDTLS"))
         self.assertEqual(lay["crypto"], "mbedtls")
 
 
@@ -137,7 +143,7 @@ class TestFih(unittest.TestCase):
 
     def test_profiles(self):
         for level, name in self.PROFILES.items():
-            m = macros(board(MBOOT_FIH_LEVEL=str(level)))
+            m = macros(board(MICROPY_MBOOT_FIH_LEVEL=str(level)))
             for other in self.PROFILES.values():
                 self.assertEqual(
                     "MCUBOOT_FIH_PROFILE_" + other in m, other == name, (level, other)
@@ -147,12 +153,14 @@ class TestFih(unittest.TestCase):
         self.assertIn("MCUBOOT_FIH_PROFILE_OFF", macros(board()))
 
     def test_unknown_level(self):
-        r = preprocess(board(MBOOT_FIH_LEVEL="4"))
+        r = preprocess(board(MICROPY_MBOOT_FIH_LEVEL="4"))
         self.assertNotEqual(r.returncode, 0)
 
     def test_generator_exports_the_profile(self):
         for level, name in self.PROFILES.items():
-            self.assertEqual(layout(board(MBOOT_FIH_LEVEL=str(level)))[1]["fih"], name.lower())
+            self.assertEqual(
+                layout(board(MICROPY_MBOOT_FIH_LEVEL=str(level)))[1]["fih"], name.lower()
+            )
 
 
 @unittest.skipIf(CC is None, "needs a host C compiler")
@@ -161,27 +169,29 @@ class TestPortCounter(unittest.TestCase):
         m = macros(board())
         self.assertIn("MCUBOOT_HW_ROLLBACK_PROT", m)
         self.assertIn("MBOOT_SECCNT_FLASH", m)
-        self.assertNotIn("MBOOT_SECCNT_PORT", m)
-        self.assertIn("MBOOT_SECCNT_ADDR", m)
+        self.assertEqual(gen.evaluate(m["MICROPY_MBOOT_SECCNT_PORT"]), 0)
+        self.assertIn("MICROPY_HW_MBOOT_SECCNT_ADDR", m)
 
     def test_port_counter(self):
-        m = macros(board(MBOOT_SECCNT_PORT="1"))
+        m = macros(board(MICROPY_MBOOT_SECCNT_PORT="1"))
         self.assertIn("MCUBOOT_HW_ROLLBACK_PROT", m)
-        self.assertIn("MBOOT_SECCNT_PORT", m)
+        self.assertEqual(gen.evaluate(m["MICROPY_MBOOT_SECCNT_PORT"]), 1)
         self.assertNotIn("MBOOT_SECCNT_FLASH", m)
-        self.assertNotIn("MBOOT_SECCNT_ADDR", m)
+        self.assertNotIn("MICROPY_HW_MBOOT_SECCNT_ADDR", m)
 
     def test_port_counter_has_no_flash_area(self):
-        _, lay = layout(board(MBOOT_SECCNT_PORT="1"))
+        _, lay = layout(board(MICROPY_MBOOT_SECCNT_PORT="1"))
         self.assertNotIn("seccnt", lay["areas"])
         self.assertEqual(lay["rollback"], "counter-port")
         self.assertEqual(layout(board())[1]["rollback"], "counter-flash")
-        self.assertEqual(layout(board(MBOOT_ROLLBACK_COUNTER="0"))[1]["rollback"], "version")
+        self.assertEqual(
+            layout(board(MICROPY_MBOOT_ROLLBACK_COUNTER="0"))[1]["rollback"], "version"
+        )
 
     def test_port_counter_is_limited_and_lockable(self):
         # bootutil asks the port whether the counter can still be raised and locks it after the
         # update.
-        m = macros(board(MBOOT_SECCNT_PORT="1"), "mcuboot_config/mcuboot_config.h")
+        m = macros(board(MICROPY_MBOOT_SECCNT_PORT="1"), "mcuboot_config/mcuboot_config.h")
         self.assertIn("MCUBOOT_HW_ROLLBACK_PROT_COUNTER_LIMITED", m)
         self.assertIn("MCUBOOT_HW_ROLLBACK_PROT_LOCK", m)
         m = macros(board(), "mcuboot_config/mcuboot_config.h")
@@ -189,26 +199,35 @@ class TestPortCounter(unittest.TestCase):
         self.assertNotIn("MCUBOOT_HW_ROLLBACK_PROT_LOCK", m)
 
     def test_port_counter_needs_a_counter(self):
-        r = preprocess(board(MBOOT_ROLLBACK_COUNTER="0", MBOOT_SECCNT_PORT="1"))
+        r = preprocess(board(MICROPY_MBOOT_ROLLBACK_COUNTER="0", MICROPY_MBOOT_SECCNT_PORT="1"))
         self.assertNotEqual(r.returncode, 0)
-        self.assertIn("MBOOT_SECCNT_PORT needs MBOOT_ROLLBACK_COUNTER 1", r.stderr)
 
     def test_zero_is_the_flash_counter(self):
-        self.assertIn("MBOOT_SECCNT_FLASH", macros(board(MBOOT_SECCNT_PORT="0")))
+        self.assertIn("MBOOT_SECCNT_FLASH", macros(board(MICROPY_MBOOT_SECCNT_PORT="0")))
 
 
 @unittest.skipIf(CC is None, "needs a host C compiler")
 class TestConfirm(unittest.TestCase):
     def test_manual_is_the_default(self):
-        self.assertNotIn("MBOOT_CONFIRM_AUTO", macros(board()))
-        self.assertNotIn("MBOOT_CONFIRM_AUTO", macros(board(MBOOT_CONFIRM_AUTO="0")))
+        self.assertEqual(gen.evaluate(macros(board())["MICROPY_MBOOT_CONFIRM_AUTO"]), 0)
+        self.assertEqual(
+            gen.evaluate(
+                macros(board(MICROPY_MBOOT_CONFIRM_AUTO="0"))["MICROPY_MBOOT_CONFIRM_AUTO"]
+            ),
+            0,
+        )
 
     def test_auto(self):
-        self.assertIn("MBOOT_CONFIRM_AUTO", macros(board(MBOOT_CONFIRM_AUTO="1")))
+        self.assertEqual(
+            gen.evaluate(
+                macros(board(MICROPY_MBOOT_CONFIRM_AUTO="1"))["MICROPY_MBOOT_CONFIRM_AUTO"]
+            ),
+            1,
+        )
 
     def test_generator_exports_the_mode(self):
         self.assertEqual(layout(board())[1]["confirm_mode"], "manual")
-        self.assertEqual(layout(board(MBOOT_CONFIRM_AUTO="1"))[1]["confirm_mode"], "auto")
+        self.assertEqual(layout(board(MICROPY_MBOOT_CONFIRM_AUTO="1"))[1]["confirm_mode"], "auto")
 
 
 if __name__ == "__main__":

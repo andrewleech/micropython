@@ -27,10 +27,10 @@
 // The plain flash with a security counter kept by the port (mboot_port_seccnt_*) and the high
 // FIH profile (entropy from mboot_port_entropy_u8). No flash area holds the counter.
 
-#define MBOOT_PRIMARY_SIZE (0x40000)
-#define MBOOT_SECONDARY_ADDR (0x90080000)
-#define MBOOT_ROLLBACK_COUNTER (1)
-#define MBOOT_SECCNT_PORT (1)
-#define MBOOT_FIH_LEVEL (3)
-#define MBOOT_DFU (0)
-#define MBOOT_TMPBUF_SZ (256)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (0x40000)
+#define MICROPY_HW_MBOOT_SECONDARY_ADDR (0x90080000)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (1)
+#define MICROPY_MBOOT_SECCNT_PORT (1)
+#define MICROPY_MBOOT_FIH_LEVEL (3)
+#define MICROPY_MBOOT_DFU (0)
+#define MICROPY_MBOOT_TMPBUF_SZ (256)
