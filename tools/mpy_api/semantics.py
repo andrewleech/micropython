@@ -18,6 +18,12 @@ def qualified_template(call):
     return bool(callee and callee['kind'] == 'FUNCTION_DECL' and callee['source_span']['source'] in call.get('qualified_template_sources', []))
 
 
+def _qualified_error_exit(call):
+    helper = call_parts(call['expression'])[0] if call else None
+    return helper in {'mp_raise_ValueError', 'mp_raise_TypeError', 'mp_raise_OverflowError', 'mp_raise_OSError',
+                      'mp_raise_msg', 'mp_raise_msg_varg', 'mp_raise_NotImplementedError', 'nlr_raise'} and qualified_template(call)
+
+
 def event_call(function, expression, location=None):
     if function['events'].get('semantic_unassessed'):
         return None
@@ -94,6 +100,78 @@ def _exclusive(left, right):
     return any(a.get('condition_id') is not None and a.get('condition_id') == b.get('condition_id')
                and a['condition'] == b['condition'] and a['branch'] != b['branch']
                for a in left.get('guards', []) for b in right.get('guards', []))
+
+def event_applicability(function, event, specialization=None, assumed_guards=()):
+    """Prove execution on every successful exit in a bounded branch context."""
+    events = function['events']
+    reasons = []
+    if events.get('semantic_unassessed') or events.get('control_flow_unresolved') or not events.get('flow'):
+        reasons.append('successful-path applicability requires assessed structured branch/block flow')
+    if event.get('loops'):
+        reasons.append('loop-contained event has no guaranteed execution certificate')
+    if event.get('conditional_evaluation'):
+        reasons.append('conditionally evaluated operand has no guaranteed execution certificate')
+    if event.get('byte_start') is None or event.get('byte_end') is None:
+        reasons.append('event lacks a structured source interval')
+    result = {'resolution': 'unresolved', 'kind': 'successful-path-dominance', 'unresolved': reasons}
+    if assumed_guards:
+        result['assumed_guards'] = deepcopy(assumed_guards)
+    if reasons:
+        return result
+    environment = dict(function['constants'])
+    environment.update(specialization or {})
+    assumptions = {guard.get('condition_id'): guard['branch'] == 'then' for guard in assumed_guards}
+    calls = {call.get('byte_start'): call for call in events['calls']}
+    successes = set()
+    def contains(start, end):
+        return (start is not None and end is not None
+                and start <= event['byte_start'] < event['byte_end'] <= end)
+    def visit(node, states, in_loop=False):
+        kind = node.get('kind')
+        if kind == 'block':
+            for child in node.get('children', []):
+                if not states:
+                    break
+                states = visit(child, states, in_loop)
+            return states
+        if kind == 'if':
+            if not in_loop and contains(node.get('condition_start'), node.get('condition_end')):
+                states = {True}
+            value = _constant_at(function, node['condition'], node, environment)
+            assumed = assumptions.get(node.get('byte_start'))
+            if assumed is not None:
+                if value is not None and bool(value) != assumed:
+                    return set()
+                value = assumed
+            branches = [node['then'] if value else node['else']] if value is not None else [node['then'], node['else']]
+            return set().union(*(visit(branch, states, in_loop) for branch in branches))
+        if kind == 'loop':
+            # Both zero-trip fallthrough and body exits remain possible; no event
+            # in an unassessed loop gains a guaranteed-execution certificate.
+            visit(node['body'], states, True)
+            return states
+        if not in_loop and contains(node.get('byte_start'), node.get('byte_end')):
+            states = {True}
+        if kind == 'return':
+            successes.update(states)
+            return set()
+        if kind == 'call':
+            call = calls.get(node.get('byte_start'))
+            if _qualified_error_exit(call):
+                return set()
+        return states
+    successes.update(visit(events['flow'], {False}))
+    if successes == {True}:
+        result['resolution'] = 'bounded-resolved'
+    else:
+        result['unresolved'].append('event does not dominate every applicable successful exit')
+    return result
+
+
+def _composed_applicability(child, caller):
+    return {'resolution': 'bounded-resolved' if child.get('resolution') == caller.get('resolution') == 'bounded-resolved' else 'unresolved',
+            'kind': 'successful-path-dominance',
+            'unresolved': child.get('unresolved', []) + caller.get('unresolved', [])}
 
 
 def _local(function, name, use):
@@ -266,16 +344,22 @@ def _unchanged(function, name, use, definition=None, allow_calls=(), scalar_read
                 return False
     return True
 
-def _storage_unchanged(function, name, use, definition, after=None, protected_fields=None):
+def _storage_unchanged(function, name, use, definition=None, after=None, protected_fields=None):
     """Follow scoped storage aliases before rejecting writes and escaping addresses."""
-    if not _automatic_definition(definition):
+    if definition and not _automatic_definition(definition):
         return False
-    start = definition.get('byte_start', -1)
+    start = definition.get('byte_start', -1) if definition else -1
     after = start if after is None else after
     end = _point(use)
     if end is None:
         return False
-    aliases = {(name, definition.get('declaration_id'))}
+    consumer = _unparen(use.get('expression_node') or use.get('initializer_node') or use)
+    if definition is None:
+        # Sibling arguments may write through an alias before the item is read.
+        end = max(end, use.get('byte_end') or end)
+        end = max([end] + [call['byte_end'] for call in function['events']['calls']
+                          if call.get('byte_start', end + 1) <= _point(use) < call.get('byte_end', _point(use))])
+    aliases = {(name, definition.get('declaration_id') if definition else None)}
     def binding(identifier, event):
         local = _local(function, identifier, event)
         return identifier, local.get('declaration_id') if local else None
@@ -284,7 +368,7 @@ def _storage_unchanged(function, name, use, definition, after=None, protected_fi
                 if _mentions(node, identifier) and binding(identifier, event) == (identifier, declaration)]
     for variable in sorted(function['events']['variables'], key=lambda event: event.get('byte_start', -1)):
         point = variable.get('byte_start', -1)
-        if not start <= point < end or _exclusive(variable, use):
+        if not start <= point < end or point == _point(use) or _exclusive(variable, use):
             continue
         node = _unparen(variable.get('initializer_node'))
         roots = mentioned(node, variable)
@@ -318,6 +402,10 @@ def _storage_unchanged(function, name, use, definition, after=None, protected_fi
             return False
     for call in function['events']['calls']:
         if not after <= call.get('byte_start', -1) or call.get('byte_end', call.get('byte_start', -1)) > end or _exclusive(call, use):
+            continue
+        if (definition is None and consumer.get('byte_start') is not None
+                and call.get('byte_start', end + 1) <= consumer['byte_start']
+                and consumer.get('byte_end', end + 1) <= call.get('byte_end', -1)):
             continue
         helper = call_parts(call['expression'])[0]
         for node in _call_operand_nodes(call):
@@ -359,7 +447,9 @@ def source_reference(function, expression, use=None, seen=()):
     if vector:
         index = _constant_at(function, vector[2], use)
         parameter = source_reference(function, vector[1], use, seen)
-        if parameter and parameter['kind'] == 'c-parameter' and isinstance(index, int) and not isinstance(index, bool) and index >= 0:
+        if (parameter and parameter['kind'] == 'c-parameter' and isinstance(index, int)
+                and not isinstance(index, bool) and index >= 0
+                and _storage_unchanged(function, function['parameters'][parameter['parameter']], use)):
             return {'kind': 'vector-item', 'scope': function['id'], 'vector_parameter': parameter['parameter'], 'index': index}
     field = re.fullmatch(r'(\w+) \[ (.*?) \] \. (u_obj|u_int|u_bool)', expression)
     if field:
@@ -704,6 +794,7 @@ def semantics(function, functions, errors, contracts, specialization=None, depth
             result['inputs'].append({'helper': helper, 'arguments': args, 'contract': contract,
                                      'bindings': [constraint_binding(a, function, call) for a in args],
                                      'domain_authority': domain_authority,
+                                     'successful_path_applicability': event_applicability(function, call, specialization),
                                      'guards': call.get('guards', []), 'callee': call['callee'],
                                      'source_span': call['source_span'], 'scope': function['id'],
                                      'byte_start': call.get('byte_start'), 'byte_end': call.get('byte_end')})
@@ -714,12 +805,16 @@ def semantics(function, functions, errors, contracts, specialization=None, depth
             result['parser_calls'].append({'arguments': args, 'argument_nodes': (call.get('expression_node') or {}).get('arguments', {}).get('children', []),
                                            'constant_bindings': dict(specialization or {}),
                                            'source_span': call['source_span'], 'guards': call.get('guards', []), 'scope': function['id'], 'callee': call['callee'],
-                                           'byte_start': call.get('byte_start'), 'byte_end': call.get('byte_end')})
+                                           'byte_start': call.get('byte_start'), 'byte_end': call.get('byte_end'),
+                                           'loops': call.get('loops', []), 'conditional_evaluation': call.get('conditional_evaluation', []),
+                                           'successful_path_applicability': event_applicability(function, call, specialization)})
     for write in events['writes']:
         if not selected(write): continue
         assigned = re.match(r'dest \[ (\d+) \] = (.*)$', write['expression'])
         if assigned:
-            result['destination_writes'].append({'destination_index': int(assigned[1]), 'expression': assigned[2], 'value_contract': return_contract(assigned[2], function, contracts, write['source_span']), 'source_span': write['source_span'], 'guards': write.get('guards', []), 'scope': function['id']})
+            result['destination_writes'].append({'destination_index': int(assigned[1]), 'expression': assigned[2], 'value_contract': return_contract(assigned[2], function, contracts, write['source_span']), 'source_span': write['source_span'], 'guards': write.get('guards', []), 'scope': function['id'],
+                                               'byte_start': write.get('byte_start'), 'byte_end': write.get('byte_end'),
+                                               'loops': write.get('loops', []), 'conditional_evaluation': write.get('conditional_evaluation', [])})
     for returned in events['returns']:
         result['branch_selection'].append({'source_span': returned['source_span'], 'selected': selected(returned), 'guards': returned.get('guards', []), 'evaluated_conditions': [condition_value(g['condition'], g.get('condition_id', returned.get('byte_start'))) for g in returned.get('guards', [])]})
         if not selected(returned) or flow_closed is not None and returned.get('byte_start') not in reachable:
@@ -775,10 +870,17 @@ def semantics(function, functions, errors, contracts, specialization=None, depth
                 if forwarded:
                     if child['argument_tables']:
                         result['argument_tables'].extend({**row, 'via_helper': callee['id'], 'caller_parameter_bindings': bindings} for row in child['argument_tables'])
-                    result['parser_calls'].extend({**row, 'via_helper': callee['id'], 'caller_parameter_bindings': bindings} for row in child['parser_calls'])
+                    caller_applicability = event_applicability(function, call, specialization)
+                    result['parser_calls'].extend({
+                        **row, 'via_helper': callee['id'], 'caller_parameter_bindings': bindings,
+                        'successful_path_applicability': _composed_applicability(
+                            row.get('successful_path_applicability', {}), caller_applicability)}
+                        for row in child['parser_calls'])
                     for row in child['inputs']:
                         lifted = {**row, 'via_helper': callee['id'], 'caller_parameter_bindings': bindings,
-                                  'guards': returned.get('guards', []) + row.get('guards', []), 'bindings': []}
+                                  'guards': returned.get('guards', []) + row.get('guards', []), 'bindings': [],
+                                  'successful_path_applicability': _composed_applicability(
+                                      row.get('successful_path_applicability', {}), caller_applicability)}
                         for relation in row.get('bindings', []):
                             ref = relation.get('source_ref')
                             mapped = remap_return({'kind': 'argument', 'source_ref': ref}, args, function, callee, call_use) if ref else None
@@ -1201,7 +1303,7 @@ def _input_uses(function, selected, composed_calls=(), converted_calls=()):
             return
         if node.get('kind') in ('subscript_expression', 'field_expression') and source_reference(function, node.get('expression'), event):
             return
-        if node.get('kind') in ('binary_expression', 'conditional_expression', 'cast_expression', 'pointer_expression', 'unary_expression', 'subscript_expression', 'field_expression', 'comma_expression'):
+        if node.get('kind') in ('binary_expression', 'conditional_expression', 'cast_expression', 'pointer_expression', 'unary_expression', 'update_expression', 'subscript_expression', 'field_expression', 'comma_expression'):
             def references(child):
                 ref = source_reference(function, child.get('expression'), event) if child.get('kind') != 'field_identifier' else None
                 if ref:
@@ -1228,9 +1330,15 @@ def _input_uses(function, selected, composed_calls=(), converted_calls=()):
                     if isinstance(item, dict):
                         inspect(item, event)
     for event in (function['events']['returns'] + function['events']['writes'] + function['events']['conditions']
-                  + function['events']['calls'] + function['events']['variables'] + function['events'].get('expressions', [])):
+                  + function['events']['calls'] + function['events']['variables'] + function['events'].get('expressions', [])
+                  + function['events'].get('control_expressions', [])):
         if selected(event):
             inspect(event.get('expression_node') or event.get('value_node') or event.get('initializer_node'), event)
+            if event.get('control_kind') and _unparen(event.get('expression_node')).get('kind') == 'identifier':
+                for origin in _input_parameter_roots(function, event['expression_node'], event):
+                    uses.append({'source_ref': origin, 'helper': None, 'guards': event.get('guards', []),
+                                 'resolution': 'unresolved', 'source_span': event.get('source_span'),
+                                 'reason': 'native controlling-expression test requires an accepted-domain proof'})
             if event.get('target_node'):
                 inspect(event['target_node'], {**event, 'byte_end': event.get('byte_start')})
                 if not _private_input_lvalue(function, event['target_node'], event):
@@ -1354,6 +1462,7 @@ def bind_public_contracts(summary, public_bindings):
                 constraints.append({'kind': domain_kinds.get(fact['contract'], fact['contract']),
                                     'guards': deepcopy(fact.get('guards', [])),
                                     'domain_authority': deepcopy(fact.get('domain_authority', {})),
+                                    'successful_path_applicability': deepcopy(fact.get('successful_path_applicability', {})),
                                     'operands': deepcopy(fact.get('arguments', [])),
                                     'resolution': fact.get('domain_authority', {}).get('resolution', 'unresolved'),
                                     'source_ref': deepcopy(relation.get('source_ref', relation)),
@@ -1375,7 +1484,8 @@ def bind_public_contracts(summary, public_bindings):
         if carrier:
             uses = [use for use in uses if not _certified_parser_consumer(use, conversion)]
             conversion_kind = 'object'
-        kinds = {constraint['kind'] for constraint in constraints if not constraint['guards']
+        kinds = {constraint['kind'] for constraint in constraints
+                 if constraint.get('successful_path_applicability', {}).get('resolution') == 'bounded-resolved'
                  and constraint.get('domain_authority', {}).get('resolution') in ('resolved', 'bounded-resolved')}
         narrow = {constraint['kind'] for constraint in constraints if constraint['kind'] != 'object'}
         reasons = []
@@ -1401,6 +1511,8 @@ def bind_public_contracts(summary, public_bindings):
             domain = None
             reasons.append('whole accepted domain not established from complete bounded uses')
             reasons.extend(reason for constraint in constraints for reason in constraint.get('domain_authority', {}).get('unresolved', []))
+            reasons.extend(reason for constraint in constraints
+                           for reason in constraint.get('successful_path_applicability', {}).get('unresolved', []))
             reasons.extend(use.get('reason', 'unknown input consumer prevents whole-domain qualification') for use in uses if use.get('resolution') == 'unresolved')
             reasons = sorted(set(reasons))
         record = {'name': binding['name'], 'accepted_domain': {
@@ -1967,7 +2079,8 @@ def _gc_region_authority(function):
 
 def _allocator_failure_authority(definitions, call):
     function = _source_body(definitions, 'm_malloc_fail', call, '/py/runtime.c')
-    if not function or function.get('parameters') != ['num_bytes'] or function.get('return_type_expression') != 'void':
+    if (not function or function.get('parameters') != ['num_bytes']
+            or function.get('parameter_source_contract', {}).get('return_type_expression') != 'void'):
         return None
     events = function['events']
     if (events.get('control_flow_unresolved') or events.get('returns') or events.get('variables')
@@ -2280,8 +2393,7 @@ def _flow_paths(function, environment):
             return True
         if kind == 'call':
             call = calls_by_point.get(node['byte_start'])
-            helper = call_parts(call['expression'])[0] if call else None
-            if helper in {'mp_raise_ValueError', 'mp_raise_TypeError', 'mp_raise_OverflowError', 'mp_raise_OSError', 'mp_raise_msg', 'mp_raise_msg_varg', 'mp_raise_NotImplementedError', 'nlr_raise'} and qualified_template(call):
+            if _qualified_error_exit(call):
                 error_exits.append({'callee': call['callee'], 'source_span': call['source_span'], 'guards': call.get('guards', [])})
                 return True
             return False

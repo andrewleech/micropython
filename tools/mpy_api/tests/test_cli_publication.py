@@ -1,6 +1,9 @@
 """A changed reference input must not become a published fresh generation."""
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -69,3 +72,31 @@ def test_reference_changed_while_staging_is_not_published(tmp_path, monkeypatch,
     assert changed
     assert not output.exists()
     assert not list(tmp_path.glob(".mpy-api-*"))
+
+
+@pytest.mark.parametrize("field", ["port", "target", "variant"])
+def test_command_rejects_known_target_mismatch_before_extraction(tmp_path, field):
+    bundle, declaration, _ = reference(tmp_path)
+    manifest_path = Path(bundle["provenance"]["manifest"]["path"])
+    manifest = json.loads(manifest_path.read_text())
+    data = declaration.read_bytes()
+    config = {"port": "unix", "target": "fixture", "variant": "standard"}
+    manifest["target"] = {**config, "inputs": [{"path": str(declaration.resolve()),
+                                              "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}]}
+    manifest_path.write_text(json.dumps(manifest))
+    config[field] = "different"
+    absent = tmp_path / "absent-input"
+    output = tmp_path / "published"
+    command = [sys.executable, "-c", "from mpy_api.cli import main; raise SystemExit(main())",
+               "--micropython-root", str(tmp_path), "--build-dir", str(tmp_path),
+               "--compdb", str(absent), "--elf", str(absent), "--map", str(absent),
+               "--link-command", str(absent), "--enrichment", str(manifest_path), "--output", str(output)]
+    for key, value in config.items():
+        command.extend(["--" + key, value])
+    environment = {**os.environ, "PYTHONPATH": os.pathsep.join([
+        str(Path(__file__).resolve().parents[2]), os.environ.get("PYTHONPATH", "")])}
+    result = subprocess.run(command, text=True, capture_output=True, env=environment)
+    assert result.returncode == 1
+    assert "exact-build target" in result.stderr
+    assert not result.stdout
+    assert not output.exists()

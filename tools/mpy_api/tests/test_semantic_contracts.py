@@ -238,6 +238,88 @@ def test_conditional_conversion_is_a_guarded_constraint_not_whole_domain():
     assert result['return_resolution'] == 'bounded-resolved'
 
 
+@pytest.mark.parametrize('source', [
+    'mp_obj_t probe(mp_obj_t flag, mp_obj_t value) { while (mp_obj_is_true(flag)) { return (mp_obj_t)99; } return mp_obj_new_int(mp_obj_get_int(value)); }',
+    'mp_obj_t probe(mp_obj_t flag, mp_obj_t value) { while (mp_obj_is_true(flag)) { mp_obj_get_int(value); break; } return (mp_obj_t)99; }',
+    'mp_obj_t probe(mp_obj_t flag, mp_obj_t value) { switch(flag) { case 97: mp_obj_get_int(value); break; default: break; } return (mp_obj_t)99; }',
+    'mp_obj_t probe(mp_obj_t flag, mp_obj_t value) { if (mp_obj_is_true(flag)) goto done; mp_obj_get_int(value); done: return 99; }',
+    'mp_obj_t probe(mp_obj_t flag, mp_obj_t value) { flag && mp_obj_get_int(value); return 99; }',
+    'mp_obj_t probe(mp_obj_t flag, mp_obj_t value) { flag ? mp_obj_get_int(value) : 0; return 99; }',
+    'mp_obj_t probe(mp_obj_t flag, mp_obj_t value) { flag ?: mp_obj_get_int(value); return 99; }',
+])
+def test_bypassed_converter_retains_local_authority_without_whole_domain(source):
+    result = public(source)
+    parameter = result['public_parameters'][1]
+    assert parameter['accepted_domain']['resolution'] == 'unresolved'
+    assert parameter['accepted_domain']['contract'] is None
+    assert parameter['accepted_domain']['reasons']
+    constraint = parameter['constraints'][0]
+    assert constraint['domain_authority']['resolution'] == 'bounded-resolved'
+    assert constraint['successful_path_applicability']['resolution'] == 'unresolved'
+    assert constraint['successful_path_applicability']['unresolved']
+
+
+@pytest.mark.parametrize('tail', [
+    'while (mp_obj_is_true(flag)) {} return 99;',
+    'while (mp_obj_is_true(flag)) { return 99; } return 99;',
+    'for (int i = 0; i < 3; i++) {} return 99;',
+])
+def test_direct_converter_before_nonconsuming_loop_retains_whole_domain(tail):
+    result = public('mp_obj_t probe(mp_obj_t flag, mp_obj_t value) { mp_obj_get_int(value); ' + tail + ' }')
+    parameter = result['public_parameters'][1]
+    assert parameter['accepted_domain']['contract'] == {'kind': 'integer-conversion-capability'}
+    assert parameter['constraints'][0]['successful_path_applicability']['resolution'] == 'bounded-resolved'
+
+
+def test_converter_on_only_successful_branch_retains_whole_domain():
+    result = public('''mp_obj_t probe(mp_obj_t flag, mp_obj_t value) {
+        if (mp_obj_is_true(flag)) mp_raise_TypeError("flag");
+        else mp_obj_get_int(value);
+        return 99;
+    }''')
+    parameter = result['public_parameters'][1]
+    assert parameter['accepted_domain']['contract'] == {'kind': 'integer-conversion-capability'}
+    assert parameter['constraints'][0]['guards']
+    assert parameter['constraints'][0]['successful_path_applicability']['resolution'] == 'bounded-resolved'
+
+
+def test_shadowed_raise_callable_does_not_erase_converter_bypass():
+    result = public('''mp_obj_t probe(mp_obj_t flag, mp_obj_t value) {
+        void (*mp_raise_TypeError)(const char *) = 0;
+        if (mp_obj_is_true(flag)) mp_raise_TypeError("flag");
+        else mp_obj_get_int(value);
+        return 99;
+    }''')
+    parameter = result['public_parameters'][1]
+    assert parameter['accepted_domain']['resolution'] == 'unresolved'
+    assert parameter['constraints'][0]['successful_path_applicability']['resolution'] == 'unresolved'
+
+
+@pytest.mark.parametrize('control', [
+    'while (value != (mp_obj_t)99) { mp_raise_TypeError("value"); }',
+    'for (; value != (mp_obj_t)99;) { mp_raise_TypeError("value"); }',
+    'do { mp_raise_TypeError("value"); } while (value != (mp_obj_t)99);',
+    'switch (value != (mp_obj_t)99) { default: break; }',
+    'while (value) { mp_raise_TypeError("value"); }',
+    'if (value) { mp_raise_TypeError("value"); }',
+])
+def test_native_control_operand_cannot_publish_arbitrary_object_acceptance(control):
+    function, summary = analyse('mp_obj_t probe(mp_obj_t value) { ' + control + ' return value; }')
+    result = bind_public_contracts(summary, bindings(function))
+    parameter = result['public_parameters'][0]
+    assert parameter['accepted_domain']['resolution'] == 'unresolved'
+    assert parameter['accepted_domain']['contract'] is None
+    assert any(use['resolution'] == 'unresolved' and use['source_ref'] ==
+               {'kind': 'c-parameter', 'scope': function['id'], 'parameter': 0}
+               for use in summary['input_uses'])
+
+
+def test_gnu_omitted_conditional_return_retains_unknown_domain():
+    result = public('mp_obj_t probe(mp_obj_t value) { return value ?: mp_obj_new_int(7); }')
+    assert result['public_parameters'][0]['accepted_domain']['resolution'] == 'unresolved'
+    assert result['return_resolution'] == 'unresolved'
+
+
 def test_truth_check_cannot_erase_integer_constraint_or_unknown_consumer():
     for operation in ('mp_obj_get_int(value);', 'consume(value);'):
         result = public('mp_obj_t probe(mp_obj_t value) { mp_obj_is_true(value); ' + operation + ' return mp_obj_new_bool(1); }')
@@ -276,13 +358,63 @@ def test_tuple_count_and_accessible_extent_are_independent(count, extent, resolv
         assert result['returns'][0]['elements'][0]['exported_argument'] == 'arg0'
 
 
-def test_fixed_vector_item_relation_preserves_reordering():
-    function, summary = analyse('mp_obj_t probe(size_t count, const mp_obj_t *vector) { return mp_obj_new_tuple(2, (mp_obj_t[]){vector[1], vector[0]}); }')
+@pytest.mark.parametrize('setup', ['', 'mp_obj_t *alias = (mp_obj_t *)vector;'])
+def test_fixed_vector_item_relation_preserves_reordering(setup):
+    function, summary = analyse('mp_obj_t probe(size_t count, const mp_obj_t *vector) { ' + setup + ' return mp_obj_new_tuple(2, (mp_obj_t[]){vector[1], vector[0]}); }')
     binding = {'parameters': [
         {'name': name, 'required': True, 'source_refs': [{'kind': 'vector-item', 'scope': function['id'], 'vector_parameter': 1, 'index': index}],
          'binding_authority': {'resolution': 'bounded-resolved'}} for index, name in enumerate(('first', 'second'))]}
     result = bind_public_contracts(summary, binding)
     assert [element['exported_argument'] for element in result['returns'][0]['elements']] == ['second', 'first']
+
+
+@pytest.mark.parametrize('sibling', ['(alias[0] = 99, vector[1])', 'mutate_vector(alias)'])
+def test_tuple_initializer_sibling_alias_mutation_blocks_original_vector_identity(sibling):
+    function, summary = analyse('''
+mp_obj_t mutate_vector(mp_obj_t *items);
+mp_obj_t probe(size_t count, const mp_obj_t *vector) {
+    mp_obj_t *alias = (mp_obj_t *)vector;
+    return mp_obj_new_tuple(2, (mp_obj_t[]){vector[0], ''' + sibling + '''});
+}
+''')
+    binding = {'parameters': [
+        {'name': 'value', 'required': True,
+         'source_refs': [{'kind': 'vector-item', 'scope': function['id'], 'vector_parameter': 1, 'index': 0}],
+         'binding_authority': {'resolution': 'bounded-resolved'}}]}
+    result = bind_public_contracts(summary, binding)
+    assert result['return_resolution'] == 'unresolved'
+    assert result['returns'][0]['elements'][0]['kind'] == 'unresolved'
+    assert 'exported_argument' not in result['returns'][0]['elements'][0]
+
+
+@pytest.mark.parametrize('operation', [
+    'mp_obj_t *items = (mp_obj_t *)args; items[0] = (mp_obj_t)99;',
+    'mp_obj_t *items = (mp_obj_t *)args; mp_obj_t *alias = items; alias[0] = 99;',
+    'mp_obj_t *items = (mp_obj_t *)args; opaque(items);',
+    'struct { mp_obj_t *items; } carrier = {.items = (mp_obj_t *)args}; carrier.items[0] = 99;',
+])
+def test_vector_alias_storage_mutation_cannot_publish_original_item_identity(operation):
+    function, summary = analyse('mp_obj_t probe(size_t count, const mp_obj_t *args) { ' + operation + ' return args[0]; }')
+    binding = {'parameters': [
+        {'name': 'value', 'required': True,
+         'source_refs': [{'kind': 'vector-item', 'scope': function['id'], 'vector_parameter': 1, 'index': 0}],
+         'binding_authority': {'resolution': 'bounded-resolved'}}]}
+    result = bind_public_contracts(summary, binding)
+    assert result['return_resolution'] == 'unresolved'
+    assert result['returns'][0]['kind'] == 'unresolved'
+    assert 'exported_argument' not in result['returns'][0]
+    assert result['public_parameters'][0]['accepted_domain']['resolution'] == 'unresolved'
+
+
+def test_unwritten_vector_alias_keeps_original_item_identity():
+    function, summary = analyse('mp_obj_t probe(size_t count, const mp_obj_t *args) { mp_obj_t *items = (mp_obj_t *)args; return args[0]; }')
+    binding = {'parameters': [
+        {'name': 'value', 'required': True,
+         'source_refs': [{'kind': 'vector-item', 'scope': function['id'], 'vector_parameter': 1, 'index': 0}],
+         'binding_authority': {'resolution': 'bounded-resolved'}}]}
+    result = bind_public_contracts(summary, binding)
+    assert result['return_resolution'] == 'bounded-resolved'
+    assert result['returns'][0]['exported_argument'] == 'value'
 
 
 @pytest.mark.parametrize('native', ['str', 'bytes', 'bytearray'])
@@ -1410,12 +1542,18 @@ def test_pure_outer_by_value_forwarding_keeps_an_unchanged_formal_specialization
     assert result['helper_propagation'][0]['constant_bindings']['selected_mode'] == 1
 
 
-def test_nested_unknown_vector_consumer_cannot_preserve_a_forwarded_element_identity():
+@pytest.mark.parametrize('setup,consumer', [
+    ('', 'mutate_vector(args)'),
+    ('mp_obj_t *items = (mp_obj_t *)args;', 'mutate_vector(items)'),
+    ('mp_obj_t *items = (mp_obj_t *)args;', '(items[0] = 99, 0)'),
+])
+def test_nested_unknown_vector_consumer_cannot_preserve_a_forwarded_element_identity(setup, consumer):
     function, result = analyse('''
 int mutate_vector(const mp_obj_t *args);
 static mp_obj_t echo(mp_obj_t value, int ignored) { return value; }
 mp_obj_t probe(const mp_obj_t *args) {
-    return echo(args[0], mutate_vector(args));
+    ''' + setup + '''
+    return echo(args[0], ''' + consumer + ''');
 }
 ''')
     assert result['return_resolution'] == 'unresolved'
@@ -1525,6 +1663,35 @@ def test_unknown_consumers_retain_formal_provenance_after_prior_escape():
     assert consumers[0]['byte_start'] != consumers[1]['byte_start']
     result = bind_public_contracts(summary, bindings(function))
     assert result['public_parameters'][0]['accepted_domain']['resolution'] == 'unresolved'
+
+
+def test_unknown_update_argument_consumer_keeps_original_vector_provenance():
+    function, summary = analyse('mp_obj_t probe(size_t count, const mp_obj_t *args) { consume(*args++); return (mp_obj_t)99; }')
+    assert any(use.get('helper') == 'consume' and use['resolution'] == 'unresolved'
+               and use['source_ref'] == {'kind': 'c-parameter', 'scope': function['id'], 'parameter': 1}
+               for use in summary['input_uses'])
+    binding = {'parameters': [
+        {'name': 'value', 'required': True,
+         'source_refs': [{'kind': 'vector-item', 'scope': function['id'], 'vector_parameter': 1, 'index': 0}],
+         'binding_authority': {'resolution': 'bounded-resolved'}}]}
+    parameter = bind_public_contracts(summary, binding)['public_parameters'][0]
+    assert parameter['accepted_domain']['resolution'] == 'unresolved'
+    assert parameter['accepted_domain']['reasons']
+
+
+@pytest.mark.parametrize('initializer', [
+    'struct { mp_obj_t item; } carrier = {.item = value}; consume(carrier.item);',
+    'mp_obj_t carrier[1] = {[0] = value}; consume(carrier[0]);',
+    'struct { mp_obj_t item; } carrier = {.item = value + 0};',
+])
+def test_designated_initializer_values_keep_unknown_input_consumers(initializer):
+    function, summary = analyse('mp_obj_t probe(mp_obj_t value) { mp_obj_is_true(value); ' + initializer + ' return 99; }')
+    parameter = bind_public_contracts(summary, bindings(function))['public_parameters'][0]
+    assert parameter['accepted_domain']['resolution'] == 'unresolved'
+    assert parameter['accepted_domain']['contract'] is None
+    assert any(use['resolution'] == 'unresolved' and use['source_ref'] ==
+               {'kind': 'c-parameter', 'scope': function['id'], 'parameter': 0}
+               for use in summary['input_uses'])
 
 
 def test_unknown_mutated_alias_consumer_keeps_all_possible_original_inputs():

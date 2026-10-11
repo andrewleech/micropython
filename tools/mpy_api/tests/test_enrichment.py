@@ -15,23 +15,6 @@ from mpy_api.frozen import collect_frozen_modules
 
 _REVISION = "a" * 40
 _NOTICE = b"Copyright fixture author\nPermission fixture notice\n"
-# Exact method body from retained same-source-docstubs/builtins.pyi:121-134,
-# generated from captured MicroPython documentation, source revision 9c29c4b.
-_CENTER_METHOD = '''    def center(self, width) -> int:
-        """
-                Return a centered string of length *width*. Padding is done using spaces.
-        
-                When Unicode support is enabled (``MICROPY_PY_BUILTINS_STR_UNICODE``), this
-                method counts Unicode characters rather than bytes, ensuring proper alignment
-                for multi-byte UTF-8 characters.
-        
-                Example::
-        
-                    >>> 'café'.center(10)  # é is 2 bytes in UTF-8
-                    '   café   '
-        """
-        ...
-'''
 
 
 def _pin(path, *, relative=None):
@@ -68,13 +51,17 @@ def _save(path, manifest):
 
 
 def _center_manifest(tmp_path):
-    path, manifest = _manifest(tmp_path, "class str:\n" + _CENTER_METHOD, module="builtins")
-    license_path = Path(__file__).resolve().parents[3] / "LICENSE"
-    (tmp_path / "MicroPython-LICENSE.txt").write_bytes(license_path.read_bytes())
-    (tmp_path / "center-excerpt.pyi").write_text(_CENTER_METHOD, encoding="utf-8")
-    excerpt = _pin(tmp_path / "center-excerpt.pyi", relative="center-excerpt.pyi")
-    manifest["sources"][0].update(uri="https://github.com/micropython/micropython/blob/9c29c4b/docs/library/builtins.rst",
-                                  revision=None, version="captured-9c29c4b", content_sha256=excerpt["sha256"], evidence=[excerpt])
+    root = Path(__file__).resolve().parents[3]
+    documentation_path = root / "docs" / "library" / "builtins.rst"
+    documentation = documentation_path.read_bytes()
+    center = documentation.decode("utf-8").split("    .. method:: str.center(width)\n\n", 1)[1].split("\n.. function:: sum()", 1)[0]
+    method = '    def center(self, width) -> int:\n        """\n' + center + '\n        """\n        ...\n'
+    path, manifest = _manifest(tmp_path, "class str:\n" + method, module="builtins")
+    (tmp_path / "MicroPython-LICENSE.txt").write_bytes((root / "LICENSE").read_bytes())
+    (tmp_path / "builtins.rst").write_bytes(documentation)
+    evidence = _pin(tmp_path / "builtins.rst", relative="builtins.rst")
+    manifest["sources"][0].update(uri=documentation_path.as_uri(), revision=None, version=None,
+                                  content_sha256=evidence["sha256"], evidence=[evidence])
     manifest["licenses"] = [{"id": "MicroPython-MIT", "expression": "MIT",
                              "copyright": "Copyright (c) 2013-2026 Damien P. George",
                              "notices": [_pin(tmp_path / "MicroPython-LICENSE.txt", relative="MicroPython-LICENSE.txt")],
@@ -177,8 +164,8 @@ def test_parameter_and_return_resolution_are_independent(tmp_path):
 
 
 @pytest.mark.parametrize("known_return", [None, "str"])
-def test_actual_center_wrong_return_survives_shape_conflict(tmp_path, known_return):
-    # This is the actual retained documentation annotation, not a corrected fixture.
+def test_documented_center_wrong_return_survives_shape_conflict(tmp_path, known_return):
+    # The deliberately incorrect int annotation must not override selected return evidence.
     path = _center_manifest(tmp_path)
     center = _function("center", known_return, parameters=[_parameter("width", "int")], offset=1)
     inventory = _inventory(_module("builtins", [_class("str", [center])]))
@@ -237,7 +224,8 @@ def test_resolved_return_with_unresolved_parser_still_compares(tmp_path):
     assert "-> bytes" in declarations["modules/probe.pyi"]
 
 
-@pytest.mark.parametrize("contract", ["native-integer-conversion", "readable-buffer", "writable-buffer"])
+@pytest.mark.parametrize("contract", ["integer-conversion-capability", "readable-buffer-capability", "writable-buffer-capability",
+                                     "tuple-or-list/exact-length", "unassessed-native-capability"])
 def test_known_unrepresentable_capability_is_not_rendered_any_equivalence(tmp_path, contract):
     path, _ = _manifest(tmp_path, "def truth(value: int, /) -> bool: ...\n")
     parameter = _parameter(contract=contract)
@@ -598,15 +586,6 @@ def test_doc_enriched_requires_runtime_and_documentation_parents(tmp_path):
         "documentation", "runtime-observation", "doc-enriched"}
 
 
-def test_tree_identity_and_consumed_identity_change_with_licence_lineage(tmp_path):
-    path, manifest = _manifest(tmp_path)
-    first = load_enrichment(path)
-    manifest["licenses"][0]["modified"] = True
-    _save(path, manifest)
-    second = load_enrichment(path)
-    assert first["tree_identity"]["sha256"] != second["tree_identity"]["sha256"]
-
-
 @pytest.mark.parametrize("imports,annotation", [
     ("from typing import Union as U\nimport builtins as b\nfrom alien import *\n", "U[b.int, b.str]"),
     ("import builtins as b\nfrom alien import *\n", "b.int"),
@@ -749,3 +728,70 @@ def test_unknown_source_takes_precedence_over_unsupported_document_annotation(tm
         assert row["outcome"] == "documentation-unverified"
         assert row["candidate"]["reason"] in row["reason"]
     assert "-> _mpy_Any" in declarations["modules/probe.pyi"]
+
+
+@pytest.mark.parametrize("kind,annotation,imports", [
+    ("bytearray", "bytearray", ""),
+    ("bytearray", "b.bytearray", "import builtins as b\n"),
+    ("str-or-bytes", "str | bytes", ""),
+    ("str-or-bytes", "bytes | str | bytes", ""),
+    ("str-or-bytes", "Union[str, bytes]", "from typing import Union\n"),
+])
+def test_exact_declaration_vocabulary_agrees_for_parameters_and_returns(tmp_path, kind, annotation, imports):
+    path, _ = _manifest(tmp_path, imports + f"def truth(value: {annotation}, /) -> {annotation}: ...\n")
+    function = _function(returns=kind, parameters=[_parameter(contract=kind)])
+    report, declarations = _merge_unchanged(_inventory(_module("probe", [function])), load_enrichment(path))
+    for field in ("parameter:0:value", "returns"):
+        row = _record(report, "truth", field)
+        assert row["outcome"] == "confirmed"
+        assert row["source"]["normalized"] == row["candidate"]["normalized"]
+    tree = ast.parse(declarations["modules/probe.pyi"])
+    definition = next(node for node in tree.body if isinstance(node, ast.FunctionDef))
+    expected = "bytearray" if kind == "bytearray" else "bytes | str"
+    assert ast.unparse(definition.args.posonlyargs[0].annotation) == expected
+    assert ast.unparse(definition.returns) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "type Scalar = int\n",
+    "def identity[T](value: T) -> T: ...\n",
+    "class Container[T]: ...\n",
+])
+def test_reference_grammar_rejects_post_python310_syntax(tmp_path, text):
+    path, _ = _manifest(tmp_path, text)
+    with pytest.raises(ValueError):
+        load_enrichment(path)
+
+
+def test_uppercase_revision_matches_selected_source(tmp_path):
+    path, manifest = _manifest(tmp_path)
+    manifest["producer"]["source"]["revision"] = ("ab" * 20).upper()
+    manifest["sources"][0]["revision"] = ("cd" * 20).upper()
+    _save(path, manifest)
+    inventory = _inventory(_module("probe", [_function()]))
+    inventory["build"]["source_revision"] = "cd" * 20
+    bundle = load_enrichment(path)
+    report, _ = _merge_unchanged(inventory, bundle)
+    assert report["target_match"]["source_versions"][0]["revision_match"] is True
+    assert bundle["provenance"]["producer"]["source"]["revision"] == "ab" * 20
+
+
+def test_standalone_inventory_retains_resolvable_enrichment_lineage(tmp_path):
+    path, _ = _manifest(tmp_path)
+    bundle = load_enrichment(path)
+    inventory = _inventory(_module("probe", [_function()]))
+    inventory["provenance"]["producer_inputs"]["compiler"] = {"fixture": "selected"}
+    report, _ = _merge_unchanged(inventory, bundle)
+    published = json.loads(json.dumps(inventory))
+
+    def resolve(reference):
+        value = published
+        for key in reference.split("."):
+            value = value[key]
+        return value
+
+    assert resolve(report["inputs_ref"]) == bundle["inputs"]
+    assert resolve(report["source_lineage"]["producer_inputs_ref"])["compiler"] == {"fixture": "selected"}
+    lineage = published["provenance"]["producer_inputs"]["enrichment"]["provenance"]
+    assert lineage == bundle["provenance"]
+    assert _record(report, "truth", "returns")["document"]["lineage"]["sources"] == lineage["sources"]

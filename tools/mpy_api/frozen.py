@@ -285,6 +285,7 @@ class _Collector:
             if isinstance(statement, ast.Return):
                 if isinstance(statement.value, ast.Name) and statement.value.id in names and statement.value.id not in written:
                     contract = {"kind": "argument", "exported_argument": statement.value.id,
+                                "identity": {"kind": "unchanged-parameter", "domain": "python-object"},
                                 "authority": "unchanged Python parameter on a straight-line successful return"}
                 else:
                     contract = _literal(statement.value) if statement.value is not None else {"kind": "None", "value": None}
