@@ -33,9 +33,15 @@
 #include "mboot_port.h"
 
 // Handoff from the app to the bootloader through a no-init RAM region at MBOOT_REQ_START
-// and a retention word. The region is MBOOT_REQ_REGION_SIZE bytes.
+// and a retention word. The region is MBOOT_REQ_REGION_SIZE bytes; the last 16 bytes of it
+// (MBOOT_FI_STATE_OFFSET) belong to the test fault-injection state and are not part of the
+// request or its CRC.
 
 #define MBOOT_REQ_REGION_SIZE 0x400u
+#define MBOOT_FI_STATE_OFFSET 0x3F0u
+#define MBOOT_FI_STATE_SIZE   16u
+_Static_assert(MBOOT_FI_STATE_OFFSET + MBOOT_FI_STATE_SIZE == MBOOT_REQ_REGION_SIZE,
+    "the fault-injection state ends the request region");
 
 #define MBOOT_REQ_MAGIC     0x5152424Du   // bytes "MBRQ"
 #define MBOOT_REQ_VERSION   1u
@@ -69,10 +75,11 @@ typedef struct {
 } mboot_request_t;
 
 _Static_assert(sizeof(mboot_request_t) == 1008, "request struct size");
-_Static_assert(sizeof(mboot_request_t) <= MBOOT_REQ_REGION_SIZE, "the request fits in the request region");
+_Static_assert(sizeof(mboot_request_t) <= MBOOT_FI_STATE_OFFSET, "the request ends before the fault-injection state");
 
-// Zeroes the request struct in the region with 64-bit stores, so that RAM with ECC is
-// initialised in full words, and clears the retention word.
+// Zeroes the request struct in the region (not the fault-injection state behind it) with
+// 64-bit stores, so that RAM with ECC is initialised in full words, and clears the retention
+// word.
 void mboot_request_clear(void);
 
 // App role. Writes the request into the region with 64-bit stores, writes the retention word

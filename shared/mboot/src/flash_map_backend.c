@@ -29,9 +29,12 @@
 #include <string.h>
 
 #include "mcuboot_config/mcuboot_config.h"
+#include "mcuboot_config/mcuboot_logging.h"
 #include "flash_map_backend/flash_map_backend.h"
 #include "sysflash/sysflash.h"
+#include "mboot_log.h"
 #include "mboot_port.h"
+#include "mboot_request.h"
 #include "mboot_shadow.h"
 
 // Alignment bootutil assumes for trailer flags (the default of bootutil when the layout
@@ -47,6 +50,43 @@
 #else
 #define HAVE_STREAM_AREA 0
 #endif
+
+// ---- fault injection (test builds only) ----
+
+#if defined(MICROPY_MBOOT_TEST_FI)
+
+#define FI_MAGIC 0x4A4E4946u    // bytes "FINJ"
+#define FI_MODE_TRACE (0x80u)   // bit 7 of the mode word: print every operation before the hook
+
+typedef struct {
+    uint32_t magic;
+    uint32_t target;
+    uint32_t counter;
+    uint32_t mode;
+} fi_state_t;
+
+// Counts the operation and calls the port hook around it while the state in the request
+// region is armed (magic present). The hook may reset the device instead of returning.
+static int fi_run(int op, uint8_t dev, uint32_t off, uint32_t len, const void *src) {
+    size_t size = 0;
+    volatile fi_state_t *st = (volatile fi_state_t *)((uint8_t *)mboot_port_request_ram(&size) + MBOOT_FI_STATE_OFFSET);
+    bool armed = size >= MBOOT_FI_STATE_OFFSET + sizeof(fi_state_t) && st->magic == FI_MAGIC;
+    if (armed) {
+        st->counter = st->counter + 1;
+        if (st->mode & FI_MODE_TRACE) {
+            mboot_log(MCUBOOT_LOG_LEVEL_ERROR, "FI %u %c %u 0x%x 0x%x\n", (unsigned)st->counter, op == 0 ? 'w' : 'e', (unsigned)dev,
+                (unsigned)off, (unsigned)len);
+        }
+        mboot_port_fi_hook(op, dev, off, len, 0);
+    }
+    int rc = op == 0 ? mboot_port_flash_dev_write(dev, off, src, len) : mboot_port_flash_dev_erase(dev, off, len);
+    if (armed) {
+        mboot_port_fi_hook(op, dev, off, len, 1);
+    }
+    return rc;
+}
+
+#endif // MICROPY_MBOOT_TEST_FI
 
 // ---- device access without ECC policy ----
 
@@ -83,7 +123,11 @@ int mboot_flash_raw_write(uint8_t dev, uint32_t off, const void *src, uint32_t l
     if (len == 0) {
         return 0;
     }
+    #if defined(MICROPY_MBOOT_TEST_FI)
+    return fi_run(0, dev, off, len, src);
+    #else
     return mboot_port_flash_dev_write(dev, off, src, len);
+    #endif
 }
 
 int mboot_flash_raw_erase(uint8_t dev, uint32_t off, uint32_t len) {
@@ -97,7 +141,11 @@ int mboot_flash_raw_erase(uint8_t dev, uint32_t off, uint32_t len) {
     if (len == 0) {
         return 0;
     }
+    #if defined(MICROPY_MBOOT_TEST_FI)
+    return fi_run(1, dev, off, len, NULL);
+    #else
     return mboot_port_flash_dev_erase(dev, off, len);
+    #endif
 }
 
 // ---- device access with the flash policy ----

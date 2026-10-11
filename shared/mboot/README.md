@@ -9,7 +9,7 @@ Mboot is MicroPython's bootloader/update facility. MCUboot is the upstream engin
 - `mboot_common.mk` selects sources and generates the board layout; `mboot_rules.mk` provides generation, signing and packaging rules; `mboot_bootloader.mk`, `mboot_bootloader.ld` and `mboot_sram.mk` build and link a bootloader on a GNU toolchain.
 - `include/` defines the `mboot_*` contracts, `MICROPY_MBOOT_*` shared feature settings and `MICROPY_HW_MBOOT_*` hardware configuration. `mcuboot_config/`, `flash_map_backend/`, `sysflash/` and `os/` retain the include names required by bootutil. Exact upstream `MCUBOOT_*` switches remain engine configuration, translated from product choices where needed.
 - `src/` implements boot flow, signed-update validation and policy, flash access, application handoff, filesystem loading and the shared bounded element parser.
-- `dfu/core/` implements portable flash dispatch, region handling and TinyUSB callbacks. `dfu/include/` is its transport contract; `dfu/tests/test_pydfu_wire.py` checks the independent pydfu wire format. See [DFU transport details](dfu/README.md).
+- `dfu/core/` implements portable flash dispatch, region handling and TinyUSB callbacks. `dfu/include/` is its transport contract; `dfu/tests/` covers the core, wire format and actual policy binding. See [DFU transport details](dfu/README.md).
 
 The bounded element parser is `src/mboot_elem.c` and `include/mboot_elem.h`. Filesystem loading consumes it without requiring DFU or TinyUSB. The build selects it exactly once when either update frontend needs it.
 
@@ -33,13 +33,13 @@ The Mboot DFU binding exposes a read-only alternate setting named `Update audit 
 
 The STM32 port implements Mboot for STM32H5 and STM32F7 only. The bootloader is built with `make -C ports/stm32 -f Makefile.mboot BOARD=NUCLEO_H563ZI` into `build-<BOARD>-mboot`. Its application is built with `make -C ports/stm32 BOARD=NUCLEO_H563ZI` into `build-<BOARD>`; a board selects this by including `ports/stm32/mboot_app.mk` from its `mpconfigvariant.mk`. NUCLEO_H563ZI (two slots with swap) and PYBD_SF6 (STM32F767, single-slot policy with the update image in SPI flash) are the boards configured so far. `ports/stm32/mboot_dev.h` describes their flash.
 
-`tools/ci.sh mboot_setup` initializes MCUboot, STM32/CMSIS, Mbed TLS and TinyUSB dependencies for production bootloader/application builds. Production CI builds the STM32 targets and runs the independent pydfu wire check.
+`tools/ci.sh mboot_setup` initializes MCUboot, STM32/CMSIS, Mbed TLS and TinyUSB dependencies for the host and embedded checks. The Python suite also compiles the F7 DFU bootloader, so it needs TinyUSB even when the other host tests use a fake transport.
 
 The established `ports/stm32/mboot` implementation and its default make entrypoint are independent. Other boards retain their legacy `USE_MBOOT`, `BUILDING_MBOOT` and DfuSe/`fwupdate` contracts. The MCUboot-backed application sets `USE_MBOOT=0` because it uses its own image layout, and `Makefile.mboot` sets `BUILDING_MBOOT=1` only so that `stm32.mk` selects the bootloader's soft-float flags.
 
 Build/signing make variables and generated filenames use the Mboot prefix: `MBOOT_PUBKEY`, `MBOOT_SIGN_KEY`, `MBOOT_PRODUCTION`, `mboot_gen/mboot_layout.{json,mk,ld}` and `mboot_keys_gen.c`. The production make setting is forwarded to C as `MICROPY_MBOOT_PRODUCTION`. The generated filesystem-reader selection is `MBOOT_MCUBOOT_FSLOAD`, separate from legacy `MBOOT_FSLOAD`. `MBOOT_DFU_FLASH_WRITE_ALIGN` is the derived device requirement; the transport is compiled with matching `MICROPY_HW_MBOOT_DFU_WRITE_ALIGN` and the binding checks their agreement.
 
-Layout IDs, image TLVs, magic values, request packing and result numbers are format contracts independent of product naming. Signing uses `tools/mboot_sign.py` and the repository's MCUboot imgtool. See [the reference documentation](../../docs/reference/mboot.rst).
+Layout IDs, image TLVs, magic values, request packing and result numbers are format contracts independent of product naming. Signing uses `tools/mboot_sign.py` and the repository's MCUboot imgtool. See [the reference documentation](../../docs/reference/mboot.rst) and [host test commands](../../tests/mboot/README.md).
 
 ## Diagnostic USB boot gate
 
