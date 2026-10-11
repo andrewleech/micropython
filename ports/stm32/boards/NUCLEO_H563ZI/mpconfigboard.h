@@ -94,7 +94,7 @@
 #define MICROPY_HW_ETH_RMII_TXD0    (pin_G13)
 #define MICROPY_HW_ETH_RMII_TXD1    (pin_B15)
 
-// Mboot (MBOOT_BACKEND=mcuboot builds, see docs/reference/mboot.rst). The primary slot follows the
+// Mboot (see docs/reference/mboot.rst). The primary slot follows the
 // bootloader. The secondary slot is at the start of bank 2, so the application can write it
 // while executing from bank 1.
 #define MBOOT_PRIMARY_SIZE                (640 * 1024)

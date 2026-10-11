@@ -127,7 +127,7 @@ extern unsigned char _micropy_hw_romfs_part0_start;
 
 void board_early_init_sf6(void);
 
-// Mboot (MBOOT_BACKEND=mcuboot builds, see docs/reference/mboot.rst). The flash is 4 sectors of 32 KiB, one
+// Mboot (see docs/reference/mboot.rst). The flash is 4 sectors of 32 KiB, one
 // of 128 KiB and seven of 256 KiB. A firmware image needs five of the 256 KiB sectors and the
 // filesystem is on SPI flash #1, so there is room for one slot only: the single policy updates
 // it in place, by DFU or from a file on the filesystem (fsload), and does not revert.

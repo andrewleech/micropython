@@ -1,7 +1,7 @@
 # mboot_common.mk - build fragment for shared/mboot.
 #
 # Included by ports/<port>/mboot/mcuboot/Makefile (MBOOT_ROLE=bootloader) and by the port's
-# app Makefile when MBOOT_BACKEND=mcuboot (MBOOT_ROLE=app):
+# app Makefile through the board configuration (MBOOT_ROLE=app):
 #
 #   include $(TOP)/shared/mboot/mboot_common.mk
 #   INC += $(MBOOT_INC)

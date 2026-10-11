@@ -1,6 +1,6 @@
 /*
     GNU linker script for STM32H573xI, application running under the MCUboot bootloader
-    (MBOOT_BACKEND=mcuboot, boards/common_bl.ld places the sections).
+    (boards/common_bl.ld places the sections).
 
     The flash addresses come from the board layout, mboot_layout.ld, and the SRAM addresses
     from mboot_sram.ld, which the build generates from ports/stm32/mboot/mcuboot/mboot_sram.ld.S.

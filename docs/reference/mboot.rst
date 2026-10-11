@@ -28,13 +28,13 @@ fails.
 Building and signing
 --------------------
 
-Build the bootloader and MicroPython firmware for the same board. Select the
-MCUboot-backed application with ``MBOOT_BACKEND=mcuboot``:
+Build the bootloader and MicroPython firmware for the same board. NUCLEO_H563ZI
+and PYBD_SF6 configure MCUboot-backed applications by default:
 
 .. code-block:: bash
 
     make -C ports/stm32/mboot/mcuboot BOARD=NUCLEO_H563ZI
-    make -C ports/stm32 BOARD=NUCLEO_H563ZI MBOOT_BACKEND=mcuboot
+    make -C ports/stm32 BOARD=NUCLEO_H563ZI
 
 Use ``PYBD_SF6`` instead of ``NUCLEO_H563ZI`` to build for that board. An
 initial installation requires programming both the bootloader and the first

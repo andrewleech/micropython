@@ -1,5 +1,5 @@
-# Rules of the Mboot application variant of the stm32 port (MBOOT_BACKEND=mcuboot), included at the end
-# of the Makefile. See mboot_app.mk.
+# Rules for Mboot applications, included at the end of the STM32 Makefile.
+# See mboot_app.mk.
 
 # The crypto headers of bootutil, after the include directories of the application.
 CFLAGS += $(MBOOT_CRYPTO_INC)

@@ -216,9 +216,9 @@ function ci_mboot_stm32_bootloader_build {
 function ci_mboot_stm32_app_build {
     make ${MAKEOPTS} -C mpy-cross
     make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI submodules
-    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI MBOOT_BACKEND=mcuboot BUILD=build-NUCLEO_H563ZI-mboot
+    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI
     make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF6 submodules
-    make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF6 MBOOT_BACKEND=mcuboot
+    make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF6
 }
 
 ########################################################################################
@@ -588,6 +588,8 @@ function ci_stm32_path {
 function ci_stm32_pyb_build {
     # This function builds the following MCU families: F4, F7.
 
+    pip3 install cryptography intelhex click cbor2 pyyaml
+    git submodule update --init lib/mcuboot
     make ${MAKEOPTS} -C mpy-cross
     make ${MAKEOPTS} -C ports/stm32 MICROPY_PY_NETWORK_WIZNET5K=5200 submodules
     make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF2 submodules

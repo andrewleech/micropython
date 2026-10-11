@@ -17,11 +17,11 @@ The DFU policy contract is `include/mboot_dfu_recovery.h` with `mboot_dfu_recove
 
 ## STM32 builds
 
-The MCUboot-backed STM32 bootloader is built with `make -C ports/stm32/mboot/mcuboot BOARD=NUCLEO_H563ZI`. Its application is built with `make -C ports/stm32 BOARD=NUCLEO_H563ZI MBOOT_BACKEND=mcuboot`, using a separate `build-NUCLEO_H563ZI-mboot` directory by default. PYBD_SF6 supports the single-slot policy.
+The STM32 bootloader is built with `make -C ports/stm32/mboot/mcuboot BOARD=NUCLEO_H563ZI`. Its application is built with `make -C ports/stm32 BOARD=NUCLEO_H563ZI`. NUCLEO_H563ZI and PYBD_SF6 configure Mboot applications by default; PYBD_SF6 supports the single-slot policy.
 
 `tools/ci.sh mboot_setup` initializes MCUboot, STM32/CMSIS, Mbed TLS and TinyUSB dependencies for production bootloader/application builds. Production CI builds the STM32 targets and runs the independent pydfu wire check.
 
-The established `ports/stm32/mboot` implementation and its default make entrypoint are independent. `USE_MBOOT`, `BUILDING_MBOOT`, legacy board settings and legacy DfuSe/`fwupdate` behavior retain their existing contracts. The MCUboot-backed application explicitly sets `USE_MBOOT=0`; selecting it does not change the legacy bootloader.
+The established `ports/stm32/mboot` implementation and its default make entrypoint are independent. Other boards retain their legacy `USE_MBOOT`, `BUILDING_MBOOT` and DfuSe/`fwupdate` contracts. The MCUboot-backed application sets `USE_MBOOT=0` because it uses its own image layout.
 
 Board layout/signing configuration and generated filenames use the Mboot prefix: `MBOOT_PUBKEY`, `MBOOT_SIGN_KEY`, `MBOOT_PRODUCTION`, `mboot_gen/mboot_layout.{json,mk,ld}` and `mboot_keys_gen.c`. The generated filesystem-reader selection is `MBOOT_MCUBOOT_FSLOAD`, separate from legacy `MBOOT_FSLOAD`. `MBOOT_DFU_FLASH_WRITE_ALIGN` is the derived device requirement; the transport is compiled with matching `MBOOT_DFU_WRITE_ALIGN` and the binding checks their agreement.
 

@@ -1,20 +1,16 @@
-# Build fragment of the MCUboot application variant of the stm32 port, included by the
-# Makefile after the board's mpconfigboard.mk when MBOOT_BACKEND=mcuboot. The build directory defaults to
-# build-$(BOARD)-mboot, or build-$(BOARD)-$(BOARD_VARIANT)-mboot, so it does not clash with
-# the default firmware build:
+# Application build configuration included by a board's mpconfigvariant.mk.
 #
-#   make BOARD=NUCLEO_H563ZI MBOOT_BACKEND=mcuboot             builds firmware.bin linked into the primary slot
-#                                                  and firmware.signed.bin (signed with MBOOT_SIGN_KEY,
-#                                                  by default the public test key)
-#   make BOARD=NUCLEO_H563ZI MBOOT_BACKEND=mcuboot initial     firmware.initial.{bin,hex}, the first image of the primary slot
-#   make BOARD=NUCLEO_H563ZI MBOOT_BACKEND=mcuboot dfu         firmware.signed.dfu for tools/pydfu.py
-#   make BOARD=NUCLEO_H563ZI MBOOT_BACKEND=mcuboot PROBE=<serial> deploy-initial
+#   make BOARD=NUCLEO_H563ZI                 builds firmware.bin in the primary slot
+#                                           and firmware.signed.bin (MBOOT_SIGN_KEY)
+#   make BOARD=NUCLEO_H563ZI initial         builds firmware.initial.{bin,hex}
+#   make BOARD=NUCLEO_H563ZI dfu             builds firmware.signed.dfu
+#   make BOARD=NUCLEO_H563ZI PROBE=<serial> deploy-initial
 #
 # The bootloader is built by mboot/mcuboot/Makefile. Both take their layout from the MBOOT_* settings
 # in the board's mpconfigboard.h and from mboot/mcuboot/mboot_dev.h.
 
 ifeq ($(filter $(MCU_SERIES),h5 f7),)
-$(error MBOOT_BACKEND=mcuboot is implemented for STM32H5 and STM32F7 only, board $(BOARD) is MCU_SERIES=$(MCU_SERIES))
+$(error Mboot applications are implemented for STM32H5 and STM32F7 only, board $(BOARD) is MCU_SERIES=$(MCU_SERIES))
 endif
 
 MBOOT_ROLE = app
@@ -32,9 +28,8 @@ include $(TOP)/shared/mboot/mboot_common.mk
 # MICROPY_HW_MBOOT_APP selects the port hooks: the flash ECC NMI handler, the reset flags
 # handoff and the routing of machine.bootloader().
 
-# The firmware starts after the image header in the primary slot. The MCU's linker script is
-# replaced by its _mcuboot variant, which takes the addresses from the layout. An MCUboot build
-# is never linked for mboot, even with USE_MBOOT=1 on the command line.
+# The firmware starts after the image header in the primary slot. The MCU's linker script
+# takes the addresses from the layout, rather than the legacy STM32 Mboot layout.
 override USE_MBOOT = 0
 MBOOT_SRAM_LD = $(BUILD)/mboot_sram.ld
 MBOOT_CMSIS_H = stm32$(MCU_SERIES)xx.h
