@@ -48,13 +48,13 @@ __attribute__((section(".mboot_info"), used)) const mboot_bl_info_t mboot_bl_inf
     .magic = 0x4E49424Du,
     .info_version = 1,
     .flags = (MBOOT_DFU_ENABLE ? 1u : 0u) | (MBOOT_FSLOAD_ENABLE ? 2u : 0u)
-        #if defined(MBOOT_FSLOAD_GZIP)
+        #if MICROPY_MBOOT_FSLOAD_GZIP
         | 4u
         #endif
     ,
     .layout_id = MBOOT_LAYOUT_ID,
     .api_version = MBOOT_API_VERSION,
-    .version = MBOOT_BL_VERSION,
+    .version = MICROPY_MBOOT_BL_VERSION,
     .reserved = {[0 ... 23] = 0xFF},
 };
 

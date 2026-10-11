@@ -1,11 +1,11 @@
 # Makefile of the STM32 MCUboot bootloader (MBOOT_ROLE=bootloader), for STM32H5 boards and for
-# STM32F7 boards whose mpconfigboard.h has the MBOOT_* settings (PYBD_SF6).
+# STM32F7 boards whose mpconfigboard.h has the MICROPY_*MBOOT_* settings (PYBD_SF6).
 #
 #   make BOARD=NUCLEO_H563ZI                  builds build-NUCLEO_H563ZI/firmware.{elf,bin,hex}
 #   make BOARD=NUCLEO_H563ZI MBOOT_CLK=hsi  keeps the reset clock instead of the board PLL clock
 #   make BOARD=NUCLEO_H563ZI PROBE=<serial> deploy-bootloader   programs the bootloader through pyocd
 #
-# The board's mpconfigboard.h holds the MBOOT_* settings (slot placement and the choices
+# The board's mpconfigboard.h holds the MICROPY_*MBOOT_* settings (slot placement and the choices
 # listed in shared/mboot/include/mboot_layout.h), mboot_dev.h here describes the flash.
 
 # Select the board to build for:
@@ -78,7 +78,7 @@ CFLAGS += $(CFLAGS_MCU_$(MCU_SERIES))
 CFLAGS += $(COPT)
 CFLAGS += -DBOARD_$(BOARD) -DBUILDING_MBOOT=1 -DMICROPY_HW_STM32WB_FLASH_SYNCRONISATION=0 -DSTM32_HAL_H='<stm32$(MCU_SERIES)xx_hal.h>'
 CFLAGS += $(MBOOT_CFLAGS)
-CFLAGS += -DMBOOT_STM32_PLL=$(if $(filter hsi,$(MBOOT_CLK)),0,1)
+CFLAGS += -DMICROPY_HW_MBOOT_STM32_PLL=$(if $(filter hsi,$(MBOOT_CLK)),0,1)
 
 # Remove uncalled code from the final image.
 CFLAGS += -fdata-sections -ffunction-sections
@@ -107,7 +107,7 @@ SRC_C = \
 	ports/stm32/flash.c \
 	$(MBOOT_SRC_C)
 
-# A SPI flash of the board (MBOOT_SPIFLASH_* in mpconfigboard.h) uses the drivers of mboot.
+# A SPI flash of the board (MICROPY_HW_MBOOT_SPIFLASH_* in mpconfigboard.h) uses the drivers of mboot.
 ifeq ($(MBOOT_SPIFLASH_ENABLE),1)
 SRC_C += drivers/bus/softspi.c drivers/bus/softqspi.c drivers/memory/spiflash.c \
 	ports/stm32/qspi.c ports/stm32/spibdev.c ports/stm32/xspi.c $(wildcard $(BOARD_DIR)/*.c)

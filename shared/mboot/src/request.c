@@ -81,7 +81,7 @@ static bool request_valid(const mboot_request_t *r) {
 }
 
 static bool retention_matches(uint32_t w) {
-    #if MBOOT_RETENTION_BITS >= 32
+    #if MICROPY_HW_MBOOT_RETENTION_BITS >= 32
     return (w & MBOOT_RET_KEY_MASK) == MBOOT_RET_KEY;
     #else
     uint32_t b = w & 0xFFu;
@@ -90,7 +90,7 @@ static bool retention_matches(uint32_t w) {
 }
 
 static uint32_t retention_value(mboot_req_mode_t mode) {
-    #if MBOOT_RETENTION_BITS >= 32
+    #if MICROPY_HW_MBOOT_RETENTION_BITS >= 32
     return MBOOT_RET_KEY | (mode == MBOOT_REQ_FSLOAD ? MBOOT_RET_FSLOAD : 0);
     #else
     return mode == MBOOT_REQ_FSLOAD ? MBOOT_RET_8BIT_FSLOAD : MBOOT_RET_8BIT_DFU;

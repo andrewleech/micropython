@@ -33,7 +33,7 @@
 #include "flash_map_backend/flash_map_backend.h"
 #include "sysflash/sysflash.h"
 
-#if defined(MBOOT_FSLOAD_ENABLE) && MBOOT_FSLOAD_ENABLE
+#if MBOOT_FSLOAD_ENABLE
 
 // Presents a sequential stream (mboot_stream_t) as a read-only struct flash_area, so that
 // bootutil_img_validate() can run over a file that is not in flash.
@@ -53,11 +53,11 @@
 // FSLOAD_HEAD_CACHE bytes and the last FSLOAD_TAIL_CACHE bytes. Reads that fall wholly inside
 // either window come from RAM; everything else is read from the stream.
 
-#ifndef MBOOT_FSLOAD_HEAD_CACHE
-#define MBOOT_FSLOAD_HEAD_CACHE 64u
+#ifndef MICROPY_MBOOT_FSLOAD_HEAD_CACHE
+#define MICROPY_MBOOT_FSLOAD_HEAD_CACHE (64u)
 #endif
-#ifndef MBOOT_FSLOAD_TAIL_CACHE
-#define MBOOT_FSLOAD_TAIL_CACHE 1024u
+#ifndef MICROPY_MBOOT_FSLOAD_TAIL_CACHE
+#define MICROPY_MBOOT_FSLOAD_TAIL_CACHE (1024u)
 #endif
 
 #define PRIME_CHUNK 256u
@@ -70,8 +70,8 @@ static struct {
     int err;                                    // negative result of the last failed stream call, or 0
     uint32_t head_len;                          // valid bytes in head
     uint32_t tail_len;                          // valid bytes in tail; tail holds [size - tail_len, size)
-    uint8_t head[MBOOT_FSLOAD_HEAD_CACHE ? MBOOT_FSLOAD_HEAD_CACHE : 1];
-    uint8_t tail[MBOOT_FSLOAD_TAIL_CACHE ? MBOOT_FSLOAD_TAIL_CACHE : 1];
+    uint8_t head[MICROPY_MBOOT_FSLOAD_HEAD_CACHE ? MICROPY_MBOOT_FSLOAD_HEAD_CACHE : 1];
+    uint8_t tail[MICROPY_MBOOT_FSLOAD_TAIL_CACHE ? MICROPY_MBOOT_FSLOAD_TAIL_CACHE : 1];
     mboot_fsload_stream_stats_t stats;
 } fs;
 
@@ -210,8 +210,8 @@ int mboot_fsload_stream_prime(mboot_stream_t *s, bool size_known, uint32_t area_
             return -MBOOT_RES_ERR_FS_READ;
         }
 
-        if (fs.head_len < MBOOT_FSLOAD_HEAD_CACHE) {
-            uint32_t h = MBOOT_FSLOAD_HEAD_CACHE - fs.head_len;
+        if (fs.head_len < MICROPY_MBOOT_FSLOAD_HEAD_CACHE) {
+            uint32_t h = MICROPY_MBOOT_FSLOAD_HEAD_CACHE - fs.head_len;
             if (h > n) {
                 h = n;
             }
@@ -221,21 +221,21 @@ int mboot_fsload_stream_prime(mboot_stream_t *s, bool size_known, uint32_t area_
 
         // The tail window is a ring over the end of the stream; it is rotated into stream
         // order once the end is known.
-        if (MBOOT_FSLOAD_TAIL_CACHE != 0) {
+        if (MICROPY_MBOOT_FSLOAD_TAIL_CACHE != 0) {
             const uint8_t *src = chunk;
             uint32_t m = n;
-            if (m > MBOOT_FSLOAD_TAIL_CACHE) {
-                src += m - MBOOT_FSLOAD_TAIL_CACHE;
-                m = MBOOT_FSLOAD_TAIL_CACHE;
+            if (m > MICROPY_MBOOT_FSLOAD_TAIL_CACHE) {
+                src += m - MICROPY_MBOOT_FSLOAD_TAIL_CACHE;
+                m = MICROPY_MBOOT_FSLOAD_TAIL_CACHE;
             }
-            uint32_t first = MBOOT_FSLOAD_TAIL_CACHE - ring_pos;
+            uint32_t first = MICROPY_MBOOT_FSLOAD_TAIL_CACHE - ring_pos;
             if (first > m) {
                 first = m;
             }
             memcpy(fs.tail + ring_pos, src, first);
             memcpy(fs.tail, src + first, m - first);
-            ring_pos = (ring_pos + m) % MBOOT_FSLOAD_TAIL_CACHE;
-            fs.tail_len = fs.tail_len + m > MBOOT_FSLOAD_TAIL_CACHE ? MBOOT_FSLOAD_TAIL_CACHE : fs.tail_len + m;
+            ring_pos = (ring_pos + m) % MICROPY_MBOOT_FSLOAD_TAIL_CACHE;
+            fs.tail_len = fs.tail_len + m > MICROPY_MBOOT_FSLOAD_TAIL_CACHE ? MICROPY_MBOOT_FSLOAD_TAIL_CACHE : fs.tail_len + m;
         }
         mboot_port_wdt_feed();
     }
@@ -243,9 +243,9 @@ int mboot_fsload_stream_prime(mboot_stream_t *s, bool size_known, uint32_t area_
     if (size_known && count != s->size) {
         return -MBOOT_RES_ERR_FS_READ;
     }
-    if (MBOOT_FSLOAD_TAIL_CACHE != 0 && fs.tail_len == MBOOT_FSLOAD_TAIL_CACHE) {
+    if (MICROPY_MBOOT_FSLOAD_TAIL_CACHE != 0 && fs.tail_len == MICROPY_MBOOT_FSLOAD_TAIL_CACHE) {
         // The oldest byte is at ring_pos: rotate the ring so that it is at index 0.
-        rotate_left(fs.tail, MBOOT_FSLOAD_TAIL_CACHE, ring_pos);
+        rotate_left(fs.tail, MICROPY_MBOOT_FSLOAD_TAIL_CACHE, ring_pos);
     }
     if (count > area_size) {
         return -MBOOT_RES_ERR_TOO_BIG;

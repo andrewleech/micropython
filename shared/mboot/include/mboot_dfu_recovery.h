@@ -94,7 +94,7 @@ _Static_assert(sizeof(mboot_dfu_recovery_result_t) == MBOOT_DFU_RESULT_WIRE_LEN,
     "mboot_dfu_recovery_result_t is the 16-byte wire format");
 
 // Validate the write ranges and region table against the device table
-// (devices, erase units, write unit versus MBOOT_DFU_WRITE_ALIGN, alignment) and run
+// (devices, erase units, write unit versus MICROPY_HW_MBOOT_DFU_WRITE_ALIGN, alignment) and run
 // mboot_region_init(). Returns 0, or a negative errno-style value when the
 // tables are inconsistent.
 int mboot_dfu_recovery_regions_init(void);
@@ -106,7 +106,7 @@ const struct flash_area *mboot_dfu_recovery_target_view(void);
 
 // Run the DFU session loop. Initialises the DFU core and USB and does not return: it
 // leaves by mboot_port_reset() when the host finished a download and reset the bus,
-// or, for REC_APP_REQUEST and REC_FORCED only, after MBOOT_DFU_TIMEOUT_S seconds without
+// or, for REC_APP_REQUEST and REC_FORCED only, after MICROPY_MBOOT_DFU_TIMEOUT_S seconds without
 // DFU activity (0 disables the timeout). A table inconsistency is reported
 // through the log and LED and ends in a reset.
 MBOOT_NORETURN void mboot_dfu_recovery_run(mboot_recovery_cause_t why);

@@ -6,8 +6,8 @@
 #   make BOARD=NUCLEO_H563ZI dfu             builds firmware.signed.dfu
 #   make BOARD=NUCLEO_H563ZI PROBE=<serial> deploy-initial
 #
-# The bootloader is built by mboot/mcuboot/Makefile. Both take their layout from the MBOOT_* settings
-# in the board's mpconfigboard.h and from mboot/mcuboot/mboot_dev.h.
+# The bootloader is built by mboot/mcuboot/Makefile. Both take their layout from the
+# MICROPY_*MBOOT_* settings in the board's mpconfigboard.h and from mboot/mcuboot/mboot_dev.h.
 
 ifeq ($(filter $(MCU_SERIES),h5 f7),)
 $(error Mboot applications are implemented for STM32H5 and STM32F7 only, board $(BOARD) is MCU_SERIES=$(MCU_SERIES))

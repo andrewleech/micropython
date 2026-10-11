@@ -69,8 +69,8 @@ void mboot_fsload_status_store(uint32_t addr, uint32_t value);
 // a gzip file on littlefs2 (1208 bytes) plus an allowance for the flash read below
 // mboot_flash_dev_read() and the flash write functions, counted as 64 byte leaves. Not included:
 // mboot_validate_view() and bootutil, which run below the same entry point.
-#ifndef MBOOT_FSLOAD_STACK_MAX
-#define MBOOT_FSLOAD_STACK_MAX 1280
+#ifndef MICROPY_MBOOT_FSLOAD_STACK_MAX
+#define MICROPY_MBOOT_FSLOAD_STACK_MAX (1280)
 #endif
 
 // ---- element stream constants (payloads as in ports/stm32/mboot/fsload.c) ----

@@ -30,7 +30,7 @@
 #include "mboot_layout.h"
 #include "mboot_fsload.h"
 
-#if defined(MBOOT_FSLOAD_LFS2) && MBOOT_FSLOAD_LFS2
+#if MICROPY_MBOOT_FSLOAD_LFS2
 
 #include "lib/littlefs/lfs2.h"
 
@@ -207,4 +207,4 @@ int mboot_vfs_lfs2_mount(const mboot_fsload_window_t *w, uint32_t block_size, co
     return 0;
 }
 
-#endif // MBOOT_FSLOAD_LFS2
+#endif // MICROPY_MBOOT_FSLOAD_LFS2

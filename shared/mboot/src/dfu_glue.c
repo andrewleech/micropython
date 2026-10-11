@@ -50,10 +50,6 @@
 #include "mboot_update.h"
 #include "mboot_validate.h"
 
-#ifndef MBOOT_DFU_TIMEOUT_S
-#define MBOOT_DFU_TIMEOUT_S 120
-#endif
-
 // Bits of mboot_port_led().
 #define LED_ALIVE (1u << 0)
 #define LED_USB (1u << 1)
@@ -168,15 +164,15 @@ void mboot_port_get_serial_number(char *buf, size_t buf_len) {
 }
 
 const char *mboot_port_get_product_string(void) {
-    return MBOOT_DFU_PRODUCT;
+    return MICROPY_HW_MBOOT_DFU_PRODUCT;
 }
 
 uint16_t mboot_port_get_vid(void) {
-    return MBOOT_DFU_VID;
+    return MICROPY_HW_MBOOT_DFU_VID;
 }
 
 uint16_t mboot_port_get_pid(void) {
-    return MBOOT_DFU_PID;
+    return MICROPY_HW_MBOOT_DFU_PID;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +191,7 @@ static const mboot_flash_dev_t *dev_containing(mboot_addr_t addr, mboot_addr_t s
 
 int mboot_dfu_recovery_regions_init(void) {
     // The core pads blocks to the value it was compiled with; it must be the one of the layout.
-    if (mboot_dfu_write_align != MBOOT_DFU_WRITE_ALIGN) {
+    if (mboot_dfu_write_align != MICROPY_HW_MBOOT_DFU_WRITE_ALIGN) {
         return -EINVAL;
     }
     if (mboot_write_ranges[0].size == 0) {
@@ -214,9 +210,9 @@ int mboot_dfu_recovery_regions_init(void) {
         if (unit == 0 || off % unit != 0 || r->size % unit != 0 || r->size > mboot_dev_run_end(d, off) - off) {
             return -EINVAL;
         }
-        // The core pads every block to MBOOT_DFU_WRITE_ALIGN; the device needs whole
+        // The core pads every block to MICROPY_HW_MBOOT_DFU_WRITE_ALIGN; the device needs whole
         // write units.
-        if (MBOOT_DFU_WRITE_ALIGN % d->write_unit != 0) {
+        if (MICROPY_HW_MBOOT_DFU_WRITE_ALIGN % d->write_unit != 0) {
             return -EINVAL;
         }
     }
@@ -480,10 +476,10 @@ static MBOOT_NORETURN void dfu_init_failed(int rc) {
 // application or the user asked for may time out. Recovery after a missing or failed image, a
 // failed fsload or a fault waits for a host.
 static uint32_t dfu_timeout_ms(mboot_recovery_cause_t why) {
-    if ((why != REC_APP_REQUEST && why != REC_FORCED) || MBOOT_DFU_TIMEOUT_S <= 0) {
+    if ((why != REC_APP_REQUEST && why != REC_FORCED) || MICROPY_MBOOT_DFU_TIMEOUT_S <= 0) {
         return 0;
     }
-    uint32_t s = MBOOT_DFU_TIMEOUT_S;
+    uint32_t s = MICROPY_MBOOT_DFU_TIMEOUT_S;
     if (s > 0x7FFFFFFFu / 1000u) {
         s = 0x7FFFFFFFu / 1000u;
     }

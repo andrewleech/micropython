@@ -118,7 +118,7 @@ int mboot_app_slot_get(size_t index, mboot_app_slot_t *slot);
 int mboot_app_confirm(void);
 
 // Confirms the running image if it is a test image that has not been confirmed yet. Port main()
-// calls this after boot.py when MBOOT_CONFIRM_AUTO is set.
+// calls this after boot.py when MICROPY_MBOOT_CONFIRM_AUTO is set.
 int mboot_app_confirm_if_pending(void);
 
 // Marks the image in the secondary slot as pending. -EINVAL when it has no image header, -ENODEV

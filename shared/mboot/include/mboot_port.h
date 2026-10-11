@@ -33,7 +33,7 @@
 
 #define MBOOT_NORETURN __attribute__((noreturn))
 
-// ---- device description (one per MBOOT_DEVn_*, in mboot_devs[] of flash_map.c) ----
+// ---- device description (one per MICROPY_HW_MBOOT_DEVn_*, in mboot_devs[] of flash_map.c) ----
 
 // Runs of equal erase units from the start of a device, one behind the other. A device with one
 // erase unit all over has one run.
@@ -103,8 +103,8 @@ static inline bool mboot_dev_erase_range_ok(const mboot_flash_dev_t *d, uint32_t
     return true;
 }
 
-#ifndef MBOOT_RETENTION_BITS
-#define MBOOT_RETENTION_BITS 32   // a port with a narrower retention register defines 8 or 16 in its port header
+#ifndef MICROPY_HW_MBOOT_RETENTION_BITS
+#define MICROPY_HW_MBOOT_RETENTION_BITS (32)   // a port with a narrower retention register defines 8 or 16 in its port header
 #endif
 
 // ---- lifecycle (both roles unless noted) ----
@@ -160,7 +160,7 @@ bool mboot_port_entry_forced(void);
 uint32_t mboot_port_fault_resets(void);
 
 // both. Word that survives every reset except power loss (STM32 TAMP BKPxR). A register narrower
-// than 32 bits keeps only the low MBOOT_RETENTION_BITS of the value, see mboot_request.h.
+// than 32 bits keeps only the low MICROPY_HW_MBOOT_RETENTION_BITS of the value, see mboot_request.h.
 // Also the no-init RAM request region below.
 uint32_t mboot_port_retention_read(void);
 void     mboot_port_retention_write(uint32_t v);
@@ -183,7 +183,7 @@ int mboot_port_flash_dev_read(uint8_t dev, uint32_t off, void *dst, uint32_t len
 int mboot_port_flash_dev_write(uint8_t dev, uint32_t off, const void *src, uint32_t len);
 int mboot_port_flash_dev_erase(uint8_t dev, uint32_t off, uint32_t len);
 
-// ---- USB (bootloader, only if MBOOT_DFU) ----
+// ---- USB (bootloader, only if MICROPY_MBOOT_DFU) ----
 int mboot_port_usb_init(void);         // clocks, PHY, pins, NVIC for the USB IRQ; 0, or a negative errno if the clock or PHY does not start (logged, error LED shown). The port file also defines the ISR that calls tusb_int_handler()
 void mboot_port_usb_deinit(void);
 void mboot_port_usb_serial_number(char *buf, size_t len);   // NUL terminated, [0-9A-F] preferred, from the chip unique id
@@ -191,10 +191,10 @@ void mboot_port_usb_serial_number(char *buf, size_t len);   // NUL terminated, [
 // ---- UI (bootloader) ----
 void mboot_port_led(uint32_t mask);    // bit0 alive, bit1 USB active, bit2 error; may be empty
 
-// ---- log sink (both; bootloader mandatory when MBOOT_LOG_LEVEL > 0) ----
+// ---- log sink (both; bootloader mandatory when MICROPY_MBOOT_LOG_LEVEL > 0) ----
 void mboot_port_log_write(const char *s, size_t n);   // UART, SWO, RTT or empty
 
-// ---- security counter backend (only if MBOOT_SECCNT_PORT) ----
+// ---- security counter backend (only if MICROPY_MBOOT_SECCNT_PORT) ----
 int mboot_port_seccnt_read(uint32_t image_id, uint32_t *value);     // 0 ok
 int mboot_port_seccnt_write(uint32_t image_id, uint32_t value);     // monotonic: value >= current; idempotent
 bool mboot_port_seccnt_can_update(uint32_t image_id, uint32_t value);

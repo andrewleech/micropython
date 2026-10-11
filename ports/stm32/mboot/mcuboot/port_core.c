@@ -57,13 +57,13 @@
 
 // Run from PLL1 at the board clock (MICROPY_HW_CLK_* in mpconfigboard.h, the same values the
 // application uses). 0 keeps the clock the reset leaves (HSI/2), for bring-up.
-#ifndef MBOOT_STM32_PLL
-#define MBOOT_STM32_PLL (1)
+#ifndef MICROPY_HW_MBOOT_STM32_PLL
+#define MICROPY_HW_MBOOT_STM32_PLL (1)
 #endif
 
 // Enable the instruction cache (STM32H5) or the instruction and data caches (STM32F7).
-#ifndef MBOOT_STM32_ICACHE
-#define MBOOT_STM32_ICACHE (1)
+#ifndef MICROPY_HW_MBOOT_STM32_ICACHE
+#define MICROPY_HW_MBOOT_STM32_ICACHE (1)
 #endif
 
 // The LEDs, USER button and log UART come from the board file (mpconfigboard.h), the same ones
@@ -73,10 +73,10 @@
 //                                   MICROPY_HW_LED_OFF(pin) give the polarity
 //   MICROPY_HW_USRSW_PIN            forced entry while the input reads MICROPY_HW_USRSW_PRESSED
 //                                   (0 or 1), with the pull MICROPY_HW_USRSW_PULL
-//   MICROPY_HW_UART_REPL            the log UART (when MBOOT_LOG_LEVEL > 0). It must be
+//   MICROPY_HW_UART_REPL            the log UART (when MICROPY_MBOOT_LOG_LEVEL > 0). It must be
 //                                   USART3 (PYB_UART_3), at MICROPY_HW_UART_REPL_BAUD on the pin
 //                                   MICROPY_HW_UART3_TX; a board without a log UART sets
-//                                   MBOOT_LOG_LEVEL 0
+//                                   MICROPY_MBOOT_LOG_LEVEL 0
 #define PYB_UART_3 (3)
 
 #ifndef MICROPY_HW_LED1
@@ -103,7 +103,7 @@
 #ifndef MICROPY_HW_USRSW_PRESSED
 #error "the board file does not define MICROPY_HW_USRSW_PRESSED"
 #endif
-#if MBOOT_LOG_LEVEL > 0
+#if MICROPY_MBOOT_LOG_LEVEL > 0
 #ifndef MICROPY_HW_UART_REPL
 #error "the board file does not define MICROPY_HW_UART_REPL (the bootloader's log UART)"
 #endif
@@ -220,7 +220,7 @@ static void gpio_config(GPIO_TypeDef *port, uint32_t pin, uint32_t mode, uint32_
     port->MODER = (port->MODER & ~(3u << s2)) | (mode << s2);
 }
 
-#if defined(MBOOT_SPIFLASH_ADDR) || defined(MBOOT_BOARD_EARLY_INIT)
+#if defined(MICROPY_HW_MBOOT_SPIFLASH_ADDR) || defined(MICROPY_HW_MBOOT_BOARD_EARLY_INIT)
 
 // The pin services that the SPI flash drivers (drivers/bus/softqspi.c, drivers/memory/spiflash.c,
 // ports/stm32/qspi.c) and the board hook of mboot expect from the HAL of the port, as in
@@ -249,15 +249,15 @@ void mp_hal_pin_config_speed(uint32_t port_pin, uint32_t speed) {
 
 #endif
 
-#if defined(MBOOT_BOARD_EARLY_INIT)
+#if defined(MICROPY_HW_MBOOT_BOARD_EARLY_INIT)
 
-// The board hook of mboot (MBOOT_BOARD_EARLY_INIT in mpconfigboard.h, PYBD: the pull-up on the
+// The board hook of mboot (MICROPY_HW_MBOOT_BOARD_EARLY_INIT in mpconfigboard.h, PYBD: the pull-up on the
 // pin that selects 500 mA on WBUS-DIP28). mboot leaves what the hook sets in place when it starts
 // the application and the application does not set it again, so mboot_port_deinit() runs the
 // hook once more after it has reset the GPIO ports.
 static void mboot_board_hook(void) {
     uint32_t initial_r0 = 0;
-    MBOOT_BOARD_EARLY_INIT(&initial_r0);
+    MICROPY_HW_MBOOT_BOARD_EARLY_INIT(&initial_r0);
     (void)initial_r0;
 }
 
@@ -293,7 +293,7 @@ void mboot_port_led(uint32_t mask) {
 
 // ---- log UART ----
 
-#if MBOOT_LOG_LEVEL > 0
+#if MICROPY_MBOOT_LOG_LEVEL > 0
 
 static void uart_init(void) {
     gpio_config(MBOOT_PIN_GPIO(MICROPY_HW_UART3_TX), MBOOT_PIN_NUMBER(MICROPY_HW_UART3_TX), GPIO_MODE_AF, MBOOT_STM32_UART_TX_AF, 0);
@@ -326,7 +326,7 @@ static void uart_putc(char c) {
 #endif
 
 void mboot_port_log_write(const char *s, size_t n) {
-    #if MBOOT_LOG_LEVEL > 0
+    #if MICROPY_MBOOT_LOG_LEVEL > 0
     if (!s_uart_ready) {
         return;
     }
@@ -346,7 +346,7 @@ void mboot_port_log_write(const char *s, size_t n) {
 
 #define WAIT_UNTIL(cond) MBOOT_STM32_WAIT_UNTIL(cond, CLOCK_WAIT_LOOPS)
 
-#if MBOOT_STM32_PLL && defined(MICROPY_HW_CLK_PLLM)
+#if MICROPY_HW_MBOOT_STM32_PLL && defined(MICROPY_HW_CLK_PLLM)
 
 #if defined(MICROPY_HW_CLK_USE_HSI) && MICROPY_HW_CLK_USE_HSI
 #define PLL_SOURCE_HZ (HSI_VALUE)
@@ -359,15 +359,15 @@ void mboot_port_log_write(const char *s, size_t n) {
 
 // Flash programming delay for the clock, by the ranges documented with
 // FLASH_PROGRAMMING_DELAY_x in stm32h5xx_hal_flash_ex.h.
-#ifndef MBOOT_STM32_FLASH_PROG_DELAY
+#ifndef MICROPY_HW_MBOOT_STM32_FLASH_PROG_DELAY
 #if PLL_HCLK_HZ <= 70000000
-#define MBOOT_STM32_FLASH_PROG_DELAY FLASH_PROGRAMMING_DELAY_0
+#define MICROPY_HW_MBOOT_STM32_FLASH_PROG_DELAY FLASH_PROGRAMMING_DELAY_0
 #elif PLL_HCLK_HZ <= 185000000
-#define MBOOT_STM32_FLASH_PROG_DELAY FLASH_PROGRAMMING_DELAY_1
+#define MICROPY_HW_MBOOT_STM32_FLASH_PROG_DELAY FLASH_PROGRAMMING_DELAY_1
 #elif PLL_HCLK_HZ <= 225000000
-#define MBOOT_STM32_FLASH_PROG_DELAY FLASH_PROGRAMMING_DELAY_2
+#define MICROPY_HW_MBOOT_STM32_FLASH_PROG_DELAY FLASH_PROGRAMMING_DELAY_2
 #else
-#define MBOOT_STM32_FLASH_PROG_DELAY FLASH_PROGRAMMING_DELAY_3
+#define MICROPY_HW_MBOOT_STM32_FLASH_PROG_DELAY FLASH_PROGRAMMING_DELAY_3
 #endif
 #endif
 
@@ -415,7 +415,7 @@ static bool clock_pll_start(void) {
 
     // Raise the wait states and the programming delay before raising the clock.
     FLASH->ACR = (FLASH->ACR & ~(FLASH_ACR_LATENCY | FLASH_ACR_WRHIGHFREQ))
-        | MICROPY_HW_FLASH_LATENCY | MBOOT_STM32_FLASH_PROG_DELAY;
+        | MICROPY_HW_FLASH_LATENCY | MICROPY_HW_MBOOT_STM32_FLASH_PROG_DELAY;
     if (!WAIT_UNTIL((FLASH->ACR & FLASH_ACR_LATENCY) == MICROPY_HW_FLASH_LATENCY)) {
         goto fail;
     }
@@ -653,7 +653,7 @@ void mboot_port_early_init(void) {
     SystemCoreClock = s_hclk_hz;
     #endif
 
-    #if MBOOT_STM32_ICACHE
+    #if MICROPY_HW_MBOOT_STM32_ICACHE
     #if defined(STM32H5)
     ICACHE->CR |= ICACHE_CR_EN;
     #else
@@ -672,7 +672,7 @@ void mboot_port_early_init(void) {
     gpio_config(MBOOT_PIN_GPIO(MICROPY_HW_LED3), MBOOT_PIN_NUMBER(MICROPY_HW_LED3), GPIO_MODE_OUT, 0, 0);
     mboot_port_led(0);
 
-    #if MBOOT_LOG_LEVEL > 0
+    #if MICROPY_MBOOT_LOG_LEVEL > 0
     uart_init();
     #endif
 
@@ -754,7 +754,7 @@ void mboot_port_deinit(void) {
     mboot_board_hook();
     RCC->APB1RSTR = RCC_APB1RSTR_USART3RST;
     RCC->APB1RSTR = 0;
-    #if defined(MBOOT_SPIFLASH_ADDR) && defined(RCC_AHB3RSTR_QSPIRST)
+    #if defined(MICROPY_HW_MBOOT_SPIFLASH_ADDR) && defined(RCC_AHB3RSTR_QSPIRST)
     // The early init of the board may have set up the QUADSPI of a second SPI flash.
     RCC->AHB3RSTR = RCC_AHB3RSTR_QSPIRST;
     RCC->AHB3RSTR = 0;

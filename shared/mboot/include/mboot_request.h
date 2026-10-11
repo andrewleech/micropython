@@ -43,7 +43,7 @@
 
 // Retention word: the upper 24 bits hold the key, bit 7 of the low byte means that FSLOAD
 // elements are in the request region. Ports whose retention register is narrower than 32
-// bits (MBOOT_RETENTION_BITS) store MBOOT_RET_8BIT_DFU or MBOOT_RET_8BIT_FSLOAD.
+// bits (MICROPY_HW_MBOOT_RETENTION_BITS) store MBOOT_RET_8BIT_DFU or MBOOT_RET_8BIT_FSLOAD.
 #define MBOOT_RET_KEY        0x70AD0000u
 #define MBOOT_RET_KEY_MASK   0xFFFFFF00u
 #define MBOOT_RET_FSLOAD     0x80u

@@ -68,15 +68,15 @@
 #include "port_stm32.h"
 
 // A SPI flash as device 1, configured like the one of ports/stm32/mboot.
-#if defined(MBOOT_SPIFLASH_ADDR)
+#if defined(MICROPY_HW_MBOOT_SPIFLASH_ADDR)
 #include "storage.h"
 #include "mboot_spiflash.h"
 #endif
 
 // Device 0 of the flash map is the whole flash. The program unit (one flash word) is that of
 // mboot_dev.h. The sectors are those of mboot_dev.h, uniform or in runs.
-#define FLASH_TOTAL_SIZE (MBOOT_DEV0_SIZE)
-#define FLASH_UNIT_BYTES (MBOOT_DEV0_WRITE)
+#define FLASH_TOTAL_SIZE (MICROPY_HW_MBOOT_DEV0_SIZE)
+#define FLASH_UNIT_BYTES (MICROPY_HW_MBOOT_DEV0_WRITE)
 #define FLASH_UNIT_WORDS (FLASH_UNIT_BYTES / 4)
 
 #if MBOOT_STM32_FLASH_ECC
@@ -96,18 +96,18 @@
 #endif
 
 // Program verification: every programmed unit is read back and compared.
-#ifndef MBOOT_STM32_FLASH_VERIFY
-#define MBOOT_STM32_FLASH_VERIFY (1)
+#ifndef MICROPY_HW_MBOOT_STM32_FLASH_VERIFY
+#define MICROPY_HW_MBOOT_STM32_FLASH_VERIFY (1)
 #endif
 
 // Size of the sector that starts at byte offset off of the flash, 0 if none starts there.
 static uint32_t sector_size_at(uint32_t off) {
-    #if defined(MBOOT_DEV0_ERASE)
-    return (off & (MBOOT_DEV0_ERASE - 1)) == 0 ? MBOOT_DEV0_ERASE : 0;
+    #if defined(MICROPY_HW_MBOOT_DEV0_ERASE)
+    return (off & (MICROPY_HW_MBOOT_DEV0_ERASE - 1)) == 0 ? MICROPY_HW_MBOOT_DEV0_ERASE : 0;
     #else
     uint32_t start;
     uint32_t size;
-    if (flash_get_sector_info(MBOOT_DEV0_BASE + off, &start, &size) < 0 || start != MBOOT_DEV0_BASE + off) {
+    if (flash_get_sector_info(MICROPY_HW_MBOOT_DEV0_BASE + off, &start, &size) < 0 || start != MICROPY_HW_MBOOT_DEV0_BASE + off) {
         return 0;
     }
     return size;
@@ -127,36 +127,36 @@ int mboot_stm32_flash_erase_sector(uint32_t off) {
     // faults while the bootloader has the instruction cache enabled.
     ICACHE->CR &= ~ICACHE_CR_EN;
     #endif
-    int rc = flash_erase(MBOOT_DEV0_BASE + off);
+    int rc = flash_erase(MICROPY_HW_MBOOT_DEV0_BASE + off);
     #if defined(STM32H5) && defined(MBOOT_ROLE_BOOTLOADER)
     ICACHE->CR |= ICACHE_CR_EN;
     #endif
     restore_irq_pri(basepri);
     // The caches hold flash data as well as code, and the flash driver does not invalidate
     // them.
-    int ic = mboot_stm32_flash_cache_changed(MBOOT_DEV0_BASE + off, sector_size_at(off));
+    int ic = mboot_stm32_flash_cache_changed(MICROPY_HW_MBOOT_DEV0_BASE + off, sector_size_at(off));
     return rc != 0 ? rc : ic;
 }
 
 // Programs one flash unit at byte offset off from the words in w.
 int mboot_stm32_flash_program_unit(uint32_t off, const uint32_t *w) {
     uint32_t basepri = raise_irq_pri(IRQ_PRI_FLASH);
-    int rc = flash_write(MBOOT_DEV0_BASE + off, w, FLASH_UNIT_WORDS);
+    int rc = flash_write(MICROPY_HW_MBOOT_DEV0_BASE + off, w, FLASH_UNIT_WORDS);
     restore_irq_pri(basepri);
-    int ic = mboot_stm32_flash_cache_changed(MBOOT_DEV0_BASE + off, FLASH_UNIT_BYTES);
+    int ic = mboot_stm32_flash_cache_changed(MICROPY_HW_MBOOT_DEV0_BASE + off, FLASH_UNIT_BYTES);
     return rc != 0 ? rc : ic;
 }
 
 #if defined(MBOOT_ROLE_BOOTLOADER)
 
 int mboot_port_flash_dev_init(void) {
-    #if defined(MBOOT_SPIFLASH_ADDR)
+    #if defined(MICROPY_HW_MBOOT_SPIFLASH_ADDR)
     #if defined(MICROPY_BOARD_EARLY_INIT)
     // The board sets the parameters of the SPI flash chips it can carry before the first use.
     MICROPY_BOARD_EARLY_INIT();
     #endif
-    MBOOT_SPIFLASH_SPIFLASH->config = MBOOT_SPIFLASH_CONFIG;
-    mp_spiflash_init(MBOOT_SPIFLASH_SPIFLASH);
+    MICROPY_HW_MBOOT_SPIFLASH_SPIFLASH->config = MICROPY_HW_MBOOT_SPIFLASH_CONFIG;
+    mp_spiflash_init(MICROPY_HW_MBOOT_SPIFLASH_SPIFLASH);
     #endif
     return 0;
 }
@@ -176,9 +176,9 @@ static int check_range(uint8_t dev, uint32_t off, uint32_t len) {
 }
 
 int mboot_port_flash_dev_read(uint8_t dev, uint32_t off, void *dst, uint32_t len) {
-    #if defined(MBOOT_SPIFLASH_ADDR)
+    #if defined(MICROPY_HW_MBOOT_SPIFLASH_ADDR)
     if (dev == 1) {
-        return mboot_spiflash_read(MBOOT_SPIFLASH_SPIFLASH, off, dst, len);
+        return mboot_spiflash_read(MICROPY_HW_MBOOT_SPIFLASH_SPIFLASH, off, dst, len);
     }
     #endif
     int rc = check_range(dev, off, len);
@@ -195,7 +195,7 @@ int mboot_port_flash_dev_read(uint8_t dev, uint32_t off, void *dst, uint32_t len
         return rc;
     }
     ECC_EVENTS_BEGIN();
-    memcpy(dst, (const void *)(MBOOT_DEV0_BASE + off), len);
+    memcpy(dst, (const void *)(MICROPY_HW_MBOOT_DEV0_BASE + off), len);
     __DSB();
     __ISB();
     return ECC_EVENTS_SEEN() ? -EIO : 0;
@@ -215,7 +215,7 @@ static unit_action_t classify_unit(uint32_t off, const uint32_t *w) {
     if (blank == 0xFFFFFFFFu) {
         return UNIT_SKIP;
     }
-    volatile const uint32_t *cur = (volatile const uint32_t *)(MBOOT_DEV0_BASE + off);
+    volatile const uint32_t *cur = (volatile const uint32_t *)(MICROPY_HW_MBOOT_DEV0_BASE + off);
     ECC_FULL_BEGIN();
     uint32_t c[FLASH_UNIT_WORDS];
     for (unsigned i = 0; i < FLASH_UNIT_WORDS; i++) {
@@ -239,9 +239,9 @@ static unit_action_t classify_unit(uint32_t off, const uint32_t *w) {
 }
 
 int mboot_port_flash_dev_write(uint8_t dev, uint32_t off, const void *src, uint32_t len) {
-    #if defined(MBOOT_SPIFLASH_ADDR)
+    #if defined(MICROPY_HW_MBOOT_SPIFLASH_ADDR)
     if (dev == 1) {
-        return mboot_spiflash_write(MBOOT_SPIFLASH_SPIFLASH, off, src, len);
+        return mboot_spiflash_write(MICROPY_HW_MBOOT_SPIFLASH_SPIFLASH, off, src, len);
     }
     #endif
     int rc = check_range(dev, off, len);
@@ -276,8 +276,8 @@ int mboot_port_flash_dev_write(uint8_t dev, uint32_t off, const void *src, uint3
         if (rc != 0) {
             return rc;
         }
-        #if MBOOT_STM32_FLASH_VERIFY
-        volatile const uint32_t *cur = (volatile const uint32_t *)(MBOOT_DEV0_BASE + off + pos);
+        #if MICROPY_HW_MBOOT_STM32_FLASH_VERIFY
+        volatile const uint32_t *cur = (volatile const uint32_t *)(MICROPY_HW_MBOOT_DEV0_BASE + off + pos);
         ECC_FULL_BEGIN();
         bool same = true;
         for (unsigned i = 0; i < FLASH_UNIT_WORDS; i++) {
@@ -294,9 +294,9 @@ int mboot_port_flash_dev_write(uint8_t dev, uint32_t off, const void *src, uint3
 }
 
 int mboot_port_flash_dev_erase(uint8_t dev, uint32_t off, uint32_t len) {
-    #if defined(MBOOT_SPIFLASH_ADDR)
+    #if defined(MICROPY_HW_MBOOT_SPIFLASH_ADDR)
     if (dev == 1) {
-        return mboot_spiflash_erase(MBOOT_SPIFLASH_SPIFLASH, off, len);
+        return mboot_spiflash_erase(MICROPY_HW_MBOOT_SPIFLASH_SPIFLASH, off, len);
     }
     #endif
     int rc = check_range(dev, off, len);
@@ -305,8 +305,8 @@ int mboot_port_flash_dev_erase(uint8_t dev, uint32_t off, uint32_t len) {
     }
     // The range is whole sectors, which may differ in size from one to the next. Nothing is
     // erased unless it is.
-    #if defined(MBOOT_DEV0_ERASE)
-    if (((off | len) & (MBOOT_DEV0_ERASE - 1)) != 0) {
+    #if defined(MICROPY_HW_MBOOT_DEV0_ERASE)
+    if (((off | len) & (MICROPY_HW_MBOOT_DEV0_ERASE - 1)) != 0) {
         return -EINVAL;
     }
     #else
@@ -325,7 +325,7 @@ int mboot_port_flash_dev_erase(uint8_t dev, uint32_t off, uint32_t len) {
             return rc;
         }
         // The sector must read back erased without an ECC event.
-        volatile const uint32_t *p = (volatile const uint32_t *)(MBOOT_DEV0_BASE + pos);
+        volatile const uint32_t *p = (volatile const uint32_t *)(MICROPY_HW_MBOOT_DEV0_BASE + pos);
         ECC_EVENTS_BEGIN();
         uint32_t acc = 0xFFFFFFFFu;
         for (uint32_t i = 0; i < size / sizeof(uint32_t); i++) {

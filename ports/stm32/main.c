@@ -682,8 +682,8 @@ soft_reset:
         goto soft_reset_exit;
     }
 
-    #if MICROPY_HW_MBOOT_APP && defined(MBOOT_CONFIRM_AUTO)
-    // MBOOT_CONFIRM_AUTO: boot.py has completed, so confirm a test image.
+    #if MICROPY_HW_MBOOT_APP && MICROPY_MBOOT_CONFIRM_AUTO
+    // MICROPY_MBOOT_CONFIRM_AUTO: boot.py has completed, so confirm a test image.
     mboot_app_confirm_if_pending();
     #endif
 

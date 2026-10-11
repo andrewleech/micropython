@@ -39,8 +39,8 @@
 // Internal constants
 // ---------------------------------------------------------------------------
 
-// MBOOT_MAX_ALT_SETTINGS is in mboot_region.h so mboot_usbd.c can
-// _Static_assert against MBOOT_USBD_MAX_ALT_SETTINGS.
+// MICROPY_MBOOT_MAX_ALT_SETTINGS is in mboot_region.h so mboot_usbd.c can
+// _Static_assert against MICROPY_MBOOT_USBD_MAX_ALT_SETTINGS.
 
 // Maximum number of regions per alt setting (folded group).
 #define MBOOT_MAX_REGIONS_PER_ALT (8)
@@ -62,7 +62,7 @@ typedef struct {
     uint8_t count;  // number of regions in this group
 } mboot_alt_group_t;
 
-static mboot_alt_group_t s_groups[MBOOT_MAX_ALT_SETTINGS];
+static mboot_alt_group_t s_groups[MICROPY_MBOOT_MAX_ALT_SETTINGS];
 static uint8_t s_num_alts;
 static uint8_t s_active_alt;
 static bool s_initialised;
@@ -242,7 +242,7 @@ int mboot_region_init(void) {
         // have the bitmap silently stop tracking past the limit and re-erase
         // sectors mid-transfer.  Bounding each region first keeps the group
         // total below from overflowing.
-        if (r->sector_count > MBOOT_DFU_MAX_SECTOR_COUNT) {
+        if (r->sector_count > MICROPY_MBOOT_DFU_MAX_SECTOR_COUNT) {
             return -EINVAL;
         }
 
@@ -282,14 +282,14 @@ int mboot_region_init(void) {
             names_equal(s_regions[s_groups[s_num_alts - 1].first].name, r->name) &&
             s_groups[s_num_alts - 1].count < MBOOT_MAX_REGIONS_PER_ALT) {
             // Append to existing group.
-            if (group_sectors + r->sector_count > MBOOT_DFU_MAX_SECTOR_COUNT) {
+            if (group_sectors + r->sector_count > MICROPY_MBOOT_DFU_MAX_SECTOR_COUNT) {
                 return -EINVAL;
             }
             group_sectors += r->sector_count;
             s_groups[s_num_alts - 1].count++;
         } else {
             // Start a new group.
-            if (s_num_alts >= MBOOT_MAX_ALT_SETTINGS) {
+            if (s_num_alts >= MICROPY_MBOOT_MAX_ALT_SETTINGS) {
                 return -EINVAL;
             }
             s_groups[s_num_alts].first = (uint8_t)i;

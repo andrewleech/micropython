@@ -30,7 +30,7 @@
 #include "mboot_layout.h"
 #include "mboot_fsload.h"
 
-#if defined(MBOOT_FSLOAD_GZIP) && MBOOT_FSLOAD_GZIP
+#if MICROPY_MBOOT_FSLOAD_GZIP
 
 #include "lib/uzlib/uzlib.h"
 
@@ -183,4 +183,4 @@ int mboot_gz_attach(mboot_stream_t *src, uint32_t limit, mboot_stream_t **out) {
     return 0;
 }
 
-#endif // MBOOT_FSLOAD_GZIP
+#endif // MICROPY_MBOOT_FSLOAD_GZIP

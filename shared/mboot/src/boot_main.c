@@ -245,7 +245,7 @@ int mboot_main(void) {
     static mboot_request_t req;
 
     mboot_port_early_init();
-    MCUBOOT_LOG_INF("MPY MCUboot %s layout %08x", MBOOT_BL_VERSION, (unsigned)MBOOT_LAYOUT_ID);
+    MCUBOOT_LOG_INF("MPY MCUboot %s layout %08x", MICROPY_MBOOT_BL_VERSION, (unsigned)MBOOT_LAYOUT_ID);
 
     // First consumer of the handoff: afterwards the request memory and the retention word are
     // zero, so a crash or reset during recovery lands in normal boot.

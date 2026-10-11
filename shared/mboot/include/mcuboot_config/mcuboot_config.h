@@ -32,14 +32,14 @@
 #include "mboot_layout.h"
 #include "mboot_port.h"
 
-#define MCUBOOT_LOG_LEVEL MBOOT_LOG_LEVEL
+#define MCUBOOT_LOG_LEVEL MICROPY_MBOOT_LOG_LEVEL
 
 #define MCUBOOT_WATCHDOG_FEED() mboot_port_wdt_feed()
 #define MCUBOOT_CPU_IDLE() do {} while (0)
 
 // The port backend of the security counter can run out of increments (fuses) and can be
 // locked after the update; the optional port functions report both.
-#if defined(MBOOT_SECCNT_PORT)
+#if MICROPY_MBOOT_SECCNT_PORT
 #define MCUBOOT_HW_ROLLBACK_PROT_COUNTER_LIMITED 1
 #define MCUBOOT_HW_ROLLBACK_PROT_LOCK 1
 #endif

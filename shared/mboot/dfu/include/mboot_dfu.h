@@ -41,7 +41,7 @@
 //
 // wBlockNum does not roll over (the DFU 1.1 spec leaves that
 // implementation-defined).  A transfer larger than
-// 65535 * MBOOT_DFU_XFER_SIZE bytes needs multiple alt settings or a larger
+// 65535 * MICROPY_MBOOT_DFU_XFER_SIZE bytes needs multiple alt settings or a larger
 // wTransferSize.
 //
 // Implicit per-sector erase: the module keeps a per-session bitmap of touched
@@ -55,7 +55,7 @@
 //
 // Bitmap size: the number of sectors in one alt setting (the sum over the
 // regions folded into it) is bounded at compile time by
-// MBOOT_DFU_MAX_SECTOR_COUNT (default 4096), and mboot_region_init() rejects a
+// MICROPY_MBOOT_DFU_MAX_SECTOR_COUNT (default 4096), and mboot_region_init() rejects a
 // region table that exceeds it.  At 1 bit per sector that is 512 bytes of BSS,
 // enough for a 16 MiB alt setting of 4 KiB sectors.  Define a larger value for
 // more sectors.
@@ -70,28 +70,28 @@
 // ---------------------------------------------------------------------------
 
 // Transfer size advertised in the DFU functional descriptor.
-#ifndef MBOOT_DFU_XFER_SIZE
-#define MBOOT_DFU_XFER_SIZE (2048)
+#ifndef MICROPY_MBOOT_DFU_XFER_SIZE
+#define MICROPY_MBOOT_DFU_XFER_SIZE (2048)
 #endif
 
 // Maximum number of sectors tracked by the touched-sector bitmap.  Must cover
 // the total sector_count of the regions of any one alt setting.
-#ifndef MBOOT_DFU_MAX_SECTOR_COUNT
-#define MBOOT_DFU_MAX_SECTOR_COUNT (4096)
+#ifndef MICROPY_MBOOT_DFU_MAX_SECTOR_COUNT
+#define MICROPY_MBOOT_DFU_MAX_SECTOR_COUNT (4096)
 #endif
 
 // Bitmap size in bytes, rounded up.
-#define MBOOT_DFU_BITMAP_BYTES ((MBOOT_DFU_MAX_SECTOR_COUNT + 7) / 8)
+#define MBOOT_DFU_BITMAP_BYTES ((MICROPY_MBOOT_DFU_MAX_SECTOR_COUNT + 7) / 8)
 
 // Write unit of the flash behind the regions, in bytes.  Must be a power of
-// two that divides MBOOT_DFU_XFER_SIZE.  mboot_dfu_on_dnload() pads every block
+// two that divides MICROPY_MBOOT_DFU_XFER_SIZE.  mboot_dfu_on_dnload() pads every block
 // with 0xFF up to a multiple of this value, so mboot_port_flash_write() always
 // gets an aligned length.  Region base addresses must be aligned to it too.
-#ifndef MBOOT_DFU_WRITE_ALIGN
-#define MBOOT_DFU_WRITE_ALIGN (4)
+#ifndef MICROPY_HW_MBOOT_DFU_WRITE_ALIGN
+#define MICROPY_HW_MBOOT_DFU_WRITE_ALIGN (4)
 #endif
 
-// Value MBOOT_DFU_WRITE_ALIGN had when mboot_dfu.c was compiled.  A front end
+// Value MICROPY_HW_MBOOT_DFU_WRITE_ALIGN had when mboot_dfu.c was compiled.  A front end
 // whose own translation units see the macro (from a generated board header,
 // say) compares it with this to catch a build that passed it to only some of
 // them.
@@ -123,13 +123,13 @@ int mboot_dfu_init(void);
 // mboot_dfu_on_dnload - DFU_DNLOAD (bRequest=1) flash dispatch.
 //
 // wBlockNum: block index, 0-based; address = region_base + wBlockNum *
-//   MBOOT_DFU_XFER_SIZE.
+//   MICROPY_MBOOT_DFU_XFER_SIZE.
 // data: payload from the host; may be NULL if wLength == 0.
 // wLength: payload byte count.  0 is the end-of-transfer marker: returns 0
 //   with no flash access, and TinyUSB handles the manifest transition itself.
 //
 // Trailing padding: mboot_port_flash_write needs len to be a multiple of
-// MBOOT_DFU_WRITE_ALIGN, so a shorter tail is padded with 0xFF before writing
+// MICROPY_HW_MBOOT_DFU_WRITE_ALIGN, so a shorter tail is padded with 0xFF before writing
 // (the NOR erased state).  With the default alignment of 4, a host that
 // uploads back a 3-byte tail reads 4 bytes, the extra one being 0xFF.
 //

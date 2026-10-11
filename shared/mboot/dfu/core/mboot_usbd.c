@@ -40,7 +40,7 @@
 #include "mboot_region.h"
 #include "mboot_usbd.h"
 
-_Static_assert(MBOOT_MAX_ALT_SETTINGS <= MBOOT_USBD_MAX_ALT_SETTINGS,
+_Static_assert(MICROPY_MBOOT_MAX_ALT_SETTINGS <= MICROPY_MBOOT_USBD_MAX_ALT_SETTINGS,
     "region-layer alt-setting limit exceeds usbd descriptor buffer capacity");
 
 // The target build includes the TinyUSB headers.  The host test harness builds
@@ -54,10 +54,10 @@ _Static_assert(MBOOT_MAX_ALT_SETTINGS <= MBOOT_USBD_MAX_ALT_SETTINGS,
 #endif
 
 
-// MBOOT_USBD_XFER_SIZE and MBOOT_DFU_XFER_SIZE must match; a port that defines
+// MICROPY_MBOOT_USBD_XFER_SIZE and MICROPY_MBOOT_DFU_XFER_SIZE must match; a port that defines
 // only one gets a build error here.
-_Static_assert(MBOOT_USBD_XFER_SIZE == MBOOT_DFU_XFER_SIZE,
-    "MBOOT_USBD_XFER_SIZE must equal MBOOT_DFU_XFER_SIZE");
+_Static_assert(MICROPY_MBOOT_USBD_XFER_SIZE == MICROPY_MBOOT_DFU_XFER_SIZE,
+    "MICROPY_MBOOT_USBD_XFER_SIZE must equal MICROPY_MBOOT_DFU_XFER_SIZE");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -205,7 +205,7 @@ void mboot_usbd_init(void) {
     for (size_t alt = 0; alt < alt_count; alt++) {
         *p++ = 9;
         *p++ = 0x04;                                  // bDescriptorType: interface
-        *p++ = MBOOT_DFU_INTERFACE_NUMBER;            // bInterfaceNumber
+        *p++ = MICROPY_MBOOT_DFU_INTERFACE_NUMBER;            // bInterfaceNumber
         *p++ = (uint8_t)alt;                          // bAlternateSetting
         *p++ = 0;                                     // bNumEndpoints
         *p++ = 0xFE;                                  // bInterfaceClass
@@ -225,8 +225,8 @@ void mboot_usbd_init(void) {
     *p++ = 0x03;                                      // bmAttributes: canDnload | canUpload
     *p++ = 0;                                         // wDetachTimeout low
     *p++ = 0;                                         // wDetachTimeout high
-    *p++ = (uint8_t)(MBOOT_USBD_XFER_SIZE & 0xFF);
-    *p++ = (uint8_t)(MBOOT_USBD_XFER_SIZE >> 8);
+    *p++ = (uint8_t)(MICROPY_MBOOT_USBD_XFER_SIZE & 0xFF);
+    *p++ = (uint8_t)(MICROPY_MBOOT_USBD_XFER_SIZE >> 8);
     *p++ = 0x10;                                      // bcdDFUVersion low
     *p++ = 0x01;                                      // bcdDFUVersion high
 
@@ -356,7 +356,7 @@ static void end_session(uint8_t alt) {
 //
 // TinyUSB calls it when it answers the GETSTATUS request that moves the device
 // to dfuDNBUSY (state 4) or to dfuMANIFEST.  It returns 100 ms for dfuDNBUSY
-// (MBOOT_USBD_POLL_DNLOAD_MS, which a port can override) and 1000 ms
+// (MICROPY_MBOOT_USBD_POLL_DNLOAD_MS, which a port can override) and 1000 ms
 // (MBOOT_USBD_POLL_MANIFEST_MS) for the manifest step.
 //
 // The host waits this long after a DNLOAD block before asking for the status
@@ -368,13 +368,13 @@ static void end_session(uint8_t alt) {
 // manifest step validates the whole image (hash and signature) and keeps the
 // long value.
 #define MBOOT_USBD_STATE_DNBUSY (4u)
-#ifndef MBOOT_USBD_POLL_DNLOAD_MS
-#define MBOOT_USBD_POLL_DNLOAD_MS (100u)
+#ifndef MICROPY_MBOOT_USBD_POLL_DNLOAD_MS
+#define MICROPY_MBOOT_USBD_POLL_DNLOAD_MS (100u)
 #endif
 #define MBOOT_USBD_POLL_MANIFEST_MS (1000u)
 uint32_t tud_dfu_get_timeout_cb(uint8_t alt, uint8_t state) {
     (void)alt;
-    return state == MBOOT_USBD_STATE_DNBUSY ? MBOOT_USBD_POLL_DNLOAD_MS : MBOOT_USBD_POLL_MANIFEST_MS;
+    return state == MBOOT_USBD_STATE_DNBUSY ? MICROPY_MBOOT_USBD_POLL_DNLOAD_MS : MBOOT_USBD_POLL_MANIFEST_MS;
 }
 
 // Map a negative mboot_dfu_on_dnload() return value to a DFU 1.1 status code.
@@ -395,7 +395,7 @@ static uint8_t dnload_status(int rc) {
 //
 // Goes through mboot_dfu_on_dnload, which checks the touched-sector bitmap and
 // erases a sector on the first write to it in the session.  Padding with 0xFF
-// to a multiple of MBOOT_DFU_WRITE_ALIGN and the staging buffer are also
+// to a multiple of MICROPY_HW_MBOOT_DFU_WRITE_ALIGN and the staging buffer are also
 // handled there.  A failed block ends the download session (end_session),
 // because the host starts over.
 void tud_dfu_download_cb(uint8_t alt, uint16_t block_num, uint8_t const *data, uint16_t length) {
@@ -446,7 +446,7 @@ uint16_t tud_dfu_upload_cb(uint8_t alt, uint16_t block_num, uint8_t *data, uint1
     }
     mboot_addr_t base = mboot_region_active_base();
     mboot_addr_t size = mboot_region_active_size();
-    mboot_addr_t addr = base + (mboot_addr_t)block_num * MBOOT_USBD_XFER_SIZE;
+    mboot_addr_t addr = base + (mboot_addr_t)block_num * MICROPY_MBOOT_USBD_XFER_SIZE;
 
     if (size == 0 || addr >= base + size) {
         return 0;
@@ -525,7 +525,7 @@ void mboot_usbd_bus_reset(void) {
 //   SETUP stage: fetch the 16-byte reply from mboot_hook_get_result and send it.
 // Any other combination is rejected (return false = STALL).
 bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const *request) {
-    if (request->wIndex != MBOOT_DFU_INTERFACE_NUMBER) {
+    if (request->wIndex != MICROPY_MBOOT_DFU_INTERFACE_NUMBER) {
         return false;
     }
     if (stage == CONTROL_STAGE_SETUP) {

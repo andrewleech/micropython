@@ -72,18 +72,18 @@ static inline uint32_t get_le32(const uint8_t *p) {
 // bits are cleared by mboot_dfu_notify_set_interface() (SET_INTERFACE and
 // DFU_ABORT).
 //
-// The bitmap is a static BSS array, MBOOT_DFU_MAX_SECTOR_COUNT bits (4096 =
+// The bitmap is a static BSS array, MICROPY_MBOOT_DFU_MAX_SECTOR_COUNT bits (4096 =
 // 512 bytes by default).
 // ---------------------------------------------------------------------------
 
 static uint8_t s_touched[MBOOT_DFU_BITMAP_BYTES];
 
-_Static_assert((MBOOT_DFU_WRITE_ALIGN & (MBOOT_DFU_WRITE_ALIGN - 1)) == 0,
-    "MBOOT_DFU_WRITE_ALIGN must be a power of two");
-_Static_assert(MBOOT_DFU_XFER_SIZE % MBOOT_DFU_WRITE_ALIGN == 0,
-    "MBOOT_DFU_XFER_SIZE must be a multiple of MBOOT_DFU_WRITE_ALIGN");
+_Static_assert((MICROPY_HW_MBOOT_DFU_WRITE_ALIGN & (MICROPY_HW_MBOOT_DFU_WRITE_ALIGN - 1)) == 0,
+    "MICROPY_HW_MBOOT_DFU_WRITE_ALIGN must be a power of two");
+_Static_assert(MICROPY_MBOOT_DFU_XFER_SIZE % MICROPY_HW_MBOOT_DFU_WRITE_ALIGN == 0,
+    "MICROPY_MBOOT_DFU_XFER_SIZE must be a multiple of MICROPY_HW_MBOOT_DFU_WRITE_ALIGN");
 
-const unsigned mboot_dfu_write_align = MBOOT_DFU_WRITE_ALIGN;
+const unsigned mboot_dfu_write_align = MICROPY_HW_MBOOT_DFU_WRITE_ALIGN;
 
 // Alt setting for which mboot_hook_session_begin() has succeeded in the
 // current session, or SESSION_NONE.  Reset along with the bitmap.
@@ -92,21 +92,21 @@ static int s_session_alt = SESSION_NONE;
 
 // Staging buffer for the current DNLOAD block.  Aligned so the write does not
 // depend on the alignment of the caller's data pointer.
-static uint8_t s_dnload_buf[MBOOT_DFU_XFER_SIZE] __attribute__((aligned(4)));
+static uint8_t s_dnload_buf[MICROPY_MBOOT_DFU_XFER_SIZE] __attribute__((aligned(4)));
 
 static void bitmap_clear(void) {
     memset(s_touched, 0, sizeof(s_touched));
 }
 
 static bool bitmap_test(uint32_t sector_idx) {
-    if (sector_idx >= MBOOT_DFU_MAX_SECTOR_COUNT) {
+    if (sector_idx >= MICROPY_MBOOT_DFU_MAX_SECTOR_COUNT) {
         return false;
     }
     return (s_touched[sector_idx / 8] & (1u << (sector_idx % 8))) != 0;
 }
 
 static void bitmap_set(uint32_t sector_idx) {
-    if (sector_idx < MBOOT_DFU_MAX_SECTOR_COUNT) {
+    if (sector_idx < MICROPY_MBOOT_DFU_MAX_SECTOR_COUNT) {
         s_touched[sector_idx / 8] |= (1u << (sector_idx % 8));
     }
 }
@@ -149,7 +149,7 @@ static int session_begin(uint8_t alt) {
 // 32-bit mboot_addr_t; only the addition to a high base can.
 static mboot_addr_t block_to_addr(uint16_t wBlockNum) {
     mboot_addr_t base = mboot_region_active_base();
-    mboot_addr_t offset = (mboot_addr_t)wBlockNum * MBOOT_DFU_XFER_SIZE;
+    mboot_addr_t offset = (mboot_addr_t)wBlockNum * MICROPY_MBOOT_DFU_XFER_SIZE;
     mboot_addr_t result = base + offset;
     if (result < base) {
         return (mboot_addr_t)-1;
@@ -193,7 +193,7 @@ int mboot_dfu_on_dnload(uint16_t wBlockNum, const uint8_t *data, uint16_t wLengt
         return 0;
     }
 
-    if (wLength > MBOOT_DFU_XFER_SIZE) {
+    if (wLength > MICROPY_MBOOT_DFU_XFER_SIZE) {
         return -EINVAL;
     }
 
@@ -218,10 +218,10 @@ int mboot_dfu_on_dnload(uint16_t wBlockNum, const uint8_t *data, uint16_t wLengt
         return rc;
     }
 
-    // Pad into the staging buffer to a MBOOT_DFU_WRITE_ALIGN multiple, then
+    // Pad into the staging buffer to a MICROPY_HW_MBOOT_DFU_WRITE_ALIGN multiple, then
     // write.
-    uint16_t padded_len = (uint16_t)((wLength + (MBOOT_DFU_WRITE_ALIGN - 1)) &
-        ~(MBOOT_DFU_WRITE_ALIGN - 1));
+    uint16_t padded_len = (uint16_t)((wLength + (MICROPY_HW_MBOOT_DFU_WRITE_ALIGN - 1)) &
+        ~(MICROPY_HW_MBOOT_DFU_WRITE_ALIGN - 1));
     memcpy(s_dnload_buf, data, wLength);
     if (padded_len > wLength) {
         memset(s_dnload_buf + wLength, 0xFF, padded_len - wLength);

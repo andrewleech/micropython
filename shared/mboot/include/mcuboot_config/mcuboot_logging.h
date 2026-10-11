@@ -34,25 +34,25 @@
 #define MCUBOOT_LOG_MODULE_REGISTER(domain)
 
 // Each message is prefixed with the function name and terminated with a newline.
-#if MBOOT_LOG_LEVEL >= MCUBOOT_LOG_LEVEL_ERROR
+#if MICROPY_MBOOT_LOG_LEVEL >= MCUBOOT_LOG_LEVEL_ERROR
 #define MCUBOOT_LOG_ERR(fmt, ...) mboot_log(MCUBOOT_LOG_LEVEL_ERROR, "%s: " fmt "\n", __func__,##__VA_ARGS__)
 #else
 #define MCUBOOT_LOG_ERR(...) IGNORE(__VA_ARGS__)
 #endif
 
-#if MBOOT_LOG_LEVEL >= MCUBOOT_LOG_LEVEL_WARNING
+#if MICROPY_MBOOT_LOG_LEVEL >= MCUBOOT_LOG_LEVEL_WARNING
 #define MCUBOOT_LOG_WRN(fmt, ...) mboot_log(MCUBOOT_LOG_LEVEL_WARNING, "%s: " fmt "\n", __func__,##__VA_ARGS__)
 #else
 #define MCUBOOT_LOG_WRN(...) IGNORE(__VA_ARGS__)
 #endif
 
-#if MBOOT_LOG_LEVEL >= MCUBOOT_LOG_LEVEL_INFO
+#if MICROPY_MBOOT_LOG_LEVEL >= MCUBOOT_LOG_LEVEL_INFO
 #define MCUBOOT_LOG_INF(fmt, ...) mboot_log(MCUBOOT_LOG_LEVEL_INFO, "%s: " fmt "\n", __func__,##__VA_ARGS__)
 #else
 #define MCUBOOT_LOG_INF(...) IGNORE(__VA_ARGS__)
 #endif
 
-#if MBOOT_LOG_LEVEL >= MCUBOOT_LOG_LEVEL_DEBUG
+#if MICROPY_MBOOT_LOG_LEVEL >= MCUBOOT_LOG_LEVEL_DEBUG
 #define MCUBOOT_LOG_DBG(fmt, ...) mboot_log(MCUBOOT_LOG_LEVEL_DEBUG, "%s: " fmt "\n", __func__,##__VA_ARGS__)
 #else
 #define MCUBOOT_LOG_DBG(...) IGNORE(__VA_ARGS__)

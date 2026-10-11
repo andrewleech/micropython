@@ -30,7 +30,7 @@
 #include "mboot_layout.h"
 #include "mboot_fsload.h"
 
-#if defined(MBOOT_FSLOAD_FAT) && MBOOT_FSLOAD_FAT
+#if MICROPY_MBOOT_FSLOAD_FAT
 
 #include "lib/oofatfs/ff.h"
 #include "lib/oofatfs/diskio.h"
@@ -198,4 +198,4 @@ int mboot_vfs_fat_mount(const mboot_fsload_window_t *w, const char *path, mboot_
     return 0;
 }
 
-#endif // MBOOT_FSLOAD_FAT
+#endif // MICROPY_MBOOT_FSLOAD_FAT

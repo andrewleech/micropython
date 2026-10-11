@@ -28,7 +28,7 @@
 #include "mboot_layout.h"
 #include "mboot_fsload.h"
 
-#if defined(MBOOT_FSLOAD_RAW) && MBOOT_FSLOAD_RAW
+#if MICROPY_MBOOT_FSLOAD_RAW
 
 // Raw file: the file bytes are the contents of one flash window, optionally followed by a
 // second window. There is no structure to parse; every read is bounded by the windows.
@@ -93,4 +93,4 @@ int mboot_vfs_raw_mount(const mboot_fsload_window_t *seg0, const mboot_fsload_wi
     return 0;
 }
 
-#endif // MBOOT_FSLOAD_RAW
+#endif // MICROPY_MBOOT_FSLOAD_RAW

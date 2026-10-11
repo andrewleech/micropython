@@ -97,8 +97,8 @@
 // Mboot (see docs/reference/mboot.rst). The primary slot follows the
 // bootloader. The secondary slot is at the start of bank 2, so the application can write it
 // while executing from bank 1.
-#define MBOOT_PRIMARY_SIZE                (640 * 1024)
-#define MBOOT_SECONDARY_ADDR              (0x08100000)
-#define MBOOT_ROLLBACK_COUNTER            (1)
-#define MBOOT_FIH_LEVEL                   (1)
-#define MBOOT_FSLOAD_FAT                  (1)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE                (640 * 1024)
+#define MICROPY_HW_MBOOT_SECONDARY_ADDR              (0x08100000)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER            (1)
+#define MICROPY_MBOOT_FIH_LEVEL                   (1)
+#define MICROPY_MBOOT_FSLOAD_FAT                  (1)

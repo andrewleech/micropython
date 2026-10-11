@@ -45,7 +45,7 @@
 #define CFG_TUSB_DEBUG 0
 
 // The DFU core (shared/mboot/dfu) supplies the descriptors and the DFU callbacks.
-// CFG_TUD_DFU_XFER_BUFSIZE must equal MBOOT_USBD_XFER_SIZE.
+// CFG_TUD_DFU_XFER_BUFSIZE must equal MICROPY_MBOOT_USBD_XFER_SIZE.
 #define CFG_TUD_DFU 1
 #define CFG_TUD_DFU_XFER_BUFSIZE 2048
 

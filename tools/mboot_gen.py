@@ -81,14 +81,54 @@ ENGINE_NAMES = frozenset(
 )
 
 
+SHARED_CONFIG_NAMES = frozenset(
+    (
+        "HEADER_SIZE",
+        "TLV_RESERVE",
+        "SECURITY_COUNTER",
+        "ROLLBACK_COUNTER",
+        "FIH_LEVEL",
+        "SECCNT_PORT",
+        "CONFIRM_AUTO",
+        "FSLOAD_FAT",
+        "FSLOAD_LFS2",
+        "FSLOAD_RAW",
+        "FSLOAD_GZIP",
+    )
+)
+HARDWARE_CONFIG_NAMES = frozenset(
+    (
+        "BOOT_SIZE",
+        "PRIMARY_ADDR",
+        "PRIMARY_SIZE",
+        "SECONDARY_ADDR",
+        "SECCNT_ADDR",
+        "SHADOW_ADDR",
+        "SCRATCH_ADDR",
+        "SCRATCH_SIZE",
+        "INTENT_ADDR",
+        "FS_ADDR",
+        "FS_SIZE",
+        "DFU_VID",
+        "DFU_PID",
+    )
+)
+
+
 def macro_name(name):
-    return ("MCUBOOT_" if name in ENGINE_NAMES else "MBOOT_") + name
+    if name in ENGINE_NAMES:
+        return "MCUBOOT_" + name
+    if name in SHARED_CONFIG_NAMES:
+        return "MICROPY_MBOOT_" + name
+    if name in HARDWARE_CONFIG_NAMES:
+        return "MICROPY_HW_MBOOT_" + name
+    return "MBOOT_" + name
 
 
-# Macros of mboot_layout.h that are read. A name that is not defined (a feature that is off, or
-# an area the configuration does not have) is absent from the result.
+# Macros of mboot_layout.h that are read. An area the configuration does not have is absent from
+# the result; feature flags may be absent or numerically zero.
 NAMES = (
-    ["MBOOT_%s_%s" % (a.upper(), f) for a in AREAS for f in ("ADDR", "SIZE", "UNIT")]
+    [macro_name("%s_%s" % (a.upper(), f)) for a in AREAS for f in ("ADDR", "SIZE", "UNIT")]
     + [
         macro_name(n)
         for n in (
@@ -140,9 +180,9 @@ NAMES = (
             "MIN_IMAGE_SIZE",
         )
     ]
-    + ["MBOOT_DEV%d_%s" % (d, f) for d in (0, 1) for f in DEVICE_FIELDS]
+    + ["MICROPY_HW_MBOOT_DEV%d_%s" % (d, f) for d in (0, 1) for f in DEVICE_FIELDS]
     + [
-        "MBOOT_DEV%d_RUN%d_%s" % (d, j, f)
+        "MICROPY_HW_MBOOT_DEV%d_RUN%d_%s" % (d, j, f)
         for d in (0, 1)
         for j in range(MAX_RUNS)
         for f in ("SIZE", "ERASE")
@@ -305,25 +345,31 @@ def build(v, board):
     g = lambda n, d=None: v.get(macro_name(n), d)
     devices = []
     for d in (0, 1):
-        if "MBOOT_DEV%d_BASE" % d not in v:
+        if "MICROPY_HW_MBOOT_DEV%d_BASE" % d not in v:
             break
         runs = []
         off = 0
-        for j in range(v["MBOOT_DEV%d_RUNS" % d]):
-            size = v["MBOOT_DEV%d_RUN%d_SIZE" % (d, j)]
-            runs.append({"off": off, "size": size, "erase": v["MBOOT_DEV%d_RUN%d_ERASE" % (d, j)]})
+        for j in range(v["MICROPY_HW_MBOOT_DEV%d_RUNS" % d]):
+            size = v["MICROPY_HW_MBOOT_DEV%d_RUN%d_SIZE" % (d, j)]
+            runs.append(
+                {
+                    "off": off,
+                    "size": size,
+                    "erase": v["MICROPY_HW_MBOOT_DEV%d_RUN%d_ERASE" % (d, j)],
+                }
+            )
             off += size
         devices.append(
             {
                 "id": d,
-                "name": v["MBOOT_DEV%d_NAME" % d],
-                "base": v["MBOOT_DEV%d_BASE" % d],
-                "size": v["MBOOT_DEV%d_SIZE" % d],
+                "name": v["MICROPY_HW_MBOOT_DEV%d_NAME" % d],
+                "base": v["MICROPY_HW_MBOOT_DEV%d_BASE" % d],
+                "size": v["MICROPY_HW_MBOOT_DEV%d_SIZE" % d],
                 "runs": runs,
-                "write": v["MBOOT_DEV%d_WRITE" % d],
-                "erased_val": v["MBOOT_DEV%d_ERASED_VAL" % d],
-                "mapped": v["MBOOT_DEV%d_MAPPED" % d],
-                "ecc": v["MBOOT_DEV%d_ECC" % d],
+                "write": v["MICROPY_HW_MBOOT_DEV%d_WRITE" % d],
+                "erased_val": v["MICROPY_HW_MBOOT_DEV%d_ERASED_VAL" % d],
+                "mapped": v["MICROPY_HW_MBOOT_DEV%d_MAPPED" % d],
+                "ecc": v["MICROPY_HW_MBOOT_DEV%d_ECC" % d],
             }
         )
     areas = {}

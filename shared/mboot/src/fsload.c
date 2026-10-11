@@ -42,15 +42,15 @@
 #include "mboot_update.h"
 #include "mboot_validate.h"
 
-#if defined(MBOOT_FSLOAD_ENABLE) && MBOOT_FSLOAD_ENABLE
+#if MBOOT_FSLOAD_ENABLE
 
 // The request, the filesystem and the file are all untrusted until mboot_validate_view()
 // has accepted the image, so everything is parsed with checked arithmetic. Offsets and lengths
 // are uint32_t throughout. Windows, file size and image length are bounded by device and
 // target sizes before use.
 
-#if !(defined(MBOOT_FSLOAD_RAW) && MBOOT_FSLOAD_RAW) && !(defined(MBOOT_FSLOAD_FAT) && MBOOT_FSLOAD_FAT) && !(defined(MBOOT_FSLOAD_LFS2) && MBOOT_FSLOAD_LFS2)
-#error "MBOOT_FSLOAD_ENABLE needs at least one of MBOOT_FSLOAD_RAW, _FAT and _LFS2"
+#if !(MICROPY_MBOOT_FSLOAD_RAW) && !(MICROPY_MBOOT_FSLOAD_FAT) && !(MICROPY_MBOOT_FSLOAD_LFS2)
+#error "MBOOT_FSLOAD_ENABLE needs at least one of MICROPY_MBOOT_FSLOAD_RAW, _FAT and _LFS2"
 #endif
 
 // Write chunk size of pass 2. A copy erases whole sectors and writes chunks at chunk-aligned
@@ -174,18 +174,18 @@ static int parse_mount(const uint8_t *m, uint8_t ml, fsload_request_t *rq) {
     rq->win[1].len = 0;
     switch (rq->fs_type) {
         case MBOOT_FSLOAD_FS_FAT:
-            #if !(defined(MBOOT_FSLOAD_FAT) && MBOOT_FSLOAD_FAT)
+            #if !(MICROPY_MBOOT_FSLOAD_FAT)
             return -MBOOT_RES_ERR_FS_MOUNT;
             #endif
             break;
         case MBOOT_FSLOAD_FS_LFS2:
-            #if !(defined(MBOOT_FSLOAD_LFS2) && MBOOT_FSLOAD_LFS2)
+            #if !(MICROPY_MBOOT_FSLOAD_LFS2)
             return -MBOOT_RES_ERR_FS_MOUNT;
             #endif
             rq->block_size = arg2;
             break;
         case MBOOT_FSLOAD_FS_RAW:
-            #if !(defined(MBOOT_FSLOAD_RAW) && MBOOT_FSLOAD_RAW)
+            #if !(MICROPY_MBOOT_FSLOAD_RAW)
             return -MBOOT_RES_ERR_FS_MOUNT;
             #endif
             if (arg3 != 0) {
@@ -343,17 +343,17 @@ static int open_source(const fsload_request_t *rq, mboot_stream_t **out) {
     int r;
 
     switch (rq->fs_type) {
-        #if defined(MBOOT_FSLOAD_FAT) && MBOOT_FSLOAD_FAT
+        #if MICROPY_MBOOT_FSLOAD_FAT
         case MBOOT_FSLOAD_FS_FAT:
             r = mboot_vfs_fat_mount(&rq->win[0], rq->path, &s);
             break;
         #endif
-        #if defined(MBOOT_FSLOAD_LFS2) && MBOOT_FSLOAD_LFS2
+        #if MICROPY_MBOOT_FSLOAD_LFS2
         case MBOOT_FSLOAD_FS_LFS2:
             r = mboot_vfs_lfs2_mount(&rq->win[0], rq->block_size, rq->path, &s);
             break;
         #endif
-        #if defined(MBOOT_FSLOAD_RAW) && MBOOT_FSLOAD_RAW
+        #if MICROPY_MBOOT_FSLOAD_RAW
         case MBOOT_FSLOAD_FS_RAW:
             r = mboot_vfs_raw_mount(&rq->win[0], rq->win[1].len != 0 ? &rq->win[1] : NULL, &s);
             break;
@@ -372,7 +372,7 @@ static int open_source(const fsload_request_t *rq, mboot_stream_t **out) {
     return 0;
 }
 
-#if defined(MBOOT_FSLOAD_GZIP) && MBOOT_FSLOAD_GZIP
+#if MICROPY_MBOOT_FSLOAD_GZIP
 // True when the file starts with the gzip magic. Leaves the stream at an undefined
 // position.
 static bool is_gzip(mboot_stream_t *s) {
@@ -402,7 +402,7 @@ static int open_stream(const fsload_request_t *rq, const fsload_target_t *t, mbo
         return r;
     }
 
-    #if defined(MBOOT_FSLOAD_GZIP) && MBOOT_FSLOAD_GZIP
+    #if MICROPY_MBOOT_FSLOAD_GZIP
     if (is_gzip(s)) {
         // The gzip reader enforces the capacity on the decompressed output.
         r = s->rewind(s);
@@ -453,7 +453,7 @@ static int open_stream(const fsload_request_t *rq, const fsload_target_t *t, mbo
 
 // ---- pass 2: write ----
 
-#if defined(MBOOT_POLICY_SINGLE) && MBOOT_POLICY_SINGLE
+#if MBOOT_POLICY_SINGLE
 
 static int intent_open(const struct flash_area **fap) {
     if (flash_area_open(MBOOT_AREA_INTENT, fap) != 0) {
@@ -515,7 +515,7 @@ static int intent_erase(void) {
 #endif // MBOOT_POLICY_SINGLE
 
 bool mboot_intent_load(mboot_request_t *req) {
-    #if defined(MBOOT_POLICY_SINGLE) && MBOOT_POLICY_SINGLE
+    #if MBOOT_POLICY_SINGLE
     const struct flash_area *fap;
     uint8_t hdr[FSLOAD_INTENT_HEADER];
     if (intent_open(&fap) != 0 || flash_area_read(fap, 0, hdr, sizeof(hdr)) != 0) {
@@ -541,7 +541,7 @@ bool mboot_intent_load(mboot_request_t *req) {
     #endif
 }
 
-#if !(defined(MBOOT_POLICY_SINGLE) && MBOOT_POLICY_SINGLE)
+#if !MBOOT_POLICY_SINGLE
 
 // Policies swap and overwrite-external: nothing may stay pending from an earlier session, and
 // a half-written image must never look complete. This is the session begin of mboot_update.h
@@ -605,7 +605,7 @@ static int copy_stream(const fsload_target_t *t, mboot_stream_t *s, uint32_t len
 
 static int install(const fsload_target_t *t, mboot_stream_t *s, uint32_t image_len, const uint8_t *elems, size_t elems_len, uint32_t *detail) {
     int r;
-    #if defined(MBOOT_POLICY_SINGLE) && MBOOT_POLICY_SINGLE
+    #if MBOOT_POLICY_SINGLE
     r = intent_write(elems, elems_len);
     #else
     (void)elems;
@@ -619,7 +619,7 @@ static int install(const fsload_target_t *t, mboot_stream_t *s, uint32_t image_l
     if (r != 0) {
         return r;
     }
-    #if defined(MBOOT_POLICY_SINGLE) && MBOOT_POLICY_SINGLE
+    #if MBOOT_POLICY_SINGLE
     // The only slot holds what pass 2 read back from the file, which may differ from what pass 1
     // validated. Validate the slot again before dropping the intent; a differing copy keeps the
     // retry record.
@@ -669,7 +669,7 @@ static int execute(const fsload_request_t *rq, const uint8_t *elems, size_t elem
         return vr->code;
     }
 
-    #if defined(MBOOT_LOG_LEVEL) && MBOOT_LOG_LEVEL >= MCUBOOT_LOG_LEVEL_DEBUG
+    #if MICROPY_MBOOT_LOG_LEVEL >= MCUBOOT_LOG_LEVEL_DEBUG
     const mboot_fsload_stream_stats_t *st = mboot_fsload_stream_stats();
     MCUBOOT_LOG_DBG("validated %u bytes: %u reads, %u cache hits, %u rewinds, %u bytes discarded",
         (unsigned)image_len, (unsigned)st->reads, (unsigned)st->cache_hits, (unsigned)st->rewinds, (unsigned)st->discarded);
@@ -718,7 +718,7 @@ int mboot_fsload_run(const uint8_t *elems, size_t len) {
         r = execute(&rq, elems, len, &vr, &pass2, &detail);
     }
 
-    #if defined(MBOOT_POLICY_SINGLE) && MBOOT_POLICY_SINGLE
+    #if MBOOT_POLICY_SINGLE
     if (r != MBOOT_RES_OK && !pass2) {
         // Nothing was written, so a retry record left by an earlier run must not trigger
         // another attempt with the same request.

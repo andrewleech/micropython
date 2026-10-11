@@ -42,7 +42,7 @@
 #define BOOT_MAX_ALIGN 8
 #endif
 
-#if defined(MBOOT_ROLE_BOOTLOADER) && defined(MBOOT_FSLOAD_ENABLE) && MBOOT_FSLOAD_ENABLE
+#if defined(MBOOT_ROLE_BOOTLOADER) && MBOOT_FSLOAD_ENABLE
 #define HAVE_STREAM_AREA 1
 #else
 #define HAVE_STREAM_AREA 0
@@ -162,7 +162,7 @@ const struct flash_area *mboot_flash_area_find(uint8_t id) {
 
 // The trailer of a slot occupies whole sectors at its end, as many as the layout needs for the
 // swap state (MBOOT_TRAILER_SECTORS). This is the only place that computes where it begins.
-_Static_assert(MBOOT_PRIMARY_SIZE > MBOOT_MAX_IMAGE_SIZE, "the primary slot holds a trailer");
+_Static_assert(MICROPY_HW_MBOOT_PRIMARY_SIZE > MBOOT_MAX_IMAGE_SIZE, "the primary slot holds a trailer");
 
 uint32_t mboot_area_erase(const struct flash_area *fa) {
     const mboot_flash_dev_t *d = fa != NULL ? dev_get(fa->fa_device_id) : NULL;

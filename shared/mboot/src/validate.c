@@ -304,7 +304,7 @@ mboot_validate_result_t mboot_validate_view(const struct flash_area *fap, uint32
         return fail(r, MBOOT_RES_ERR_NOT_TARGET, hdr.ih_flags);
     }
     if (flags & VALIDATE_CHECK_TARGET) {
-        if ((hdr.ih_flags & IMAGE_F_RAM_LOAD) != 0 || hdr.ih_hdr_size != MBOOT_HEADER_SIZE) {
+        if ((hdr.ih_flags & IMAGE_F_RAM_LOAD) != 0 || hdr.ih_hdr_size != MICROPY_MBOOT_HEADER_SIZE) {
             return fail(r, MBOOT_RES_ERR_NOT_TARGET, hdr.ih_flags);
         }
     }

@@ -53,7 +53,7 @@ void mboot_assert_fail(const char *file, int line) {
     static bool failing;
     if (!failing) {
         failing = true;
-        #if MBOOT_LOG_LEVEL >= MCUBOOT_LOG_LEVEL_ERROR
+        #if MICROPY_MBOOT_LOG_LEVEL >= MCUBOOT_LOG_LEVEL_ERROR
         mboot_log(MCUBOOT_LOG_LEVEL_ERROR, "ASSERT %s:%d\n", file, line);
         #else
         (void)file;

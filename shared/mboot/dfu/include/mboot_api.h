@@ -235,23 +235,23 @@ extern int mboot_port_flash_page_erase(mboot_addr_t addr, mboot_addr_t *next_add
 // it in a download session.
 //
 // Alignment:
-//   - addr is a multiple of MBOOT_DFU_WRITE_ALIGN (default 4, see mboot_dfu.h).
-//   - len is a multiple of MBOOT_DFU_WRITE_ALIGN.
+//   - addr is a multiple of MICROPY_HW_MBOOT_DFU_WRITE_ALIGN (default 4, see mboot_dfu.h).
+//   - len is a multiple of MICROPY_HW_MBOOT_DFU_WRITE_ALIGN.
 //   - The range lies within a single erased sector, or the port handles
 //     cross-sector writes itself.
 //   Partial-unit writes are not supported; mboot_dfu.c pads the trailing bytes
 //   of a download block with 0xFF before calling this function.
 //
 // A flash controller whose program granularity is larger than
-// MBOOT_DFU_WRITE_ALIGN (a 256-byte page program, for example) must align or
+// MICROPY_HW_MBOOT_DFU_WRITE_ALIGN (a 256-byte page program, for example) must align or
 // split the write itself, using a RAM staging buffer if it needs one.  The
-// common code only guarantees MBOOT_DFU_WRITE_ALIGN alignment.
+// common code only guarantees MICROPY_HW_MBOOT_DFU_WRITE_ALIGN alignment.
 //
 // Arguments
-//   addr   Destination start address (MBOOT_DFU_WRITE_ALIGN aligned).
+//   addr   Destination start address (MICROPY_HW_MBOOT_DFU_WRITE_ALIGN aligned).
 //   src    Source buffer in RAM, must not alias flash.  For a download block it
 //          is the 4-byte aligned staging buffer of mboot_dfu.c.
-//   len    Number of bytes to write (multiple of MBOOT_DFU_WRITE_ALIGN).
+//   len    Number of bytes to write (multiple of MICROPY_HW_MBOOT_DFU_WRITE_ALIGN).
 //
 // Call context: not interrupt-safe; may block.
 // Return: 0 on success, negative errno-style value on error.

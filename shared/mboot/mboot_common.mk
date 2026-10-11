@@ -24,9 +24,9 @@
 #   MBOOT_CPP_FLAGS   options the preprocessor needs to read the board, for example -D<MCU>
 #   MBOOT_PUBKEY      PEM key whose public part the bootloader accepts (default: the test key)
 #   MBOOT_SIGN_KEY    private signing key of the app role (default: the test key)
-#   MBOOT_PRODUCTION  1 refuses the public test keys, and MBOOT_VALIDATE_PRIMARY 0 (the C
-#                       configuration sees it as -DMBOOT_PRODUCTION)
-#   MBOOT_MBEDTLS_SRC_C  with MBOOT_CRYPTO_SEL_MBEDTLS: the Mbed TLS sources (relative to TOP) and
+#   MBOOT_PRODUCTION  1 refuses the public test keys, and MICROPY_MBOOT_VALIDATE_PRIMARY 0 (the C
+#                       configuration sees it as -DMICROPY_MBOOT_PRODUCTION)
+#   MBOOT_MBEDTLS_SRC_C  with MICROPY_MBOOT_CRYPTO_MBEDTLS: the Mbed TLS sources (relative to TOP) and
 #                       the port's own include path and MBEDTLS_CONFIG_FILE for them
 #   PYTHON              python3
 
@@ -68,7 +68,7 @@ MBOOT_INC := $(MBOOT_GEN_INC) \
 # clean tree; mboot_rules.mk regenerates when the headers or the key change.
 MBOOT_GEN_CMD = $(PYTHON) $(TOP)/tools/mboot_gen.py --out $(MBOOT_GEN_DIR) \
     --board $(notdir $(BOARD_DIR:/=)) --key $(MBOOT_PUBKEY) \
-    -- $(CC) $(MBOOT_GEN_INC) $(MBOOT_CPP_FLAGS) -DMBOOT_PRODUCTION=$(MBOOT_PRODUCTION)
+    -- $(CC) $(MBOOT_GEN_INC) $(MBOOT_CPP_FLAGS) -DMICROPY_MBOOT_PRODUCTION=$(MBOOT_PRODUCTION)
 MBOOT_GEN_LOG := $(shell $(MBOOT_GEN_CMD) 2>&1 || echo MBOOT_GEN_FAILED)
 ifneq ($(findstring MBOOT_GEN_FAILED,$(MBOOT_GEN_LOG)),)
 $(error mboot_gen.py failed: $(MBOOT_GEN_LOG))
@@ -96,7 +96,7 @@ MBOOT_LD_LAYOUT := $(MBOOT_GEN_DIR)/mboot_layout.ld
 # port.
 ifeq ($(MBOOT_CRYPTO),mbedtls)
 ifeq ($(MBOOT_ROLE)$(MBOOT_MBEDTLS_SRC_C),bootloader)
-$(error mboot_common.mk: MBOOT_CRYPTO_SEL_MBEDTLS needs MBOOT_MBEDTLS_SRC_C from the port)
+$(error mboot_common.mk: MICROPY_MBOOT_CRYPTO_MBEDTLS needs MBOOT_MBEDTLS_SRC_C from the port)
 endif
 else
 MBOOT_INC += -I$(MBOOT_LIB_DIR)/ext/tinycrypt/lib/include \
@@ -110,8 +110,8 @@ endif
 else
 MBOOT_CFLAGS := -DMBOOT_ROLE_APP=1
 endif
-MBOOT_CFLAGS += -DMBOOT_PRODUCTION=$(MBOOT_PRODUCTION)
-MBOOT_CFLAGS += -DMBOOT_BL_VERSION='"$(MBOOT_BL_VERSION)"'
+MBOOT_CFLAGS += -DMICROPY_MBOOT_PRODUCTION=$(MBOOT_PRODUCTION)
+MBOOT_CFLAGS += -DMICROPY_MBOOT_BL_VERSION='"$(MBOOT_BL_VERSION)"'
 
 MBOOT_GEN_SRC_C :=
 ifeq ($(MBOOT_ROLE),bootloader)
@@ -177,7 +177,7 @@ endif
 MBOOT_FRONT_SRC_C := $(addprefix $(MBOOT_SRC_DIR)/, boot_main.c validate.c)
 ifeq ($(MBOOT_DFU_ENABLE),1)
 # dfu_glue.c binds the DFU core of shared/mboot/dfu. The core pads every download block to
-# MBOOT_DFU_WRITE_ALIGN, which has to be the value the glue checks against.
+# MICROPY_HW_MBOOT_DFU_WRITE_ALIGN, which has to be the value the glue checks against.
 MBOOT_FRONT_SRC_C += $(addprefix $(MBOOT_SRC_DIR)/, dfu_glue.c dfu_regions.c) \
     $(addprefix $(MBOOT_DFU_DIR)/core/, mboot_dfu.c mboot_region.c mboot_usbd.c) \
     $(MBOOT_SRC_DIR)/mboot_elem.c
@@ -186,7 +186,7 @@ MBOOT_INC += -I$(TOP)/$(MBOOT_DFU_DIR)/include
 # driver and the TinyUSB include path (tusb_config.h) belong to the port.
 MBOOT_TINYUSB_SRC_C := $(addprefix lib/tinyusb/src/, \
     tusb.c common/tusb_fifo.c device/usbd.c class/dfu/dfu_device.c class/vendor/vendor_device.c)
-MBOOT_CFLAGS += -DMBOOT_DFU_WRITE_ALIGN=$(MBOOT_DFU_FLASH_WRITE_ALIGN)
+MBOOT_CFLAGS += -DMICROPY_HW_MBOOT_DFU_WRITE_ALIGN=$(MBOOT_DFU_FLASH_WRITE_ALIGN)
 endif
 ifeq ($(MBOOT_FSLOAD_ENABLE),1)
 MBOOT_FRONT_SRC_C += $(addprefix $(MBOOT_SRC_DIR)/, fsload.c fsload_stream.c)

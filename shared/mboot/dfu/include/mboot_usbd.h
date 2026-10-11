@@ -51,22 +51,22 @@
 // DFU interface number
 // ---------------------------------------------------------------------------
 
-// MBOOT_DFU_INTERFACE_NUMBER - bInterfaceNumber of the DFU interface in the
+// MICROPY_MBOOT_DFU_INTERFACE_NUMBER - bInterfaceNumber of the DFU interface in the
 // configuration descriptor.  The bootloader exposes exactly one interface.
 // A board config can override it.
-#ifndef MBOOT_DFU_INTERFACE_NUMBER
-#define MBOOT_DFU_INTERFACE_NUMBER (0)
+#ifndef MICROPY_MBOOT_DFU_INTERFACE_NUMBER
+#define MICROPY_MBOOT_DFU_INTERFACE_NUMBER (0)
 #endif
 
 // ---------------------------------------------------------------------------
 // Transfer size
 // ---------------------------------------------------------------------------
 
-// MBOOT_USBD_XFER_SIZE - wTransferSize advertised in the DFU functional
+// MICROPY_MBOOT_USBD_XFER_SIZE - wTransferSize advertised in the DFU functional
 // descriptor.  Must match CFG_TUD_DFU_XFER_BUFSIZE in tusb_config.h and
-// MBOOT_DFU_XFER_SIZE from mboot_dfu.h (2048).
-#ifndef MBOOT_USBD_XFER_SIZE
-#define MBOOT_USBD_XFER_SIZE (2048)
+// MICROPY_MBOOT_DFU_XFER_SIZE from mboot_dfu.h (2048).
+#ifndef MICROPY_MBOOT_USBD_XFER_SIZE
+#define MICROPY_MBOOT_USBD_XFER_SIZE (2048)
 #endif
 
 // ---------------------------------------------------------------------------
@@ -75,14 +75,14 @@
 
 // Maximum number of alt settings the static configuration descriptor buffer
 // holds.  Each alt adds one 9-byte interface descriptor:
-// 9 (config) + MBOOT_USBD_MAX_ALT_SETTINGS * 9 (interfaces) + 9 (DFU functional).
-#ifndef MBOOT_USBD_MAX_ALT_SETTINGS
-#define MBOOT_USBD_MAX_ALT_SETTINGS (16)
+// 9 (config) + MICROPY_MBOOT_USBD_MAX_ALT_SETTINGS * 9 (interfaces) + 9 (DFU functional).
+#ifndef MICROPY_MBOOT_USBD_MAX_ALT_SETTINGS
+#define MICROPY_MBOOT_USBD_MAX_ALT_SETTINGS (16)
 #endif
 
 // Total worst-case configuration descriptor length.
 #define MBOOT_USBD_CFG_DESC_MAX_LEN \
-    (9 + (MBOOT_USBD_MAX_ALT_SETTINGS) * 9 + 9)
+    (9 + (MICROPY_MBOOT_USBD_MAX_ALT_SETTINGS) * 9 + 9)
 
 // ---------------------------------------------------------------------------
 // Lifecycle

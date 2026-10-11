@@ -137,23 +137,30 @@ void board_early_init_sf6(void);
 // 0x08020000 128 KiB sector        intent area of fsload
 // 0x08040000 five 256 KiB sectors  the slot (image header, firmware, trailer)
 // 0x08180000 two 256 KiB sectors   security counter
-#define MBOOT_POLICY              (MBOOT_POLICY_SEL_SINGLE)
-#define MBOOT_INTENT_ADDR         (0x08020000)
-#define MBOOT_PRIMARY_ADDR        (0x08040000)
-#define MBOOT_PRIMARY_SIZE        (1280 * 1024)
-#define MBOOT_SECCNT_ADDR         (0x08180000)
-#define MBOOT_ROLLBACK_COUNTER    (1)
-#define MBOOT_DFU                 (1)
+#define MICROPY_MBOOT_UPDATE_MODE              (MICROPY_MBOOT_UPDATE_MODE_SINGLE_SLOT)
+#define MICROPY_HW_MBOOT_INTENT_ADDR         (0x08020000)
+#define MICROPY_HW_MBOOT_PRIMARY_ADDR        (0x08040000)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE        (1280 * 1024)
+#define MICROPY_HW_MBOOT_SECCNT_ADDR         (0x08180000)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER    (1)
+#define MICROPY_MBOOT_DFU                 (1)
 
 // The application filesystem is FAT on SPI flash #1, read by the bootloader to install an update
 // from a file (fsload). The chip is detected at run time and is 2 MiB or 8 MiB, so the layout
 // takes the size that both have.
-#define MBOOT_FSLOAD_FAT          (1)
-#define MBOOT_FS_ADDR             (0x80000000)
-#define MBOOT_FS_SIZE             (2 * 1024 * 1024)
-#define MBOOT_DEV1_SIZE           (MBOOT_FS_SIZE)
+#define MICROPY_MBOOT_FSLOAD_FAT          (1)
+#define MICROPY_HW_MBOOT_FS_ADDR             (0x80000000)
+#define MICROPY_HW_MBOOT_FS_SIZE             (2 * 1024 * 1024)
+#define MICROPY_HW_MBOOT_DEV1_SIZE           (MICROPY_HW_MBOOT_FS_SIZE)
+#define MICROPY_HW_MBOOT_SPIFLASH_ADDR (0x80000000)
+#define MICROPY_HW_MBOOT_SPIFLASH_BYTE_SIZE (1 << MICROPY_BOARD_SPIFLASH_CHIP_PARAMS0->memory_size_bytes_log2)
+#define MICROPY_HW_MBOOT_SPIFLASH_ERASE_BLOCKS_PER_PAGE (1)
+#define MICROPY_HW_MBOOT_SPIFLASH_LAYOUT_DYNAMIC_MAX_LEN (20)
+#define MICROPY_HW_MBOOT_SPIFLASH_SPIFLASH (&spi_bdev.spiflash)
+#define MICROPY_HW_MBOOT_SPIFLASH_CONFIG (&spiflash_config)
+#define MICROPY_HW_MBOOT_BOARD_EARLY_INIT(initial_r0) mboot_board_early_init()
 
 // There is no log UART: MICROPY_HW_UART_REPL is not defined and USB is the console.
-#define MBOOT_LOG_LEVEL           (0)
+#define MICROPY_MBOOT_LOG_LEVEL           (0)
 
 #endif // MICROPY_INCLUDED_STM32_BOARDS_PYBD_SF6_MPCONFIGBOARD_H

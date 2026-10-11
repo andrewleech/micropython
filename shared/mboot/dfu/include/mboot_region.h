@@ -72,10 +72,10 @@
 
 // Maximum number of DFU alt settings (region groups after folding adjacent
 // same-name regions).  mboot_usbd.c sizes its configuration-descriptor buffer
-// from MBOOT_USBD_MAX_ALT_SETTINGS, and MBOOT_MAX_ALT_SETTINGS must not exceed
+// from MICROPY_MBOOT_USBD_MAX_ALT_SETTINGS, and MICROPY_MBOOT_MAX_ALT_SETTINGS must not exceed
 // it; mboot_usbd.c asserts that at compile time.
-#ifndef MBOOT_MAX_ALT_SETTINGS
-#define MBOOT_MAX_ALT_SETTINGS (16)
+#ifndef MICROPY_MBOOT_MAX_ALT_SETTINGS
+#define MICROPY_MBOOT_MAX_ALT_SETTINGS (16)
 #endif
 
 // ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@
 //     check
 //   - the region table exceeds an internal capacity limit
 //   - the regions folded into one alt setting have more than
-//     MBOOT_DFU_MAX_SECTOR_COUNT sectors in total (the DFU touched-sector
+//     MICROPY_MBOOT_DFU_MAX_SECTOR_COUNT sectors in total (the DFU touched-sector
 //     bitmap holds one bit per sector of the alt setting)
 int mboot_region_init(void);
 
@@ -186,7 +186,7 @@ uint8_t mboot_region_get_active(void);
 //
 // For a multi-region alt setting (folded group) this is the lowest address of
 // its regions.  mboot_dfu.c uses it to convert wBlockNum to a flash address:
-// addr = base + wBlockNum * MBOOT_DFU_XFER_SIZE.
+// addr = base + wBlockNum * MICROPY_MBOOT_DFU_XFER_SIZE.
 mboot_addr_t mboot_region_active_base(void);
 
 // mboot_region_active_size - return the total byte size of the active alt setting.
