@@ -185,15 +185,22 @@ def syntax_adapter(code, origins, physical, record):
 
     def metadata(node):
         scope = scope_node(node)
-        loops = []
+        loops, conditional_evaluation = [], []
         parent = node.parent
         while parent:
             if parent.type in ('for_statement', 'while_statement', 'do_statement'):
                 loops.append(parent.start_byte)
+            consequence = (parent.child_by_field_name('consequence')
+                           or parent.child_by_field_name('alternative')) if parent.type == 'conditional_expression' else None
+            if (consequence and node.start_byte >= consequence.start_byte) or (
+                    parent.type == 'binary_expression' and text(parent.child_by_field_name('operator')) in ('&&', '||')
+                    and parent.child_by_field_name('right').start_byte <= node.start_byte):
+                conditional_evaluation.append(parent.start_byte)
             parent = parent.parent
         return {'byte_start': node.start_byte, 'byte_end': node.end_byte,
                 'scope_id': scope.start_byte, 'scope_start': scope.start_byte,
-                'scope_end': scope.end_byte, 'loops': loops}
+                'scope_end': scope.end_byte, 'loops': loops,
+                'conditional_evaluation': conditional_evaluation}
 
     def binding_scope(node):
         parents = []
@@ -275,6 +282,8 @@ def syntax_adapter(code, origins, physical, record):
             'field_expression': ('argument', 'field'),
             'pointer_expression': ('argument',),
             'unary_expression': ('argument',),
+            'update_expression': ('argument',),
+            'initializer_pair': ('value',),
             'cast_expression': ('type', 'value'),
             'assignment_expression': ('left', 'right'),
             'binary_expression': ('left', 'right'),
@@ -594,7 +603,7 @@ def syntax_adapter(code, origins, physical, record):
                                 if possible_name in global_functions:
                                     variables.append({'name': possible_name, 'expression': text(child), 'source_span': loc(child), 'declaration_point': point_for_name(pointer, possible_name), 'unresolved': 'typedef-dependent declaration/expression ambiguity; possible local binding'})
             shadows = {v['name'] for v in variables} | set(params)
-            events = {'calls': [], 'returns': [], 'variables': variables, 'conditions': [], 'writes': [], 'expressions': []}
+            events = {'calls': [], 'returns': [], 'variables': variables, 'conditions': [], 'control_expressions': [], 'writes': [], 'expressions': []}
             if body_barriers:
                 events['semantic_unassessed'] = body_barriers
             if any(child.type in ('goto_statement', 'labeled_statement', 'switch_statement') for child in walk(body)):
@@ -634,7 +643,7 @@ def syntax_adapter(code, origins, physical, record):
                     condition = text(condition_node)
                     if condition.startswith('( ') and condition.endswith(' )'): condition = condition[2:-2]
                     identity = loc(child)
-                    events['conditions'].append({'expression': condition, 'expression_node': expression_fact(condition_node),
+                    events['conditions'].append({'control_kind': 'if_statement', 'expression': condition, 'expression_node': expression_fact(condition_node),
                                                  'source_span': identity, 'guards': guards, **metadata(condition_node)})
                     events['conditions'][-1]['condition_id'] = child.start_byte
                     visit(condition_node, guards)
@@ -643,6 +652,13 @@ def syntax_adapter(code, origins, physical, record):
                     if consequence: visit(consequence, guards + [{'condition': condition, 'branch': 'then', 'condition_id': child.start_byte, 'source_span': identity}])
                     if alternative: visit(alternative, guards + [{'condition': condition, 'branch': 'else', 'condition_id': child.start_byte, 'source_span': identity}])
                     return
+                if child.type in ('for_statement', 'while_statement', 'do_statement', 'switch_statement'):
+                    control = child.child_by_field_name('condition')
+                    if control:
+                        events['control_expressions'].append({
+                            'expression': text(control), 'expression_node': expression_fact(control),
+                            'control_kind': child.type, 'source_span': loc(control),
+                            'guards': guards, **metadata(control)})
                 if child.type == 'call_expression' and typedef_cast(child) is None:
                     expression = text(child)
                     callee_name = text(child.child_by_field_name('function'))
@@ -682,14 +698,17 @@ def syntax_adapter(code, origins, physical, record):
                     if condition.startswith('( ') and condition.endswith(' )'):
                         condition = condition[2:-2]
                     return {'kind': 'if', 'condition': condition, 'byte_start': child.start_byte,
+                            'condition_start': child.child_by_field_name('condition').start_byte,
+                            'condition_end': child.child_by_field_name('condition').end_byte,
                             'then': flow(child.child_by_field_name('consequence')),
                             'else': flow(child.child_by_field_name('alternative')) if child.child_by_field_name('alternative') else {'kind': 'fallthrough'}}
                 if child.type == 'return_statement':
-                    return {'kind': 'return', 'byte_start': child.start_byte, 'loops': metadata(child)['loops']}
+                    return {'kind': 'return', 'byte_start': child.start_byte, 'byte_end': child.end_byte, 'loops': metadata(child)['loops']}
                 if (child.type == 'expression_statement' and len(child.named_children) == 1
                         and child.named_children[0].type == 'call_expression'
                         and typedef_cast(child.named_children[0]) is None):
-                    return {'kind': 'call', 'byte_start': child.named_children[0].start_byte}
+                    return {'kind': 'call', 'byte_start': child.named_children[0].start_byte,
+                            'byte_end': child.named_children[0].end_byte}
                 if child.type in ('for_statement', 'while_statement', 'do_statement'):
                     return {'kind': 'loop', 'loop_kind': child.type, 'byte_start': child.start_byte,
                             'initializer_expression': text(child.child_by_field_name('initializer')) if child.child_by_field_name('initializer') else None,
@@ -703,7 +722,7 @@ def syntax_adapter(code, origins, physical, record):
                 if child.type == 'labeled_statement':
                     return {'kind': 'label', 'name': text(child.child_by_field_name('label')), 'byte_start': child.start_byte,
                             'children': [flow(nested) for nested in child.named_children if nested.type != 'statement_identifier']}
-                return {'kind': 'fallthrough'}
+                return {'kind': 'fallthrough', 'byte_start': child.start_byte, 'byte_end': child.end_byte}
             events['flow'] = flow(body)
             declaration_identity = global_functions.get(name, [{'name': name, 'kind': 'FUNCTION_DECL', 'source_span': point_for_name(node.child_by_field_name('declarator'), name)}])[0]
             functions.append({'id': function_id(physical, name, loc(node)), 'declaration_identity': declaration_identity, 'name': name, 'linkage': 'static' if text(node).startswith('static ') else 'external', 'parameters': params, 'source_span': loc(node), 'events': events, 'constants': function_constants(node, body), 'body_expression': body_expression,
@@ -716,7 +735,6 @@ def syntax_adapter(code, origins, physical, record):
                                   'signature_unresolved': signature_unresolved,
                                   'declaration_modifiers': declaration_modifiers,
                                   'declaration_modifiers_resolution': 'resolved' if modifiers_resolved else 'unresolved',
-                                  'declaration_modifiers_source': loc(node),
                                   'declaration_prefix_expression': original_prefix,
                                   'kind': 'old-style-identifier-list' if legacy_headers else 'parsed-C-declaration',
                                   'parameter_names': params, 'source_evidence': legacy_headers,
@@ -724,7 +742,6 @@ def syntax_adapter(code, origins, physical, record):
                                   'declaration_binding_resolution': 'resolved' if parameter_declarations_resolved else 'unresolved',
                                   'unresolved': [] if parameter_declarations_resolved else ['original identifier list and parsed declaration-list declarators do not form a complete unique binding'],
                                   'abi_resolution': 'unassessed'}})
-            functions[-1].update(return_type_expression=return_type_expression, return_type_resolution=return_type_resolution)
     errors = [{'source_span': loc(n), 'reason': 'tree-sitter ' + n.type, 'operational': True} for n in walk(tree.root_node) if n.type == 'ERROR' or n.is_missing]
     unassessed_origins = [
         {'source_span': loc(node), 'syntax_kind': node.type,

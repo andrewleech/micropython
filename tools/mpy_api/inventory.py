@@ -11,7 +11,7 @@ import subprocess
 from . import compiler
 from .frontend import syntax_adapter, constant
 from .bindings import definitions, registration_records, call_parts, scalar_field, strip_outer, constant_value
-from .semantics import semantics, direct_parameter, bind_public_contracts, checked_receiver_authority, input_helper_authority, lexical_constant
+from .semantics import semantics, direct_parameter, bind_public_contracts, checked_receiver_authority, input_helper_authority, lexical_constant, event_applicability
 from .link import collect_ownership, join
 from .frozen_payload import collect_frozen_payload
 
@@ -76,19 +76,15 @@ def _extract_impl(record, compdb, root):
     by_name = {}
     for function in functions:
         by_name.setdefault(function['name'], []).append(function)
-    normalized = []
     for function in functions:
         tests = [{'name': name, 'expression': condition['expression'], 'source_span': condition['source_span']}
                  for condition in (function['events']['conditions'] if not function['events'].get('semantic_unassessed') else [])
                  for name in re.findall(r'MP_QSTR_(\w+)', condition['expression'])]
-        normalized.append({**{key: function[key] for key in ('id', 'declaration_identity', 'name', 'linkage', 'source_span')},
-                           'translation_unit': record['identity'],
-                           'parameters': function['parameters'], 'constants': function['constants'],
-                           'events': function['events'], 'body_expression': function['body_expression'],
-                           'parameter_source_contract': function['parameter_source_contract'],
-                           '_semantic_function': function,
-                           'semantics': semantics(function, by_name, errors, contracts),
-                           'handler_attributes': sorted({test['name'] for test in tests}), 'handler_attribute_tests': tests})
+        function.update(
+            semantics={**semantics(function, by_name, errors, contracts),
+                       'diagnostic_stage': 'translation-unit-extraction'},
+            handler_attributes=sorted({test['name'] for test in tests}),
+            handler_attribute_tests=tests)
     prepared['frontend'] = frontend
     object_definitions = definitions(declarations, functions, errors, record['identity'], directive_code, directive_origins, prepared)
     registrations = registration_records(directive_code, directive_origins, physical, prepared)
@@ -96,7 +92,7 @@ def _extract_impl(record, compdb, root):
     empty_program = not code.strip()
     return {'translation_unit': record['identity'], 'source': physical,
             'definitions': object_definitions,
-            'functions': normalized,
+            'functions': functions,
             'registrations': registrations,
             'errors': errors, 'contracts': contracts, 'frontend': frontend,
             'coverage': {'status': 'processed-empty' if empty_program else 'processed',
@@ -151,12 +147,11 @@ def _parameter_family(function):
 
 
 def _parser_forwarding(parser, function, public_function, shape):
-    function = function.get('_semantic_function', function)
-    public_function = public_function.get('_semantic_function', public_function)
     family = _parameter_family(function)
     public_family = _parameter_family(public_function)
     args = parser['arguments']
-    if not family or not public_family or len(args) != 6 or parser.get('guards'):
+    if (not family or not public_family or len(args) != 6 or parser.get('guards')
+            or parser.get('successful_path_applicability', {}).get('resolution') != 'bounded-resolved'):
         return None
     params = function['parameters']
     bindings = parser.get('caller_parameter_bindings', {})
@@ -454,7 +449,7 @@ def _parser_conversions(facts, function, linked_functions=None, protocol=None):
     conversions = {}
     functions = {}
     for definition in facts['functions']:
-        functions.setdefault(definition['name'], []).append(definition.get('_semantic_function', definition))
+        functions.setdefault(definition['name'], []).append(definition)
     for kind, field, helper in (('bool', 'u_bool', 'mp_obj_is_true'),
                                 ('int', 'u_int', 'mp_obj_get_int')):
         expression = out + ' [ i ] . ' + field + ' = ' + helper + ' ( given_arg )'
@@ -471,7 +466,7 @@ def _parser_conversions(facts, function, linked_functions=None, protocol=None):
         if len(matches) != 1 or len(calls) != 1:
             return None
         helper_authority = input_helper_authority(
-            calls[0], function.get('_semantic_function', function), functions,
+            calls[0], function, functions,
             facts.get('contracts', {}), linked_functions)
         conversions[kind] = {'kind': 'object' if kind == 'bool' else 'integer-conversion-capability',
                              'resolution': 'bounded-resolved', 'helper': helper,
@@ -569,7 +564,7 @@ def _parameters(shape, semantic, facts, parser_owner=None, linked_functions=None
     sizeof_pattern = (r'sizeof \( ' + re.escape(table_name)
                       + r' \) / sizeof \( \( ' + re.escape(table_name) + r' \) \[ 0 \] \)')
     count_expr = re.sub(sizeof_pattern, str(row_count), args[3])
-    if lexical_constant(function.get('_semantic_function', function), count_expr,
+    if lexical_constant(function, count_expr,
                         parser['argument_nodes'][3], forwarding['specialization']) != row_count:
         unresolved('parser table count is not the complete selected table')
         return
@@ -674,7 +669,7 @@ def _parameters(shape, semantic, facts, parser_owner=None, linked_functions=None
             'parser_identity': protocol['parser_identity'],
             'source': protocol['source']}}
     shape['parser_parameters'] = parameters
-    shape['parameters'] = parameters[offset:]
+    shape['parameters'] = [dict(parameter) for parameter in parameters[offset:]]
     shape['parameters_resolution'] = 'resolved'
 
 
@@ -711,7 +706,7 @@ def _public_contracts(shape, semantic, function, identity, receiver=None):
                                  'source': function['source_span'], 'binding_authority': authority})
             shape['parser_parameters'] = complete
             if shape.get('keywords') is False:
-                shape['parameters'] = complete[offset:]
+                shape['parameters'] = [dict(parameter) for parameter in complete[offset:]]
                 shape['parameters_resolution'] = 'resolved'
                 shape['parameters_authority'] = authority
     if not complete or type(offset) is not int or not 0 <= offset <= len(complete):
@@ -756,7 +751,7 @@ def _receiver_offset(shape, offset):
         shape['parameters_resolution'] = 'unresolved'
         shape.setdefault('unresolved', []).append('complete parser table is unavailable for receiver rebinding')
         return
-    shape['parameters'] = complete[offset:]
+    shape['parameters'] = [dict(parameter) for parameter in complete[offset:]]
 
 
 def _handler_dispatch_authority(framework):
@@ -819,6 +814,14 @@ def _handler_write_contract(write, function, contracts, dispatch, resolve, prese
         for guard in write['guards']))
     if not getter:
         reasons.append('handler write is not proven to be in the NULL-input getter branch')
+    getter_guards = [
+        guard for guard in write['guards']
+        if ((null and guard['condition'] == 'dest [ 0 ] == ' + null and guard['branch'] == 'then')
+            or (null and guard['condition'] == 'dest [ 0 ] != ' + null and guard['branch'] == 'else')
+            or re.fullmatch(r'attr == MP_QSTR_\w+', guard['condition']))]
+    applicability = event_applicability(function, write, assumed_guards=getter_guards)
+    if applicability['resolution'] != 'bounded-resolved':
+        reasons.extend(applicability['unresolved'])
     if dispatch['status'] != 'bounded-resolved':
         reasons.append(dispatch['reason'])
     def compatible(left, right):
@@ -835,7 +838,7 @@ def _handler_write_contract(write, function, contracts, dispatch, resolve, prese
                if re.search(r'\bdest\b', call['expression']) and compatible(write, call)]
     if escaped:
         reasons.append('handler destination escapes to a call with unassessed value/binding effects')
-    receiver_presence = all(other['expression'] != sentinel and direct_parameter(function.get('_semantic_function', function), other['expression']) == 0
+    receiver_presence = all(other['expression'] != sentinel and direct_parameter(function, other['expression']) == 0
                             for other in receivers)
     if not receiver_presence:
         reasons.append('handler destination[1] may request fallback or supply an unqualified receiver')
@@ -855,9 +858,10 @@ def _handler_write_contract(write, function, contracts, dispatch, resolve, prese
         reasons.append('handler callable object result has no qualified public binding/callshape')
     availability = {'status': 'bounded-resolved' if getter and nonnull and dispatch['status'] == 'bounded-resolved'
                     and null and sentinel and null != sentinel and receiver_presence and not escaped
+                    and applicability['resolution'] == 'bounded-resolved'
                     and not function['events'].get('control_flow_unresolved') else 'unresolved',
                     'authority': dispatch, 'object_ownership': ownership,
-                    'result_source': write['source_span']}
+                    'result_source': write['source_span'], 'successful_path_applicability': applicability}
     return {'resolved': not reasons, 'reasons': reasons, 'availability': availability,
             'binding': {'kind': 'handler-method-or-fallback' if receivers else 'ordinary-value-candidate',
                         'destination_one_writes': receivers,
@@ -917,7 +921,7 @@ def _linked_functions(inputs, present):
                     continue
                 seen.add(key)
                 linked.setdefault(name, []).append({
-                    'function': function.get('_semantic_function', function),
+                    'function': function,
                     'declaration_identity': declaration,
                     'authority': {'resolution': 'bounded-resolved',
                                   'function_identity': function['id'],
@@ -932,7 +936,6 @@ def _linked_functions(inputs, present):
 
 def _header_helper_authority(facts, function, caller, linked_functions, present, *, terminal_literal=False):
     """Keep source-inline exceptions distinct from allocated/static-call bodies."""
-    raw = function.get('_semantic_function', function)
     caller_function = caller['function']
     if (caller['authority'].get('translation_unit') != facts['translation_unit']
             or not any(call.get('callee') == function['declaration_identity']
@@ -944,14 +947,14 @@ def _header_helper_authority(facts, function, caller, linked_functions, present,
                  'selected_caller_identity': caller_function['id'], 'contracts': facts.get('contracts', {})}
     if present(facts, {'name': function['name']}):
         return {**authority, 'selection': 'selected allocated header helper body'}
-    contract = raw.get('parameter_source_contract', {})
+    contract = function.get('parameter_source_contract', {})
     modifiers = contract.get('declaration_modifiers', [])
     inline = (contract.get('declaration_modifiers_resolution') == 'resolved'
               and any(modifier in modifiers for modifier in ('inline', '__inline__', '__inline')))
-    if inline and raw['linkage'] == 'static' and 'static' in modifiers and contract.get('signature_resolution') == 'resolved':
+    if inline and function['linkage'] == 'static' and 'static' in modifiers and contract.get('signature_resolution') == 'resolved':
         return {**authority, 'selection': 'source-qualified static inline body in the exact caller translation unit',
-                'inline_declaration': {'modifiers': modifiers, 'source': contract['declaration_modifiers_source']}}
-    if terminal_literal and inline and raw['linkage'] == 'external':
+                'inline_declaration': {'modifiers': modifiers, 'source': function['source_span']}}
+    if terminal_literal and inline and function['linkage'] == 'external':
         prefix = contract.get('declaration_prefix_expression', '')
         if (re.fullmatch(r'inline __attribute__ \( \( always_inline \) \) const char', prefix)
                 and facts.get('input', {}).get('compiler_expanded_sha256')
@@ -959,8 +962,8 @@ def _header_helper_authority(facts, function, caller, linked_functions, present,
             return {**authority, 'selection': 'source-forced inline literal terminal-message body in the exact compiled caller translation unit',
                     'domain_scope': 'literal terminal-error payload only; no normal return or input domain authority',
                     'inline_declaration': {'modifiers': modifiers, 'prefix': prefix,
-                                           'source': contract['declaration_modifiers_source']}}
-    if raw['linkage'] == 'static':
+                                           'source': function['source_span']}}
+    if function['linkage'] == 'static':
         rows = [row for row in linked_functions.get(function['name'], [])
                 if row['function']['id'] == function['id']
                 and row['authority']['translation_unit'] == facts['translation_unit']
@@ -1088,16 +1091,13 @@ def _normal_surface(raw, inputs, resolve, present, root):
 
     def selected_semantics(facts, function):
         if function['id'] not in semantic_cache:
-            raw_function = function.get('_semantic_function')
-            if raw_function is None:
-                semantic_cache[function['id']] = function['semantics']
-            else:
-                functions = {}
-                for item in facts['functions']:
-                    functions.setdefault(item['name'], []).append(item.get('_semantic_function', item))
-                semantic_cache[function['id']] = semantics(
-                    raw_function, functions, facts.get('errors', []), facts.get('contracts', {}),
-                    linked_functions=linked_functions)
+            functions = {}
+            for item in facts['functions']:
+                functions.setdefault(item['name'], []).append(item)
+            semantic_cache[function['id']] = {
+                **semantics(function, functions, facts.get('errors', []), facts.get('contracts', {}),
+                            linked_functions=linked_functions),
+                'diagnostic_stage': 'selected-linked-semantics'}
         return semantic_cache[function['id']]
 
     def symbol(binding):
@@ -1197,7 +1197,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
         if selected:
             facts, function = selected
             receiver_definitions[name] = {
-                'function': function.get('_semantic_function', function),
+                'function': function,
                 'authority': {'resolution': 'bounded-resolved', 'function_identity': function['id'],
                               'translation_unit': facts['translation_unit'],
                               'object': facts.get('input', {}).get('object'),
@@ -1225,7 +1225,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
                 facts, function, checked_call, linked_functions, present, terminal_literal=True)
             if authority:
                 receiver_definitions['MP_COMPRESSED_ROM_TEXT'] = {
-                    'function': function.get('_semantic_function', function), 'authority': authority}
+                    'function': function, 'authority': authority}
     if checked_call and 'mp_obj_get_type' not in receiver_definitions:
         candidates = []
         for call in checked_call['function']['events']['calls']:
@@ -1239,7 +1239,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
         if len(candidates) == 1:
             facts, function = candidates[0]
             receiver_definitions['mp_obj_get_type'] = {
-                'function': function.get('_semantic_function', function),
+                'function': function,
                 'authority': {'resolution': 'bounded-resolved', 'function_identity': function['id'],
                               'translation_unit': facts['translation_unit'], 'source': function['source_span'],
                               'object': facts.get('input', {}).get('object'),
@@ -1261,7 +1261,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
             authority = _header_helper_authority(facts, function, type_getter, linked_functions, present)
             if authority:
                 receiver_definitions[name] = {
-                    'function': function.get('_semantic_function', function), 'authority': authority}
+                    'function': function, 'authority': authority}
     dispatch = receiver_definitions.get('mp_convert_member_lookup')
     if dispatch:
         dispatch_tu = dispatch['authority'].get('translation_unit')
@@ -1274,7 +1274,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
             authority = _header_helper_authority(facts, function, dispatch, linked_functions, present)
             if authority:
                 receiver_definitions['dispatch_mp_obj_is_obj'] = {
-                    'function': function.get('_semantic_function', function), 'authority': authority}
+                    'function': function, 'authority': authority}
     factory = receiver_definitions.get('mp_obj_new_checked_fun')
     if factory:
         factory_tu = factory['authority']['translation_unit']
@@ -1434,8 +1434,8 @@ def _normal_surface(raw, inputs, resolve, present, root):
             if (helper != 'mp_arg_check_num' or len(args) != 5 or event.get('guards')
                     or callee.get('kind') != 'FUNCTION_DECL'
                     or callee.get('source_span', {}).get('source') != str(root / 'py/runtime.h')
-                    or direct_parameter(function.get('_semantic_function', function), args[0]) != 1
-                    or direct_parameter(function.get('_semantic_function', function), args[1]) != 2):
+                    or direct_parameter(function, args[0]) != 1
+                    or direct_parameter(function, args[1]) != 2):
                 continue
             bounds = [constant(expression, function['constants']) for expression in args[2:]]
             if all(value is not None for value in bounds):
@@ -1563,7 +1563,7 @@ def _public_translation_unit(facts):
             'function_id', 'parameters', 'status', 'input_coverage',
             'input_resolution', 'return_resolution', 'input_unresolved',
             'return_unresolved', 'frontend_unresolved', 'unresolved',
-            'syntax_semantic_barriers') if key in semantics}
+            'syntax_semantic_barriers', 'diagnostic_stage') if key in semantics}
         summary['evidence_role'] = 'extraction overview; selected API fields retain branch/value evidence'
         functions.append(summary)
     return {**facts, 'functions': functions}

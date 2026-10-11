@@ -11,10 +11,10 @@ import pytest
 
 from mpy_api import compiler
 from mpy_api.declarations import render_declarations
-from mpy_api.inventory import _call_slot_abi_matches, _call_slot_binding, _checked_wrapper_type_authority, _extract, _header_helper_authority, _linked_functions, _native_receiver_contract, _parameters, _public_contracts, _receiver_offset
+from mpy_api.inventory import _call_slot_abi_matches, _call_slot_binding, _checked_wrapper_type_authority, _extract, _header_helper_authority, _linked_functions, _native_receiver_contract, _normal_surface, _parameters, _public_contracts, _receiver_offset
 from mpy_api.link import collect_ownership, join
 from mpy_api.semantics import checked_receiver_authority, semantics
-from test_native_bindings import ARGUMENT_HEADER, ROOT, argument_parser_source, extract_c, parsed_definitions
+from test_native_bindings import ARGUMENT_HEADER, HANDLERS, ROOT, argument_parser_source, extract_c, linked_c, parsed_definitions
 from test_semantic_contracts import connected_framework_fixture
 
 
@@ -304,7 +304,7 @@ def test_exact_linked_cross_tu_identity_and_unallocated_definition(tmp_path, opt
     _, _, present = join(facts, ownership)
     linked = _linked_functions(facts, present)
     caller = next(function for function in facts[1]["functions"] if function["name"] == "selected")
-    summary = semantics(caller["_semantic_function"], {"selected": [caller["_semantic_function"]]}, [], facts[1]["contracts"], linked_functions=linked)
+    summary = semantics(caller, {"selected": [caller]}, [], facts[1]["contracts"], linked_functions=linked)
     shape = {"minimum": 1, "maximum": 1, "keywords": False, "implicit_argument_offset": 0}
     mapped = _public_contracts(shape, summary, caller, {"object_id": "selected-object"})
     assert mapped["return_resolution"] == "bounded-resolved"
@@ -316,7 +316,7 @@ def test_exact_linked_cross_tu_identity_and_unallocated_definition(tmp_path, opt
         assert linked["backend_alias"][0]["authority"]["allocated_caller_authority"]["direct_static_call_path"]
     reduced = _linked_functions(facts[1:], present)
     assert "external_identity" not in reduced
-    unavailable = semantics(caller["_semantic_function"], {"selected": [caller["_semantic_function"]]}, [],
+    unavailable = semantics(caller, {"selected": [caller]}, [],
                             facts[1]["contracts"], linked_functions=reduced)
     unbound = _public_contracts(dict(shape), unavailable, caller, {"object_id": "selected-object"})
     assert unbound["return_resolution"] == "unresolved"
@@ -452,21 +452,101 @@ const mp_obj_type_t mp_type_fun_builtin_1 = {
 def test_actual_connected_receiver_framework_controls_emitted_identity_domain(tmp_path, flags, mutation, nominal):
     definitions = connected_framework_fixture(mutation)
     checked = checked_receiver_authority(definitions)
-    witness = _checked_wrapper_type_authority(wrapper_type_source(flags), definitions)
-    qualified = checked["resolution"] == "bounded-resolved" and witness is not None
-    assert qualified is nominal
+    native_wrapper = wrapper_type_source(flags)
     facts, function, wrapper = extracted_wrapper(tmp_path, "mp_obj_t selected(mp_obj_t value) { return value; }")
-    receiver = {"native_type": "str", "native_type_identity": "fixture-str",
-                "nominal_authority_resolution": "bounded-resolved" if qualified else "unresolved",
-                "selected_receiver_check": checked, "wrapper_type_authority": witness,
-                "authority": {"resolution": "bounded-resolved"}}
+    owner = wrapper_type_source("0", name="mp_type_str", physical="/fixture/py/objstr.c")
+    receiver = _native_receiver_contract(owner, wrapper["callshape"], native_wrapper,
+                                         checked, definitions, Path("/fixture"))
+    assert (receiver["nominal_authority_resolution"] == "bounded-resolved") is nominal
     symbol = bind_wrapper(facts, function, wrapper, offset=1, receiver=receiver)
+    tree, declaration = emitted_native_method(symbol)
+    receiver_argument = (declaration.args.posonlyargs + declaration.args.args)[0]
+    assert annotation_name(receiver_argument.annotation, tree) == ("str" if nominal else "typing.Any")
+    assert annotation_name(declaration.returns, tree) == ("str" if nominal else "typing.Any")
+
+
+@pytest.mark.parametrize("invocation,return_annotation", [
+    ("for (size_t i = 0; i < n_args; ++i) { PARSE; }", "None"),
+    ("for (size_t i = 0; i < n_args; ++i) { return mp_const_none; } PARSE;", "typing.Any"),
+])
+def test_parser_public_rows_require_successful_path_applicability(tmp_path, invocation, return_annotation):
+    body = """mp_obj_t selected(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_filter, MP_ARG_OBJ | MP_ARG_KW_ONLY, { .u_rom_obj = mp_const_none } },
+    };
+    mp_arg_val_t vals[1];
+    """ + invocation.replace("PARSE", "mp_arg_parse_all(n_args, pos_args, kw_args, 1, allowed, vals)") + """
+    return mp_const_none;
+}"""
+    facts, function, wrapper = extracted_wrapper(tmp_path, body, fixed=False, minimum=0, maximum=1)
+    symbol = bind_wrapper(facts, function, wrapper)
+    assert symbol["callshape"]["parameters_resolution"] == "unresolved"
+    assert not symbol["semantics"]["public_parameters"]
     _, tree, declaration = emitted(symbol)
-    if nominal:
-        assert not declaration.args.posonlyargs and not declaration.args.args
-        assert annotation_name(declaration.returns, tree) == "str"
-    else:
-        assert annotation_name(declaration.returns, tree) != "str"
+    assert declaration.args.vararg and declaration.args.kwarg
+    assert not declaration.args.kwonlyargs
+    assert annotation_name(declaration.returns, tree) == return_annotation
+
+
+@pytest.mark.parametrize("name,source,descriptor,nominal", [
+    ("mp_type_str", "/fixture/py/objstr.c", "function", True),
+    ("custom_type", "/fixture/py/objstr.c", "function", False),
+    ("mp_type_str", "/fixture/custom.c", "function", False),
+    ("mp_type_str", "/fixture/py/objstr.c", "staticmethod", False),
+])
+def test_receiver_nominal_qualification_requires_native_owner_and_descriptor(tmp_path, name, source, descriptor, nominal):
+    facts, function, wrapper = extracted_wrapper(tmp_path, "mp_obj_t selected(mp_obj_t value) { return value; }")
+    definitions = connected_framework_fixture()
+    owner = wrapper_type_source("0", name=name, physical=source)
+    native_wrapper = wrapper_type_source("MP_TYPE_FLAG_BINDS_SELF | MP_TYPE_FLAG_BUILTIN_FUN")
+    shape = {**wrapper["callshape"], "descriptor": descriptor}
+    receiver = _native_receiver_contract(owner, shape, native_wrapper,
+                                         checked_receiver_authority(definitions), definitions, Path("/fixture"))
+    assert (receiver["nominal_authority_resolution"] == "bounded-resolved") is nominal
+    symbol = bind_wrapper(facts, function, wrapper, offset=1, receiver=receiver)
+    tree, declaration = emitted_native_method(symbol)
+    receiver_argument = (declaration.args.posonlyargs + declaration.args.args)[0]
+    assert annotation_name(receiver_argument.annotation, tree) == ("str" if nominal else "typing.Any")
+    assert annotation_name(declaration.returns, tree) == ("str" if nominal else "typing.Any")
+
+
+def test_selected_surface_publishes_native_receiver_and_original_c_declarations(tmp_path):
+    source = HANDLERS.replace(
+        "uint8_t slot_index_attr;\n    const void *slots[1];",
+        "uint8_t slot_index_attr, slot_index_locals_dict;\n    const void *slots[2];")
+    source = source.replace("static const mp_obj_type_t sample = {", """
+#define MP_ROM_QSTR(value) (((mp_rom_obj_t)(value) << 3) | 2)
+typedef struct { mp_rom_obj_t key, value; } mp_rom_map_elem_t;
+typedef struct { unsigned used; const mp_rom_map_elem_t *table; } fixture_map_t;
+typedef struct { mp_obj_base_t base; fixture_map_t map; } mp_obj_dict_t;
+static const mp_rom_map_elem_t sample_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_method), MP_ROM_PTR(&method_obj) },
+};
+static const mp_obj_dict_t sample_locals = {
+    .base = { &mp_type_type }, .map = { .used = 1, .table = sample_table },
+};
+static const mp_obj_type_t sample = {""")
+    source = source.replace(
+        ".slot_index_attr = 1, .slots = { (const void *)sample_attr },",
+        ".slot_index_attr = 1, .slot_index_locals_dict = 2, .slots = { (const void *)sample_attr, &sample_locals },")
+    facts, raw, resolve, present = linked_c(tmp_path, source, "py/runtime.c")
+    _, types, _ = _normal_surface(raw, [facts], resolve, present, tmp_path)
+    sample = next(item for item in types if item["name"] == "Sample")
+    symbol = next(item for item in sample["members"] if item["name"] == "method")
+    assert symbol["receiver_contract"]["native_type_identity"] == sample["identity"]
+    assert symbol["receiver_contract"]["nominal_authority_resolution"] == "unresolved"
+    function = next(item for item in facts["functions"] if item["name"] == "method")
+    declarations = function["parameter_source_contract"]["declarations"]
+    assert declarations[0]["name"] == "self_in"
+    returned = symbol["semantics"]["returns"][0]
+    assert returned["selected_receiver_binding"]["binding_authority"]["parameter_source_contract"]["declarations"] == declarations
+    assert function["semantics"]["diagnostic_stage"] == "translation-unit-extraction"
+    assert symbol["semantics"]["diagnostic_stage"] == "selected-linked-semantics"
+    tree, declaration = emitted_native_method(symbol)
+    receiver_argument = (declaration.args.posonlyargs + declaration.args.args)[0]
+    assert annotation_name(receiver_argument.annotation, tree) == "typing.Any"
+    assert annotation_name(declaration.returns, tree) == "typing.Any"
+
 
 
 def test_python_keyword_qstr_retains_runtime_name_without_invalid_declaration(tmp_path):
@@ -949,7 +1029,7 @@ def test_verbose_parser_terminal_literal_payload_preserves_public_contracts(tmp_
     diagnostic_path = tmp_path / "verbose-parser-contracts.json"
     diagnostic_path.write_text(json.dumps({
         "mutation": mutation, "raw_semantics": function["semantics"], "public_symbol": symbol,
-        "source_returns": function["_semantic_function"]["events"]["returns"], "emitted": text,
+        "source_returns": function["events"]["returns"], "emitted": text,
     }, indent=2, sort_keys=True) + "\n")
     if qualified:
         assert symbol["callshape"]["parameters_resolution"] == "resolved"
@@ -1047,7 +1127,7 @@ def test_wrapper_receiver_flags_require_selected_compile_tu_probe_agreement(tmp_
     native = next(definition for definition in native_facts["definitions"] if definition["name"] == "mp_type_fun_builtin_1")
     runtime = next(function for function in runtime_facts["functions"] if function["name"] == "mp_convert_member_lookup")
     receiver_definitions = {"mp_convert_member_lookup": {
-        "function": runtime["_semantic_function"], "authority": {"contracts": runtime_facts["contracts"]},
+        "function": runtime, "authority": {"contracts": runtime_facts["contracts"]},
     }}
     authority = _checked_wrapper_type_authority(native, receiver_definitions, native_facts["contracts"])
     assert bool(authority) is accepted
@@ -1080,7 +1160,7 @@ def test_header_tag_helper_needs_actual_inline_or_selected_body_ownership(tmp_pa
     """, filename="py/obj.c")
     function = next(function for function in facts["functions"] if function["name"] == "mp_obj_is_obj")
     getter = next(function for function in facts["functions"] if function["name"] == "mp_obj_get_type")
-    caller = {"function": getter["_semantic_function"], "authority": {"translation_unit": facts["translation_unit"]}}
+    caller = {"function": getter, "authority": {"translation_unit": facts["translation_unit"]}}
     present = lambda _facts, declaration: declaration["name"] == ("mp_obj_is_obj" if allocated else "mp_obj_get_type") if static_path or allocated else False
     linked = _linked_functions([facts], present) if static_path else {}
     authority = _header_helper_authority(facts, function, caller, linked, present)
@@ -1109,7 +1189,7 @@ def test_forced_external_inline_codec_authority_is_terminal_literal_scope_only(t
     """, filename="py/runtime.c")
     function = next(function for function in facts["functions"] if function["name"] == "MP_COMPRESSED_ROM_TEXT")
     checked = next(function for function in facts["functions"] if function["name"] == "checked_fun_call")
-    caller = {"function": checked["_semantic_function"], "authority": {"translation_unit": facts["translation_unit"]}}
+    caller = {"function": checked, "authority": {"translation_unit": facts["translation_unit"]}}
     authority = _header_helper_authority(facts, function, caller, {}, lambda *_: False, terminal_literal=terminal)
     assert bool(authority) is accepted
     if accepted:

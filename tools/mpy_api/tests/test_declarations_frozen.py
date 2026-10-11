@@ -148,6 +148,25 @@ def test_frozen_physical_target_and_package_identities(tmp_path):
     passthrough_relation(declaration(tree, "echo"), tree)
 
 
+def test_frozen_identity_typevar_does_not_depend_on_explanatory_evidence(tmp_path):
+    modules = collect_frozen_modules(selected(tmp_path, "def echo(value):\n    return value\n"))
+    symbol = next(symbol for symbol in modules[0]["exports"] if symbol["name"] == "echo")
+    for contract in symbol["semantics"]["returns"]:
+        contract.pop("authority")
+    tree = ast.parse(render_declarations(inventory(*modules))["modules/renamed.pyi"])
+    passthrough_relation(declaration(tree, "echo"), tree)
+
+
+@pytest.mark.parametrize("source", [
+    "type Scalar = int\n",
+    "def identity[T](value: T) -> T: ...\n",
+    "class Container[T]: ...\n",
+])
+def test_frozen_grammar_rejects_post_python310_syntax(tmp_path, source):
+    with pytest.raises(ValueError):
+        collect_frozen_modules(selected(tmp_path, source))
+
+
 def test_frozen_keyword_defaults_import_aliases_and_decorators(tmp_path):
     source = "from .helper import thing as alias\nclass C:\n    @staticmethod\n    def f(a, /, b=False, *, c=None, **rest):\n        return 1\n    @classmethod\n    def g(cls, value):\n        return value\n"
     modules = collect_frozen_modules(selected(tmp_path, source, ("pkg/mod.py",)))

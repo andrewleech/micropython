@@ -265,11 +265,13 @@ def generate(args):
     output = args.output.absolute()
     if output.exists() or output.is_symlink():
         raise FileExistsError(f"output already exists: {output}")
+    from .enrichment import load_enrichment, merge_enrichment, validate_enrichment_target, verify_enrichment
+    enrichment = load_enrichment(args.enrichment) if args.enrichment else None
+    if enrichment:
+        validate_enrichment_target(enrichment, {key: getattr(args, key) for key in ("port", "target", "variant")})
     tools = producer_tools(root)
     inputs = {"compdb": file_identity(args.compdb), "elf": file_identity(args.elf),
               "map": file_identity(args.map_path), "link_command": file_identity(args.link_command)}
-    from .enrichment import load_enrichment, merge_enrichment, verify_enrichment
-    enrichment = load_enrichment(args.enrichment) if args.enrichment else None
     parser = parser_identity()
     revision = source_revision(root)
     compdb, scope = authority_modules(root)
@@ -309,7 +311,7 @@ def generate(args):
                                          "records": [module["provenance"] for module in frozen]}
     identities = {**inputs, "tool_version": __version__, "python": sys.version,
                   "tools": tools, "parser": parser, "frozen": frozen_inputs,
-                  "enrichment": {"provenance": enrichment["provenance"], "inputs": enrichment["inputs"]} if enrichment else None}
+                  "enrichment": None}
     inventory.setdefault("provenance", {})["producer_inputs"] = identities
     if enrichment:
         merge_enrichment(inventory, enrichment)

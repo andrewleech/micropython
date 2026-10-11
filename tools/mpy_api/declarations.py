@@ -8,6 +8,8 @@ import keyword
 import unicodedata
 from typing import Any
 
+from .vocabulary import ATOM_KINDS, canonical_contract, canonical_default
+
 
 _RESOLVED = {"resolved", "bounded-resolved", "source-resolved", "selected-source"}
 _DYNAMIC = {
@@ -15,10 +17,6 @@ _DYNAMIC = {
     "registered-delegation-selection-unassessed", "registered-delegation",
     "extensible-contributor-gap", "dynamic", "open",
 }
-_ATOMS = {"None": "None", "none": "None", "bool": "bool", "int": "int",
-          "str": "str", "bytes": "bytes", "bytearray": "bytearray", "float": "float", "complex": "complex",
-          "object": "object", "list": "list", "dict": "dict",
-          "set": "set", "tuple": "tuple"}
 
 
 def _identifier(value: Any) -> bool:
@@ -99,6 +97,7 @@ class _Renderer:
             return self.any_name
         if "resolution" in contract and _status(contract["resolution"]) not in _RESOLVED:
             return self.any_name
+        contract = canonical_contract(contract)
         kind = contract.get("kind")
         if kind in ("argument", "argument-table"):
             name = contract.get("exported_argument")
@@ -106,16 +105,14 @@ class _Renderer:
         if kind in ("integer-conversion-capability", "readable-buffer-capability", "writable-buffer-capability", "tuple-or-list/exact-length"):
             self.representation_gap(self.module, f"{kind} is source-qualified; target native acceptance has no qualified declaration representation")
             return self.any_name
-        if kind == "str-or-bytes":
-            return self.contract({"kind": "union", "alternatives": [{"kind": "str"}, {"kind": "bytes"}]}, relations)
         if kind == "tuple" and "elements" in contract:
             self.representation_gap(self.module, "tuple element contracts are retained in inventory; target builtin type parameters are unqualified")
         if kind == "union":
             parts = sorted(set(self.contract(item, relations) for item in contract.get("alternatives", [])))
             return " | ".join(parts) if parts and self.any_name not in parts else self.any_name
-        if kind not in _ATOMS:
+        if kind not in ATOM_KINDS:
             return self.any_name
-        atom = _ATOMS[kind]
+        atom = kind
         nominal = atom
         if nominal in self.names and self.module.get("name") != "builtins":
             self.representation_gap(self.module, f"annotation type {nominal} is shadowed by a runtime declaration")
@@ -125,13 +122,14 @@ class _Renderer:
     def default(self, parameter: dict) -> str:
         contract = parameter.get("default_contract", {})
         if isinstance(contract, dict) and _status(contract.get("resolution", "resolved")) in _RESOLVED:
+            contract = canonical_default(contract)
             kind = contract.get("kind")
-            if kind in ("None", "none"):
+            if kind == "None":
                 return "None"
-            if kind in ("bool", "bool-storage") and type(contract.get("value")) is bool:
+            if kind == "bool" and type(contract.get("value")) is bool:
                 return repr(contract["value"])
             value = contract.get("value", contract.get("literal_value"))
-            if kind in ("int", "integer-storage-literal") and type(value) is int:
+            if kind == "int" and type(value) is int:
                 return repr(value)
             if kind in ("str", "bytes") and isinstance(value, (str, bytes)):
                 return repr(value)
@@ -152,7 +150,7 @@ class _Renderer:
                 parameter = required.get(name)
                 broad = parameter and (_status(parameter.get("type_resolution")) in _RESOLVED
                                        and (parameter.get("type_contract") or {}).get("kind") == "object")
-                frozen_identity = contract.get("authority") == "unchanged Python parameter on a straight-line successful return"
+                frozen_identity = contract.get("identity") == {"kind": "unchanged-parameter", "domain": "python-object"}
                 if name in names and (broad or frozen_identity):
                     found.add(name)
             if name := contract.get("exported_argument"):

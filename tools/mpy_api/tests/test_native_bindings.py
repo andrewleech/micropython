@@ -1,4 +1,5 @@
 """Native declaration identity, handler protocols and receiver-table consistency."""
+import copy
 from pathlib import Path
 import subprocess
 
@@ -9,7 +10,7 @@ from mpy_api.bindings import constant_value, definitions
 from mpy_api.frontend import syntax_adapter
 from mpy_api.inventory import (
     _extract, _handler_dispatch_authority, _handler_write_contract, _normal_surface,
-    _parameters, _receiver_offset,
+    _parameters, _public_contracts, _receiver_offset,
 )
 from mpy_api.link import _map_contributions, collect_ownership, join
 
@@ -190,6 +191,35 @@ def test_unresolved_and_method_handler_values_are_not_ordinary_constants(tmp_pat
     assert "clear" not in members
 
 
+@pytest.mark.parametrize("getter,payload", [
+    ("for (unsigned i = 0; i < self->payload; ++i) { dest[0] = mp_const_none; return; }", 0),
+    ("for (unsigned i = 0; i < self->payload; ++i) { return; } dest[0] = mp_const_none;", 1),
+    ("if (self->payload) { dest[0] = mp_const_none; }", 0),
+])
+def test_handler_presence_requires_complete_getter_path_coverage(tmp_path, getter, payload):
+    source = HANDLERS.replace("            dest[0] = mp_const_none;", "            " + getter)
+    source = source.replace(
+        "int main(void) { return exported_type->name != MP_QSTR_Sample; }",
+        """int main(void) {
+    sample_instance_t instance = { { exported_type }, 0 };
+    mp_obj_t dest[2] = { MP_OBJ_NULL, MP_OBJ_NULL };
+    sample_attr(MP_OBJ_FROM_PTR(&instance), MP_QSTR_value, dest);
+    return dest[0] != MP_OBJ_NULL;
+}""")
+    source = source.replace("{ { exported_type }, 0 }", "{ { exported_type }, " + str(payload) + " }")
+    facts, raw, resolve, present, _, _ = handler_fixture(tmp_path, source)
+    subprocess.run([str(tmp_path / "fixture.elf")], check=True, capture_output=True)
+    _, types, _ = _normal_surface(raw, [facts], resolve, present, tmp_path)
+    sample = next(item for item in types if item["name"] == "Sample")
+    value = next(item for item in sample["members"] if item["name"] == "value")
+    assert value["kind"] == "unknown"
+    assert value["resolution"]["status"] == "unresolved"
+    availability = value["resolution"]["availability"]
+    assert availability["status"] == "unresolved"
+    assert availability["successful_path_applicability"]["resolution"] == "unresolved"
+    assert availability["successful_path_applicability"]["unresolved"]
+
+
 def test_missing_selected_null_contract_cannot_qualify_handler_presence(tmp_path):
     source = HANDLERS.replace("#define MP_OBJ_NULL ((mp_obj_t)0)", "enum { MP_OBJ_NULL = 0 };")
     facts, _, resolve, present = linked_c(tmp_path, source, "py/runtime.c")
@@ -323,12 +353,24 @@ const mp_obj_fun_builtin_var_t configure_obj = {
     assert [row["name"] for row in shape["parser_parameters"]] == ["self", "mode", "filter"]
     assert [row["name"] for row in shape["parameters"]] == ["mode", "filter"]
     assert shape["parameters"][0]["default_contract"]["value"] == 17
+    parser_rows = copy.deepcopy(shape["parser_parameters"])
+    public = _public_contracts(shape, function["semantics"], function, {"object_id": wrapper["id"]})
+    assert shape["parser_parameters"] == parser_rows
+    assert shape["parameters"][0]["type_resolution"] == "unresolved"
+    assert shape["parameters"][0]["type_contract"] is None
+    assert shape["parameters"][1]["type_contract"] == {"kind": "object"}
+    assert shape["parameters"][0]["accepted_domain"] == public["public_parameters"][0]["accepted_domain"]
+    assert "accepted_domain" not in shape["parser_parameters"][1]
     _receiver_offset(shape, 0)
     assert shape["implicit_argument_offset"] == 0
     assert [row["name"] for row in shape["parameters"]] == ["self", "mode", "filter"]
     assert shape["parameters"][0]["required"] is True
     assert shape["parameters"][0]["kind"] == "positional_only"
     assert (shape["minimum"], shape["maximum"]) == (1, 5)
+    assert "type_contract" not in shape["parameters"][0]
+    _public_contracts(shape, function["semantics"], function, {"object_id": wrapper["id"]})
+    assert shape["parser_parameters"] == parser_rows
+    assert shape["parameters"][0]["type_contract"] == {"kind": "object"}
 
 
 def test_generated_stub_load_and_zero_sections_have_nonfilesystem_ownership(tmp_path):

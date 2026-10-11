@@ -11,11 +11,11 @@ import re
 from collections import Counter
 from pathlib import Path, PurePosixPath
 
+from .vocabulary import ATOM_KINDS, canonical_contract, canonical_default, union_descriptor
+
 
 _RESOLVED = {"resolved", "bounded-resolved", "source-resolved", "selected-source"}
 _ROLES = {"documentation", "runtime-observation", "doc-enriched", "released-reference"}
-_ATOMS = {"None", "bool", "int", "str", "bytes", "float", "complex", "object",
-          "list", "dict", "set", "tuple"}
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _REVISION = re.compile(r"[0-9a-fA-F]{40,64}\Z")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
@@ -160,7 +160,7 @@ def _lineage(row, sources, licenses):
 
 
 def _declaration_binding(node, module):
-    canonical = (isinstance(node, ast.ClassDef) and module == "builtins" and node.name in _ATOMS
+    canonical = (isinstance(node, ast.ClassDef) and module == "builtins" and node.name in ATOM_KINDS
                  and not node.decorator_list and not node.keywords)
     return ("atom", node.name) if canonical else ("declaration", f"{type(node).__name__}@{node.lineno}:{node.col_offset}")
 
@@ -265,7 +265,7 @@ def _binding(node, scopes):
                 return scope[node.id]
             if "*" in scope:
                 return "shadowed", f"{node.id} (star import)"
-        if node.id in _ATOMS:
+        if node.id in ATOM_KINDS:
             return "atom", node.id
         if node.id in ("staticmethod", "classmethod"):
             return "decorator", node.id
@@ -273,7 +273,7 @@ def _binding(node, scopes):
     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
         base = _binding(node.value, scopes)
         if base[0] == "module" and base[1] in ("typing", "typing_extensions", "builtins"):
-            if base[1] == "builtins" and node.attr in _ATOMS:
+            if base[1] == "builtins" and node.attr in ATOM_KINDS:
                 return "atom", node.attr
             return "import", f"{base[1]}.{node.attr}"
     return "unsupported", ast.unparse(node)
@@ -285,16 +285,6 @@ def _annotation(node, scopes):
     return {"raw": raw, "normalized": descriptor, "reason": reason,
             "span": {"line": getattr(node, "lineno", None), "column": getattr(node, "col_offset", None),
                      "end_line": getattr(node, "end_lineno", None), "end_column": getattr(node, "end_col_offset", None)}}
-
-
-def _union(descriptors):
-    atoms = {}
-    for descriptor in descriptors:
-        children = descriptor["alternatives"] if descriptor.get("kind") == "union" else [descriptor]
-        for child in children:
-            atoms[_stable(child)] = child
-    values = [atoms[key] for key in sorted(atoms)]
-    return values[0] if len(values) == 1 else {"kind": "union", "alternatives": values}
 
 
 def _annotation_value(node, scopes):
@@ -323,7 +313,7 @@ def _annotation_value(node, scopes):
             if descriptor is None:
                 return None, reason
             descriptors.append(descriptor)
-        return _union(descriptors), None
+        return union_descriptor(descriptors), None
     return None, "annotation expression/checker representation unassessed"
 
 
@@ -374,7 +364,7 @@ def _candidate_parameters(node, scopes):
 def _candidates(raw, row, sources, licenses):
     try:
         text = raw.decode("utf-8")
-        tree = ast.parse(text, filename=row["path"], type_comments=True)
+        tree = ast.parse(text, filename=row["path"], type_comments=True, feature_version=(3, 10))
     except (UnicodeDecodeError, SyntaxError, ValueError) as error:
         _fail(f"invalid declaration {row['path']}: {error}")
     result = []
@@ -472,6 +462,7 @@ def load_enrichment(manifest_path):
     _text(producer["source"]["uri"], "producer.source.uri")
     if not _REVISION.fullmatch(_text(producer["source"]["revision"], "producer.source.revision")):
         _fail("producer.source.revision must be an immutable hexadecimal revision")
+    producer["source"]["revision"] = producer["source"]["revision"].lower()
     sources, licenses = {}, {}
     for source in _list(manifest["sources"], "sources", nonempty=True):
         _object(source, ("id", "role", "uri", "revision", "version", "content_sha256", "evidence"), label="source")
@@ -483,6 +474,8 @@ def load_enrichment(manifest_path):
         _text(source["uri"], "source.uri")
         if source["revision"] is not None and not _REVISION.fullmatch(_text(source["revision"], "source.revision")):
             _fail("source.revision must be an immutable hexadecimal revision")
+        if source["revision"] is not None:
+            source["revision"] = source["revision"].lower()
         if source["content_sha256"] is not None and (not isinstance(source["content_sha256"], str) or not _SHA256.fullmatch(source["content_sha256"])):
             _fail("source.content_sha256 must be a lowercase SHA256")
         if source["revision"] is None and source["content_sha256"] is None:
@@ -507,7 +500,6 @@ def load_enrichment(manifest_path):
             _pin(pin, "license.notice")
             relative = _relative(pin["path"], "notice path")
             identity, data = _capture(base / relative, snapshots, pin)
-            # Only generated path components are published, not arbitrary manifest names.
             basename = re.sub(r"[^A-Za-z0-9._-]", "_", relative.name)
             destination = f"enrichment-notices/{key}/{identity['sha256']}-{basename}"
             notice_artifacts[destination] = data
@@ -568,7 +560,7 @@ def load_enrichment(manifest_path):
                   "producer": copy.deepcopy(producer), "sources": copy.deepcopy(manifest["sources"]),
                   "licenses": copy.deepcopy(manifest["licenses"]), "target": copy.deepcopy(target)}
     bundle = {"provenance": provenance, "inputs": inputs, "candidates": candidates,
-              "manifest": copy.deepcopy(manifest), "tree_identity": tree_identity,
+              "manifest": copy.deepcopy(manifest),
               "notice_artifacts": notice_artifacts, "_snapshots": snapshots,
               "_tree": str(tree), "_members": members}
     verify_enrichment(bundle)
@@ -607,6 +599,12 @@ def _input_identities(value):
             yield from _input_identities(child)
 
 
+def validate_enrichment_target(bundle, build):
+    target = bundle["manifest"]["target"]
+    if target is not None and any(build.get(key) != target[key] for key in ("port", "target", "variant")):
+        _fail("exact-build target port/target/variant differs from selected build")
+
+
 def _target_match(inventory, bundle):
     target = bundle["manifest"]["target"]
     build = inventory.get("build", {})
@@ -616,8 +614,7 @@ def _target_match(inventory, bundle):
                 for source in bundle["manifest"]["sources"]]
     if target is None:
         return {"status": "unmatched-reference", "reason": "reference has no exact-build claim", "source_versions": versions}
-    if any(build.get(key) != target[key] for key in ("port", "target", "variant")):
-        _fail("exact-build target port/target/variant differs from selected build")
+    validate_enrichment_target(bundle, build)
     identities = list(_input_identities(build.get("consumed_inputs", {})))
     producer_inputs = inventory.get("provenance", {}).get("producer_inputs", {})
     identities.extend(_input_identities({key: value for key, value in producer_inputs.items() if key != "enrichment"}))
@@ -705,17 +702,16 @@ def _semantic_descriptor(contract):
     """Strip source evidence/literal values without approximating unknown capabilities."""
     if not isinstance(contract, dict) or "resolution" in contract and _status(contract["resolution"]) not in _RESOLVED:
         return None
+    contract = canonical_contract(contract)
     kind = contract.get("kind")
-    if kind == "none":
-        kind = "None"
-    if kind in _ATOMS:
+    if kind in ATOM_KINDS:
         if kind == "tuple" and "elements" in contract:
             elements = [_semantic_descriptor(element) for element in contract["elements"]]
             return {"kind": "tuple", "elements": elements} if all(element is not None for element in elements) else None
         return {"kind": kind}
     if kind == "union":
         alternatives = [_semantic_descriptor(child) for child in contract.get("alternatives", [])]
-        return _union(alternatives) if alternatives and all(child is not None for child in alternatives) else None
+        return union_descriptor(alternatives) if alternatives and all(child is not None for child in alternatives) else None
     if kind in ("argument", "argument-table"):
         return {"kind": kind, "exported_argument": contract.get("exported_argument"),
                 "storage_field": contract.get("storage_field")}
@@ -730,7 +726,7 @@ def _source_return(symbol):
     contracts = semantic.get("returns", [])
     resolved = _status(semantic.get("return_resolution")) in _RESOLVED
     values = [_semantic_descriptor(contract) for contract in contracts]
-    descriptor = _union(values) if resolved and values and all(value is not None for value in values) else None
+    descriptor = union_descriptor(values) if resolved and values and all(value is not None for value in values) else None
     return {"resolution": semantic.get("return_resolution", "unresolved"), "value": copy.deepcopy(contracts),
             "normalized": descriptor, "evidence": {"source": copy.deepcopy(symbol.get("source")),
             "return_unresolved": copy.deepcopy(semantic.get("return_unresolved", [])),
@@ -808,8 +804,8 @@ def _shape_comparison(symbol, candidate, in_class):
 def _source_default(contract):
     if not isinstance(contract, dict) or _status(contract.get("resolution", "resolved")) not in _RESOLVED:
         return None
+    contract = canonical_default(contract)
     kind = contract.get("kind")
-    kind = {"none": "None", "bool-storage": "bool", "integer-storage-literal": "int"}.get(kind, kind)
     if kind == "None":
         return {"kind": "None"}
     value = contract.get("value", contract.get("literal_value"))
@@ -827,9 +823,7 @@ def merge_enrichment(inventory, bundle):
     source_lineage = {"source_revision": inventory.get("build", {}).get("source_revision"),
                       "root": inventory.get("build", {}).get("root"),
                       "authority": inventory.get("provenance", {}).get("frontend"),
-                      "producer_inputs": copy.deepcopy(inventory.get("provenance", {}).get("producer_inputs", {}))}
-    # Enrichment lineage is held separately to avoid embedding the report in itself.
-    source_lineage["producer_inputs"].pop("enrichment", None)
+                      "producer_inputs_ref": "provenance.producer_inputs"}
 
     def record(candidate, field, source, value, outcome, reason, identity=None):
         records.append({"document": {key: copy.deepcopy(candidate[key]) for key in ("file", "sha256", "module", "qualname", "kind", "span", "lineage")},
@@ -882,9 +876,10 @@ def merge_enrichment(inventory, bundle):
         record(candidate, "returns", source, candidate["returns"], return_outcome, return_reason, identity)
     records.sort(key=lambda row: (row["document"]["file"], row["document"]["module"], row["document"]["qualname"],
                                   row["document"]["span"]["line"], row["document"]["span"]["column"], row["field"]))
-    report = {"schema_version": 1, "inputs": copy.deepcopy(bundle["inputs"]), "target_match": target_match,
+    report = {"schema_version": 1, "inputs_ref": "provenance.producer_inputs.enrichment.inputs", "target_match": target_match,
               "source_lineage": source_lineage,
               "summary": dict(sorted(Counter(row["outcome"] for row in records).items())), "records": records}
     inventory["enrichment"] = report
-    inventory.setdefault("provenance", {})["enrichment"] = copy.deepcopy(bundle["provenance"])
+    inventory.setdefault("provenance", {}).setdefault("producer_inputs", {})["enrichment"] = {
+        "provenance": copy.deepcopy(bundle["provenance"]), "inputs": copy.deepcopy(bundle["inputs"])}
     return report
