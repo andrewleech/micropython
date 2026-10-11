@@ -3,8 +3,6 @@
 #
 #   make BOARD=NUCLEO_H563ZI                  builds build-NUCLEO_H563ZI/firmware.{elf,bin,hex}
 #   make BOARD=NUCLEO_H563ZI MBOOT_CLK=hsi  keeps the reset clock instead of the board PLL clock
-#   make BOARD=NUCLEO_H563ZI MBOOT_TEST_FI=1  adds the fault-injection hook for the test campaigns
-#                                             (STM32H5 only)
 #   make BOARD=NUCLEO_H563ZI PROBE=<serial> deploy-bootloader   programs the bootloader through pyocd
 #
 # The board's mpconfigboard.h holds the MBOOT_* settings (slot placement and the choices
@@ -35,9 +33,6 @@ include $(BOARD_DIR)/mpconfigboard.mk
 
 ifeq ($(filter $(MCU_SERIES),h5 f7),)
 $(error the MCUboot bootloader of the stm32 port is implemented for STM32H5 and STM32F7 only, board $(BOARD) is MCU_SERIES=$(MCU_SERIES))
-endif
-ifeq ($(MCU_SERIES)$(MBOOT_TEST_FI),f71)
-$(error MBOOT_TEST_FI=1 is implemented for STM32H5 only (tests/mboot/hw/fi_flash.c programs the STM32H5 flash controller), board $(BOARD) is MCU_SERIES=$(MCU_SERIES))
 endif
 
 CROSS_COMPILE ?= arm-none-eabi-
@@ -120,12 +115,6 @@ endif
 
 # The flash driver of the port (flash.c) is the HAL flash driver.
 SRC_HAL = $(addprefix lib/stm32lib/STM32$(MCU_SERIES_UPPER)xx_HAL_Driver/Src/stm32$(MCU_SERIES)xx_hal_, flash.c flash_ex.c)
-
-# The fault-injection builds of the hardware tests program the flash with a register level driver
-# that can be reset inside the program pulse.
-ifeq ($(MBOOT_TEST_FI),1)
-SRC_C += tests/mboot/hw/fi_flash.c
-endif
 
 # The USB device controller driver (the USB DRD FS of the STM32H5, the DWC2 OTG core of the
 # STM32F7); the TinyUSB core and DFU class are listed by mboot_common.mk.

@@ -26,7 +26,6 @@
 #   MBOOT_SIGN_KEY    private signing key of the app role (default: the test key)
 #   MBOOT_PRODUCTION  1 refuses the public test keys, and MBOOT_VALIDATE_PRIMARY 0 (the C
 #                       configuration sees it as -DMBOOT_PRODUCTION)
-#   MBOOT_TEST_FI     1 adds the fault injection hook of the test campaigns
 #   MBOOT_MBEDTLS_SRC_C  with MBOOT_CRYPTO_SEL_MBEDTLS: the Mbed TLS sources (relative to TOP) and
 #                       the port's own include path and MBEDTLS_CONFIG_FILE for them
 #   PYTHON              python3
@@ -46,7 +45,6 @@ endif
 
 PYTHON ?= python3
 MBOOT_PRODUCTION ?= 0
-MBOOT_TEST_FI ?= 0
 MBOOT_PUBKEY ?= $(TOP)/tests/mboot/keys/test-ecdsa-p256.pem
 ifneq ($(MBOOT_PRODUCTION),1)
 MBOOT_SIGN_KEY ?= $(TOP)/tests/mboot/keys/test-ecdsa-p256.pem
@@ -113,9 +111,6 @@ else
 MBOOT_CFLAGS := -DMBOOT_ROLE_APP=1
 endif
 MBOOT_CFLAGS += -DMBOOT_PRODUCTION=$(MBOOT_PRODUCTION)
-ifeq ($(MBOOT_TEST_FI),1)
-MBOOT_CFLAGS += -DMBOOT_TEST_FI=1
-endif
 MBOOT_CFLAGS += -DMBOOT_BL_VERSION='"$(MBOOT_BL_VERSION)"'
 
 MBOOT_GEN_SRC_C :=

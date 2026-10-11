@@ -116,10 +116,6 @@ static uint32_t sector_size_at(uint32_t off) {
 
 // ---- controller primitives ----
 
-// The fault-injection builds of the hardware tests (MBOOT_TEST_FI) use a register level driver
-// that can reset inside the program pulse, tests/mboot/hw/fi_flash.c.
-#if !defined(MBOOT_TEST_FI)
-
 // The flash driver runs with the interrupts that flush the filesystem cache to flash
 // (flashbdev.c) held off, like the filesystem code does.
 
@@ -151,15 +147,9 @@ int mboot_stm32_flash_program_unit(uint32_t off, const uint32_t *w) {
     return rc != 0 ? rc : ic;
 }
 
-#endif
-
 #if defined(MBOOT_ROLE_BOOTLOADER)
 
 int mboot_port_flash_dev_init(void) {
-    #if defined(MBOOT_TEST_FI)
-    mboot_stm32_fi_init();
-    #endif
-
     #if defined(MBOOT_SPIFLASH_ADDR)
     #if defined(MICROPY_BOARD_EARLY_INIT)
     // The board sets the parameters of the SPI flash chips it can carry before the first use.

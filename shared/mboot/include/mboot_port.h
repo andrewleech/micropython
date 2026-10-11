@@ -212,13 +212,4 @@ void     mboot_port_ecc_clear(void);    // clear the controller's ECC error flag
 // flash_map_backend.c returns 0).
 uint32_t mboot_port_ecc_corrected(void);
 
-// ---- test hook (only if MBOOT_TEST_FI=1, never in release builds) ----
-// Called by flash_map_backend.c around every flash write and erase while the fault-injection
-// state in the last 16 bytes of the request region (MBOOT_REQ_START + MBOOT_FI_STATE_OFFSET,
-// see mboot_request.h) is armed. phase 0 = before the operation, phase 1 = after it completed.
-// The port reads its trigger from that state (the words magic, target, counter and mode) and may
-// abort via mboot_port_reset() or, for "during" cuts, start the operation and reset while the
-// controller is busy.
-void mboot_port_fi_hook(int op /*0 write,1 erase*/, uint8_t dev, uint32_t off, uint32_t len, int phase);
-
 #endif

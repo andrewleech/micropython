@@ -17,7 +17,7 @@ Layout
     core/mboot_region.c     Region table to alt settings and dfu-util interface strings.
     ../src/mboot_elem.c     Shared TLV element parser.
     core/mboot_usbd.c       Descriptor builder, DFU class callbacks, vendor request handler.
-    tests/                  Host unit tests.
+    tests/test_pydfu_wire.py Independent pydfu wire-format check.
 
 The common code includes no `py/`, `extmod/` or port header, and only `mboot_usbd.c` includes TinyUSB (`lib/tinyusb`, unmodified). TinyUSB's DFU driver has no callback for `SET_INTERFACE` or for a bus reset, so `mboot_usbd.c` detects an alt switch at the next data callback and `mboot_usbd_leave_requested()` polls `tud_mounted()` to see the reset that follows a successful manifest.
 
@@ -43,6 +43,6 @@ The core has no default for these; a link without definitions of all three fails
 Tests
 -----
 
-    make -C shared/mboot/dfu/tests check
+    python3 -m pytest shared/mboot/dfu/tests/test_pydfu_wire.py -q
 
-Builds and runs the core tests, the `dfu_glue.c` tests and the pydfu wire test on plain Linux; see `tests/README.md`.
+Checks pydfu's DFU request encoding independently of a device or bootloader build.

@@ -119,17 +119,9 @@ uint32_t mboot_stm32_hclk_hz(void);
 
 // Controller primitives behind mboot_port_flash_dev_write/erase (port_flash.c). off is the byte
 // offset in the flash (the start of a sector, or a multiple of the flash word). They return 0 or
-// a negative errno and leave the caches without stale flash content. The fault-injection builds
-// of the hardware tests (MBOOT_TEST_FI, STM32H5 only) execute them from RAM, with
-// tests/mboot/hw/fi_flash.c.
-#if defined(MBOOT_TEST_FI)
-#define MBOOT_STM32_FLASH_PRIM __attribute__((long_call))
-void mboot_stm32_fi_init(void);
-#else
-#define MBOOT_STM32_FLASH_PRIM
-#endif
-int mboot_stm32_flash_erase_sector(uint32_t off) MBOOT_STM32_FLASH_PRIM;
-int mboot_stm32_flash_program_unit(uint32_t off, const uint32_t *w) MBOOT_STM32_FLASH_PRIM;
+// a negative errno and leave the caches without stale flash content.
+int mboot_stm32_flash_erase_sector(uint32_t off);
+int mboot_stm32_flash_program_unit(uint32_t off, const uint32_t *w);
 
 // Bounded busy wait: true when cond became true within loops evaluations. Nothing in the
 // bootloader may wait forever for hardware, because recovery has to stay reachable.
