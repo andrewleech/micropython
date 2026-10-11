@@ -1,0 +1,37 @@
+/*
+ * This file is part of the MicroPython project, http://micropython.org/
+ *
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2026 Andrew Leech
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
+// Host test configuration: a 1 MiB flash with 4 KiB sectors and a 4 byte write unit, a 0x200 byte
+// image header and littlefs2 for fsload.
+
+#define MBOOT_PRIMARY_SIZE (0x60000)
+#define MBOOT_SECONDARY_ADDR (0x80000)
+#define MBOOT_ROLLBACK_COUNTER (0)
+#define MBOOT_HEADER_SIZE (0x200)
+#define MBOOT_TMPBUF_SZ (1024)
+#define MBOOT_DFU_PID (0xDFA6)
+#define MBOOT_FSLOAD_LFS2 (1)
+#define MBOOT_LOG_LEVEL (0)

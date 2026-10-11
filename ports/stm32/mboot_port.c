@@ -163,11 +163,15 @@ int mboot_port_flash_cache_prepare(void) {
     return icache_invalidate();
 }
 
+#if !defined(MBOOT_TEST_FI)
+
 static int flash_cache_changed(uint32_t addr, uint32_t len) {
     (void)addr;
     (void)len;
     return icache_invalidate();
 }
+
+#endif // !MBOOT_TEST_FI
 
 #else
 
@@ -188,6 +192,14 @@ static int flash_cache_changed(uint32_t addr, uint32_t len) {
 }
 
 #endif
+
+// The fault-injection builds of the hardware tests (MBOOT_TEST_FI, STM32H5 only) replace the two
+// primitives with the register level driver of tests/mboot/hw/fi_flash.c, which runs from RAM so
+// that a reset can land inside the program pulse.
+
+#if defined(MBOOT_TEST_FI)
+void mboot_stm32_fi_init(void);
+#else
 
 // The flash driver runs with the interrupts that flush the filesystem cache to flash
 // (flashbdev.c) held off, like the filesystem code does.
@@ -223,9 +235,15 @@ int mboot_port_flash_program_unit(uint32_t off, const uint32_t *w) {
     return rc != 0 ? rc : ic;
 }
 
+#endif // !MBOOT_TEST_FI
+
 #if defined(MBOOT_ROLE_BOOTLOADER)
 
 int mboot_port_flash_dev_init(void) {
+    #if defined(MBOOT_TEST_FI)
+    mboot_stm32_fi_init();
+    #endif
+
     #if defined(MICROPY_HW_MBOOT_SPIFLASH_ADDR)
     #if defined(MICROPY_BOARD_EARLY_INIT)
     // The board sets the parameters of the SPI flash chips it can carry before the first use.
