@@ -1,5 +1,6 @@
 """Bounded C syntax facts from the selected build compiler expansion."""
 import re
+from collections import namedtuple
 from .gnu import adapt_source, restore_text
 
 TOKEN = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[A-Za-z_]\w*|0[xX][0-9a-fA-F]+(?:[uUlL]+)?|\d+(?:[uUlL]+)?|==|!=|<=|>=|->|&&|\|\||<<|>>|\+=|-=|\+\+|--|[^\s]')
@@ -111,6 +112,46 @@ def function_id(physical, name, location):
     return physical + '::' + name + '@' + location['source'] + ':' + str(location['start_line'])
 
 
+_NodeContext = namedtuple('_NodeContext', 'scope function_definition function_declarator loops conditionals')
+
+
+def _context_index(tree, text):
+    """Index strict ancestors for one tree, sharing immutable loop and byte-predicate chains."""
+    contexts = {}
+    stack = [_NodeContext(None, None, None, None, None)]
+    cursor = tree.walk()
+    while True:
+        node = cursor.node
+        context = stack[-1]
+        contexts[node.id] = context
+        scope, definition, declarator, loops, conditionals = context
+        if node.type in ('compound_statement', 'function_definition', 'for_statement'):
+            scope = node
+        if node.type == 'function_definition':
+            definition = node
+        if node.type == 'function_declarator':
+            declarator = node
+        if node.type in ('for_statement', 'while_statement', 'do_statement'):
+            loops = (node.start_byte, loops)
+        consequence = (node.child_by_field_name('consequence')
+                       or node.child_by_field_name('alternative')) if node.type == 'conditional_expression' else None
+        if consequence:
+            conditionals = (node.start_byte, consequence.start_byte, conditionals)
+        elif (node.type == 'binary_expression'
+              and text(node.child_by_field_name('operator')) in ('&&', '||')):
+            conditionals = (node.start_byte, node.child_by_field_name('right').start_byte, conditionals)
+        if cursor.goto_first_child():
+            unchanged = (scope is context.scope and definition is context.function_definition
+                         and declarator is context.function_declarator
+                         and loops is context.loops and conditionals is context.conditionals)
+            stack.append(context if unchanged else _NodeContext(scope, definition, declarator, loops, conditionals))
+            continue
+        while not cursor.goto_next_sibling():
+            if not cursor.goto_parent():
+                return contexts
+            stack.pop()
+
+
 def syntax_adapter(code, origins, physical, record):
     from tree_sitter import Language, Parser
     import tree_sitter_c
@@ -176,44 +217,36 @@ def syntax_adapter(code, origins, physical, record):
         location = loc(identifier)
         return {**location, 'end_line': location['start_line']}
 
+    contexts = _context_index(tree, text)
 
     def scope_node(node):
-        parent = node.parent
-        while parent and parent.type not in ('compound_statement', 'function_definition', 'for_statement'):
-            parent = parent.parent
-        return parent or node
+        return contexts[node.id].scope or node
 
     def metadata(node):
         scope = scope_node(node)
         loops, conditional_evaluation = [], []
-        parent = node.parent
-        while parent:
-            if parent.type in ('for_statement', 'while_statement', 'do_statement'):
-                loops.append(parent.start_byte)
-            consequence = (parent.child_by_field_name('consequence')
-                           or parent.child_by_field_name('alternative')) if parent.type == 'conditional_expression' else None
-            if (consequence and node.start_byte >= consequence.start_byte) or (
-                    parent.type == 'binary_expression' and text(parent.child_by_field_name('operator')) in ('&&', '||')
-                    and parent.child_by_field_name('right').start_byte <= node.start_byte):
-                conditional_evaluation.append(parent.start_byte)
-            parent = parent.parent
+        context = contexts[node.id]
+        loop = context.loops
+        while loop:
+            start, loop = loop
+            loops.append(start)
+        conditional = context.conditionals
+        while conditional:
+            start, threshold, conditional = conditional
+            if node.start_byte >= threshold:
+                conditional_evaluation.append(start)
         return {'byte_start': node.start_byte, 'byte_end': node.end_byte,
                 'scope_id': scope.start_byte, 'scope_start': scope.start_byte,
                 'scope_end': scope.end_byte, 'loops': loops,
                 'conditional_evaluation': conditional_evaluation}
 
     def binding_scope(node):
-        parents = []
-        parent = node.parent
-        while parent:
-            parents.append(parent)
-            parent = parent.parent
+        context = contexts[node.id]
         if node.type == 'parameter_declaration':
-            scope = next((parent for parent in parents if parent.type == 'function_definition'), None)
-            scope = scope or next((parent for parent in parents if parent.type == 'function_declarator'), None)
+            # A definition owns all of its parameters, including nested prototype declarators.
+            scope = context.function_definition or context.function_declarator
         else:
-            scope = next((parent for parent in parents if parent.type in
-                          ('compound_statement', 'function_definition', 'for_statement')), None)
+            scope = context.scope
         return (scope.start_byte, scope.end_byte) if scope else (0, len(data))
 
     ordinary_bindings = {}
