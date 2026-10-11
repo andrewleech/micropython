@@ -102,6 +102,10 @@ All selected compilation-database units must be covered. Missing generated input
 
 The C frontend uses the actual compiler's expanded source. A bounded GNU syntax adapter handles grammar gaps while preserving source spans and original evidence. Projections that lose value/effect/control-flow meaning impose a containing-body semantic barrier, so parser acceptance cannot establish helper, constructor or return semantics. Arbitrary C layout, precedence and dataflow inference are not supported.
 
+The frontend indexes syntax ancestry once per translation unit, avoiding repeated tree searches for scope and evaluation metadata. These indexes are local to extraction and are not retained across translation units or builds.
+
+Semantic queries use function-local indexes and memoisation. Deduplicating consumers request ordered unique parameter roots, while controlling-expression evidence retains duplicate paths. Query contexts are local to analysis, not serialized or shared across builds.
+
 Compatible same-spelling static tentative declarations join their sole initialized owner. Multiple initialized definitions, incompatible declaration spellings and other unqualified ownership remain ambiguous. Attribute-handler availability requires the selected getter dispatch/NULL/sentinel protocol and a qualified non-null object reference. Computed results and unresolved store/receiver/fallback bindings remain gaps; this is not arbitrary handler analysis.
 
 Linker-generated glue/veneer contributions retain their original map rows and unassessed ownership, they are not compiled-TU objects or filesystem inputs. Missing real link operands still fail. Weak/COMDAT ownership and archive-member allocations retain separate unassessed gaps.

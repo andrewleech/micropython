@@ -2,6 +2,9 @@
 import json
 import re
 from copy import deepcopy
+from bisect import bisect_right
+from collections.abc import Mapping
+from heapq import merge
 from .frontend import constant
 from .bindings import call_parts, constant_value, errors_at, intersect, strip_outer
 
@@ -12,6 +15,174 @@ CONSTRUCTORS['mp_obj_new_str_from_vstr'] = 'str'
 INPUT_HELPERS = {'mp_obj_is_true': 'object/truth-tested', 'mp_obj_get_int': 'integer-conversion/helper-boundary', 'mp_get_buffer_raise': 'buffer-capability', 'mp_obj_get_array_fixed_n': 'tuple-or-list/exact-length', 'mp_obj_str_get_str': 'str-or-bytes', 'mp_module_generic_attr': 'registered-module-key-table'}
 INPUT_HELPERS.update({'mp_obj_str_get_data': 'str-or-bytes', 'check_is_str_or_bytes': 'str-or-bytes',
                       'str_check_arg_type': 'same-native-string-family'})
+
+_INPUT_DEPTH = 16
+
+
+class _QueryFunction(Mapping):
+    """Read-only function evidence with analysis-lifetime indexes and memo tables."""
+
+    def __init__(self, function):
+        self.function = function
+        events = function['events']
+        self.variables = {}
+        self.writes = {}
+        self.identifier_writes = {}
+        self.indirect_writes = []
+        self.locals = {}
+        self.binding_mentions = {}
+        self.parameter_roots = {}
+        self.alias_sources = {}
+        self.root_sources = {}
+        self.identities = {}
+        self.binding_bits = {}
+        self.reachable = {}
+        for variable in events['variables']:
+            self.variables.setdefault(variable['name'], []).append(variable)
+        for ordinal, write in enumerate(events['writes']):
+            self.writes.setdefault(write.get('target'), []).append(write)
+            target = _unparen(write.get('target_node'))
+            if target.get('kind') == 'identifier':
+                name = target.get('expression')
+                self.identifier_writes.setdefault(name, []).append((ordinal, write))
+            else:
+                self.indirect_writes.append((ordinal, write))
+        intervals = []
+        for call in events['calls']:
+            if call.get('byte_start') is not None and call.get('byte_end') is not None:
+                intervals.append((call['byte_start'], call['byte_end']))
+        intervals.sort()
+        self.call_starts = []
+        self.call_ends = []
+        end = -1
+        for start, stop in intervals:
+            self.call_starts.append(start)
+            end = max(end, stop)
+            self.call_ends.append(end)
+
+    def __getitem__(self, key):
+        return self.function[key]
+
+    def __iter__(self):
+        return iter(self.function)
+
+    def __len__(self):
+        return len(self.function)
+
+    def identity(self, evidence):
+        identity = id(evidence)
+        # Synthetic use records must stay alive while their identity is a memo key.
+        self.identities[identity] = evidence
+        return identity
+
+    def call_end(self, point):
+        index = bisect_right(self.call_starts, point) - 1
+        return self.call_ends[index] if index >= 0 and self.call_ends[index] > point else -1
+
+    def writes_for_binding(self, name, declaration, start=-1, end=None, use=None):
+        candidates = merge(self.identifier_writes.get(name, ()), self.indirect_writes, key=lambda item: item[0])
+        for _, write in candidates:
+            if (not write.get('value_node') or write.get('byte_start', -1) < start
+                    or end is not None and write.get('byte_start', -1) >= end
+                    or use is not None and _exclusive(write, use)):
+                continue
+            target = _unparen(write.get('target_node'))
+            if target.get('kind') == 'identifier':
+                local = _local(self, name, write)
+                affected = (local.get('declaration_id') if local else None) == declaration
+            else:
+                affected = _input_binding_mention(self, target, write, name, declaration)
+            if affected:
+                yield write
+
+    def alias_origins(self, name, local, use):
+        key = name, local.get('declaration_id'), self.identity(use)
+        if key not in self.alias_sources:
+            point = _point(use)
+            origins = [(local.get('initializer_node') or {}, local)]
+            if point is not None:
+                origins.extend((write['value_node'], write) for write in self.writes.get(name, ())
+                               if write.get('value_node')
+                               and local.get('byte_start', -1) <= write.get('byte_start', -1) < point
+                               and not _exclusive(write, use)
+                               and (_local(self, name, write) or {}).get('declaration_id') == local.get('declaration_id'))
+            self.alias_sources[key] = origins
+        return self.alias_sources[key]
+
+    def root_origins(self, name, local, use):
+        declaration = local.get('declaration_id') if local else None
+        key = name, declaration, self.identity(use)
+        if key not in self.root_sources:
+            point = _point(use)
+            origins = [(local.get('initializer_node') or {}, local)] if local else []
+            if point is not None:
+                end = max(point or -1, use.get('byte_end', point) or -1, self.call_end(point))
+                start = local.get('byte_start', -1) if local else -1
+                origins.extend((write['value_node'], write)
+                               for write in self.writes_for_binding(name, declaration, start, end, use))
+            self.root_sources[key] = origins
+        return self.root_sources[key]
+
+    def binding_bit(self, identity):
+        if identity not in self.binding_bits:
+            self.binding_bits[identity] = 1 << len(self.binding_bits)
+        return self.binding_bits[identity]
+
+    def reachable_bindings(self, node, use, remaining, alias):
+        node = _unparen(node)
+        if not node or remaining <= 0:
+            return 0
+        key = self.identity(node), self.identity(use), remaining, alias
+        if key not in self.reachable:
+            bindings = 0
+            if node.get('kind') == 'identifier':
+                name = node.get('expression')
+                local = _local(self, name, use)
+                bindings = self.binding_bit((name, local.get('declaration_id') if local else None))
+                if remaining > 1:
+                    origins = (self.alias_origins(name, local, use) if local else ()) if alias else self.root_origins(name, local, use)
+                    for origin, event in origins:
+                        bindings |= self.reachable_bindings(origin, event, remaining - 1, alias)
+            elif remaining > 1:
+                for child in _input_children(node, alias):
+                    bindings |= self.reachable_bindings(child, use, remaining - 1, alias)
+            self.reachable[key] = bindings
+        return self.reachable[key]
+
+    def seen_key(self, node, use, seen, depth, alias):
+        if not seen:
+            return 0
+        reachable = self.reachable_bindings(node, use, _INPUT_DEPTH - depth, alias)
+        blocked = 0
+        for identity in seen:
+            blocked |= self.binding_bit(identity)
+        # Only bindings reachable before the cutoff can observe path-local blocking.
+        return reachable & blocked
+
+
+def _query_function(function):
+    return function if isinstance(function, _QueryFunction) else _QueryFunction(function)
+
+
+def _input_children(node, alias):
+    fields = {
+        'call_expression': ('arguments',), 'cast_expression': ('value',),
+        'field_expression': ('argument',),
+        'subscript_expression': ('argument',) if alias else ('argument', 'index'),
+    }.get(node.get('kind'))
+    if fields:
+        for field in fields:
+            yield node.get(field)
+    else:
+        for value in node.values():
+            if isinstance(value, dict):
+                yield value
+    for value in node.values():
+        if isinstance(value, list):
+            for child in value:
+                if isinstance(child, dict):
+                    yield child
+
 
 def qualified_template(call):
     callee = call.get('callee') if call else None
@@ -37,6 +208,14 @@ def event_call(function, expression, location=None):
 
 def _point(location):
     return location.get('byte_start') if location else None
+
+
+def _containing_call_end(function, point):
+    if isinstance(function, _QueryFunction):
+        end = function.call_end(point)
+        return end if end > point else None
+    return max((call['byte_end'] for call in function['events']['calls']
+                if call.get('byte_start', point + 1) <= point < call.get('byte_end', point)), default=None)
 
 
 def _unparen(node):
@@ -178,10 +357,21 @@ def _local(function, name, use):
     point = _point(use)
     if point is None:
         return None
-    candidates = [v for v in function['events']['variables'] if v['name'] == name
-                  and v.get('byte_start', point + 1) < point
-                  and v.get('scope_start', point + 1) <= point < v.get('scope_end', -1)]
-    return max(candidates, key=lambda v: (v.get('scope_start', 0), v['byte_start'])) if candidates else None
+    key = name, point
+    if isinstance(function, _QueryFunction) and key in function.locals:
+        return function.locals[key]
+    variables = function.variables.get(name, ()) if isinstance(function, _QueryFunction) else function['events']['variables']
+    local = None
+    rank = None
+    for variable in variables:
+        if (variable['name'] == name and variable.get('byte_start', point + 1) < point
+                and variable.get('scope_start', point + 1) <= point < variable.get('scope_end', -1)):
+            candidate_rank = variable.get('scope_start', 0), variable['byte_start']
+            if rank is None or candidate_rank > rank:
+                local, rank = variable, candidate_rank
+    if isinstance(function, _QueryFunction):
+        function.locals[key] = local
+    return local
 
 
 _C_INTEGER_TYPES = {
@@ -283,8 +473,8 @@ def _unchanged(function, name, use, definition=None, allow_calls=(), scalar_read
     end = (use or {}).get('byte_end', point)
     if point is not None:
         # C call arguments are unordered; a sibling expression may change the binding.
-        end = max([end or point] + [call['byte_end'] for call in function['events']['calls']
-                                   if call.get('byte_start', point + 1) <= point < call.get('byte_end', point)])
+        call_end = _containing_call_end(function, point)
+        end = max(end or point, call_end) if call_end is not None else end or point
     for variable in function['events']['variables']:
         if point is not None and not start <= variable.get('byte_start', -1) < point or _exclusive(variable, use or {}):
             continue
@@ -747,6 +937,7 @@ def semantics(function, functions, errors, contracts, specialization=None, depth
                       input_resolution='unresolved', return_resolution='unresolved', input_uses=[],
                       successful_path_coverage={'resolution': 'unresolved', 'unresolved': reasons})
         return result
+    function = _query_function(function)
     result['return_unresolved'].extend(events.get('control_flow_unresolved', []))
     result['constructor_calls'] = [{'kind': CONSTRUCTORS[call_parts(call['expression'])[0]], 'expression': call['expression'], 'callee': call['callee'], 'source_span': call['source_span'], 'guards': call.get('guards', [])} for call in events['calls'] if call_parts(call['expression'])[0] in CONSTRUCTORS and qualified_template(call)]
     shadowed = set(function['parameters']) | {v['name'] for v in events['variables']}
@@ -1117,87 +1308,74 @@ def _input_binding_mention(function, node, use, name, declaration, seen=(), dept
     node = _unparen(node)
     if not node:
         return False
-    if depth >= 16:
+    if depth >= _INPUT_DEPTH:
         return True
+    function = _query_function(function)
+    local, identity = None, None
     if node.get('kind') == 'identifier':
         identifier = node.get('expression')
         local = _local(function, identifier, use)
-        identity = (identifier, local.get('declaration_id') if local else None)
+        identity = identifier, local.get('declaration_id') if local else None
         if identity == (name, declaration):
             return True
         if not local or identity in seen:
             return False
-        origins = [(local.get('initializer_node') or {}, local)]
-        point = _point(use)
-        origins.extend((write.get('value_node') or {}, write)
-                       for write in function['events']['writes']
-                       if write.get('target') == identifier and write.get('value_node')
-                       and point is not None and local.get('byte_start', -1) <= write.get('byte_start', -1) < point
-                       and not _exclusive(write, use)
-                       and (_local(function, identifier, write) or {}).get('declaration_id') == local.get('declaration_id'))
+    key = (function.identity(node), function.identity(use), name, declaration,
+           function.seen_key(node, use, seen, depth, True), depth)
+    if key not in function.binding_mentions:
+        function.binding_mentions[key] = _input_binding_mention_query(
+            function, node, use, name, declaration, seen, depth, local, identity)
+    return function.binding_mentions[key]
+
+
+def _input_binding_mention_query(function, node, use, name, declaration, seen, depth, local, identity):
+    if node.get('kind') == 'identifier':
+        origins = function.alias_origins(node.get('expression'), local, use)
         return any(_input_binding_mention(function, origin, event, name, declaration, (*seen, identity), depth + 1)
                    for origin, event in origins)
-    fields = {
-        'field_expression': ('argument',), 'subscript_expression': ('argument',),
-        'cast_expression': ('value',), 'call_expression': ('arguments',),
-    }.get(node.get('kind'))
-    children = [node.get(field) for field in fields] if fields else [
-        value for value in node.values() if isinstance(value, dict)]
-    children.extend(child for value in node.values() if isinstance(value, list)
-                    for child in value if isinstance(child, dict))
     return any(_input_binding_mention(function, child, use, name, declaration, seen, depth + 1)
-               for child in children)
+               for child in _input_children(node, True))
 
 
-def _input_parameter_roots(function, node, use, seen=(), depth=0):
+def _input_parameter_roots(function, node, use, seen=(), depth=0, unique=False):
     """Keep conservative consumer provenance separate from unchanged identity."""
     node = _unparen(node)
     if not node:
         return []
-    if depth >= 16:
+    if depth >= _INPUT_DEPTH:
         return [{'kind': 'c-parameter', 'scope': function['id'], 'parameter': index}
                 for index in range(len(function['parameters']))]
+    function = _query_function(function)
+    local = None
     if node.get('kind') == 'identifier':
         name = node.get('expression')
         local = _local(function, name, use)
+        if (name, local.get('declaration_id') if local else None) in seen:
+            return ([{'kind': 'c-parameter', 'scope': function['id'],
+                      'parameter': function['parameters'].index(name)}]
+                    if not local and name in function['parameters'] else [])
+    key = function.identity(node), function.identity(use), function.seen_key(node, use, seen, depth, False), depth, unique
+    if key not in function.parameter_roots:
+        function.parameter_roots[key] = _input_parameter_roots_query(function, node, use, seen, depth, local, unique)
+    return function.parameter_roots[key]
+
+
+def _input_parameter_roots_query(function, node, use, seen, depth, local, unique):
+    if node.get('kind') == 'identifier':
+        name = node.get('expression')
         declaration = local.get('declaration_id') if local else None
         identity = (name, declaration)
         roots = ([{'kind': 'c-parameter', 'scope': function['id'],
                    'parameter': function['parameters'].index(name)}]
                  if not local and name in function['parameters'] else [])
-        if identity in seen:
-            return roots
-        origins = [(local.get('initializer_node') or {}, local)] if local else []
-        point = _point(use)
-        end = max(point or -1, use.get('byte_end', point) or -1)
-        if point is not None:
-            end = max([end] + [call['byte_end'] for call in function['events']['calls']
-                              if call.get('byte_start', point + 1) <= point < call.get('byte_end', point)])
-        for write in function['events']['writes']:
-            if (not write.get('value_node') or point is None
-                    or not (local.get('byte_start', -1) if local else -1) <= write.get('byte_start', -1) < end
-                    or _exclusive(write, use)):
-                continue
-            target = _unparen(write.get('target_node'))
-            if target.get('kind') == 'identifier':
-                target_local = _local(function, target.get('expression'), write)
-                affected = (target.get('expression'), target_local.get('declaration_id') if target_local else None) == identity
-            else:
-                affected = _input_binding_mention(function, target, write, name, declaration)
-            if affected:
-                origins.append((write['value_node'], write))
-        return roots + [reference for origin, event in origins
-                        for reference in _input_parameter_roots(function, origin, event, (*seen, identity), depth + 1)]
-    fields = {
-        'call_expression': ('arguments',), 'cast_expression': ('value',),
-        'field_expression': ('argument',), 'subscript_expression': ('argument', 'index'),
-    }.get(node.get('kind'))
-    children = [node.get(field) for field in fields] if fields else [
-        value for value in node.values() if isinstance(value, dict)]
-    children.extend(child for value in node.values() if isinstance(value, list)
-                    for child in value if isinstance(child, dict))
-    return [reference for child in children
-            for reference in _input_parameter_roots(function, child, use, seen, depth + 1)]
+        origins = function.root_origins(name, local, use)
+        roots.extend(reference for origin, event in origins
+                     for reference in _input_parameter_roots(function, origin, event, (*seen, identity), depth + 1, unique))
+    else:
+        roots = [reference for child in _input_children(node, False)
+                 for reference in _input_parameter_roots(function, child, use, seen, depth + 1, unique)]
+    # All roots have one scope and kind; recursive projection preserves first occurrence order.
+    return list({root['parameter']: root for root in roots}.values()) if unique else roots
 
 
 def _private_input_slot(function, name, use, permitted_pointer=None):
@@ -1263,6 +1441,7 @@ def _private_input_lvalue(function, node, use):
 
 
 def _input_uses(function, selected, composed_calls=(), converted_calls=()):
+    function = _query_function(function)
     uses = []
     for call in function['events']['calls']:
         if not selected(call):
@@ -1286,12 +1465,12 @@ def _input_uses(function, selected, composed_calls=(), converted_calls=()):
                              'source_span': call['source_span'], 'callee': call.get('callee'),
                              'byte_start': call.get('byte_start'), 'byte_end': call.get('byte_end')})
             elif not converted:
-                roots = {_reference_key(root): root for root in _input_parameter_roots(function, node, call)}
+                roots = _input_parameter_roots(function, node, call, unique=True)
                 uses.extend({'source_ref': root, 'helper': helper, 'operand': index, 'guards': call.get('guards', []),
                              'resolution': 'unresolved', 'source_span': call['source_span'], 'callee': call.get('callee'),
                              'byte_start': call.get('byte_start'), 'byte_end': call.get('byte_end'),
                              'reason': 'input consumer retains conservative parameter provenance after def/use barriers'}
-                            for root in roots.values())
+                            for root in roots)
             if not converted and (not reference or not known or address):
                 for field in _parser_object_uses(function, node, call):
                     uses.append({'source_ref': field, 'helper': helper, 'operand': index, 'guards': call.get('guards', []),
@@ -1309,7 +1488,7 @@ def _input_uses(function, selected, composed_calls=(), converted_calls=()):
                 if ref:
                     yield ref
                 elif child.get('kind') == 'identifier':
-                    yield from _input_parameter_roots(function, child, event)
+                    yield from _input_parameter_roots(function, child, event, unique=True)
                 for value in child.values():
                     if isinstance(value, dict):
                         yield from references(value)
@@ -1343,7 +1522,7 @@ def _input_uses(function, selected, composed_calls=(), converted_calls=()):
                 inspect(event['target_node'], {**event, 'byte_end': event.get('byte_start')})
                 if not _private_input_lvalue(function, event['target_node'], event):
                     reference = source_reference(function, (event.get('value_node') or {}).get('expression'), event)
-                    roots = ([reference] if reference else _input_parameter_roots(function, event.get('value_node'), event))
+                    roots = ([reference] if reference else list(_input_parameter_roots(function, event.get('value_node'), event, unique=True)))
                     roots.extend(_parser_object_uses(function, event.get('value_node'), event))
                     for origin in {_reference_key(root): root for root in roots}.values():
                         uses.append({'source_ref': origin, 'helper': None, 'guards': event.get('guards', []),
