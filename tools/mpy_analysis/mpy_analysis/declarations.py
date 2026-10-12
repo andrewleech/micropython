@@ -7,11 +7,11 @@ import binascii
 import hashlib
 import json
 import re
-from pathlib import Path, PurePosixPath, PureWindowsPath
 import subprocess
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
-from .metadata import LICENSING, LICENSEREF, validate_license
+from .metadata import LICENSEREF, LICENSING, validate_license
 from .metadata_bom import parse_json, validate_cyclonedx
 from .scope import FROZEN_GROUP, source_path
 
@@ -121,29 +121,46 @@ def selected_digest(scope: dict[str, Any], directory: Path) -> tuple[str, int]:
 
 def revision_matches_selected(scope: dict[str, Any], directory: Path) -> bool:
     """A Git binding is valid only for tracked selected bytes matching HEAD."""
+    directory = directory.resolve(strict=True)
+    selected = {
+        source_path(scope, record).resolve(strict=True)
+        for group in (FROZEN_GROUP, "native")
+        for record in scope["groups"].get(group, [])
+        if source_path(scope, record).resolve(strict=True).is_relative_to(directory)
+    }
+    if not selected:
+        return False
     result = subprocess.run(
         ["git", "-C", str(directory), "rev-parse", "--show-toplevel"],
         capture_output=True,
         text=True,
     )
-    if result.returncode:
-        return False
-    root = Path(result.stdout.strip()).resolve()
-    paths = sorted(
-        {
-            source_path(scope, record).relative_to(root).as_posix()
+    git_root = Path(result.stdout.strip()).resolve() if result.returncode == 0 else None
+    if git_root is not None and all(path.is_relative_to(git_root) for path in selected):
+        root = git_root
+    else:
+        roots = {
+            Path(scope["roots"][record["root"]]).resolve(strict=True)
             for group in (FROZEN_GROUP, "native")
             for record in scope["groups"].get(group, [])
-            if source_path(scope, record).is_relative_to(directory)
+            if source_path(scope, record).resolve(strict=True) in selected
         }
-    )
-    if not paths:
-        return False
+        candidates = [root for root in roots if all(path.is_relative_to(root) for path in selected)]
+        if not candidates:
+            return False
+        deepest = max(len(root.parts) for root in candidates)
+        winners = [root for root in candidates if len(root.parts) == deepest]
+        if len(winners) != 1:
+            return False
+        root = winners[0]
+    paths = sorted(path.relative_to(root).as_posix() for path in selected)
     tracked = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "--error-unmatch", "--", *paths], capture_output=True
+        ["git", "-C", str(root), "ls-files", "--error-unmatch", "--", *paths],
+        capture_output=True,
     )
     unchanged = subprocess.run(
-        ["git", "-C", str(root), "diff", "--quiet", "HEAD", "--", *paths], capture_output=True
+        ["git", "-C", str(root), "diff", "--quiet", "HEAD", "--", *paths],
+        capture_output=True,
     )
     return tracked.returncode == 0 and unchanged.returncode == 0
 

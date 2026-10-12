@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from jsonschema import Draft7Validator, FormatChecker
 from referencing import Registry, Resource
@@ -69,14 +70,36 @@ def _validate(document: dict, names: tuple[str, ...]) -> list[Path]:
     return paths
 
 
+def valid_uri(value: Any) -> bool:
+    """Check the URI shape needed by emitted CycloneDX URL fields."""
+    if not isinstance(value, str) or not value:
+        return False
+    if any(character.isspace() or ord(character) < 0x20 for character in value):
+        return False
+    try:
+        parsed = urlparse(value)
+        if not parsed.scheme:
+            return False
+        if parsed.netloc and not parsed.hostname:
+            return False
+        _ = parsed.port
+    except ValueError:
+        return False
+    return True
+
+
 def validate_cyclonedx(document: Any) -> list[Path]:
     """Validate the supported CycloneDX document against bundled offline schemas."""
     if not isinstance(document, dict) or not isinstance(document.get("specVersion"), str):
         raise ValueError("CycloneDX document requires a string specVersion")
     if document["specVersion"] != "1.6":
         raise UnsupportedBomError("supported CycloneDX version is 1.6")
+    for index, component in enumerate(document.get("components", [])):
+        for reference_index, reference in enumerate(component.get("externalReferences", [])):
+            location = f"components[{index}].externalReferences[{reference_index}]"
+            if not valid_uri(reference.get("url")):
+                raise ValueError(f"invalid CycloneDX external reference URL at {location}")
     return _validate(document, ("bom-1.6.schema.json", "spdx.schema.json", "jsf-0.82.schema.json"))
-
 
 def _properties(items: list[dict]) -> dict:
     values = {}

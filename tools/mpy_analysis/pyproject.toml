@@ -35,6 +35,8 @@ sast-run = "mpy_analysis.runner:main"
 sast-scope = "mpy_analysis.scope:main"
 sast-check-fixtures = "mpy_analysis.fixtures:main"
 sast-sbom = "mpy_analysis.sbom:main"
+sast-firmware-merge = "mpy_analysis.firmware_capture_receipt:main"
+sast-firmware-capture = "mpy_analysis.firmware_capture:main"
 
 [tool.setuptools]
 packages = ["mpy_analysis"]

@@ -1,14 +1,14 @@
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-
-from mpy_analysis import scope, sbom
+from mpy_analysis import sbom, scope
+from test_firmware_inventory import make_inventory
 
 MPY_ROOT = Path(__file__).resolve().parents[3]
 
@@ -121,6 +121,312 @@ def test_compiler_actions_select_sources_without_repository_sweep(tmp_path):
     actions = [row for row in receipt["sources"] if row["group"] == "native"]
     assert [row["compilation"]["arguments"][-1] for row in actions] == ["one.o", "two.o"]
     assert actions[0]["component"] == actions[1]["component"]
+
+
+
+
+def firmware_receipt(inventory, app, build_dir, source_path="selected.c"):
+    from mpy_analysis.firmware_receipt import receipt_id
+
+    build_dir.mkdir()
+    compiler = Path(sys.executable).resolve()
+    obj, elf, map_file = (build_dir / name for name in ("selected.o", "firmware.elf", "firmware.map"))
+    for path, content in (
+        (obj, b"object"),
+        (elf, b"ELF"),
+        (map_file, b"link map"),
+    ):
+        path.write_bytes(content)
+
+    def record(path, role):
+        path = Path(path).resolve()
+        return {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "role": role,
+        }
+
+    build_id = "a" * 64
+    source = app / "selected.c"
+    object_record = record(obj, "object")
+    source_binding = [{"root": "app", "path": source_path}]
+    roots = [
+        {"name": name, "path": inventory["roots"][name]}
+        for name in ("app", "library")
+    ]
+    repositories = [
+        {
+            **root,
+            "revision": git(root["path"], "rev-parse", "HEAD"),
+            "tree_sha256": hashlib.sha256(root["name"].encode()).hexdigest(),
+            "dirty": False,
+        }
+        for root in roots
+    ]
+    actions = [
+        {
+            "id": "compile-selected",
+            "build_id": build_id,
+            "kind": "compile",
+            "image": "application",
+            "argv": [str(compiler), "-c", str(source), "-o", str(obj)],
+            "cwd": str(app),
+            "exit_code": 0,
+            "executable": record(compiler, "compiler"),
+            "inputs": [record(source, "source")],
+            "outputs": [object_record],
+        },
+        {
+            "id": "link-application",
+            "build_id": build_id,
+            "kind": "link",
+            "argv": [str(compiler), str(obj), "-Wl,-Map=firmware.map", "-o", str(elf)],
+            "cwd": str(build_dir),
+            "exit_code": 0,
+            "executable": record(compiler, "compiler"),
+            "inputs": [{**object_record, "role": "link-operand"}],
+            "outputs": [record(elf, "elf"), record(map_file, "map")],
+        },
+    ]
+    receipt = {
+        "schema": "mpy-firmware-build/v1",
+        "build_id": build_id,
+        "configuration": {
+            "port": inventory["port"],
+            "target": inventory["target"],
+            "variant": inventory["variant"],
+            "variables": {"LTO": "0"},
+        },
+        "source_repositories": repositories,
+        "toolchain": [
+            {"role": "compiler", "version": "python-fixture", "executable": record(compiler, "compiler")}
+        ],
+        "actions": actions,
+        "images": [
+            {
+                "id": "application",
+                "build_id": build_id,
+                "role": "application",
+                "link_action": "link-application",
+                "link": {
+                    "adapter": "fixture-map/v1",
+                    "linker_format": "fixture",
+                    "status": "complete",
+                    "elf": record(elf, "elf"),
+                    "map": record(map_file, "map"),
+                    "operands": [
+                        {
+                            "kind": "object",
+                            "input": {**object_record, "role": "link-operand"},
+                            "disposition": "contributed",
+                            "source_bindings": source_binding,
+                            "evidence": "link map allocation",
+                        }
+                    ],
+                    "discarded_sections": [],
+                    "unresolved": [],
+                    "lto": "disabled",
+                },
+                "object_accounting": [
+                    {
+                        "object": object_record,
+                        "disposition": "contributed",
+                        "source_bindings": source_binding,
+                        "evidence": "compiler action and link map",
+                    }
+                ],
+                "artifacts": [record(elf, "elf")],
+            }
+        ],
+        "status": "complete",
+    }
+    receipt["receipt_id"] = receipt_id(receipt)
+    return receipt
+
+
+def test_firmware_receipt_adds_linked_image_and_exact_source_dependency(tmp_path):
+    inventory, app, _ = selection(tmp_path)
+    database = app / "compile_commands.json"
+    database.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(app),
+                    "file": "selected.c",
+                    "arguments": ["cc", "-c", "selected.c", "-o", "selected.o"],
+                }
+            ]
+        )
+    )
+    inventory["groups"]["native"] = scope.collect_compdb_sources(
+        database, roots=inventory["roots"], owners={"app": "application", "library": "external"}
+    )
+    evidence = firmware_receipt(inventory, app, tmp_path / "firmware-build")
+
+    document, receipt = sbom.generate_sbom(
+        inventory, micropython_root=MPY_ROOT, build_receipt=evidence
+    )
+    image = next(component for component in document["components"] if component["type"] == "firmware")
+    file_component = next(
+        component
+        for component in document["components"]
+        if component["type"] == "file" and component["name"] == "selected.c"
+    )
+    dependencies = {row["ref"]: row["dependsOn"] for row in document["dependencies"]}
+
+    assert image["hashes"][0]["content"] == evidence["images"][0]["link"]["elf"]["sha256"]
+    assert file_component["bom-ref"] in dependencies[image["bom-ref"]]
+    assert receipt["link_closure"]["status"] == "complete"
+    assert receipt["firmware_completeness"] == "not-established"
+
+
+def test_unmatched_linked_source_remains_partial_in_sbom(tmp_path):
+    inventory, app, _ = selection(tmp_path)
+    database = app / "compile_commands.json"
+    database.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(app),
+                    "file": "selected.c",
+                    "arguments": ["cc", "-c", "selected.c", "-o", "selected.o"],
+                }
+            ]
+        )
+    )
+    inventory["groups"]["native"] = scope.collect_compdb_sources(
+        database, roots=inventory["roots"], owners={"app": "application", "library": "external"}
+    )
+    evidence = firmware_receipt(inventory, app, tmp_path / "firmware-build", "missing.c")
+
+    document, receipt = sbom.generate_sbom(
+        inventory, micropython_root=MPY_ROOT, build_receipt=evidence
+    )
+
+    assert receipt["link_closure"]["status"] == "incomplete"
+    assert receipt["link_closure"]["images"][0]["unmapped_source_bindings"] == [
+        {"root": "app", "path": "missing.c"}
+    ]
+    assert any(gap["kind"] == "linked-source-not-in-selected-scope" for gap in receipt["gaps"])
+    image = next(component for component in document["components"] if component["type"] == "firmware")
+    assert properties(image)["mpy:link-closure"] == "incomplete"
+
+
+def test_cli_accepts_build_receipt_and_emits_firmware_sbom(tmp_path):
+    inventory, app, _ = selection(tmp_path)
+    database = app / "compile_commands.json"
+    database.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(app),
+                    "file": "selected.c",
+                    "arguments": ["cc", "-c", "selected.c", "-o", "selected.o"],
+                }
+            ]
+        )
+    )
+    inventory["groups"]["native"] = scope.collect_compdb_sources(
+        database, roots=inventory["roots"], owners={"app": "application", "library": "external"}
+    )
+    scope_path = tmp_path / "scope.json"
+    receipt_path = tmp_path / "build-receipt.json"
+    output_dir = tmp_path / "output"
+    scope_path.write_text(json.dumps(inventory))
+    receipt_path.write_text(
+        json.dumps(firmware_receipt(inventory, app, tmp_path / "firmware-build"))
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mpy_analysis.sbom",
+            "--scope",
+            str(scope_path),
+            "--micropython-root",
+            str(MPY_ROOT),
+            "--build-receipt",
+            str(receipt_path),
+            "--output-dir",
+            str(output_dir),
+        ],
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])},
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    document = json.loads((output_dir / "sbom.json").read_text())
+    summary = json.loads((output_dir / "sbom-summary.json").read_text())
+    assert any(component["type"] == "firmware" for component in document["components"])
+    assert summary["link_closure"]["status"] == "complete"
+
+
+def test_firmware_receipt_target_mismatch_is_rejected(tmp_path):
+    from mpy_analysis.firmware_receipt import receipt_id
+
+    inventory, app, _ = selection(tmp_path)
+    evidence = firmware_receipt(inventory, app, tmp_path / "firmware-build")
+    evidence["configuration"]["target"] = "different-target"
+    evidence["receipt_id"] = receipt_id(evidence)
+
+    with pytest.raises(ValueError, match="does not match SBOM scope"):
+        sbom.generate_sbom(inventory, micropython_root=MPY_ROOT, build_receipt=evidence)
+
+
+def test_firmware_receipt_stale_source_revision_is_rejected(tmp_path):
+    from mpy_analysis.firmware_receipt import receipt_id
+
+    inventory, app, _ = selection(tmp_path)
+    evidence = firmware_receipt(inventory, app, tmp_path / "firmware-build")
+    evidence["source_repositories"][0]["revision"] = "0" * 40
+    evidence["receipt_id"] = receipt_id(evidence)
+
+    with pytest.raises(ValueError, match="source revision is stale"):
+        sbom.generate_sbom(inventory, micropython_root=MPY_ROOT, build_receipt=evidence)
+
+def test_parent_repository_status_ignores_unavailable_gitlink(tmp_path):
+    inventory, _, library = selection(tmp_path)
+    gitlink = library / "modules" / "missing"
+    gitlink.mkdir(parents=True)
+    (gitlink / ".git").write_text("gitdir: missing\n")
+    revision = git(library, "rev-parse", "HEAD")
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(library),
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{revision},modules/missing",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(library),
+            "-c",
+            "user.name=SBOM Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "Record unavailable Gitlink",
+        ],
+        check=True,
+    )
+
+    _, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+
+    assert not any(
+        gap["kind"] == "dirty-selected-repository" and gap["path"] == str(library)
+        for gap in receipt["gaps"]
+    )
 
 
 def test_dirty_source_hash_and_repository_revision_remain_distinct(tmp_path):
@@ -584,4 +890,56 @@ def test_cli_preserves_selected_license_sidecar_output_alias(tmp_path, invalid_s
     assert result.returncode == 2
     assert terms.read_text() == content
     assert (app / "main.py.license").is_symlink()
+
     assert not (output / "sbom-summary.json").exists()
+
+
+def test_posthoc_link_inventory_adds_only_incomplete_firmware_evidence(tmp_path):
+    inventory, app, _ = selection(tmp_path)
+    database = app / "compile_commands.json"
+    database.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(app),
+                    "file": "selected.c",
+                    "arguments": ["cc", "-c", "selected.c", "-o", "selected.o"],
+                }
+            ]
+        )
+    )
+    inventory["groups"]["native"] = scope.collect_compdb_sources(
+        database, roots=inventory["roots"], owners={"app": "application", "library": "external"}
+    )
+    path = make_inventory(tmp_path, app / "selected.c")
+
+    document, summary = sbom.generate_sbom(
+        inventory, micropython_root=MPY_ROOT, posthoc_link_inventory=path
+    )
+
+    image = next(component for component in document["components"] if component["type"] == "firmware")
+    file_component = next(
+        component
+        for component in document["components"]
+        if component["type"] == "file" and component["name"] == "selected.c"
+    )
+    dependencies = {row["ref"]: row["dependsOn"] for row in document["dependencies"]}
+    assert file_component["bom-ref"] in dependencies[image["bom-ref"]]
+    assert properties(image)["mpy:link-closure"] == "posthoc-incomplete"
+    assert properties(image)["mpy:capture-authority"] == "posthoc-published-inventory"
+    assert summary["link_closure"]["status"] == "posthoc-incomplete"
+    assert summary["firmware_completeness"] == "not-established"
+    assert summary["coverage_status"] == "incomplete"
+
+
+def test_actual_and_posthoc_firmware_evidence_cannot_be_combined(tmp_path):
+    inventory, app, _ = selection(tmp_path)
+    posthoc = make_inventory(tmp_path, app / "selected.c")
+
+    with pytest.raises(ValueError, match="not both"):
+        sbom.generate_sbom(
+            inventory,
+            micropython_root=MPY_ROOT,
+            build_receipt={},
+            posthoc_link_inventory=posthoc,
+        )

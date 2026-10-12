@@ -9,19 +9,19 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import re
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any, Sequence
 from urllib.parse import quote, urlparse
 
-from jsonschema import FormatChecker
-
 from .compdb import arguments_of, entry_file, validate_entry
+from .firmware_inventory import load_posthoc_link_inventory
+from .firmware_receipt import load_firmware_receipt, validate_firmware_receipt
 from .generic_inventory import assemble
 from .metadata import collect_metadata
-from .metadata_bom import validate_cyclonedx
+from .metadata_bom import valid_uri, validate_cyclonedx
 from .scope import FROZEN_GROUP, parse_scope, source_path
 
 
@@ -57,14 +57,7 @@ def _vcs_url(origin: str) -> str | None:
             return None
         authority, path = scp.groups()
         candidate = f"ssh://{authority}/{quote(path, safe='/~')}"
-    try:
-        parsed = urlparse(candidate)
-        if not parsed.scheme or not parsed.hostname:
-            return None
-        parsed.port
-    except ValueError:
-        return None
-    return candidate if FormatChecker().conforms(candidate, "iri") else None
+    return candidate if valid_uri(candidate) else None
 
 
 def _purl(url: str, revision: str, name: str) -> str:
@@ -94,12 +87,22 @@ class _Builder:
         self.dependencies.setdefault(reference, set())
         return reference
 
-    def repository(self, path: Path) -> dict[str, Any] | None:
+    def repository(self, path: Path, *, declared_root: Path | None = None) -> dict[str, Any] | None:
+        source = path.resolve(strict=True)
         directory = path if path.is_dir() else path.parent
-        key = str(directory)
+        declared = declared_root.resolve(strict=True) if declared_root is not None else None
+        if declared is not None and not source.is_relative_to(declared):
+            raise ValueError(f"selected source is outside its declared repository root: {path}")
+        git_root = _git(directory, "rev-parse", "--show-toplevel")
+        if git_root and source.is_relative_to(Path(git_root).resolve()):
+            root = str(Path(git_root).resolve())
+        elif git_root and declared is not None:
+            root = str(declared)
+        else:
+            root = git_root
+        key = str(Path(root).resolve()) if root else str(directory)
         if key in self.repositories:
             return self.repositories[key]
-        root = _git(directory, "rev-parse", "--show-toplevel")
         if not root:
             self.repositories[key] = None
             self.gaps.append({"kind": "repository-provenance-unavailable", "path": key})
@@ -109,10 +112,14 @@ class _Builder:
             return self.repositories[root]
         revision = _git(Path(root), "rev-parse", "HEAD")
         if not revision:
-            raise ValueError(f"selected repository has no revision: {root}")
+            self.repositories[key] = None
+            self.gaps.append({"kind": "repository-provenance-unavailable", "path": key})
+            return None
         origin = _git(Path(root), "remote", "get-url", "origin")
         vcs_url = _vcs_url(origin) if origin else None
-        status = _git(Path(root), "status", "--porcelain", "--untracked-files=no")
+        status = _git(
+            Path(root), "status", "--porcelain", "--untracked-files=no", "--ignore-submodules=all"
+        )
         if status is None:
             raise ValueError(f"cannot inspect selected repository state: {root}")
         info: dict[str, Any] = {
@@ -186,7 +193,7 @@ class _Builder:
             ),
         }
         reference = self.add("file", identity, component)
-        repository = self.repository(path)
+        repository = self.repository(path, declared_root=Path(self.scope["roots"][record["root"]]))
         tracked = None
         if repository:
             relative = path.relative_to(repository["directory"]).as_posix()
@@ -219,13 +226,239 @@ class _Builder:
         return reference
 
 
+def _attach_firmware_images(
+    receipt: dict[str, Any],
+    scope: dict[str, Any],
+    builder: _Builder,
+    root_dependencies: set[str],
+) -> dict[str, Any]:
+    """Add build-bound firmware subjects and their exact selected source dependencies."""
+    validated = receipt
+    configuration = validated["configuration"]
+    for field in ("port", "target", "variant"):
+        if configuration[field] != scope[field]:
+            raise ValueError(
+                f"firmware receipt {field} {configuration[field]!r} does not match "
+                f"SBOM scope {scope[field]!r}"
+            )
+    for repository in validated["source_repositories"]:
+        name = repository["name"]
+        root = scope["roots"].get(name)
+        if not root or Path(root).resolve() != Path(repository["path"]).resolve():
+            raise ValueError(f"firmware receipt source root does not match SBOM root: {name}")
+        revision = _git(Path(root), "rev-parse", "HEAD")
+        if revision and revision != repository["revision"]:
+            raise ValueError(f"firmware receipt source revision is stale: {name}")
+
+    source_refs: dict[tuple[str, str], set[str]] = {}
+    for source in builder.sources:
+        source_refs.setdefault((source["root"], source["path"]), set()).add(source["component"])
+
+    images = []
+    for image in validated["images"]:
+        link = image["link"]
+        bindings = set()
+        for row in image["object_accounting"]:
+            if row["disposition"] == "contributed":
+                bindings.update((item["root"], item["path"]) for item in row["source_bindings"])
+        for operand in link["operands"]:
+            if operand["disposition"] != "contributed":
+                continue
+            if operand["kind"] == "archive":
+                members = (item for item in operand["members"] if item["disposition"] == "contributed")
+                for member in members:
+                    bindings.update(
+                        (item["root"], item["path"]) for item in member["source_bindings"]
+                    )
+            else:
+                bindings.update(
+                    (item["root"], item["path"])
+                    for item in operand.get("source_bindings", [])
+                )
+        mapped, missing = set(), []
+        for binding in sorted(bindings):
+            refs = source_refs.get(binding)
+            if refs:
+                mapped.update(refs)
+            else:
+                missing.append(binding)
+                builder.gaps.append(
+                    {
+                        "kind": "linked-source-not-in-selected-scope",
+                        "root": binding[0],
+                        "path": binding[1],
+                        "image": image["id"],
+                    }
+                )
+        link_status = (
+            "complete"
+            if validated["status"] == "complete" and link["status"] == "complete" and not missing
+            else "incomplete"
+        )
+        component = {
+            "type": "firmware",
+            "name": image["id"],
+            "hashes": [{"alg": "SHA-256", "content": link["elf"]["sha256"]}],
+            "properties": _properties(
+                {
+                    "build-id": validated["build_id"],
+                    "receipt-id": validated["receipt_id"],
+                    "image-role": image["role"],
+                    "port": configuration["port"],
+                    "target": configuration["target"],
+                    "variant": configuration["variant"],
+                    "link-closure": link_status,
+                    "linker-format": link["linker_format"],
+                    "linker-map-sha256": link["map"]["sha256"],
+                    "lto": link["lto"],
+                }
+            ),
+        }
+        reference = builder.add(
+            "firmware-image", [validated["build_id"], image["id"]], component
+        )
+        builder.dependencies[reference] = mapped
+        root_dependencies.add(reference)
+        images.append(
+            {
+                "id": image["id"],
+                "role": image["role"],
+                "elf_sha256": link["elf"]["sha256"],
+                "link_closure": link_status,
+                "linked_components": sorted(mapped),
+                "unmapped_source_bindings": [
+                    {"root": root, "path": path} for root, path in missing
+                ],
+            }
+        )
+    return {
+        "schema": validated["schema"],
+        "receipt_id": validated["receipt_id"],
+        "build_id": validated["build_id"],
+        "status": "complete"
+        if all(image["link_closure"] == "complete" for image in images)
+        else "incomplete",
+        "images": images,
+    }
+
+def _attach_posthoc_firmware_image(
+    evidence: dict[str, Any],
+    scope: dict[str, Any],
+    builder: _Builder,
+    root_dependencies: set[str],
+) -> dict[str, Any]:
+    """Add an explicitly incomplete image edge from a posthoc published inventory."""
+    source_refs: dict[tuple[str, str], set[str]] = {}
+    for source in builder.sources:
+        path = source_path(scope, source).resolve()
+        source_refs.setdefault((str(path), source["sha256"]), set()).add(source["component"])
+
+    mapped: set[str] = set()
+    unmapped = []
+    for contribution in evidence["contributions"]:
+        key = (contribution["source"]["path"], contribution["source"]["sha256"])
+        refs = source_refs.get(key)
+        if refs:
+            mapped.update(refs)
+        else:
+            unmapped.append(key)
+            builder.gaps.append(
+                {
+                    "kind": "posthoc-linked-source-not-in-selected-scope",
+                    "path": key[0],
+                    "sha256": key[1],
+                }
+            )
+
+    image = evidence["image"]
+    build = evidence["build"]
+    component = {
+        "type": "firmware",
+        "name": image["id"],
+        "hashes": [{"alg": "SHA-256", "content": image["elf"]["sha256"]}],
+        "properties": _properties(
+            {
+                "capture-authority": evidence["authority"],
+                "generation-id": evidence["generation"]["id"],
+                "inventory-sha256": evidence["generation"]["inventory_sha256"],
+                "image-role": image["role"],
+                "link-closure": "posthoc-incomplete",
+                "linker": image["linker"]["path"],
+                "linker-sha256": image["linker"]["sha256"],
+                "linker-map-sha256": image["map"]["sha256"],
+                "port": build["port"],
+                "source-revision": build["source_revision"],
+                "target": build["target"],
+                "variant": build["variant"],
+            }
+        ),
+    }
+    reference = builder.add(
+        "posthoc-firmware-image",
+        [evidence["generation"]["id"], image["id"]],
+        component,
+    )
+    builder.dependencies[reference] = mapped
+    root_dependencies.add(reference)
+    builder.gaps.append(
+        {
+            "kind": "posthoc-firmware-link-inventory",
+            "generation": evidence["generation"]["id"],
+            "unresolved_inputs": len(evidence["unresolved_inputs"]),
+            "unassessed_objects": len(evidence["unassessed_objects"]),
+            "reason": "posthoc link attribution does not establish event-time build or full firmware closure",
+        }
+    )
+    return {
+        "schema": evidence["schema"],
+        "authority": evidence["authority"],
+        "generation": evidence["generation"],
+        "status": "posthoc-incomplete",
+        "images": [
+            {
+                "id": image["id"],
+                "role": image["role"],
+                "elf_sha256": image["elf"]["sha256"],
+                "linked_components": sorted(mapped),
+                "unmapped_sources": [
+                    {"path": path, "sha256": digest} for path, digest in unmapped
+                ],
+                "unresolved_inputs": evidence["unresolved_inputs"],
+                "unassessed_objects": evidence["unassessed_objects"],
+                "no_contribution_objects": evidence["no_contribution_objects"],
+            }
+        ],
+        "limitations": evidence["limitations"],
+    }
+
 def generate_sbom(
     scope: dict[str, Any],
     *,
     micropython_root: Path,
     declaration_files: Sequence[Path] = (),
+    build_receipt: Path | dict[str, Any] | None = None,
+    posthoc_link_inventory: Path | None = None,
+    link_generation: Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return generic selected-dependency components and field-level evidence."""
+    if build_receipt is not None and posthoc_link_inventory is not None:
+        raise ValueError("provide either an actual build receipt or a posthoc link inventory, not both")
+    if link_generation is not None and posthoc_link_inventory is None:
+        raise ValueError("--link-generation requires --link-inventory")
+    if posthoc_link_inventory is not None:
+        posthoc_evidence = load_posthoc_link_inventory(
+            posthoc_link_inventory, generation_path=link_generation
+        )
+    else:
+        posthoc_evidence = None
+    if build_receipt is None:
+        firmware_evidence = None
+    elif isinstance(build_receipt, Path):
+        firmware_evidence = load_firmware_receipt(build_receipt)
+    elif isinstance(build_receipt, dict):
+        firmware_evidence = validate_firmware_receipt(build_receipt)
+    else:
+        raise ValueError("build_receipt must be a path or JSON object")
     scope = parse_scope(scope)
     mpy = Path(micropython_root).resolve(strict=True)
     if not (mpy / "tools/manifestfile.py").is_file():
@@ -266,6 +499,16 @@ def generate_sbom(
         )
     root_dependencies = inventory.pop("roots")
     root_dependencies.update(info["ref"] for info in builder.repositories.values() if info)
+    if firmware_evidence:
+        link_closure = _attach_firmware_images(
+            firmware_evidence, scope, builder, root_dependencies
+        )
+    elif posthoc_evidence:
+        link_closure = _attach_posthoc_firmware_image(
+            posthoc_evidence, scope, builder, root_dependencies
+        )
+    else:
+        link_closure = None
     component = {
         "type": "application",
         "name": scope["target"],
@@ -274,7 +517,7 @@ def generate_sbom(
             {
                 **build_identity,
                 "scope": "manifest-and-compiler-selected-sources",
-                "link-closure": "not-established",
+                "link-closure": link_closure["status"] if link_closure else "not-established",
             }
         ),
     }
@@ -305,14 +548,20 @@ def generate_sbom(
         "source_accounting": "accounted" if not unassessed else "incomplete",
         "firmware_completeness": "not-established",
         "limitations": [
-            "Compilation databases select compiled sources, not linked objects or header dependencies.",
+            *(
+                []
+                if link_closure
+                else ["Compilation databases select compiled sources, not linked objects."]
+            ),
             "Manifest selection does not inventory runtime-loaded or build-fetched dependencies.",
+            "Header/sysroot and generated-input provenance remain separate closure requirements.",
             "Unmarked vendored boundaries cannot be discovered reliably; declare selected dependencies explicitly.",
         ],
         **inventory,
         "gaps": builder.gaps,
         "unassessed_groups": unassessed,
         "sources": builder.sources,
+        "link_closure": link_closure or {"status": "not-established"},
         "packages": scope.get("packages", []),
         "package_requirements": scope.get("package_requirements", []),
         "component_count": len(builder.components),
@@ -410,6 +659,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=[],
         help="Source-bound CycloneDX 1.6 dependency declarations; repeatable",
     )
+    parser.add_argument(
+        "--build-receipt",
+        type=Path,
+        help="versioned actual-build/link receipt from the selected firmware build",
+    )
+    parser.add_argument(
+        "--link-inventory",
+        type=Path,
+        help="qualified published linker inventory, recorded as posthoc/incomplete evidence",
+    )
+    parser.add_argument(
+        "--link-generation",
+        type=Path,
+        help="generation.json companion for --link-inventory; defaults to its sibling",
+    )
     args = parser.parse_args(argv)
     try:
         scope_path = args.scope.resolve()
@@ -422,6 +686,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             input_error, data = exc, None
         protected = _protected_inputs(scope_path, data)
         protected.update(path.resolve() for path in args.dependency_metadata)
+        for evidence_path in (args.build_receipt, args.link_inventory, args.link_generation):
+            if evidence_path:
+                protected.add(evidence_path.resolve())
         _invalidate_outputs(destinations, protected)
         if input_error is not None:
             raise input_error
@@ -430,6 +697,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             scope,
             micropython_root=args.micropython_root,
             declaration_files=args.dependency_metadata,
+            build_receipt=args.build_receipt,
+            posthoc_link_inventory=args.link_inventory,
+            link_generation=args.link_generation,
         )
         output.mkdir(parents=True, exist_ok=True)
         receipt["scope_file"] = str(scope_path)
