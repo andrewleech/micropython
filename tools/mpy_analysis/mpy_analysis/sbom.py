@@ -317,6 +317,34 @@ def _attach_firmware_images(
         reference = builder.add(
             "firmware-image", [validated["build_id"], image["id"]], component
         )
+        for operand in link["operands"]:
+            if operand["disposition"] != "contributed" or "toolchain" not in operand:
+                continue
+            compiler = next(
+                tool
+                for tool in validated["toolchain"]
+                if tool["role"] == operand["toolchain"]["role"]
+                and tool["executable"]["path"] == operand["toolchain"]["executable"]["path"]
+            )
+            library_path = Path(operand["input"]["path"])
+            library = builder.add(
+                "toolchain-library",
+                [validated["build_id"], operand["input"]["sha256"]],
+                {
+                    "type": "library",
+                    "name": library_path.name,
+                    "version": compiler["version"],
+                    "hashes": [{"alg": "SHA-256", "content": operand["input"]["sha256"]}],
+                    "properties": _properties(
+                        {
+                            "toolchain-compiler": compiler["executable"]["path"],
+                            "toolchain-compiler-sha256": compiler["executable"]["sha256"],
+                            "contributing-members": str(len(operand["contributing_members"])),
+                        }
+                    ),
+                },
+            )
+            mapped.add(library)
         builder.dependencies[reference] = mapped
         root_dependencies.add(reference)
         images.append(
