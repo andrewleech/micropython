@@ -114,7 +114,10 @@ def _source_bindings(value: Any, label: str, repository_names: set[str]) -> list
             raise FirmwareReceiptError(
                 f"{label}[{index}] must bind a canonical contained path under a declared source root"
             )
-        result.append({"root": root, "path": path})
+        via = binding.get("via")
+        if via not in (None, "generator"):
+            raise FirmwareReceiptError(f"{label}[{index}].via must be absent or 'generator'")
+        result.append({"root": root, "path": path, **({"via": via} if via else {})})
     if len({(item["root"], item["path"]) for item in result}) != len(result):
         raise FirmwareReceiptError(f"{label} repeats a source boundary")
     return result

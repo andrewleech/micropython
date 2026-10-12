@@ -580,6 +580,8 @@ def test_generated_source_binds_to_generator_inputs(tmp_path):
         "open(sys.argv[4], 'w').write('int generated(void) { return %s; }\\n' % data)\n"
     )
     (source_root / "value.txt").write_text("7\n")
+    (source_root / "manifest.py").write_text('module("main.py")\n')
+    (source_root / "main.py").write_text("main = True\n")
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     subprocess.run(["git", "-C", str(root), "config", "user.email", "sbom-test@example.invalid"], check=True)
     subprocess.run(["git", "-C", str(root), "config", "user.name", "SBOM Test"], check=True)
@@ -607,6 +609,8 @@ $(BUILD)/firmware.elf: $(BUILD)/main.o $(BUILD)/generated.o
 \t$(CC) -nostdlib -Wl,-e,main -Wl,-Map=$(BUILD)/firmware.map -o $@ $^
 """
     )
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "build rules"], check=True)
     build = tmp_path / "build"
     receipt_path = tmp_path / "receipt.json"
     assert capture_make(
@@ -636,6 +640,58 @@ $(BUILD)/firmware.elf: $(BUILD)/main.o $(BUILD)/generated.o
     assert objects["generated.o"][0] == "contributed"
     assert {binding["path"] for binding in objects["generated.o"][1]} == {"gen.py", "value.txt"}
     assert not any("outside declared roots" in item["reason"] for item in image["link"]["unresolved"])
+
+    mpy_root = Path(__file__).resolve().parents[3]
+    inventory = scope.collect_manifest_scope(
+        mpy_root,
+        [source_root / "manifest.py"],
+        roots={"fixture": str(source_root)},
+        path_vars={},
+        owners={"fixture": "application"},
+        target="native",
+        variant="generated-source",
+        port="native",
+    )
+    events = [json.loads(line) for line in (tmp_path / "actions.jsonl").read_text().splitlines()]
+    compdb = tmp_path / "compile_commands.json"
+    compdb.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": event["cwd"],
+                    "file": next(item["path"] for item in event["inputs"] if item["role"] == "source"),
+                    "arguments": event["argv"],
+                    "output": next(
+                        item["path"] for item in event["outputs"] if Path(item["path"]).suffix == ".o"
+                    ),
+                }
+                for event in events
+                if event["kind"] == "compile"
+                and all(
+                    Path(item["path"]).is_relative_to(source_root)
+                    for item in event["inputs"]
+                    if item["role"] == "source"
+                )
+            ]
+        )
+    )
+    inventory["groups"]["native"] = scope.collect_compdb_sources(
+        compdb, roots=inventory["roots"], owners={"fixture": "application"}
+    )
+    document, summary = sbom.generate_sbom(
+        inventory, micropython_root=mpy_root, build_receipt=receipt_path
+    )
+    selections = {
+        next(prop["value"] for prop in item["properties"] if prop["name"] == "mpy:path"): next(
+            prop["value"] for prop in item["properties"] if prop["name"] == "mpy:selection"
+        )
+        for item in document["components"]
+        if item["type"] == "file"
+    }
+    assert selections["gen.py"] == selections["value.txt"] == "generator-input"
+    assert not any(gap["kind"] == "linked-source-not-in-selected-scope" for gap in summary["gaps"])
+    assert summary["link_closure"]["status"] == "complete"
+    assert summary["firmware_completeness"] == "established"
 
 
 @pytest.mark.skipif(

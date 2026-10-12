@@ -226,6 +226,33 @@ class _Builder:
         return reference
 
 
+def _generator_input(builder: _Builder, binding: tuple[str, str]) -> str | None:
+    """Add a file component for an input of a captured generator that wrote a linked source.
+
+    The owner is the one owner the selected sources already assign to the root; with none
+    or several the input stays unmapped.
+    """
+    root, path = binding
+    owners = {
+        property_["value"]
+        for source in builder.sources
+        if source["root"] == root
+        for property_ in builder.components[source["component"]]["properties"]
+        if property_["name"] == "mpy:owner"
+    }
+    if len(owners) != 1:
+        return None
+    return builder.file(
+        "generator-input",
+        {
+            "root": root,
+            "path": path,
+            "owner": owners.pop(),
+            "provenance": {"kind": "captured-generator-input"},
+        },
+    )
+
+
 def _attach_firmware_images(
     receipt: dict[str, Any],
     scope: dict[str, Any],
@@ -258,26 +285,35 @@ def _attach_firmware_images(
     for image in validated["images"]:
         link = image["link"]
         bindings = set()
+        generator_bindings = set()
+
+        def collect(items):
+            for item in items:
+                key = (item["root"], item["path"])
+                bindings.add(key)
+                if item.get("via") == "generator":
+                    generator_bindings.add(key)
+
         for row in image["object_accounting"]:
             if row["disposition"] == "contributed":
-                bindings.update((item["root"], item["path"]) for item in row["source_bindings"])
+                collect(row["source_bindings"])
         for operand in link["operands"]:
             if operand["disposition"] != "contributed":
                 continue
             if operand["kind"] == "archive":
                 members = (item for item in operand["members"] if item["disposition"] == "contributed")
                 for member in members:
-                    bindings.update(
-                        (item["root"], item["path"]) for item in member["source_bindings"]
-                    )
+                    collect(member["source_bindings"])
             else:
-                bindings.update(
-                    (item["root"], item["path"])
-                    for item in operand.get("source_bindings", [])
-                )
+                collect(operand.get("source_bindings", []))
         mapped, missing = set(), []
         for binding in sorted(bindings):
             refs = source_refs.get(binding)
+            if not refs and binding in generator_bindings:
+                reference = _generator_input(builder, binding)
+                if reference:
+                    refs = {reference}
+                    source_refs[binding] = refs
             if refs:
                 mapped.update(refs)
             else:
@@ -566,6 +602,20 @@ def generate_sbom(
         for group, records in scope["groups"].items()
         if group not in (FROZEN_GROUP, "native") and records
     }
+    firmware_blocking_gaps = {
+        "checkout-gitlink-mismatch",
+        "dirty-selected-repository",
+        "linked-source-not-in-selected-scope",
+        "posthoc-linked-source-not-in-selected-scope",
+        "repository-provenance-unavailable",
+        "selected-source-not-tracked",
+    }
+    firmware_established = bool(
+        firmware_evidence
+        and link_closure
+        and link_closure["status"] == "complete"
+        and not any(gap["kind"] in firmware_blocking_gaps for gap in builder.gaps)
+    )
     receipt = {
         "schema_version": 1,
         **build_identity,
@@ -574,7 +624,7 @@ def generate_sbom(
         if builder.gaps or unassessed
         else "selected-sources-accounted",
         "source_accounting": "accounted" if not unassessed else "incomplete",
-        "firmware_completeness": "not-established",
+        "firmware_completeness": "established" if firmware_established else "not-established",
         "limitations": [
             *(
                 []

@@ -306,7 +306,7 @@ def receipt_from_journal(
     elf: Path,
     map_file: Path,
 ) -> dict[str, Any]:
-    """Create a valid partial receipt from a wrapped make run; never claim complete closure."""
+    """Create a receipt from a wrapped make run; complete only when no link evidence is unresolved."""
     events = _load_events(Path(journal), build_id, image_id)
     build_root = Path(build_dir).resolve(strict=True)
     elf_record = _record(Path(elf), "elf")
@@ -410,8 +410,9 @@ def receipt_from_journal(
         producer_bindings = []
         for item in action["inputs"]:
             for binding in _bindings(item["path"], source_roots):
-                if binding not in producer_bindings:
-                    producer_bindings.append(binding)
+                marked = {**binding, "via": "generator"}
+                if marked not in producer_bindings:
+                    producer_bindings.append(marked)
         for output in action["outputs"]:
             generated_source_inputs[output["path"]] = producer_bindings
 
@@ -650,7 +651,23 @@ def receipt_from_journal(
     )
     if not parsed:
         linker_format = "unknown"
-
+    lto = "unsupported" if any(
+        argument == "-flto" or argument.startswith("-flto=")
+        for action in actions
+        for argument in action["argv"]
+    ) else "disabled"
+    unresolved_rows = [dict(item) for item in {(row["path"], row["reason"]): row for row in unresolved}.values()]
+    repositories_verified = not any(
+        record["dirty"] or record.get("provenance_status") for record in root_records
+    )
+    link_complete = (
+        not unresolved_rows
+        and linker_format != "unknown"
+        and lto == "disabled"
+        and repositories_verified
+        and all(row["disposition"] != "unsupported" for row in object_accounting)
+        and all(operand["disposition"] != "unsupported" for operand in operands)
+    )
     image = {
         "configuration": {
             "port": port,
@@ -665,17 +682,13 @@ def receipt_from_journal(
         "link": {
             "adapter": "mpy-make-wrapper/v1",
             "linker_format": linker_format,
-            "status": "incomplete",
+            "status": "complete" if link_complete else "incomplete",
             "elf": elf_record,
             "map": map_record,
             "operands": operands,
             "discarded_sections": discarded,
-            "unresolved": [dict(item) for item in {(row["path"], row["reason"]): row for row in unresolved}.values()],
-            "lto": "unsupported" if any(
-                argument == "-flto" or argument.startswith("-flto=")
-                for action in actions
-                for argument in action["argv"]
-            ) else "disabled",
+            "unresolved": unresolved_rows,
+            "lto": lto,
         },
         "object_accounting": object_accounting,
         "artifacts": list(image_artifacts.values()),
@@ -700,7 +713,7 @@ def receipt_from_journal(
         ],
         "actions": actions,
         "images": [image],
-        "status": "incomplete",
+        "status": "complete" if link_complete else "incomplete",
     }
     receipt["receipt_id"] = receipt_id(receipt)
     return validate_firmware_receipt(receipt)
@@ -779,7 +792,7 @@ def merge_receipts(receipts: list[dict[str, Any]]) -> dict[str, Any]:
         "toolchain": [toolchain_by_identity[key] for key in sorted(toolchain_by_identity)],
         "actions": actions,
         "images": images,
-        "status": "incomplete",
+        "status": "complete" if all(item["status"] == "complete" for item in checked) else "incomplete",
     }
     merged["receipt_id"] = receipt_id(merged)
     return validate_firmware_receipt(merged)

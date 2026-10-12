@@ -277,7 +277,7 @@ def test_firmware_receipt_adds_linked_image_and_exact_source_dependency(tmp_path
     assert image["hashes"][0]["content"] == evidence["images"][0]["link"]["elf"]["sha256"]
     assert file_component["bom-ref"] in dependencies[image["bom-ref"]]
     assert receipt["link_closure"]["status"] == "complete"
-    assert receipt["firmware_completeness"] == "not-established"
+    assert receipt["firmware_completeness"] == "established"
 
 
 def test_unmatched_linked_source_remains_partial_in_sbom(tmp_path):
@@ -310,6 +310,7 @@ def test_unmatched_linked_source_remains_partial_in_sbom(tmp_path):
     assert any(gap["kind"] == "linked-source-not-in-selected-scope" for gap in receipt["gaps"])
     image = next(component for component in document["components"] if component["type"] == "firmware")
     assert properties(image)["mpy:link-closure"] == "incomplete"
+    assert receipt["firmware_completeness"] == "not-established"
 
 
 def test_cli_accepts_build_receipt_and_emits_firmware_sbom(tmp_path):
