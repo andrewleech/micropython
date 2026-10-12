@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from typing import Any
+
 from jsonschema import FormatChecker
 
 from .boundaries import discover_boundaries
 from .declarations import load_declarations, merge_declaration, revision_matches_selected
 from .metadata import collect_metadata
+from .metadata_bom import valid_uri
 from .scope import FROZEN_GROUP, source_path
 
 REQUIRED = ("name", "version", "license", "license_applicability")
@@ -123,7 +125,7 @@ def _dependency_component(
     references = []
     if repository and repository.get("vcs_url"):
         references.append({"type": "vcs", "url": repository["vcs_url"]})
-    if fields.get("url"):
+    if fields.get("url") and valid_uri(fields["url"]):
         references.append({"type": "website", "url": fields["url"]})
     if declaration:
         for reference in declaration["component"].get("externalReferences", []):
@@ -198,7 +200,9 @@ def assemble(
         directory = Path(boundary["directory"])
         files = sorted({source_path(scope, record) for _, record in boundary["sources"]})
         outside = [path for path in files if not path.is_relative_to(directory)]
-        repository = builder.repository(directory)
+        repository = builder.repository(
+            directory, declared_root=Path(scope["roots"][boundary["root"]])
+        )
         metadata = collect_metadata(
             directory,
             manifest_metadata=boundary.get("manifest_metadata"),

@@ -84,7 +84,20 @@ sast-sbom --scope scope.json --micropython-root "$MPY" --output-dir build/sbom
 
 `$MPY` must match the inventory's actual manifest authority, including its version. The library root selected by `MPY_LIB_DIR` need not be the MicroPython checkout's gitlinked library; its actual repository revision is recorded. Explicit roots can also name separately versioned locally frozen libraries. Only `runtime_frozen_python` and compiler-evidenced `native` records enter this SBOM; other groups are reported as unassessed.
 
-The Python API is `generate_sbom(scope, *, micropython_root, declaration_files=())` in `mpy_analysis.sbom`, returning `(document, receipt)`. The CLI writes schema-validated CycloneDX 1.6 `sbom.json` and `sbom-summary.json`, deterministically and without network access. Selected source files retain SHA-256 hashes and dependency ownership. Actual Git roots/submodules retain their origin, revision, tracked state and gitlink evidence. Git revisions identify checkout state, not release versions. Multiple compiler actions remain distinct receipt rows without duplicating their source file; frozen import aliases remain distinct identities.
+The Python API is `generate_sbom(scope, *, micropython_root, declaration_files=(), build_receipt=None, posthoc_link_inventory=None, link_generation=None)` in `mpy_analysis.sbom`, returning `(document, receipt)`. The CLI writes schema-validated CycloneDX 1.6 `sbom.json` and `sbom-summary.json`, deterministically and without network access. Selected source files retain SHA-256 hashes and dependency ownership. Actual Git roots/submodules retain their origin, revision, tracked state and gitlink evidence. Git revisions identify checkout state, not release versions. Multiple compiler actions remain distinct receipt rows without duplicating their source file; frozen import aliases remain distinct identities.
+
+### Firmware build receipts
+
+The selected-source SBOM does not establish which compiled code reached a firmware image. G5 build receipts bind captured build/link evidence to final ELF images and add proven link-derived source edges:
+
+```sh
+sast-sbom --scope scope.json --micropython-root "$MPY" \
+    --build-receipt firmware-build-receipt.json --output-dir build/sbom
+```
+
+A qualified published linker inventory can also be imported with `--link-inventory inventory.json`. This verifies exact published hashes and source ownership evidence, but the output is always labelled `posthoc-incomplete`, never a build-time receipt.
+
+The receipt and posthoc inventory schemas, API, evidence limits and adapter status are documented in [FIRMWARE-RECEIPT.md](FIRMWARE-RECEIPT.md). Neither source selection nor posthoc inventories establish complete firmware coverage.
 
 Dependency discovery starts from selected records and walks their ancestors within explicit physical roots. Authoritative require ownership takes priority; other manifests are candidates, not permission to execute new metadata code. Package/native markers and current source-bound declarations can establish dependency boundaries. A checkout, root directory or licence filename alone does not establish a distribution identity. Unmarked vendored units cannot be found reliably, their discovery limit remains explicit. There is no table of recognised libraries or package-specific version macro rules.
 

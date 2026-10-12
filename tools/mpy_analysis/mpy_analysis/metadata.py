@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import ast
 import configparser
-from email.parser import Parser
 import hashlib
 import json
-from pathlib import Path, PurePosixPath
 import re
+from email.parser import Parser
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 try:
@@ -20,6 +20,8 @@ from license_expression import get_spdx_licensing
 from reuse.copyright import SourceType
 from reuse.global_licensing import NestedReuseTOML, PrecedenceType, ReuseDep5, ReuseTOML
 from reuse.project import Project
+
+from .metadata_bom import valid_uri
 
 FIELDS = ("name", "version", "description", "author", "license", "url")
 LICENSING = get_spdx_licensing()
@@ -221,6 +223,10 @@ class _Collector:
                 self.evidence(field, raw, path, parser, "unsupported", **extra)
                 self.issue(field, "unsupported", str(error), path)
                 return
+        if field == "url" and not valid_uri(value):
+            self.evidence(field, raw, path, parser, "unsupported", **extra)
+            self.issue(field, "unsupported", "URL is not a valid URI", path)
+            return
         self.evidence(
             field, value, path, parser, raw_value=raw, applicability="distribution", **extra
         )
