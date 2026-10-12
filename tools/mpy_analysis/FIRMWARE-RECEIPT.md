@@ -23,7 +23,13 @@ A source binding names a declared repository root and a canonical relative path.
 
 The validator checks receipt identity and schema, action/image relationships, explicit inclusion decisions, canonical source paths and current hashes for recorded files. A hash match proves that the current file bytes match the receipt, it does not prove the build adapter observed those bytes during the build. That temporal binding must come from an adapter capturing the actual successful build actions and their inputs / outputs.
 
-For GCC-style `-MF` depfiles, the event journal records the depfile SHA-256 and parsed dependency path / hash pairs immediately after the compiler exits, and the receipt validator checks those pairs against the action's captured inputs. The receipt identity covers this evidence, but dependencies are still discovered after compilation; it does not prove the compiler consumed those exact bytes during the action, so the receipt remains incomplete for that evidence gap.
+For GCC-style `-MF` depfiles, the event journal records the depfile SHA-256 and parsed dependency path / hash pairs immediately after the compiler exits, and the receipt validator checks those pairs against the action's captured inputs. Receipts are intended for CI builds where sources and headers are not modified during the build, so depfile dependencies are accepted as the bytes the compiler consumed. A build that does modify an input during an action is still flagged through `changed_inputs_during_action`.
+
+Generated sources (for example `frozen_content.c` or `pins_*.c`) are bound to the source boundaries of the inputs of the captured generator action that wrote them; generator actions that produce files in the build directory are recorded in the receipt. A generated source whose producer was not captured stays an outside-declared-roots gap.
+
+A prebuilt archive inside the installation prefix of the captured compiler (for example `libgcc.a`) is recorded as a `library` operand with a `toolchain` binding to the captured compiler, its SHA-256, and the archive members the GNU map allocated. The SBOM emits it as a `library` component with the compiler version, and it is a dependency of the firmware image. The compiler itself is not a component; it stays in receipt `toolchain` as build provenance. Libraries outside the compiler prefix remain unresolved.
+
+Submodule working trees that were not verified against their pinned Gitlink are only listed as gaps when a captured action consumed an input under them.
 
 ## Usage
 
