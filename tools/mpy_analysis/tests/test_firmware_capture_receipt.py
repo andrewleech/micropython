@@ -496,6 +496,149 @@ $(BUILD)/firmware.bin: $(BUILD)/firmware.elf
     with pytest.raises(ValueError, match="does not match SBOM scope"):
         sbom.generate_sbom(inventory, micropython_root=mpy_root, build_receipt=mismatched)
 @pytest.mark.skipif(
+    not all(shutil.which(tool) for tool in ("make", "gcc", "ld")),
+    reason="native GNU build tools are unavailable",
+)
+def test_toolchain_library_with_map_contribution_is_a_component(tmp_path):
+    root = tmp_path / "source"
+    source_root = root / "src"
+    make_dir = root / "make"
+    source_root.mkdir(parents=True)
+    make_dir.mkdir()
+    (source_root / "manifest.py").write_text('module("main.py")\n')
+    (source_root / "main.py").write_text("main = True\n")
+    (source_root / "main.c").write_text(
+        "unsigned __int128 divide(unsigned __int128 a, unsigned __int128 b) { return a / b; }\n"
+        "int main(void) { return (int)divide(100, 7); }\n"
+    )
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.email", "sbom-test@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.name", "SBOM Test"], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "src"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "source"], check=True)
+    (make_dir / "Makefile").write_text(
+        """ROOT := $(abspath ..)
+LIBGCC := $(shell $(CC) -print-libgcc-file-name)
+
+.PHONY: all
+all: $(BUILD)/firmware.elf
+
+$(BUILD):
+\tmkdir -p $@
+
+$(BUILD)/main.o: $(ROOT)/src/main.c | $(BUILD)
+\t$(CC) -c $< -o $@
+
+$(BUILD)/firmware.elf: $(BUILD)/main.o
+\t$(CC) -nostdlib -Wl,-e,main -Wl,-Map=$(BUILD)/firmware.map -o $@ $< $(LIBGCC)
+"""
+    )
+    build = tmp_path / "build"
+    receipt_path = tmp_path / "receipt.json"
+    assert capture_make(
+        micropython_root=root,
+        make_dir=make_dir,
+        build_dir=build,
+        journal=tmp_path / "actions.jsonl",
+        receipt_path=receipt_path,
+        elf=build / "firmware.elf",
+        map_file=build / "firmware.map",
+        image_id="native",
+        image_role="application",
+        build_id="d" * 64,
+        port="native",
+        target="native",
+        variant="toolchain-library",
+        source_roots={"fixture": source_root},
+        cross_compile="",
+        variables=[],
+        targets=["all"],
+    ) == 0
+    receipt = json.loads(receipt_path.read_text())
+    image = receipt["images"][0]
+    library = next(item for item in image["link"]["operands"] if item["kind"] == "library")
+    assert library["disposition"] == "contributed"
+    assert library["contributing_members"]
+    assert not any("libgcc" in item["path"] for item in image["link"]["unresolved"])
+    assert validate_firmware_receipt(receipt)["receipt_id"] == receipt["receipt_id"]
+
+
+@pytest.mark.skipif(
+    not all(shutil.which(tool) for tool in ("make", "gcc", "ld", "python3")),
+    reason="native GNU build tools are unavailable",
+)
+def test_generated_source_binds_to_generator_inputs(tmp_path):
+    root = tmp_path / "source"
+    source_root = root / "src"
+    make_dir = root / "make"
+    source_root.mkdir(parents=True)
+    make_dir.mkdir()
+    (source_root / "main.c").write_text("extern int generated(void); int main(void) { return generated(); }\n")
+    (source_root / "gen.py").write_text(
+        "import sys\n"
+        "data = open(sys.argv[2]).read().strip()\n"
+        "open(sys.argv[4], 'w').write('int generated(void) { return %s; }\\n' % data)\n"
+    )
+    (source_root / "value.txt").write_text("7\n")
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.email", "sbom-test@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.name", "SBOM Test"], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "src"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "source"], check=True)
+    (make_dir / "Makefile").write_text(
+        """ROOT := $(abspath ..)
+
+.PHONY: all
+all: $(BUILD)/firmware.elf
+
+$(BUILD):
+\tmkdir -p $@
+
+$(BUILD)/generated.c: $(ROOT)/src/gen.py $(ROOT)/src/value.txt | $(BUILD)
+\t$(PYTHON) $(ROOT)/src/gen.py --input $(ROOT)/src/value.txt --output-source $@
+
+$(BUILD)/%.o: $(BUILD)/%.c
+\t$(CC) -c $< -o $@
+
+$(BUILD)/main.o: $(ROOT)/src/main.c | $(BUILD)
+\t$(CC) -c $< -o $@
+
+$(BUILD)/firmware.elf: $(BUILD)/main.o $(BUILD)/generated.o
+\t$(CC) -nostdlib -Wl,-e,main -Wl,-Map=$(BUILD)/firmware.map -o $@ $^
+"""
+    )
+    build = tmp_path / "build"
+    receipt_path = tmp_path / "receipt.json"
+    assert capture_make(
+        micropython_root=root,
+        make_dir=make_dir,
+        build_dir=build,
+        journal=tmp_path / "actions.jsonl",
+        receipt_path=receipt_path,
+        elf=build / "firmware.elf",
+        map_file=build / "firmware.map",
+        image_id="native",
+        image_role="application",
+        build_id="c" * 64,
+        port="native",
+        target="native",
+        variant="generated-source",
+        source_roots={"fixture": source_root},
+        cross_compile="",
+        variables=[],
+        targets=["all"],
+    ) == 0
+    image = json.loads(receipt_path.read_text())["images"][0]
+    objects = {
+        Path(item["object"]["path"]).name: (item["disposition"], item["source_bindings"])
+        for item in image["object_accounting"]
+    }
+    assert objects["generated.o"][0] == "contributed"
+    assert {binding["path"] for binding in objects["generated.o"][1]} == {"gen.py", "value.txt"}
+    assert not any("outside declared roots" in item["reason"] for item in image["link"]["unresolved"])
+
+
+@pytest.mark.skipif(
     not all(
         shutil.which(tool)
         for tool in ("make", "gcc", "g++", "as", "ld", "ar", "objcopy", "strip", "python3")

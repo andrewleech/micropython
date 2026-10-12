@@ -157,6 +157,15 @@ def _bindings(path: str, source_roots: dict[str, Path]) -> list[dict[str, str]]:
     return [{"root": name, "path": relative}]
 
 
+def _within_toolchain(path: str, toolchain: dict[tuple[str, str], dict[str, Any]]) -> bool:
+    """True when path lies inside the installation prefix of the captured compiler."""
+    compilers = [record for (role, _), record in toolchain.items() if role == "cc"]
+    if len(compilers) != 1:
+        return False
+    prefix = Path(compilers[0]["path"]).resolve().parent.parent
+    return Path(path).resolve().is_relative_to(prefix)
+
+
 def _archive_members(
     archive_path: str,
     archive_action: dict[str, Any],
@@ -325,7 +334,7 @@ def receipt_from_journal(
             and Path(item["path"]).suffix.lower() in (".bin", ".hex", ".dfu", ".pack")
             for item in outputs
         )
-        relevant = relevant or event["kind"] == "transform" and any(
+        relevant = relevant or event["kind"] in ("transform", "generate") and any(
             in_build(item["path"]) for item in outputs
         )
         if relevant:
@@ -394,6 +403,18 @@ def receipt_from_journal(
     else:
         map_error = None
 
+    generated_source_inputs = {}
+    for action in actions:
+        if action["kind"] != "generate":
+            continue
+        producer_bindings = []
+        for item in action["inputs"]:
+            for binding in _bindings(item["path"], source_roots):
+                if binding not in producer_bindings:
+                    producer_bindings.append(binding)
+        for output in action["outputs"]:
+            generated_source_inputs[output["path"]] = producer_bindings
+
     source_for_object = {}
     object_records = {}
     for action in actions:
@@ -406,16 +427,22 @@ def receipt_from_journal(
                 bindings = []
                 if len(source_inputs) == 1:
                     bindings = _bindings(source_inputs[0]["path"], source_roots)
+                    if not bindings:
+                        bindings = generated_source_inputs.get(source_inputs[0]["path"], [])
                 source_for_object[output["path"]] = bindings
 
     allocated = set()
+    toolchain_archive_members: dict[str, set[str]] = {}
     discarded = []
     if parsed is not None:
         for group in parsed["allocated_sections"]:
             identity = group["identity"]
+            path = Path(identity["path"])
+            resolved = str((path if path.is_absolute() else Path(map_file).parent / path).resolve())
             if identity["kind"] == "object":
-                path = Path(identity["path"])
-                allocated.add(str((path if path.is_absolute() else Path(map_file).parent / path).resolve()))
+                allocated.add(resolved)
+            elif identity["kind"] == "archive_member":
+                toolchain_archive_members.setdefault(resolved, set()).add(identity["member"])
         for row in parsed["discarded_sections"]:
             identity = row["identity"]
             operand_path = identity["path"]
@@ -447,6 +474,11 @@ def receipt_from_journal(
         }
         for path in sorted(map_only_loads)
     ]
+    consumed_paths = [
+        Path(item["path"])
+        for action in actions
+        for item in action["inputs"]
+    ]
     unresolved.extend(
         {
             "path": str(Path(repository["path"]) / submodule),
@@ -454,6 +486,7 @@ def receipt_from_journal(
         }
         for repository in root_records
         for submodule in repository["unverified_submodules"]
+        if any((Path(repository["path"]) / submodule) in path.parents for path in consumed_paths)
     )
     if parsed is not None:
         unresolved.extend(
@@ -537,6 +570,18 @@ def receipt_from_journal(
                 "disposition": "contributed",
                 "evidence": "captured linker-script argument",
             }
+        elif suffix in (".a", ".lib") and path in toolchain_archive_members and _within_toolchain(path, toolchain):
+            compiler = next(
+                record for (role, _), record in sorted(toolchain.items()) if role == "cc"
+            )
+            operand = {
+                "kind": "library",
+                "input": input_record,
+                "disposition": "contributed",
+                "toolchain": {"role": "cc", "executable": {"path": compiler["path"], "sha256": compiler["sha256"]}},
+                "contributing_members": sorted(toolchain_archive_members[path]),
+                "evidence": "GNU ld map allocates sections from this archive under the captured compiler installation",
+            }
         else:
             reason = "system library, response file or prebuilt input lacks qualified source accounting"
             operand = {
@@ -603,18 +648,6 @@ def receipt_from_journal(
         {"path": path, "reason": "input bytes changed while the wrapped tool action ran"}
         for path in changed_input_paths
     )
-    late_dependencies = sorted(
-        {
-            path
-            for event in selected_events
-            if event["kind"] in ("compile", "assemble")
-            for path in event.get("dependencies_discovered_after_action", [])
-        }
-    )
-    unresolved.extend(
-        {"path": path, "reason": "compiler dependency discovered from a depfile after the compile action"}
-        for path in late_dependencies
-    )
     if not parsed:
         linker_format = "unknown"
 
@@ -637,7 +670,7 @@ def receipt_from_journal(
             "map": map_record,
             "operands": operands,
             "discarded_sections": discarded,
-            "unresolved": unresolved,
+            "unresolved": [dict(item) for item in {(row["path"], row["reason"]): row for row in unresolved}.values()],
             "lto": "unsupported" if any(
                 argument == "-flto" or argument.startswith("-flto=")
                 for action in actions

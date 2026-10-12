@@ -218,6 +218,10 @@ def _action_outputs(role: str, kind: str, argv: list[str], cwd: Path) -> list[di
         if files:
             paths.add(files[-1])
     if role == "python":
+        for index, arg in enumerate(argv[:-1]):
+            if arg.startswith("--output-"):
+                candidate = Path(argv[index + 1])
+                paths.add(candidate if candidate.is_absolute() else cwd / candidate)
         generated = [
             path
             for arg in argv

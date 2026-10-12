@@ -221,7 +221,19 @@ def _validate_actions(actions, build_id, verify_files):
             )
     return action_inputs, outputs, output_versions, compiled_objects
 
-def _validate_link_operands(link, image_id, link_id, action_inputs, repo_names, verify_files):
+def _validate_toolchain_library(operand, path, image_id, toolchain_executables):
+    toolchain = _object(operand.get("toolchain"), f"image {image_id} toolchain library {path}")
+    executable = _object(toolchain.get("executable"), f"image {image_id} toolchain library executable")
+    key = (toolchain.get("role"), executable.get("path"))
+    if toolchain_executables.get(key) != executable.get("sha256"):
+        raise FirmwareReceiptError(f"toolchain library is not bound to a captured toolchain tool: {path}")
+    members = operand.get("contributing_members")
+    if not isinstance(members, list) or not members or not all(isinstance(item, str) and item for item in members):
+        raise FirmwareReceiptError(f"toolchain library must list contributing members: {path}")
+    _text(operand.get("evidence"), f"image {image_id} toolchain library evidence")
+
+
+def _validate_link_operands(link, image_id, link_id, action_inputs, repo_names, verify_files, toolchain_executables):
     operands = link.get("operands")
     if not isinstance(operands, list):
         raise FirmwareReceiptError(f"image {image_id}.link.operands must enumerate link inputs")
@@ -249,7 +261,9 @@ def _validate_link_operands(link, image_id, link_id, action_inputs, repo_names, 
             _text(operand.get("reason"), f"image {image_id} no-contribution reason")
         if disposition == "unsupported":
             _text(operand.get("reason"), f"image {image_id} unsupported-input reason")
-        if disposition == "contributed" and kind in ("object", "archive", "prebuilt", "library"):
+        if disposition == "contributed" and kind == "library" and "toolchain" in operand:
+            _validate_toolchain_library(operand, path, image_id, toolchain_executables)
+        elif disposition == "contributed" and kind in ("object", "archive", "prebuilt", "library"):
             _source_bindings(
                 operand.get("source_bindings"),
                 f"image {image_id} operand source_bindings",
@@ -383,11 +397,13 @@ def validate_firmware_receipt(
     toolchain = receipt.get("toolchain")
     if not isinstance(toolchain, list) or not toolchain:
         raise FirmwareReceiptError("toolchain must identify the selected compiler/linker tools")
+    toolchain_executables = {}
     for index, item in enumerate(toolchain):
         tool = _object(item, f"toolchain[{index}]")
         _text(tool.get("role"), f"toolchain[{index}].role")
         _text(tool.get("version"), f"toolchain[{index}].version")
-        _path_record(tool.get("executable"), f"toolchain[{index}].executable", verify_files=verify_files)
+        executable = _path_record(tool.get("executable"), f"toolchain[{index}].executable", verify_files=verify_files)
+        toolchain_executables[(tool["role"], executable["path"])] = executable["sha256"]
 
     actions = receipt.get("actions")
     action_inputs, outputs, output_versions, compiled_objects = _validate_actions(
@@ -429,7 +445,7 @@ def validate_firmware_receipt(
             raise FirmwareReceiptError(f"image {image_id} cannot claim complete closure with an unknown linker format")
 
         by_operand = _validate_link_operands(
-            link, image_id, link_id, action_inputs, repo_names, verify_files
+            link, image_id, link_id, action_inputs, repo_names, verify_files, toolchain_executables
         )
         _validate_object_accounting(
             image, image_id, repo_names, compiled_objects, by_operand, verify_files
