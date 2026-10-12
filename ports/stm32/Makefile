@@ -730,7 +730,7 @@ $(GEN_CDCINF_FILE): $(CDCINF_TEMPLATE) $(INSERT_USB_IDS) $(USB_IDS_FILE) | $(HEA
 	$(Q)$(PYTHON) $(INSERT_USB_IDS) $(USB_IDS_FILE) $< > $@
 
 ifeq ($(MBOOT_ROLE),app)
-include mboot/mcuboot/mboot_app_rules.mk
+include mboot_app_rules.mk
 endif
 
 include $(TOP)/py/mkrules.mk

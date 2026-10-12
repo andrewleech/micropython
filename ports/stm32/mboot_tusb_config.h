@@ -26,21 +26,15 @@
 #ifndef MICROPY_INCLUDED_STM32_MBOOT_TUSB_CONFIG_H
 #define MICROPY_INCLUDED_STM32_MBOOT_TUSB_CONFIG_H
 
-// TinyUSB configuration of the STM32 MCUboot bootloader: a full-speed device with the DFU class
-// only, polled from the main loop. On STM32H5 it is the USB DRD FS controller (rhport 0). On
-// STM32F7 it is the OTG_HS core (rhport 1, rhport 0 is not used) in full-speed mode on its
-// internal PHY.
+// TinyUSB configuration of the STM32 Mboot bootloader: a device with the DFU class only, polled
+// from the main loop. The root hub port and the speed come from the board's USB settings, as in
+// the application (tinyusb_port/tusb_config.h).
+#include "tinyusb_port/tusb_rhport.h"
 
-// The series is told by its CMSIS header: its device macro (STM32H5, STM32F7) is only defined by
-// including it.
-#if __has_include("stm32h5xx.h")
-#define CFG_TUSB_MCU OPT_MCU_STM32H5
-#define CFG_TUSB_RHPORT0_MODE (OPT_MODE_DEVICE | OPT_MODE_FULL_SPEED)
-#else
-#define CFG_TUSB_MCU OPT_MCU_STM32F7
-#define CFG_TUSB_RHPORT0_MODE (OPT_MODE_NONE)
-#define CFG_TUSB_RHPORT1_MODE (OPT_MODE_DEVICE | OPT_MODE_FULL_SPEED)
+#if !defined(CFG_TUSB_RHPORT0_MODE) && !defined(CFG_TUSB_RHPORT1_MODE)
+#define CFG_TUSB_RHPORT0_MODE (OPT_MODE_DEVICE)
 #endif
+
 #define CFG_TUSB_OS OPT_OS_NONE
 #define CFG_TUSB_DEBUG 0
 
@@ -58,5 +52,9 @@
 #define CFG_TUD_MSC 0
 #define CFG_TUD_HID 0
 #define CFG_TUD_MIDI 0
+
+// The size of a descriptor string, which mp_usbd_port_get_serial_number() of the port checks the
+// serial number against.
+#define MICROPY_HW_USB_DESC_STR_MAX (40)
 
 #endif // MICROPY_INCLUDED_STM32_MBOOT_TUSB_CONFIG_H

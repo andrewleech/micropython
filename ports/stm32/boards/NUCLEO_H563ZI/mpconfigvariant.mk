@@ -1,1 +1,1 @@
-include mboot/mcuboot/mboot_app.mk
+include mboot_app.mk

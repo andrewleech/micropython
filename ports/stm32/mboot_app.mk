@@ -6,15 +6,15 @@
 #   make BOARD=NUCLEO_H563ZI dfu             builds firmware.signed.dfu
 #   make BOARD=NUCLEO_H563ZI PROBE=<serial> deploy-initial
 #
-# The bootloader is built by mboot/mcuboot/Makefile. Both take their layout from the
-# MICROPY_*MBOOT_* settings in the board's mpconfigboard.h and from mboot/mcuboot/mboot_dev.h.
+# The bootloader is built by Makefile.mboot. Both take their layout from the
+# MICROPY_*MBOOT_* settings in the board's mpconfigboard.h and from mboot_dev.h.
 
 ifeq ($(filter $(MCU_SERIES),h5 f7),)
 $(error Mboot applications are implemented for STM32H5 and STM32F7 only, board $(BOARD) is MCU_SERIES=$(MCU_SERIES))
 endif
 
 MBOOT_ROLE = app
-MBOOT_DEV_DIR = $(CURDIR)/mboot/mcuboot
+MBOOT_DEV_DIR = $(CURDIR)
 # mboot_dev.h reads the CMSIS device header, so the layout generator has to preprocess it with
 # the cross compiler. The generator runs while this fragment is read, before the Makefile sets
 # CROSS_COMPILE and includes stm32.mk (core flags and the CMSIS header location), so this
@@ -43,11 +43,9 @@ MBOOT_CRYPTO_INC = $(filter %/ext/tinycrypt/lib/include %/ext/mbedtls-asn1/inclu
 INC += $(filter-out $(MBOOT_CRYPTO_INC),$(MBOOT_INC))
 CFLAGS += $(MBOOT_CFLAGS) -DMICROPY_HW_MBOOT_APP=1
 
-# The port files shared with the bootloader: the handoff words, the ECC event counter and the
-# flash policy layered over flash.c.
-SRC_C += \
-	mboot/mcuboot/port_common.c \
-	mboot/mcuboot/port_flash.c
+# The port file shared with the bootloader: the backup words, the flash ECC flags and the
+# controller primitives under the flash policy of shared/mboot.
+SRC_C += mboot_port.c
 
 LIB_SRC_C += $(MBOOT_SRC_C)
 OBJ += $(MBOOT_GEN_SRC_C:.c=.o)

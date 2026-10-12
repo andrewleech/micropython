@@ -5,9 +5,6 @@ on:
   pull_request:
     paths:
       - '.github/workflows/*.yml'
-      - 'extmod/extmod.cmake'
-      - 'extmod/extmod.mk'
-      - 'extmod/modmboot.*'
       - 'lib/littlefs/**'
       - 'lib/CMSIS_6'
       - 'lib/mcuboot'
@@ -15,9 +12,6 @@ on:
       - 'lib/uzlib/**'
       - 'lib/stm32lib'
       - 'ports/stm32/**'
-      - 'ports/stm32/mboot/mcuboot/**'
-      - 'docs/library/index.rst'
-      - 'docs/library/mboot.rst'
       - 'shared/mboot/**'
       - 'tests/mboot/keys/**'
       - 'tools/ci.sh'

@@ -52,7 +52,7 @@
 #else
 #error "mboot_dev.h: the MCUboot port of the stm32 port supports STM32H5 and STM32F7 only and this build has no CMSIS header of either"
 #endif
-#include "../../flash.h"
+#include "flash.h"
 
 #define MICROPY_HW_MBOOT_DEV0_NAME "internal"
 #define MICROPY_HW_MBOOT_DEV0_WRITE FLASH_WORD_BYTES

@@ -81,7 +81,8 @@
 #include "storage.h"
 #include "dma.h"
 #if MICROPY_HW_MBOOT_APP
-#include "mboot/mcuboot/port_stm32.h"
+#include "shared/mboot/include/mboot_layout.h"
+#include "shared/mboot/include/mboot_port.h"
 #endif
 
 #if MICROPY_HW_TINYUSB_STACK
@@ -243,9 +244,9 @@ void HardFault_Handler(void) {
   * @retval None
   */
 void NMI_Handler(void) {
-    #if MICROPY_HW_MBOOT_APP && MBOOT_STM32_FLASH_ECC
+    #if MICROPY_HW_MBOOT_APP && MICROPY_HW_MBOOT_DEV0_ECC
     // Reading a flash word with an invalid ECC raises the NMI; count and clear it.
-    mboot_stm32_nmi_ecc();
+    mboot_ecc_nmi();
     #endif
 }
 

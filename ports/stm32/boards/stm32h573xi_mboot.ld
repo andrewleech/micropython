@@ -3,7 +3,7 @@
     (boards/common_bl.ld places the sections).
 
     The flash addresses come from the board layout, mboot_layout.ld, and the SRAM addresses
-    from mboot_sram.ld, which the build generates from ports/stm32/mboot/mcuboot/mboot_sram.ld.S.
+    from mboot_sram.ld, which the build generates from ports/stm32/mboot_sram.ld.S.
     Both must be passed to the linker before this script:
       MBOOT_APP_START, MBOOT_APP_LEN   the primary slot after the image header
       MBOOT_FS_START, MBOOT_FS_SIZE    the filesystem area

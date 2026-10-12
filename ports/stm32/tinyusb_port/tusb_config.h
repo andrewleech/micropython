@@ -28,23 +28,7 @@
 
 #include "py/mpconfig.h"
 
-// STM32F4/F7/H7 boards with USB_HS use OTG_HS on RHPORT1, not RHPORT0.
-// Disable RHPORT0 and put RHPORT1 in device mode (HS, or FS when the
-// HS controller uses the internal FS PHY via MICROPY_HW_USB_HS_IN_FS).
-// Other configs are handled either by the board (e.g. N6 sets RHPORT0
-// to HS in mpconfigboard_common.h) or by the shared default in
-// shared/tinyusb/tusb_config.h (RHPORT0 in FS device mode).
-
-// These families place OTG_HS on RHPORT1. Extend the list if a new family
-// also uses OTG_HS on RHPORT1 rather than RHPORT0.
-#if MICROPY_HW_USB_HS && (defined(STM32F4) || defined(STM32F7) || defined(STM32H7))
-#define CFG_TUSB_RHPORT0_MODE (OPT_MODE_NONE)
-#if MICROPY_HW_USB_HS_IN_FS
-#define CFG_TUSB_RHPORT1_MODE (OPT_MODE_DEVICE | OPT_MODE_FULL_SPEED)
-#else
-#define CFG_TUSB_RHPORT1_MODE (OPT_MODE_DEVICE | OPT_MODE_HIGH_SPEED)
-#endif
-#endif
+#include "tinyusb_port/tusb_rhport.h"
 
 #if defined(USB_HS_PHYC) && !defined(USB_HS_PHYC_PLL1_PLLSEL_Pos)
 // Providing missing definitions of USB_HS_PHYC_PLL1_PLLSEL constants, required by TinyUSB.

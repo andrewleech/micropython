@@ -50,42 +50,7 @@
 #include "shared/tinyusb/mp_usbd.h"
 #if MICROPY_HW_MBOOT_APP
 #include "shared/mboot/include/mboot_app.h"
-#include "mboot/mcuboot/port_stm32.h"
-#endif
-
-#if defined(STM32G0)
-// G0 has BOR and POR combined
-#define RCC_CSR_BORRSTF RCC_CSR_PWRRSTF
-#define RCC_CSR_PORRSTF RCC_CSR_PWRRSTF
-#endif
-
-#if defined(STM32H5) || defined(STM32N6)
-#define RCC_SR          RSR
-#define RCC_SR_IWDGRSTF RCC_RSR_IWDGRSTF
-#define RCC_SR_WWDGRSTF RCC_RSR_WWDGRSTF
-#define RCC_SR_BORRSTF  RCC_RSR_BORRSTF
-#define RCC_SR_PINRSTF  RCC_RSR_PINRSTF
-#define RCC_SR_RMVF     RCC_RSR_RMVF
-#elif defined(STM32H7)
-#define RCC_SR          RSR
-#define RCC_SR_IWDGRSTF RCC_RSR_IWDG1RSTF
-#define RCC_SR_WWDGRSTF RCC_RSR_WWDG1RSTF
-#define RCC_SR_PORRSTF  RCC_RSR_PORRSTF
-#define RCC_SR_BORRSTF  RCC_RSR_BORRSTF
-#define RCC_SR_PINRSTF  RCC_RSR_PINRSTF
-#define RCC_SR_RMVF     RCC_RSR_RMVF
-#else
-#define RCC_SR          CSR
-#define RCC_SR_IWDGRSTF RCC_CSR_IWDGRSTF
-#define RCC_SR_WWDGRSTF RCC_CSR_WWDGRSTF
-#if defined(RCC_CSR_PORRSTF)
-#define RCC_SR_PORRSTF  RCC_CSR_PORRSTF
-#endif
-#if defined(RCC_CSR_BORRSTF)
-#define RCC_SR_BORRSTF  RCC_CSR_BORRSTF
-#endif
-#define RCC_SR_PINRSTF  RCC_CSR_PINRSTF
-#define RCC_SR_RMVF     RCC_CSR_RMVF
+#include "shared/mboot/include/mboot_port.h"
 #endif
 
 #define PYB_RESET_SOFT      (0)
@@ -164,7 +129,7 @@ void machine_init(void) {
         uint32_t state = RCC->RCC_SR;
         #if MICROPY_HW_MBOOT_APP
         // The MCUboot bootloader clears the flags and hands them over in a backup register.
-        state = mboot_stm32_reset_flags_take(state);
+        state = mboot_reset_flags_take(state);
         #endif
         if (state & RCC_SR_IWDGRSTF || state & RCC_SR_WWDGRSTF) {
             reset_cause = PYB_RESET_WDT;

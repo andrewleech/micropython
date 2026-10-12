@@ -208,9 +208,9 @@ function ci_mboot_python_test {
 
 function ci_mboot_stm32_bootloader_build {
     make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI submodules
-    make ${MAKEOPTS} -C ports/stm32/mboot/mcuboot BOARD=NUCLEO_H563ZI
+    make ${MAKEOPTS} -C ports/stm32 -f Makefile.mboot BOARD=NUCLEO_H563ZI
     make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF6 submodules
-    make ${MAKEOPTS} -C ports/stm32/mboot/mcuboot BOARD=PYBD_SF6
+    make ${MAKEOPTS} -C ports/stm32 -f Makefile.mboot BOARD=PYBD_SF6
 }
 
 function ci_mboot_stm32_app_build {

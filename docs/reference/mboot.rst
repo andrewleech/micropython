@@ -23,7 +23,7 @@ Build the bootloader and application for the same board configuration. Their ima
 
 For the current STM32 integration, the following commands run from the repository root, with ``<board>`` replaced by a board configured for this bootloader::
 
-    make -C ports/stm32/mboot/mcuboot BOARD=<board>
+    make -C ports/stm32 -f Makefile.mboot BOARD=<board>
     make -C ports/stm32 BOARD=<board>
     make -C ports/stm32 BOARD=<board> initial
 

@@ -9,7 +9,7 @@ include $(TOP)/shared/mboot/mboot_rules.mk
 
 # The SRAM linker symbols; firmware.elf lists its prerequisites as link inputs, so the script is
 # order-only.
-include $(MBOOT_DEV_DIR)/mboot_sram.mk
+include $(TOP)/shared/mboot/mboot_sram.mk
 $(BUILD)/firmware.elf: | $(MBOOT_SRAM_LD)
 
 # Programming: the debug probe is always named by serial number, there is no default. The
