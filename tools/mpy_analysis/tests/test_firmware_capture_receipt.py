@@ -476,3 +476,171 @@ $(BUILD)/firmware.bin: $(BUILD)/firmware.elf
     }
     assert summary["link_closure"]["status"] == "incomplete"
     assert summary["firmware_completeness"] == "not-established"
+    for record in (
+        image["link"]["elf"],
+        image["link"]["map"],
+        archive["input"],
+    ):
+        path = Path(record["path"])
+        original = path.read_bytes()
+        path.write_bytes(original + b"stale")
+        with pytest.raises(ValueError, match="stale"):
+            validate_firmware_receipt(receipt)
+        path.write_bytes(original)
+
+    mismatched = json.loads(json.dumps(receipt))
+    mismatched["configuration"]["target"] = "wrong-target"
+    from mpy_analysis.firmware_capture_receipt import receipt_id
+
+    mismatched["receipt_id"] = receipt_id(mismatched)
+    with pytest.raises(ValueError, match="does not match SBOM scope"):
+        sbom.generate_sbom(inventory, micropython_root=mpy_root, build_receipt=mismatched)
+@pytest.mark.skipif(
+    not all(
+        shutil.which(tool)
+        for tool in ("make", "gcc", "g++", "as", "ld", "ar", "objcopy", "strip", "python3")
+    ),
+    reason="native GNU build tools are unavailable",
+)
+def test_duplicate_archive_member_names_fail_closed_in_capture(tmp_path):
+    root = tmp_path / "source"
+    source_root = root / "src"
+    make_dir = root / "make"
+    (source_root / "left").mkdir(parents=True)
+    (source_root / "right").mkdir()
+    make_dir.mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.email", "sbom-test@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.name", "SBOM Test"], check=True)
+    (source_root / "main.c").write_text("extern int value(void); int main(void) { return value(); }\n")
+    (source_root / "left" / "same.c").write_text("int value(void) { return 1; }\n")
+    (source_root / "right" / "same.c").write_text("int value(void) { return 2; }\n")
+    subprocess.run(["git", "-C", str(root), "add", "src"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "source"], check=True)
+    (make_dir / "Makefile").write_text(
+        """ROOT := $(abspath ..)
+
+.PHONY: all
+all: $(BUILD)/firmware.elf
+
+$(BUILD):
+\tmkdir -p $@
+
+$(BUILD)/main.o: $(ROOT)/src/main.c | $(BUILD)
+\t$(CC) -c $< -o $@
+
+$(BUILD)/left/same.o: $(ROOT)/src/left/same.c | $(BUILD)
+\tmkdir -p $(dir $@)
+\t$(CC) -c $< -o $@
+
+$(BUILD)/right/same.o: $(ROOT)/src/right/same.c | $(BUILD)
+\tmkdir -p $(dir $@)
+\t$(CC) -c $< -o $@
+
+$(BUILD)/libduplicate.a: $(BUILD)/left/same.o $(BUILD)/right/same.o
+\t$(AR) q $@ $^
+\t$(AR) s $@
+
+$(BUILD)/firmware.elf: $(BUILD)/main.o $(BUILD)/libduplicate.a
+\t$(CC) -nostdlib -Wl,-e,main -Wl,-Map=$(BUILD)/firmware.map -o $@ $^
+"""
+    )
+    build = tmp_path / "build"
+    receipt_path = tmp_path / "receipt.json"
+    assert capture_make(
+        micropython_root=root,
+        make_dir=make_dir,
+        build_dir=build,
+        journal=tmp_path / "actions.jsonl",
+        receipt_path=receipt_path,
+        elf=build / "firmware.elf",
+        map_file=build / "firmware.map",
+        image_id="native",
+        image_role="application",
+        build_id="c" * 64,
+        port="native",
+        target="native",
+        variant="duplicate-archive-member",
+        source_roots={"fixture": source_root},
+        cross_compile="",
+        variables=[],
+        targets=["all"],
+    ) == 0
+
+    receipt = json.loads(receipt_path.read_text())
+    image = receipt["images"][0]
+    archive = next(
+        item for item in image["link"]["operands"] if item["input"]["path"].endswith(".a")
+    )
+    assert archive["disposition"] == "unsupported"
+    assert archive["reason"] == "archive member inventory or source attribution could not be qualified"
+    assert receipt["status"] == "incomplete"
+
+
+@pytest.mark.skipif(
+    not all(
+        shutil.which(tool)
+        for tool in ("make", "gcc", "g++", "as", "ld", "ar", "objcopy", "strip", "python3")
+    ),
+    reason="native GNU build tools are unavailable",
+)
+def test_failed_deployment_transform_stays_out_of_receipt(tmp_path):
+    root = tmp_path / "source"
+    source_root = root / "src"
+    make_dir = root / "make"
+    source_root.mkdir(parents=True)
+    make_dir.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.email", "sbom-test@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.name", "SBOM Test"], check=True)
+    (source_root / "main.c").write_text("int main(void) { return 0; }\n")
+    subprocess.run(["git", "-C", str(root), "add", "src"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "source"], check=True)
+    (make_dir / "Makefile").write_text(
+        """ROOT := $(abspath ..)
+
+.PHONY: all
+all: $(BUILD)/firmware.bin
+
+$(BUILD):
+\tmkdir -p $@
+
+$(BUILD)/main.o: $(ROOT)/src/main.c | $(BUILD)
+\t$(CC) -c $< -o $@
+
+$(BUILD)/firmware.elf: $(BUILD)/main.o
+\t$(CC) -Wl,-Map=$(BUILD)/firmware.map -o $@ $^
+
+$(BUILD)/firmware.bin: $(BUILD)/firmware.elf
+\t$(OBJCOPY) --invalid-option $< $@
+"""
+    )
+    build = tmp_path / "build"
+    journal = tmp_path / "actions.jsonl"
+    receipt_path = tmp_path / "receipt.json"
+    result = capture_make(
+        micropython_root=root,
+        make_dir=make_dir,
+        build_dir=build,
+        journal=journal,
+        receipt_path=receipt_path,
+        elf=build / "firmware.elf",
+        map_file=build / "firmware.map",
+        image_id="native",
+        image_role="application",
+        build_id="d" * 64,
+        port="native",
+        target="native",
+        variant="failed-transform",
+        source_roots={"fixture": source_root},
+        cross_compile="",
+        variables=[],
+        targets=["all"],
+    )
+
+    events = [json.loads(line) for line in journal.read_text().splitlines()]
+    transforms = [event for event in events if event["kind"] == "transform"]
+    assert result != 0
+    assert len(transforms) == 1
+    assert transforms[0]["exit_code"] != 0
+    assert not receipt_path.exists()
