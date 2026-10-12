@@ -30,8 +30,9 @@
 
 int mboot_main(void);
 
-// Bootloader info block, placed in the last 64 bytes of the boot area by mboot.ld. The
-// application reads it through mboot_app_bootloader_info() and the layout check.
+// Bootloader info block, placed in the last 64 bytes of the boot area by the linker script
+// (section .mboot_info). The application reads it through mboot_app_bootloader_info() and the
+// layout check.
 typedef struct {
     uint32_t magic;
     uint16_t info_version;
@@ -58,15 +59,7 @@ __attribute__((section(".mboot_info"), used)) const mboot_bl_info_t mboot_bl_inf
     .reserved = {[0 ... 23] = 0xFF},
 };
 
+// The port's reset or start-up code calls main() once .data and .bss are initialised.
 int main(void) {
     return mboot_main();
-}
-
-// Entered from Reset_Handler in ports/stm32/resethandler.s, after .data and .bss have been
-// initialised. The value of r0 at reset is not used.
-void stm32_main(uint32_t r0) {
-    (void)r0;
-    main();
-    for (;;) {
-    }
 }

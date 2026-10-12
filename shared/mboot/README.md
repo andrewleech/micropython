@@ -6,7 +6,7 @@ Mboot is MicroPython's bootloader/update facility. MCUboot is the upstream engin
 
 ## Layout and ownership
 
-- `mboot_common.mk` selects sources and generates the board layout; `mboot_rules.mk` provides generation, signing and packaging rules.
+- `mboot_common.mk` selects sources and generates the board layout; `mboot_rules.mk` provides generation, signing and packaging rules; `mboot_bootloader.mk`, `mboot_bootloader.ld` and `mboot_sram.mk` build and link a bootloader on a GNU toolchain.
 - `include/` defines the `mboot_*` contracts, `MICROPY_MBOOT_*` shared feature settings and `MICROPY_HW_MBOOT_*` hardware configuration. `mcuboot_config/`, `flash_map_backend/`, `sysflash/` and `os/` retain the include names required by bootutil. Exact upstream `MCUBOOT_*` switches remain engine configuration, translated from product choices where needed.
 - `src/` implements boot flow, signed-update validation and policy, flash access, application handoff, filesystem loading and the shared bounded element parser.
 - `dfu/core/` implements portable flash dispatch, region handling and TinyUSB callbacks. `dfu/include/` is its transport contract; `dfu/tests/test_pydfu_wire.py` checks the independent pydfu wire format. See [DFU transport details](dfu/README.md).
@@ -15,9 +15,15 @@ The bounded element parser is `src/mboot_elem.c` and `include/mboot_elem.h`. Fil
 
 The DFU policy contract is `include/mboot_dfu_recovery.h` with `mboot_dfu_recovery_*` entrypoints, distinct from the transport's `dfu/include/mboot_dfu.h` and `mboot_dfu_*` dispatch functions. Device-relative flash operations use `mboot_port_flash_dev_*`; transport address-relative operations use `mboot_port_flash_*`. The binding enforces the generated write ranges before accessing flash.
 
+## Porting
+
+A port provides the functions of `include/mboot_port.h`, `mboot_dev.h` (the flash geometry, read through `include/mboot_layout.h`), `mboot_sram.ld.S` (the SRAM bounds) and a bootloader Makefile that includes `mboot_common.mk` and `mboot_bootloader.mk`. What does not depend on the MCU is shared. `src/flash_internal.c` is the policy for a memory mapped internal flash, on two controller primitives of the port. `src/ecc.c` counts flash ECC events from two controller flags. `src/backup_words.c` keeps the handoff word and the reset flags in the words behind `mboot_port_bkp_read/write()`. `src/fault.c` is the Cortex-M fault policy and `src/boot_info.c` the info block and `main()`.
+
+A port should implement the rest on the services its application already has, not beside them. The STM32 port (`ports/stm32/mboot_port.c`, `mboot_boot.c`) runs the bootloader on `SystemClock_Config()` with the board's `MICROPY_HW_CLK_*` values, the HAL tick, `mp_hal_pin_config()`, `mp_usbd_ll_init()` and `flash.c`, so a board needs no bootloader specific clock, pin or USB settings.
+
 ## STM32 builds
 
-The STM32 bootloader is built with `make -C ports/stm32/mboot/mcuboot BOARD=NUCLEO_H563ZI`. Its application is built with `make -C ports/stm32 BOARD=NUCLEO_H563ZI`. NUCLEO_H563ZI and PYBD_SF6 configure Mboot applications by default; PYBD_SF6 supports the single-slot policy.
+The STM32 bootloader is built with `make -C ports/stm32 -f Makefile.mboot BOARD=NUCLEO_H563ZI`. Its application is built with `make -C ports/stm32 BOARD=NUCLEO_H563ZI`. NUCLEO_H563ZI and PYBD_SF6 configure Mboot applications by default; PYBD_SF6 supports the single-slot policy.
 
 `tools/ci.sh mboot_setup` initializes MCUboot, STM32/CMSIS, Mbed TLS and TinyUSB dependencies for production bootloader/application builds. Production CI builds the STM32 targets and runs the independent pydfu wire check.
 

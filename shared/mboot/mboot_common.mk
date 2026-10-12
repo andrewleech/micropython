@@ -1,6 +1,6 @@
 # mboot_common.mk - build fragment for shared/mboot.
 #
-# Included by ports/<port>/mboot/mcuboot/Makefile (MBOOT_ROLE=bootloader) and by the port's
+# Included by the port's bootloader Makefile (MBOOT_ROLE=bootloader) and by the port's
 # app Makefile through the board configuration (MBOOT_ROLE=app):
 #
 #   include $(TOP)/shared/mboot/mboot_common.mk
@@ -125,9 +125,9 @@ MBOOT_DFU_DIR := shared/mboot/dfu
 MBOOT_TINYUSB_SRC_C :=
 
 # Flash map, flash access policy, logging, request handoff and the update slot
-# session, in both roles. shadow.c has no code without the ECC policy.
+# session, in both roles. shadow.c and ecc.c have no code without the ECC policy.
 MBOOT_GLUE_SRC_C := $(addprefix $(MBOOT_SRC_DIR)/, \
-    flash_map.c flash_map_backend.c shadow.c record_ring.c request.c update.c mboot_crc32.c log.c printf_lite.c)
+    flash_map.c flash_map_backend.c flash_internal.c shadow.c ecc.c backup_words.c record_ring.c request.c update.c mboot_crc32.c log.c printf_lite.c)
 
 # A SPI flash as device 1 is driven through drivers/memory/spiflash.c, which the port provides.
 ifeq ($(MBOOT_SPIFLASH_ENABLE),1)
@@ -144,7 +144,7 @@ MBOOT_BOOTUTIL_SRC_C := $(addprefix $(MBOOT_BU_DIR)/, \
     tlv.c bootutil_find_key.c bootutil_img_hash.c bootutil_img_security_cnt.c image_validate.c \
     image_ecdsa.c bootutil_misc.c bootutil_area.c bootutil_loader.c bootutil_public.c \
     fault_injection_hardening.c)
-MBOOT_GLUE_SRC_C += $(addprefix $(MBOOT_SRC_DIR)/, security_cnt.c seccnt_flash.c arm_jump.c)
+MBOOT_GLUE_SRC_C += $(addprefix $(MBOOT_SRC_DIR)/, security_cnt.c seccnt_flash.c arm_jump.c fault.c boot_info.c)
 ifeq ($(MBOOT_FIH),high)
 MBOOT_GLUE_SRC_C += $(MBOOT_SRC_DIR)/fih_delay_rng.c
 endif

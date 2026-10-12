@@ -1,8 +1,8 @@
 /*
- * Linker script of the STM32H5 MCUboot bootloader.
+ * Linker script of the Mboot bootloader for ARM Cortex-M ports.
  *
  * The flash addresses come from the board layout, mboot_layout.ld, and the SRAM addresses from
- * mboot_sram.ld (generated from mboot_sram.ld.S). Both must be passed to the linker before
+ * mboot_sram.ld (generated from the port's mboot_sram.ld.S). Both must be passed to the linker before
  * this script. The bootloader owns the boot area from MBOOT_BOOT_START; the last 64 bytes hold
  * the info block (section .mboot_info). Its RAM is a window at the start of SRAM. The RAM above
  * the window, up to the request region, is unused; an application may point the status word of

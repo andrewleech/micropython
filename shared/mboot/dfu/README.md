@@ -3,7 +3,7 @@
 shared/mboot/dfu - port-agnostic DFU 1.1 bootloader core
 =============================================================
 
-The flash-facing part of a TinyUSB DFU 1.1 bootloader: region and alt-setting handling, DNLOAD/UPLOAD flash dispatch, a vendor erase request and the TinyUSB device callbacks. The binding in `shared/mboot/src/dfu_glue.c` connects the core to Mboot's generated flash map and signed-update policy for `ports/stm32/mboot/mcuboot`. MCUboot supplies image validation and swap/revert; the transport and policy glue are MicroPython-owned.
+The flash-facing part of a TinyUSB DFU 1.1 bootloader: region and alt-setting handling, DNLOAD/UPLOAD flash dispatch, a vendor erase request and the TinyUSB device callbacks. The binding in `shared/mboot/src/dfu_glue.c` connects the core to Mboot's generated flash map and signed-update policy for `ports/stm32` (`Makefile.mboot`). MCUboot supplies image validation and swap/revert; the transport and policy glue are MicroPython-owned.
 
 Layout
 ------

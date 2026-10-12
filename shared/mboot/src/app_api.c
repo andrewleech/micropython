@@ -52,7 +52,7 @@ _Static_assert(MBOOT_APP_ELEMS_MAX == MBOOT_REQ_ELEMS_MAX, "element stream limit
 _Static_assert(MBOOT_APP_WRITER_CHUNK % 32 == 0, "writer chunk is a multiple of every write unit");
 
 // Info block in the last 64 bytes of the bootloader area, as placed by the bootloader build
-// (ports/stm32/mboot/mcuboot/main.c).
+// (shared/mboot/src/boot_info.c).
 #define BL_INFO_SIZE        64
 #define BL_INFO_MAGIC       0x4E49424Du
 #define BL_INFO_VERSION     1

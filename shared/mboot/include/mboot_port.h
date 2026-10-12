@@ -156,15 +156,48 @@ bool mboot_port_entry_forced(void);
 // (HardFault, an NMI that is not a flash ECC event, ...) caused since the bootloader last handed
 // over to the application. The port clears it in mboot_port_deinit(). At 3 the main flow stops
 // running boot_go() and enters recovery with cause REC_FAULT: the bootloader stays in DFU instead of
-// resetting again. A weak default in boot_main.c returns 0.
+// resetting again. fault.c implements it for Cortex-M ports, and a weak default in boot_main.c
+// returns 0.
 uint32_t mboot_port_fault_resets(void);
 
-// both. Word that survives every reset except power loss (STM32 TAMP BKPxR). A register narrower
-// than 32 bits keeps only the low MICROPY_HW_MBOOT_RETENTION_BITS of the value, see mboot_request.h.
-// Also the no-init RAM request region below.
+// ---- backup words (both) ----
+//
+// Words that survive every reset except power loss (STM32 TAMP or RTC BKPxR). backup_words.c
+// keeps the handoff word of mboot_request.h, the reset flags handoff and, in the bootloader,
+// the count of fault resets in them. A register narrower than 32 bits keeps only the low
+// MICROPY_HW_MBOOT_RETENTION_BITS of the handoff word, see mboot_request.h.
+enum {
+    MBOOT_BKP_RETENTION,            // handoff word
+    MBOOT_BKP_FAULTS,               // consecutive fault resets
+    MBOOT_BKP_RESET_FLAGS,          // reset flags for the application
+    MBOOT_BKP_RESET_FLAGS_CHECK,    // validity check of the reset flags
+    MBOOT_BKP_COUNT,
+};
+uint32_t mboot_port_bkp_read(unsigned idx);
+void     mboot_port_bkp_write(unsigned idx, uint32_t v);
+
 uint32_t mboot_port_retention_read(void);
 void     mboot_port_retention_write(uint32_t v);
 void *mboot_port_request_ram(size_t *size_out);      // returns (void *)MBOOT_REQ_START and 0x400
+
+// bootloader. Keeps the reset flags of the reset that started it for the application, which finds
+// the hardware flags cleared: raw is the hardware reset status register of the port, cause
+// MBOOT_RESET_*. A software reset does not replace the flags of an earlier reset that no
+// application has taken yet (the bootloader resets itself after a DFU session or an fsload).
+void mboot_reset_flags_stash(uint32_t raw, uint32_t cause);
+// application, once at start. Returns the stashed flags and consumes them, or current when there
+// are none.
+uint32_t mboot_reset_flags_take(uint32_t current);
+
+// bootloader, Cortex-M, fault.c. Enables the MemManage, BusFault, UsageFault (and SecureFault)
+// exceptions, so that a fault is reported by its own handler rather than as a HardFault, and
+// disables them again for the application. The handlers log the fault and reset, counted by
+// mboot_port_fault_resets(). mboot_fault_count_clear() resets the count.
+void mboot_fault_enable(void);
+void mboot_fault_disable(void);
+void mboot_fault_count_clear(void);
+// Logs msg and resets as a fault does, for a failure that the port cannot continue from.
+MBOOT_NORETURN void mboot_fault_fatal(const char *msg);
 
 // ---- flash device access (device-relative offsets; role specific implementation) ----
 //
@@ -182,6 +215,20 @@ int mboot_port_flash_dev_init(void);                                       // bo
 int mboot_port_flash_dev_read(uint8_t dev, uint32_t off, void *dst, uint32_t len);
 int mboot_port_flash_dev_write(uint8_t dev, uint32_t off, const void *src, uint32_t len);
 int mboot_port_flash_dev_erase(uint8_t dev, uint32_t off, uint32_t len);
+
+// Policy for a memory mapped internal flash that is device 0 of the flash map (flash_internal.c),
+// on the controller primitives of the port. A port's mboot_port_flash_dev_* calls these for
+// device 0. Offsets and lengths are as above.
+int mboot_flash_internal_read(uint32_t off, void *dst, uint32_t len);
+int mboot_flash_internal_write(uint32_t off, const void *src, uint32_t len);
+int mboot_flash_internal_erase(uint32_t off, uint32_t len);
+// Erases the sector that starts at device 0 offset off.
+int mboot_port_flash_erase_sector(uint32_t off);
+// Programs one write unit of device 0 at offset off from w. The unit is erased.
+int mboot_port_flash_program_unit(uint32_t off, const uint32_t *w);
+// Called before a read of device 0 that has to report ECC errors, so that no cache hides them.
+// Both primitives above leave the caches without stale flash content. 0 or a negative errno.
+int mboot_port_flash_cache_prepare(void);
 
 // ---- USB (bootloader, only if MICROPY_MBOOT_DFU) ----
 int mboot_port_usb_init(void);         // clocks, PHY, pins, NVIC for the USB IRQ; 0, or a negative errno if the clock or PHY does not start (logged, error LED shown). The port file also defines the ISR that calls tusb_int_handler()
@@ -204,12 +251,22 @@ int mboot_port_seccnt_lock(uint32_t image_id);                      // optional;
 uint8_t mboot_port_entropy_u8(void);
 
 // ---- ECC flash (only if a device has MBOOT_DEVn_ECC = 1) ----
-uint32_t mboot_port_ecc_events(void);   // count of ECC double-error events, incremented by the NMI handler
-void     mboot_port_ecc_clear(void);    // clear the controller's ECC error flag
-// A word that a power cut left partly programmed can also read as "corrected" (a single-bit ECC
-// correction, possibly with wrong data) without a double-error event. This counts every such read.
-// A port whose controller has no correction flag need not define it (the weak default in
-// flash_map_backend.c returns 0).
-uint32_t mboot_port_ecc_corrected(void);
+//
+// ecc.c counts the events from the two flags that the controller of the port reports. The NMI of
+// a double error calls mboot_ecc_nmi(), in the bootloader from fault.c, in the application from
+// the port's NMI handler.
+// Reads and clears the double error flag of the controller. True if it was set, and then *info
+// is the value of its status register for diagnostics.
+bool mboot_port_ecc_detect_take(uint32_t *info);
+// Reads and clears the correction flag. A word that a power cut left partly programmed can read
+// as "corrected" (a single-bit ECC correction, possibly with wrong data) without a double error.
+// A port whose controller has no correction flag returns false.
+bool mboot_port_ecc_corrected_take(void);
+
+bool mboot_ecc_nmi(void);               // NMI handler: counts and clears a pending double error, true if there was one
+uint32_t mboot_ecc_last_info(void);     // info of the last double error
+uint32_t mboot_port_ecc_events(void);   // count of ECC double-error events
+void     mboot_port_ecc_clear(void);    // consume a pending double-error flag
+uint32_t mboot_port_ecc_corrected(void);// count of "corrected" reads
 
 #endif
