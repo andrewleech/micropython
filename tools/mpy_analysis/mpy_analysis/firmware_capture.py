@@ -257,7 +257,11 @@ def run_tool(role: str, executable: Path, argv: list[str], *, journal: Path, ima
     result = subprocess.run([str(executable), *argv])
     after_inputs = _action_inputs(role, kind, argv, cwd)
     after = {item["path"]: item["sha256"] for item in after_inputs}
-    changed_inputs = sorted(path for path, digest in before.items() if after.get(path) != digest)
+    outputs = _action_outputs(role, kind, argv, cwd) if result.returncode == 0 else []
+    in_place = {item["path"] for item in outputs} if kind == "transform" else set()
+    changed_inputs = sorted(
+        path for path, digest in before.items() if after.get(path) != digest and path not in in_place
+    )
     captured_paths = set(before)
     post_action_dependencies = []
     for item in after_inputs:
@@ -265,7 +269,6 @@ def run_tool(role: str, executable: Path, argv: list[str], *, journal: Path, ima
             inputs.append(item)
             post_action_dependencies.append(item["path"])
             captured_paths.add(item["path"])
-    outputs = _action_outputs(role, kind, argv, cwd) if result.returncode == 0 else []
     dependency_evidence = _depfile_evidence(argv, cwd) if result.returncode == 0 else []
     _append_event(
         journal,

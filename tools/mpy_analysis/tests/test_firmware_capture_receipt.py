@@ -787,3 +787,27 @@ $(BUILD)/firmware.bin: $(BUILD)/firmware.elf
     assert len(transforms) == 1
     assert transforms[0]["exit_code"] != 0
     assert not receipt_path.exists()
+
+
+def test_in_place_transform_is_not_reported_as_input_mutation(tmp_path, monkeypatch):
+    from mpy_analysis.firmware_capture import run_tool
+
+    image = tmp_path / "firmware.elf"
+    image.write_bytes(b"before")
+    tool = tmp_path / "strip"
+    tool.write_text("#!/bin/sh\nprintf after > \"$1\"\n")
+    tool.chmod(0o755)
+    journal = tmp_path / "actions.jsonl"
+    monkeypatch.chdir(tmp_path)
+
+    assert run_tool("strip", tool, [str(image)], journal=journal, image_id="x", build_id="a" * 64) == 0
+    event = json.loads(journal.read_text())
+    assert event["kind"] == "transform"
+    assert event["changed_inputs_during_action"] == []
+    assert event["outputs"][0]["sha256"] == hashlib.sha256(b"after").hexdigest()
+
+    other = tmp_path / "source.c"
+    other.write_text("x")
+    tool.write_text("#!/bin/sh\nprintf y > \"$2\"\nprintf z > \"$1\"\n")
+    run_tool("strip", tool, [str(image), str(other)], journal=journal, image_id="x", build_id="a" * 64)
+    assert json.loads(journal.read_text().splitlines()[-1])["changed_inputs_during_action"] == [str(image)]
