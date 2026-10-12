@@ -33,7 +33,11 @@ def function(variables=(), writes=(), calls=(), controls=()):
 
 
 def parameters(roots):
-    return [root['parameter'] for root in roots]
+    return list(roots)
+
+
+def reference_parameters(references):
+    return [reference['parameter'] for reference in references]
 
 
 def test_local_strict_boundaries_shadowing_and_first_tie():
@@ -52,22 +56,20 @@ def test_local_strict_boundaries_shadowing_and_first_tie():
     assert _local(context, 'missing', {'byte_start': 20}) is None
 
 
-def test_roots_keep_initializer_write_order_and_controlling_multiplicity():
+def test_roots_keep_initializer_write_order_and_report_each_root_once():
     local = variable('a', 2, identifier('q'))
     assignments = [write('a', 10, identifier('p')), write('a', 15, identifier('q'))]
     control = {'control_kind': 'while_statement', 'expression_node': identifier('a'),
                'byte_start': 30, 'byte_end': 31, 'guards': [], 'source_span': span(30)}
     context = _QueryFunction(function([local], assignments, controls=[control]))
-    assert parameters(_input_parameter_roots(context, control['expression_node'], control)) == [1, 0, 1]
-    assert parameters(_input_parameter_roots(context, control['expression_node'], control, unique=True)) == [1, 0]
-    assert parameters(_input_parameter_roots(context, control['expression_node'], control)) == [1, 0, 1]
+    assert parameters(_input_parameter_roots(context, control['expression_node'], control)) == [1, 0]
     uses = _input_uses(context, lambda event: True)
     controlling = [use for use in uses if use.get('reason') ==
                    'native controlling-expression test requires an accepted-domain proof']
-    assert parameters([use['source_ref'] for use in controlling]) == [1, 0, 1]
+    assert reference_parameters([use['source_ref'] for use in controlling]) == [1, 0]
 
 
-def test_call_consumers_keep_first_root_order_without_controlling_deduplication():
+def test_call_consumers_and_controlling_tests_keep_first_root_order():
     local = variable('a', 2, identifier('q'))
     assignments = [write('a', 10, identifier('p')), write('a', 15, identifier('q'))]
     node = identifier('a')
@@ -80,8 +82,8 @@ def test_call_consumers_keep_first_root_order_without_controlling_deduplication(
     operands = [use['source_ref'] for use in uses if use.get('helper') == 'consume']
     controlling = [use['source_ref'] for use in uses if use.get('reason') ==
                    'native controlling-expression test requires an accepted-domain proof']
-    assert parameters(operands) == [1, 0]
-    assert parameters(controlling) == [1, 0, 1]
+    assert reference_parameters(operands) == [1, 0]
+    assert reference_parameters(controlling) == [1, 0]
 
 
 def test_root_memo_distinguishes_guards_and_use_end():
@@ -123,10 +125,10 @@ def test_indirect_write_binding_index_preserves_order():
     indirect = {'kind': 'pointer_expression', 'expression': '* ptr', 'argument': identifier('ptr')}
     writes = [write('a', 10, identifier('q')), write('* ptr', 12, identifier('p'), target_node=indirect)]
     context = _QueryFunction(function([local, pointer], writes))
-    # The alias path reaches p; its in-interval indirect store emits p again before cycle stopping.
+    # The alias path reaches p, so the in-interval indirect store contributes its value roots.
     assert _input_binding_mention(context, indirect, writes[1], 'p', None)
-    assert parameters(_input_parameter_roots(context, writes[1]['value_node'], writes[1])) == [0, 0]
-    assert parameters(_input_parameter_roots(context, identifier('a'), {'byte_start': 20})) == [0, 1, 0, 0]
+    assert parameters(_input_parameter_roots(context, writes[1]['value_node'], writes[1])) == [0]
+    assert parameters(_input_parameter_roots(context, identifier('a'), {'byte_start': 20})) == [0, 1]
 
 
 def test_cycle_seen_and_depth_cutoff_keep_distinct_answers():
@@ -134,15 +136,15 @@ def test_cycle_seen_and_depth_cutoff_keep_distinct_answers():
     context = _QueryFunction(function([local], [write('a', 10, identifier('a'))]))
     node, use = identifier('a'), {'byte_start': 20}
     assert parameters(_input_parameter_roots(context, node, use)) == [0]
-    assert _input_parameter_roots(context, node, use, seen=(('a', 'a:2'),)) == []
-    assert parameters(_input_parameter_roots(context, node, use, depth=15)) == [0, 1, 0, 1]
+    assert _input_parameter_roots(context, node, use, seen=(('a', 'a:2'),)) == ()
+    assert parameters(_input_parameter_roots(context, node, use, depth=15)) == [0, 1]
     assert parameters(_input_parameter_roots(context, node, use, depth=16)) == [0, 1]
-    assert _input_parameter_roots(context, {}, use, depth=16) == []
+    assert _input_parameter_roots(context, {}, use, depth=16) == ()
     assert parameters(_input_parameter_roots(context, identifier('p'), use, seen=(('p', None),))) == [0]
     assert _input_binding_mention(context, node, use, 'a', 'a:2', seen=(('a', 'a:2'),))
     seen = (('unrelated', None), ('a', 'a:2'))
-    assert _input_parameter_roots(context, node, use, seen=seen) == []
-    assert _input_parameter_roots(context, node, use, seen=tuple(reversed(seen))) == []
+    assert _input_parameter_roots(context, node, use, seen=seen) == ()
+    assert _input_parameter_roots(context, node, use, seen=tuple(reversed(seen))) == ()
 
 
 def test_consumer_analysis_does_not_change_evidence():
@@ -159,7 +161,51 @@ def test_only_reachable_ancestry_can_block_provenance():
     node, use = identifier('a'), {'byte_start': 20}
     assert parameters(_input_parameter_roots(context, node, use, seen=(('unrelated', None),))) == [0]
     assert parameters(_input_parameter_roots(context, node, use, seen=(('another', None),))) == [0]
-    assert _input_parameter_roots(context, node, use, seen=(('b', 'b:2'),)) == []
+    assert _input_parameter_roots(context, node, use, seen=(('b', 'b:2'),)) == ()
     assert parameters(_input_parameter_roots(context, node, use, seen=(('b', 'b:2'),), depth=15)) == [0, 1]
     assert _input_binding_mention(context, node, use, 'p', None, seen=(('unrelated', None),))
     assert not _input_binding_mention(context, node, use, 'p', None, seen=(('b', 'b:2'),))
+
+
+def test_indirect_store_admissions_do_not_multiply_controlling_rows():
+    base = variable('b', 2, identifier('p'))
+    allocation = {'kind': 'call_expression', 'expression': 'alloc ( b ? 1 : 0 )',
+                  'arguments': {'kind': 'argument_list', 'children': [identifier('b')]}}
+    slots = variable('o', 4, allocation)
+    stores = [write('* o', 10 + 2 * index, identifier('q' if index % 2 else 'b'),
+                    target_node={'kind': 'field_expression', 'operator': '->', 'expression': 'o -> f',
+                                 'argument': identifier('o')})
+              for index in range(12)]
+    control = {'control_kind': 'if_statement', 'expression_node': identifier('b'),
+               'byte_start': 60, 'byte_end': 61, 'guards': [], 'source_span': span(60)}
+    context = _QueryFunction(function([base, slots], stores, controls=[control]))
+    assert parameters(_input_parameter_roots(context, control['expression_node'], control)) == [0, 1]
+    controlling = [use['source_ref'] for use in _input_uses(context, lambda event: True)
+                   if use.get('reason') == 'native controlling-expression test requires an accepted-domain proof']
+    assert reference_parameters(controlling) == [0, 1]
+
+
+def test_repeated_root_queries_return_the_memoised_tuple():
+    local = variable('a', 2, identifier('p'))
+    assignments = [write('a', 10 + index, identifier('q' if index % 2 else 'p')) for index in range(40)]
+    context = _QueryFunction(function([local], assignments))
+    node, use = identifier('a'), {'byte_start': 100}
+    roots = _input_parameter_roots(context, node, use)
+    assert roots == (0, 1)
+    assert _input_parameter_roots(context, node, use) is roots
+
+
+def test_input_uses_are_distinct_by_value_across_overlapping_events():
+    local = variable('a', 2, identifier('p'))
+    operation = {'kind': 'binary_expression', 'expression': 'a + 1', 'left': identifier('a'),
+                 'right': {'kind': 'number_literal', 'expression': '1'}}
+    then = {'condition_id': 5, 'condition': 'flag', 'branch': 'then'}
+
+    def view(guards):
+        return {'expression_node': operation, 'byte_start': 20, 'byte_end': 25, 'guards': list(guards),
+                'source_span': span(20)}
+    evidence = function([local])
+    evidence['events']['expressions'] = [view([then]), view([then]), view([])]
+    uses = _input_uses(evidence, lambda event: True)
+    derived = [use for use in uses if use.get('reason') == 'non-call derived operation requires an accepted-domain proof']
+    assert [(use['source_ref']['parameter'], use['guards']) for use in derived] == [(0, [then]), (0, [])]
