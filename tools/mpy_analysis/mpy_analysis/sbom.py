@@ -253,6 +253,79 @@ def _generator_input(builder: _Builder, binding: tuple[str, str]) -> str | None:
     )
 
 
+def _system_package_components(builder: _Builder, link: dict[str, Any]) -> set[str]:
+    """Add one component per installed package that supplied linked files.
+
+    Package identity comes from the package database record captured with the receipt;
+    each linked file is a nested file component with its SHA-256 and linkage.
+    """
+    files: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+    packages: dict[tuple[str, ...], dict[str, Any]] = {}
+
+    def collect(package: dict[str, Any], path: str, sha256: str, linkage: str, members: list[str]) -> None:
+        key = (package["manager"], package["name"], package["version"], package["architecture"])
+        packages[key] = package
+        files.setdefault(key, []).append(
+            {
+                "type": "file",
+                "name": path,
+                "hashes": [{"alg": "SHA-256", "content": sha256}],
+                "properties": _properties(
+                    {
+                        "linkage": linkage,
+                        "package-md5sum": package["md5sum"],
+                        "contributing-members": members or None,
+                    }
+                ),
+            }
+        )
+
+    for operand in link["operands"]:
+        if operand["disposition"] == "contributed" and "system_package" in operand:
+            collect(
+                operand["system_package"],
+                operand["input"]["path"],
+                operand["input"]["sha256"],
+                "static",
+                operand["contributing_members"],
+            )
+    for entry in link.get("implicit_inputs", []):
+        if entry["disposition"] == "contributed":
+            collect(
+                entry["package"],
+                entry["path"],
+                entry["sha256"],
+                entry["linkage"],
+                entry.get("contributing_members", []),
+            )
+    references = set()
+    for key, package in sorted(packages.items()):
+        distro = package["distro"]
+        purl = f"pkg:deb/{quote(distro['id'], safe='')}/{quote(package['name'], safe='')}@{quote(package['version'], safe='~')}"
+        qualifiers = [f"arch={quote(package['architecture'], safe='')}"] if package["architecture"] else []
+        if distro["id"] and distro["version_id"]:
+            qualifiers.append(f"distro={quote(distro['id'] + '-' + distro['version_id'], safe='')}")
+        component = {
+            "type": "library",
+            "name": package["name"],
+            "version": package["version"],
+            "components": sorted(files[key], key=lambda item: item["name"]),
+            "properties": _properties(
+                {
+                    "package-manager": package["manager"],
+                    "package-architecture": package["architecture"] or None,
+                    "selection": "linked-system-package",
+                }
+            ),
+        }
+        if distro["id"]:
+            component["purl"] = purl + ("?" + "&".join(qualifiers) if qualifiers else "")
+        if package["maintainer"]:
+            component["supplier"] = {"name": package["maintainer"]}
+        references.add(builder.add("system-package", list(key), component))
+    return references
+
+
 def _attach_firmware_images(
     receipt: dict[str, Any],
     scope: dict[str, Any],
@@ -381,6 +454,7 @@ def _attach_firmware_images(
                 },
             )
             mapped.add(library)
+        mapped.update(_system_package_components(builder, link))
         builder.dependencies[reference] = mapped
         root_dependencies.add(reference)
         images.append(

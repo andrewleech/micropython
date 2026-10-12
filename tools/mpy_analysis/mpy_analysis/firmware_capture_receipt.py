@@ -12,6 +12,7 @@ from typing import Any
 
 from .firmware_receipt import receipt_id, validate_firmware_receipt
 from .gnu_map import parse_gnu_map
+from .system_packages import identify_system_file
 
 
 def _digest(path: Path) -> str:
@@ -164,6 +165,74 @@ def _within_toolchain(path: str, toolchain: dict[tuple[str, str], dict[str, Any]
         return False
     prefix = Path(compilers[0]["path"]).resolve().parent.parent
     return Path(path).resolve().is_relative_to(prefix)
+
+
+def _system_package(path: str) -> tuple[dict[str, Any] | None, str | None]:
+    return identify_system_file(path)
+
+
+def _implicit_input(
+    path: str,
+    *,
+    allocated: set[str],
+    archive_members: dict[str, set[str]],
+    as_needed: list[dict[str, str]],
+    matched: set[int],
+) -> tuple[dict[str, Any] | None, str]:
+    """Account for a file the linker loaded that was not a captured link operand.
+
+    Contributing files must be owned by an installed package; files that contribute nothing
+    are recorded with their hash only.
+    """
+    file = Path(path)
+    if not file.is_file():
+        return None, "GNU map LOAD input is not a regular file"
+    entry: dict[str, Any] = {
+        "path": path,
+        "sha256": _digest(file),
+        "origin": "gnu-map-load",
+        "evidence": "GNU ld map LOAD record without a captured link command operand",
+    }
+    suffix = file.suffix.lower()
+    head = file.read_bytes()[:4]
+    needed = [
+        index
+        for index, item in enumerate(as_needed)
+        if "name" in item and (file.parent / item["name"]).resolve() == file
+    ]
+    if suffix in (".o", ".obj"):
+        entry["kind"] = "object"
+        contributes = path in allocated
+        entry["linkage"] = "static"
+    elif suffix in (".a", ".lib"):
+        entry["kind"] = "archive"
+        contributes = path in archive_members
+        entry["linkage"] = "static"
+        if contributes:
+            entry["contributing_members"] = sorted(archive_members[path])
+    elif head == b"\x7fELF":
+        entry["kind"] = "shared-library"
+        contributes = bool(needed)
+        entry["linkage"] = "dynamic"
+        matched.update(needed)
+    else:
+        entry["kind"] = "script"
+        contributes = False
+    if not contributes:
+        entry["disposition"] = "no-contribution"
+        entry.pop("linkage", None)
+        entry["reason"] = (
+            "linker script"
+            if entry["kind"] == "script"
+            else "GNU ld records no allocated sections or as-needed reference for this input"
+        )
+        return entry, ""
+    package, failure = _system_package(path)
+    if package is None:
+        return None, f"GNU map LOAD input contributes but has no verified package identity: {failure}"
+    entry["disposition"] = "contributed"
+    entry["package"] = package
+    return entry, ""
 
 
 def _archive_members(
@@ -468,13 +537,21 @@ def receipt_from_journal(
             if path not in link_inputs:
                 map_only_loads.add(path)
     operands = []
-    unresolved = [
-        {
-            "path": path,
-            "reason": "GNU map LOAD input was not captured as a link action operand",
-        }
-        for path in sorted(map_only_loads)
-    ]
+    unresolved = []
+    implicit_inputs = []
+    as_needed_matched = set()
+    for path in sorted(map_only_loads):
+        entry, failure = _implicit_input(
+            path,
+            allocated=allocated,
+            archive_members=toolchain_archive_members,
+            as_needed=parsed["as_needed_libraries"] if parsed is not None else [],
+            matched=as_needed_matched,
+        )
+        if entry is not None:
+            implicit_inputs.append(entry)
+        else:
+            unresolved.append({"path": path, "reason": failure})
     consumed_paths = [
         Path(item["path"])
         for action in actions
@@ -495,7 +572,8 @@ def receipt_from_journal(
                 "path": item.get("name", item.get("raw", "unknown as-needed library")),
                 "reason": "GNU map identifies an as-needed library without a resolved link input",
             }
-            for item in parsed["as_needed_libraries"]
+            for index, item in enumerate(parsed["as_needed_libraries"])
+            if index not in as_needed_matched
         )
     archive_actions = {}
     for action in actions:
@@ -582,6 +660,15 @@ def receipt_from_journal(
                 "toolchain": {"role": "cc", "executable": {"path": compiler["path"], "sha256": compiler["sha256"]}},
                 "contributing_members": sorted(toolchain_archive_members[path]),
                 "evidence": "GNU ld map allocates sections from this archive under the captured compiler installation",
+            }
+        elif suffix in (".a", ".lib") and path in toolchain_archive_members and _system_package(path)[0]:
+            operand = {
+                "kind": "library",
+                "input": input_record,
+                "disposition": "contributed",
+                "system_package": _system_package(path)[0],
+                "contributing_members": sorted(toolchain_archive_members[path]),
+                "evidence": "GNU ld map allocates sections from this archive; installed package database owns the file",
             }
         else:
             reason = "system library, response file or prebuilt input lacks qualified source accounting"
@@ -687,6 +774,7 @@ def receipt_from_journal(
             "map": map_record,
             "operands": operands,
             "discarded_sections": discarded,
+            "implicit_inputs": implicit_inputs,
             "unresolved": unresolved_rows,
             "lto": lto,
         },

@@ -49,6 +49,7 @@ def test_captured_gnu_build_emits_exact_incomplete_receipt(tmp_path):
         "Discarded input sections\n\n"
         "Linker script and memory map\n"
         f" .text.main 0x08000000 0x00000010 {obj['path']}\n"
+        f" .init 0x08000100 0x00000004 {system_obj['path']}\n"
     )
     map_file = _record(build / "firmware.map", map_text.encode(), "map")
     build_id = "a" * 64
@@ -156,10 +157,11 @@ def test_captured_gnu_build_emits_exact_incomplete_receipt(tmp_path):
     assert image["link"]["status"] == "incomplete"
     assert image["link"]["operands"][0]["disposition"] == "contributed"
     assert image["link"]["linker_format"] == "gnu-ld-map"
-    assert {
-        "path": system_obj["path"],
-        "reason": "GNU map LOAD input was not captured as a link action operand",
-    } in image["link"]["unresolved"]
+    assert any(
+        item["path"] == system_obj["path"]
+        and item["reason"].startswith("GNU map LOAD input contributes but has no verified package identity")
+        for item in image["link"]["unresolved"]
+    )
     assert {
         "path": "libc.so.6",
         "reason": "GNU map identifies an as-needed library without a resolved link input",
@@ -867,3 +869,203 @@ def test_in_place_transform_is_not_reported_as_input_mutation(tmp_path, monkeypa
     tool.write_text("#!/bin/sh\nprintf y > \"$2\"\nprintf z > \"$1\"\n")
     run_tool("strip", tool, [str(image), str(other)], journal=journal, image_id="x", build_id="a" * 64)
     assert json.loads(journal.read_text().splitlines()[-1])["changed_inputs_during_action"] == [str(image)]
+
+
+def _fake_dpkg(tmp_path, monkeypatch, files):
+    from mpy_analysis import system_packages
+
+    admin = tmp_path / "dpkg"
+    (admin / "info").mkdir(parents=True)
+    (admin / "status").write_text(
+        "Package: libfixture\nStatus: install ok installed\nArchitecture: amd64\n"
+        "Version: 1.2-3\nMaintainer: Fixture Maintainer <fixture@example.invalid>\n"
+        "Description: fixture\n continued\n"
+    )
+    (admin / "info" / "libfixture:amd64.list").write_text(
+        "/.\n" + "".join(f"{path}\n" for path in files)
+    )
+    (admin / "info" / "libfixture:amd64.md5sums").write_text(
+        "".join(
+            f"{hashlib.md5(Path(path).read_bytes()).hexdigest()}  {str(path).lstrip('/')}\n" for path in files
+        )
+    )
+    monkeypatch.setattr(system_packages, "DPKG_ADMIN_DIR", admin)
+    system_packages._database.cache_clear()
+    return admin
+
+
+def test_implicit_system_inputs_need_package_identity_and_matching_checksum(tmp_path, monkeypatch):
+    from mpy_analysis.firmware_capture_receipt import _implicit_input
+
+    owned = tmp_path / "usr" / "crt1.o"
+    owned.parent.mkdir()
+    owned.write_bytes(b"crt object")
+    unowned = tmp_path / "usr" / "other.o"
+    unowned.write_bytes(b"unowned object")
+    _fake_dpkg(tmp_path, monkeypatch, [owned])
+    allocated = {str(owned.resolve()), str(unowned.resolve())}
+
+    entry, failure = _implicit_input(
+        str(owned.resolve()), allocated=allocated, archive_members={}, as_needed=[], matched=set()
+    )
+    assert failure == ""
+    assert entry["disposition"] == "contributed"
+    assert entry["package"]["name"] == "libfixture"
+    assert entry["package"]["version"] == "1.2-3"
+    assert entry["package"]["maintainer"] == "Fixture Maintainer <fixture@example.invalid>"
+
+    entry, failure = _implicit_input(
+        str(unowned.resolve()), allocated=allocated, archive_members={}, as_needed=[], matched=set()
+    )
+    assert entry is None and "lists no owner" in failure
+
+    owned.write_bytes(b"modified after install")
+    entry, failure = _implicit_input(
+        str(owned.resolve()), allocated=allocated, archive_members={}, as_needed=[], matched=set()
+    )
+    assert entry is None and "does not match the checksum" in failure
+
+
+def test_dynamic_library_contributes_only_when_the_map_lists_it_as_needed(tmp_path, monkeypatch):
+    from mpy_analysis.firmware_capture_receipt import _implicit_input
+
+    library = tmp_path / "usr" / "libfixture.so.1"
+    library.parent.mkdir()
+    library.write_bytes(b"\x7fELF" + b"\0" * 12)
+    (library.parent / "libfixture.so").symlink_to(library.name)
+    _fake_dpkg(tmp_path, monkeypatch, [library])
+
+    matched: set[int] = set()
+    entry, _ = _implicit_input(
+        str(library.resolve()),
+        allocated=set(),
+        archive_members={},
+        as_needed=[{"name": "libfixture.so.1", "file": "x.o", "symbol": "f"}],
+        matched=matched,
+    )
+    assert entry["linkage"] == "dynamic" and entry["disposition"] == "contributed"
+    assert matched == {0}
+
+    entry, _ = _implicit_input(
+        str(library.resolve()), allocated=set(), archive_members={}, as_needed=[], matched=set()
+    )
+    assert entry["disposition"] == "no-contribution"
+    assert "package" not in entry
+
+
+@pytest.mark.skipif(
+    not all(shutil.which(tool) for tool in ("make", "gcc", "ld", "ar")),
+    reason="native GNU build tools are unavailable",
+)
+def test_prebuilt_system_archive_becomes_a_package_component(tmp_path, monkeypatch):
+    root = tmp_path / "source"
+    source_root = root / "src"
+    make_dir = root / "make"
+    source_root.mkdir(parents=True)
+    make_dir.mkdir()
+    (source_root / "manifest.py").write_text('module("main.py")\n')
+    (source_root / "main.py").write_text("main = True\n")
+    (source_root / "main.c").write_text("extern int fixture(void); int main(void) { return fixture(); }\n")
+    sysroot = tmp_path / "sysroot"
+    sysroot.mkdir()
+    (sysroot / "fixture.c").write_text("int fixture(void) { return 3; }\n")
+    subprocess.run(["gcc", "-c", str(sysroot / "fixture.c"), "-o", str(sysroot / "fixture.o")], check=True)
+    subprocess.run(["ar", "rcs", str(sysroot / "libfixture.a"), str(sysroot / "fixture.o")], check=True)
+    _fake_dpkg(tmp_path, monkeypatch, [sysroot / "libfixture.a"])
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.email", "sbom-test@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.name", "SBOM Test"], check=True)
+    (make_dir / "Makefile").write_text(
+        f"""ROOT := $(abspath ..)
+
+.PHONY: all
+all: $(BUILD)/firmware.elf
+
+$(BUILD):
+\tmkdir -p $@
+
+$(BUILD)/main.o: $(ROOT)/src/main.c | $(BUILD)
+\t$(CC) -c $< -o $@
+
+$(BUILD)/firmware.elf: $(BUILD)/main.o
+\t$(CC) -nostdlib -Wl,-e,main -Wl,-Map=$(BUILD)/firmware.map -o $@ $< {sysroot}/libfixture.a
+"""
+    )
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "source"], check=True)
+    build = tmp_path / "build"
+    receipt_path = tmp_path / "receipt.json"
+    assert capture_make(
+        micropython_root=root,
+        make_dir=make_dir,
+        build_dir=build,
+        journal=tmp_path / "actions.jsonl",
+        receipt_path=receipt_path,
+        elf=build / "firmware.elf",
+        map_file=build / "firmware.map",
+        image_id="native",
+        image_role="application",
+        build_id="b" * 64,
+        port="native",
+        target="native",
+        variant="system-package",
+        source_roots={"fixture": source_root},
+        cross_compile="",
+        variables=[],
+        targets=["all"],
+    ) == 0
+    receipt = json.loads(receipt_path.read_text())
+    library = next(
+        item for item in receipt["images"][0]["link"]["operands"] if item["kind"] == "library"
+    )
+    assert library["system_package"]["name"] == "libfixture"
+    assert library["contributing_members"] == ["fixture.o"]
+    assert receipt["status"] == "complete"
+    assert validate_firmware_receipt(receipt)["receipt_id"] == receipt["receipt_id"]
+
+    mpy_root = Path(__file__).resolve().parents[3]
+    inventory = scope.collect_manifest_scope(
+        mpy_root,
+        [source_root / "manifest.py"],
+        roots={"fixture": str(source_root)},
+        path_vars={},
+        owners={"fixture": "application"},
+        target="native",
+        variant="system-package",
+        port="native",
+    )
+    events = [json.loads(line) for line in (tmp_path / "actions.jsonl").read_text().splitlines()]
+    compdb = tmp_path / "compile_commands.json"
+    compdb.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": event["cwd"],
+                    "file": next(item["path"] for item in event["inputs"] if item["role"] == "source"),
+                    "arguments": event["argv"],
+                    "output": next(item["path"] for item in event["outputs"] if item["path"].endswith(".o")),
+                }
+                for event in events
+                if event["kind"] == "compile"
+            ]
+        )
+    )
+    inventory["groups"]["native"] = scope.collect_compdb_sources(
+        compdb, roots=inventory["roots"], owners={"fixture": "application"}
+    )
+    document, summary = sbom.generate_sbom(
+        inventory, micropython_root=mpy_root, build_receipt=receipt_path
+    )
+    package = next(item for item in document["components"] if item.get("name") == "libfixture")
+    firmware = next(item for item in document["components"] if item["type"] == "firmware")
+    dependencies = {item["ref"]: set(item["dependsOn"]) for item in document["dependencies"]}
+    assert package["version"] == "1.2-3"
+    assert package["supplier"] == {"name": "Fixture Maintainer <fixture@example.invalid>"}
+    assert package["purl"].startswith("pkg:deb/") and "/libfixture@1.2-3" in package["purl"]
+    assert package["components"][0]["hashes"][0]["content"] == library["input"]["sha256"]
+    assert package["bom-ref"] in dependencies[firmware["bom-ref"]]
+    assert summary["firmware_completeness"] == "established"
+
+    (sysroot / "libfixture.a").write_bytes(b"replaced after capture")
+    with pytest.raises(ValueError, match="stale"):
+        validate_firmware_receipt(receipt)

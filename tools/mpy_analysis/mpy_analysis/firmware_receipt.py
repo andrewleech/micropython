@@ -236,6 +236,70 @@ def _validate_toolchain_library(operand, path, image_id, toolchain_executables):
     _text(operand.get("evidence"), f"image {image_id} toolchain library evidence")
 
 
+def _validate_system_package(package, path, label, verify_files):
+    package = _object(package, f"{label} package")
+    if package.get("manager") != "dpkg":
+        raise FirmwareReceiptError(f"{label} package manager is unsupported: {path}")
+    for field in ("name", "version"):
+        _text(package.get(field), f"{label} package {field}")
+    for field in ("architecture", "maintainer"):
+        if not isinstance(package.get(field), str):
+            raise FirmwareReceiptError(f"{label} package {field} must be text: {path}")
+    md5sum = package.get("md5sum")
+    if not isinstance(md5sum, str) or len(md5sum) != 32 or any(c not in "0123456789abcdef" for c in md5sum):
+        raise FirmwareReceiptError(f"{label} package md5sum must be a lowercase MD5 digest: {path}")
+    distro = _object(package.get("distro"), f"{label} package distro")
+    for field in ("id", "version_id"):
+        if not isinstance(distro.get(field), str):
+            raise FirmwareReceiptError(f"{label} package distro {field} must be text: {path}")
+    if verify_files:
+        digest = hashlib.md5(usedforsecurity=False)
+        try:
+            digest.update(Path(path).read_bytes())
+        except OSError as exc:
+            raise FirmwareReceiptError(f"cannot verify package checksum: {path}") from exc
+        if digest.hexdigest() != md5sum:
+            raise FirmwareReceiptError(f"stale system file does not match its package checksum: {path}")
+
+
+def _validate_implicit_inputs(link, image_id, operand_paths, verify_files):
+    entries = link.get("implicit_inputs", [])
+    if not isinstance(entries, list):
+        raise FirmwareReceiptError(f"image {image_id}.link.implicit_inputs must be an array")
+    seen = set()
+    for index, raw in enumerate(entries):
+        label = f"image {image_id}.link.implicit_inputs[{index}]"
+        entry = _object(raw, label)
+        record = _path_record(
+            {"path": entry.get("path"), "sha256": entry.get("sha256")}, label, verify_files=verify_files
+        )
+        path = record["path"]
+        if path in seen or path in operand_paths:
+            raise FirmwareReceiptError(f"{label} repeats a link input: {path}")
+        seen.add(path)
+        if entry.get("origin") != "gnu-map-load":
+            raise FirmwareReceiptError(f"{label}.origin is unsupported")
+        if entry.get("kind") not in ("object", "archive", "shared-library", "script"):
+            raise FirmwareReceiptError(f"{label}.kind is unsupported")
+        _text(entry.get("evidence"), f"{label}.evidence")
+        disposition = entry.get("disposition")
+        if disposition == "no-contribution":
+            _text(entry.get("reason"), f"{label}.reason")
+        elif disposition == "contributed":
+            if entry["kind"] == "script" or entry.get("linkage") not in ("static", "dynamic"):
+                raise FirmwareReceiptError(f"{label} contributes without a code linkage")
+            if entry["kind"] == "archive":
+                members = entry.get("contributing_members")
+                if not isinstance(members, list) or not members or not all(
+                    isinstance(item, str) and item for item in members
+                ):
+                    raise FirmwareReceiptError(f"{label} archive must list contributing members")
+            _validate_system_package(entry.get("package"), path, label, verify_files)
+        else:
+            raise FirmwareReceiptError(f"{label}.disposition must be explicit")
+
+
+
 def _validate_link_operands(link, image_id, link_id, action_inputs, repo_names, verify_files, toolchain_executables):
     operands = link.get("operands")
     if not isinstance(operands, list):
@@ -264,7 +328,17 @@ def _validate_link_operands(link, image_id, link_id, action_inputs, repo_names, 
             _text(operand.get("reason"), f"image {image_id} no-contribution reason")
         if disposition == "unsupported":
             _text(operand.get("reason"), f"image {image_id} unsupported-input reason")
-        if disposition == "contributed" and kind == "library" and "toolchain" in operand:
+        if disposition == "contributed" and kind == "library" and "system_package" in operand:
+            _validate_system_package(
+                operand["system_package"], path, f"image {image_id} system library", verify_files
+            )
+            members = operand.get("contributing_members")
+            if not isinstance(members, list) or not members or not all(
+                isinstance(item, str) and item for item in members
+            ):
+                raise FirmwareReceiptError(f"system library must list contributing members: {path}")
+            _text(operand.get("evidence"), f"image {image_id} system library evidence")
+        elif disposition == "contributed" and kind == "library" and "toolchain" in operand:
             _validate_toolchain_library(operand, path, image_id, toolchain_executables)
         elif disposition == "contributed" and kind in ("object", "archive", "prebuilt", "library"):
             _source_bindings(
@@ -450,6 +524,7 @@ def validate_firmware_receipt(
         by_operand = _validate_link_operands(
             link, image_id, link_id, action_inputs, repo_names, verify_files, toolchain_executables
         )
+        _validate_implicit_inputs(link, image_id, set(by_operand), verify_files)
         _validate_object_accounting(
             image, image_id, repo_names, compiled_objects, by_operand, verify_files
         )
