@@ -14,6 +14,8 @@ import stat
 from pathlib import Path
 from typing import Any
 
+from .argv_tokens import enables_lto
+
 SCHEMA = "mpy-firmware-build/v1"
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -234,6 +236,21 @@ def _validate_toolchain_library(operand, path, image_id, toolchain_executables):
     if not isinstance(members, list) or not members or not all(isinstance(item, str) and item for item in members):
         raise FirmwareReceiptError(f"toolchain library must list contributing members: {path}")
     _text(operand.get("evidence"), f"image {image_id} toolchain library evidence")
+
+
+def _validate_linker_generated(link, image_id):
+    entries = link.get("linker_generated_sections", [])
+    if not isinstance(entries, list):
+        raise FirmwareReceiptError(f"image {image_id}.link.linker_generated_sections must be an array")
+    for index, raw in enumerate(entries):
+        label = f"image {image_id}.link.linker_generated_sections[{index}]"
+        entry = _object(raw, label)
+        _text(entry.get("section"), f"{label}.section")
+        _text(entry.get("evidence"), f"{label}.evidence")
+        for field in ("address", "size"):
+            value = entry.get(field)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise FirmwareReceiptError(f"{label}.{field} must be a non-negative integer")
 
 
 def _validate_system_package(package, path, label, verify_files):
@@ -525,6 +542,7 @@ def validate_firmware_receipt(
             link, image_id, link_id, action_inputs, repo_names, verify_files, toolchain_executables
         )
         _validate_implicit_inputs(link, image_id, set(by_operand), verify_files)
+        _validate_linker_generated(link, image_id)
         _validate_object_accounting(
             image, image_id, repo_names, compiled_objects, by_operand, verify_files
         )
@@ -570,10 +588,9 @@ def validate_firmware_receipt(
                 "on",
             )
             lto_enabled = lto_enabled or any(
-                argument == "-flto" or argument.startswith("-flto=")
+                enables_lto(action["argv"], Path(action["cwd"]))
                 for action in actions
                 if action["kind"] in ("compile", "assemble", "link")
-                for argument in action["argv"]
             )
             if lto_enabled and link["lto"] != "qualified":
                 raise FirmwareReceiptError(

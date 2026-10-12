@@ -16,6 +16,8 @@ import time
 from pathlib import Path
 from typing import Sequence
 
+from .argv_tokens import flatten as _flatten
+from .argv_tokens import resolve_arg as _resolve_arg
 from .firmware_capture_receipt import receipt_from_journal
 
 _PROBES = {"-dumpmachine", "-print-file-name=libgcc.a", "-print-prog-name=ld"}
@@ -40,14 +42,6 @@ def _file_record(path: Path, role: str) -> dict[str, str] | None:
         return {"path": str(resolved), "sha256": _sha256(resolved), "role": role}
     except OSError:
         return None
-
-
-def _resolve_arg(value: str, cwd: Path) -> Path | None:
-    if not value or value.startswith("-") or value.startswith("="):
-        return None
-    path = Path(value)
-    candidate = path if path.is_absolute() else cwd / path
-    return candidate if candidate.is_file() else None
 
 
 def _depfile_inputs(path: Path, cwd: Path) -> list[Path]:
@@ -117,7 +111,7 @@ def _action_inputs(role: str, kind: str, argv: list[str], cwd: Path) -> list[dic
     candidates: dict[str, tuple[Path, str]] = {}
     output_values: set[str] = set()
     option = None
-    for arg in argv:
+    for arg in _flatten(argv, cwd):
         if option in _OUTPUT_OPTIONS:
             output_values.add(arg)
             option = None
@@ -137,14 +131,10 @@ def _action_inputs(role: str, kind: str, argv: list[str], cwd: Path) -> list[dic
         if arg.startswith("-Map="):
             output_values.add(arg.split("=", 1)[1])
             continue
-        if arg.startswith("-Wl,"):
-            for field in arg[4:].split(","):
-                if field.startswith("-T") and len(field) > 2:
-                    candidate = _resolve_arg(field[2:], cwd)
-                    if candidate is not None:
-                        candidates[str(candidate.resolve())] = (candidate, "link-operand")
-                elif field.startswith("-Map="):
-                    output_values.add(field.split("=", 1)[1])
+        if arg.startswith("-T") and len(arg) > 2:
+            candidate = _resolve_arg(arg[2:], cwd)
+            if candidate is not None:
+                candidates[str(candidate.resolve())] = (candidate, "link-operand")
             continue
         if arg.startswith("@"):
             candidate = _resolve_arg(arg[1:], cwd)
@@ -183,7 +173,7 @@ def _action_inputs(role: str, kind: str, argv: list[str], cwd: Path) -> list[dic
 def _action_outputs(role: str, kind: str, argv: list[str], cwd: Path) -> list[dict[str, str]]:
     paths: set[Path] = set()
     option = None
-    for index, arg in enumerate(argv):
+    for arg in _flatten(argv, cwd):
         if option in _OUTPUT_OPTIONS:
             if option in ("-o", "-Map"):
                 candidate = Path(arg)
@@ -196,15 +186,6 @@ def _action_outputs(role: str, kind: str, argv: list[str], cwd: Path) -> list[di
         if arg.startswith("-Map="):
             candidate = Path(arg.split("=", 1)[1])
             paths.add(candidate if candidate.is_absolute() else cwd / candidate)
-            continue
-        if arg.startswith("-Wl,"):
-            for field in arg[4:].split(","):
-                if field.startswith("-Map="):
-                    candidate = Path(field.split("=", 1)[1])
-                    paths.add(candidate if candidate.is_absolute() else cwd / candidate)
-                elif field == "-Map" and index + 1 < len(argv):
-                    candidate = Path(argv[index + 1])
-                    paths.add(candidate if candidate.is_absolute() else cwd / candidate)
             continue
     if role == "ar":
         for arg in argv:

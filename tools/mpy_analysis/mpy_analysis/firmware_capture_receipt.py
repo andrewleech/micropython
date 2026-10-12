@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .argv_tokens import enables_lto
 from .firmware_receipt import receipt_id, validate_firmware_receipt
 from .gnu_map import parse_gnu_map
 from .system_packages import identify_system_file
@@ -504,9 +505,21 @@ def receipt_from_journal(
     allocated = set()
     toolchain_archive_members: dict[str, set[str]] = {}
     discarded = []
+    linker_generated = []
     if parsed is not None:
         for group in parsed["allocated_sections"]:
             identity = group["identity"]
+            if identity.get("raw") == "linker stubs":
+                linker_generated.extend(
+                    {
+                        "section": section["section"],
+                        "address": section["address"],
+                        "size": section["size"],
+                        "evidence": f"GNU map allocates linker-generated stub section at line {section['line']}",
+                    }
+                    for section in group["sections"]
+                )
+                continue
             path = Path(identity["path"])
             resolved = str((path if path.is_absolute() else Path(map_file).parent / path).resolve())
             if identity["kind"] == "object":
@@ -738,10 +751,9 @@ def receipt_from_journal(
     )
     if not parsed:
         linker_format = "unknown"
-    lto = "unsupported" if any(
-        argument == "-flto" or argument.startswith("-flto=")
-        for action in actions
-        for argument in action["argv"]
+    lto_variable = str(variables.get("LTO", "")).lower() in ("1", "true", "yes", "on")
+    lto = "unsupported" if lto_variable or any(
+        enables_lto(action["argv"], Path(action["cwd"])) for action in actions
     ) else "disabled"
     unresolved_rows = [dict(item) for item in {(row["path"], row["reason"]): row for row in unresolved}.values()]
     repositories_verified = not any(
@@ -775,6 +787,7 @@ def receipt_from_journal(
             "operands": operands,
             "discarded_sections": discarded,
             "implicit_inputs": implicit_inputs,
+            "linker_generated_sections": linker_generated,
             "unresolved": unresolved_rows,
             "lto": lto,
         },
