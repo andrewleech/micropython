@@ -38,6 +38,8 @@ class _QueryFunction(Mapping):
         self.root_sources = {}
         self.identities = {}
         self.binding_bits = {}
+        self.binding_kinds = {}
+        self.out_parameter_cache = {}
         self.reachable = {}
         for variable in events['variables']:
             self.variables.setdefault(variable['name'], []).append(variable)
@@ -101,6 +103,113 @@ class _QueryFunction(Mapping):
         index = bisect_right(self.call_starts, point) - 1
         return self.call_ends[index] if index >= 0 and self.call_ends[index] > point else -1
 
+    @cached_property
+    def operand_calls(self):
+        """Positioned calls with their operand nodes, in event order."""
+        return [(call, nodes) for call in self.function['events']['calls']
+                if call.get('byte_start') is not None and (nodes := _call_operand_nodes(call))]
+
+    def binding_kind(self, name, declaration):
+        """'array', 'scalar' (declared integer or floating storage), 'pointer' (declared with `*`), 'opaque' or 'unknown'.
+
+        Opaque storage is declared without a pointer or array declarator and an unrecognised type (typedefs such as
+        mp_obj_t, aggregates), so it may hold pointers. Unknown storage has no declaration record (file-scope
+        objects, unresolved parameters) and may additionally be an array.
+        """
+        key = name, declaration
+        kind = self.binding_kinds.get(key)
+        if kind is None:
+            if declaration is None:
+                source = self.function.get('parameter_source_contract') or {}
+                records = ([record for record in source.get('declarations', ()) if record.get('name') == name]
+                           if source.get('declaration_binding_resolution') == 'resolved' else [])
+            else:
+                records = [record for record in self.variables.get(name, ()) if record.get('declaration_id') == declaration]
+            record = records[0] if len(records) == 1 else None
+            declarator = (record or {}).get('declarator_expression')
+            if record is None:
+                kind = 'unknown'
+            elif record.get('array_dimensions') or declarator is not None and '[' in declarator:
+                kind = 'array'
+            elif declarator is not None and '*' in declarator:
+                kind = 'pointer'
+            elif declarator is not None and record.get('type_expression') in _SCALAR_TYPES:
+                kind = 'scalar'
+            else:
+                kind = 'opaque'
+            self.binding_kinds[key] = kind
+        return kind
+
+    @cached_property
+    def address_index(self):
+        """Binding -> call operands that are, in the operand itself, a pointer into the binding's own storage.
+
+        Positions are (call, operand) indexes into operand_calls. Needs no alias flow, so alias queries may use it.
+        """
+        targets = {}
+        for c, (call, nodes) in enumerate(self.operand_calls):
+            for n, node in enumerate(nodes):
+                found = set()
+                _address_targets(self, node, call, found)
+                for binding in found:
+                    targets.setdefault(binding, []).append((c, n))
+        return targets
+
+    @cached_property
+    def alias_index(self):
+        """Binding-independent alias facts of every call operand: (binding bit -> operands whose alias flow names the
+        binding within the depth bound, operands whose flow runs past the bound).
+
+        An operand past the bound may reach any binding; it is probed with a binding no identifier names. Used by
+        root queries only: alias queries never reach it, so building it cannot recurse.
+        """
+        reach, bounded = {}, set()
+        for c, (call, nodes) in enumerate(self.operand_calls):
+            for n, node in enumerate(nodes):
+                if _input_binding_mention(self, node, call, '', None, address=True):
+                    bounded.add((c, n))
+                mask = self.reachable_bindings(node, call, _INPUT_DEPTH, True)
+                while mask:
+                    low = mask & -mask
+                    reach.setdefault(low, []).append((c, n))
+                    mask ^= low
+        return reach, bounded
+
+    def calls_for_binding(self, name, declaration, direct):
+        """Calls an operand of which may carry the address of the binding's storage, each with its other operands.
+
+        The callee may store through that pointer, so the other operands are the possible sources of the stored
+        value. direct=True accepts only an address taken in the operand itself (`&x`, `&x.f`, an array `x`), which
+        is how a pointer binding receives a value from the callee; direct=False also follows pointer aliases
+        (`p = &x` ... `f(p)`).
+        """
+        key = name, declaration, direct
+        found = self.out_parameter_cache.get(key)
+        if found is None:
+            if direct:
+                positions, bounded, named = self.address_index.get((name, declaration), ()), (), ()
+            else:
+                reach, bounded = self.alias_index
+                named = set(reach.get(self.binding_bit((name, declaration)), ()))
+                positions = sorted(bounded.union(named))
+            called, excluded = set(), {}
+            for c, n in positions:
+                call, nodes = self.operand_calls[c]
+                # A bounded operand that cannot name the binding within the bound answers the exact query exactly
+                # as the probe did (True), so only operands that may name it need the query.
+                if direct or ((c, n) in bounded and (c, n) not in named
+                              or _input_binding_mention(self, nodes[n], call, name, declaration, address=True)):
+                    called.add(c)
+                    excluded.setdefault(c, set()).add(n)
+                elif (c, n) in bounded:
+                    # May reach any binding although the exact query on this binding says no: the call is kept, and
+                    # the operand stays a source of the stored value.
+                    called.add(c)
+            found = [(self.operand_calls[c][0], [node for n, node in enumerate(self.operand_calls[c][1]) if n not in excluded.get(c, ())])
+                     for c in sorted(called)]
+            self.out_parameter_cache[key] = found
+        return found
+
     def writes_for_binding(self, name, declaration, start=-1, end=None, use=None):
         candidates = merge(self.identifier_writes.get(name, ()), self.indirect_writes, key=lambda item: item[0])
         for _, write in candidates:
@@ -118,16 +227,23 @@ class _QueryFunction(Mapping):
                 yield write
 
     def alias_origins(self, name, local, use):
-        key = name, local.get('declaration_id'), self.identity(use)
+        declaration = local.get('declaration_id')
+        key = name, declaration, self.identity(use)
         if key not in self.alias_sources:
             point = _point(use)
             origins = [(local.get('initializer_node') or {}, local)]
             if point is not None:
+                start = local.get('byte_start', -1)
                 origins.extend((write['value_node'], write) for write in self.writes.get(name, ())
                                if write.get('value_node')
-                               and local.get('byte_start', -1) <= write.get('byte_start', -1) < point
+                               and start <= write.get('byte_start', -1) < point
                                and not _exclusive(write, use)
-                               and (_local(self, name, write) or {}).get('declaration_id') == local.get('declaration_id'))
+                               and (_local(self, name, write) or {}).get('declaration_id') == declaration)
+                # A pointer binding receives its value from the callee when its address is passed.
+                origins.extend((node, call) for call, sources in self.calls_for_binding(name, declaration, True)
+                               if start <= call['byte_start'] and call.get('byte_end', call['byte_start']) <= point
+                               and not _exclusive(call, use)
+                               for node in sources)
             self.alias_sources[key] = origins
         return self.alias_sources[key]
 
@@ -142,6 +258,13 @@ class _QueryFunction(Mapping):
                 start = local.get('byte_start', -1) if local else -1
                 origins.extend((write['value_node'], write)
                                for write in self.writes_for_binding(name, declaration, start, end, use))
+                # A callee defines the binding after its operands are evaluated, so a use inside the call
+                # does not see that call's definition; sibling and enclosing-statement uses are unordered.
+                origins.extend((node, call) for call, sources in self.calls_for_binding(name, declaration, False)
+                               if start <= call['byte_start'] < end
+                               and not call['byte_start'] <= point < call.get('byte_end', call['byte_start'])
+                               and not _exclusive(call, use)
+                               for node in sources)
             self.root_sources[key] = origins
         return self.root_sources[key]
 
@@ -165,9 +288,15 @@ class _QueryFunction(Mapping):
                     origins = (self.alias_origins(name, local, use) if local else ()) if alias else self.root_origins(name, local, use)
                     for origin, event in origins:
                         bindings |= self.reachable_bindings(origin, event, remaining - 1, alias)
-            elif remaining > 1:
-                for child in _input_children(node, alias):
-                    bindings |= self.reachable_bindings(child, use, remaining - 1, alias)
+            else:
+                if alias:
+                    # An address taken at the last level still reaches its binding.
+                    target = _address_target(self, node, use)
+                    if target is not None:
+                        bindings = self.binding_bit(target[0])
+                if remaining > 1:
+                    for child in _input_children(node, alias):
+                        bindings |= self.reachable_bindings(child, use, remaining - 1, alias)
             self.reachable[key] = bindings
         return self.reachable[key]
 
@@ -186,12 +315,29 @@ def _query_function(function):
     return function if isinstance(function, _QueryFunction) else _QueryFunction(function)
 
 
+_NON_POINTER_OPERATORS = frozenset(('<', '>', '<=', '>=', '==', '!=', '&&', '||'))
+
+
 def _input_children(node, alias):
+    """Operands whose value can reach node's value; alias flows exclude operands that cannot carry a pointer."""
+    kind = node.get('kind')
+    if alias:
+        if kind in ('sizeof_expression', 'offsetof_expression'):
+            return
+        if kind == 'binary_expression' and node.get('operator') in _NON_POINTER_OPERATORS:
+            return
+        if kind == 'unary_expression' and node.get('operator') == '!':
+            return
+        if kind == 'conditional_expression':
+            # The condition selects between the branches; its value is not a result.
+            for field in ('consequence', 'alternative'):
+                yield node.get(field)
+            return
     fields = {
         'call_expression': ('arguments',), 'cast_expression': ('value',),
         'field_expression': ('argument',),
         'subscript_expression': ('argument',) if alias else ('argument', 'index'),
-    }.get(node.get('kind'))
+    }.get(kind)
     if fields:
         for field in fields:
             yield node.get(field)
@@ -456,6 +602,13 @@ _C_INTEGER_TYPES = {
     'signed long int', 'unsigned long', 'unsigned long int', 'long long',
     'long long int', 'signed long long', 'signed long long int',
     'unsigned long long', 'unsigned long long int',
+}
+
+# Declared types whose values are never pointers; every other type (opaque typedefs such as mp_obj_t,
+# intptr_t, mp_uint_t included) may hold one.
+_SCALAR_TYPES = _C_INTEGER_TYPES | {
+    'bool', '_Bool', 'float', 'double', 'long double', 'size_t', 'ssize_t', 'ptrdiff_t',
+    'int8_t', 'int16_t', 'int32_t', 'int64_t', 'uint8_t', 'uint16_t', 'uint32_t', 'uint64_t',
 }
 
 
@@ -1378,37 +1531,113 @@ def _parser_object_uses(function, node, use):
                        'table_entry_index': row['table_entry_index'], 'storage_field': 'u_obj'}
 
 
-def _input_binding_mention(function, node, use, name, declaration, seen=(), depth=0):
-    """Follow possible scoped lvalue aliases without claiming a definite store."""
+def _binding(function, node, use):
+    """Scoped identity of an identifier node, as keyed by the binding queries."""
+    local = _local(function, node['expression'], use)
+    return node['expression'], local.get('declaration_id') if local else None
+
+
+def _storage_root(function, node, use):
+    """Binding whose own storage the lvalue designates, with whether that is certain; None through a pointer.
+
+    Member selection with `.` and indexing of a declared array stay inside the object; `->`, `*` and indexing of a
+    declared pointer leave it. Indexing anything else may do either, so it is possible but not certain.
+    """
+    certain = True
+    node = _unparen(node)
+    while True:
+        kind = node.get('kind')
+        if kind == 'field_expression' and node.get('operator') == '.':
+            node = _unparen(node.get('argument'))
+        elif kind == 'subscript_expression':
+            node = _unparen(node.get('argument'))
+            shape = function.binding_kind(*_binding(function, node, use)) if node.get('kind') == 'identifier' else None
+            if shape == 'pointer':
+                return None
+            certain = certain and shape == 'array'
+        else:
+            break
+    return (_binding(function, node, use), certain) if node.get('kind') == 'identifier' else None
+
+
+def _address_target(function, node, use):
+    """For a pointer into a binding's own storage (`&lvalue`, a decaying array) the binding and certainty, else None."""
+    if node.get('kind') == 'identifier':
+        binding = _binding(function, node, use)
+        return (binding, True) if function.binding_kind(*binding) == 'array' else None
+    if node.get('kind') == 'pointer_expression' and node.get('operator') == '&':
+        return _storage_root(function, node.get('argument'), use)
+    return None
+
+
+def _array_element(function, node, use):
+    """Whether node reads a value out of a declared array (an element, or a member of one), not a pointer into it."""
+    base = node
+    while base.get('kind') == 'subscript_expression' or base.get('kind') == 'field_expression' and base.get('operator') == '.':
+        base = _unparen(base.get('argument'))
+    return (base is not node and base.get('kind') == 'identifier'
+            and function.binding_kind(*_binding(function, base, use)) == 'array')
+
+
+def _address_targets(function, node, use, found):
+    """Add to found the bindings node's value may be a pointer into the own storage of, without following aliases."""
+    node = _unparen(node)
+    if not node:
+        return
+    target = _address_target(function, node, use)
+    if target is not None:
+        found.add(target[0])
+    if not _array_element(function, node, use):
+        for child in _input_children(node, True):
+            _address_targets(function, child, use, found)
+
+
+def _input_binding_mention(function, node, use, name, declaration, seen=(), depth=0, address=False):
+    """Follow possible scoped lvalue aliases without claiming a definite store.
+
+    A flow reaches the binding through a pointer into its own storage or, unless address is set, through its
+    value when it may hold a pointer (a store through that pointer is a store into the bound object). With
+    address set the flow is the pointer value alone: a pointer into another binding's storage, or an array
+    decaying to one, carries no other pointer, whatever that storage contains.
+    """
     node = _unparen(node)
     if not node:
         return False
     if depth >= _INPUT_DEPTH:
         return True
     function = _query_function(function)
+    if address and _array_element(function, node, use):
+        return False
+    target = _address_target(function, node, use)
+    if target is not None:
+        if target[0] == (name, declaration):
+            return True
+        if address and target[1]:
+            return False
     local, identity = None, None
     if node.get('kind') == 'identifier':
         identifier = node.get('expression')
         local = _local(function, identifier, use)
         identity = identifier, local.get('declaration_id') if local else None
         if identity == (name, declaration):
-            return True
+            kind = function.binding_kind(name, declaration)
+            return kind == 'unknown' or not address and kind in ('pointer', 'opaque')
         if not local or identity in seen:
             return False
     key = (function.identity(node), function.identity(use), name, declaration,
-           function.seen_key(node, use, seen, depth, True), depth)
+           function.seen_key(node, use, seen, depth, True), depth, address)
     if key not in function.binding_mentions:
         function.binding_mentions[key] = _input_binding_mention_query(
-            function, node, use, name, declaration, seen, depth, local, identity)
+            function, node, use, name, declaration, seen, depth, local, identity, address)
     return function.binding_mentions[key]
 
 
-def _input_binding_mention_query(function, node, use, name, declaration, seen, depth, local, identity):
+def _input_binding_mention_query(function, node, use, name, declaration, seen, depth, local, identity, address):
     if node.get('kind') == 'identifier':
         origins = function.alias_origins(node.get('expression'), local, use)
-        return any(_input_binding_mention(function, origin, event, name, declaration, (*seen, identity), depth + 1)
+        return any(_input_binding_mention(function, origin, event, name, declaration, (*seen, identity), depth + 1, address)
                    for origin, event in origins)
-    return any(_input_binding_mention(function, child, use, name, declaration, seen, depth + 1)
+    return any(_input_binding_mention(function, child, use, name, declaration, seen, depth + 1, address)
                for child in _input_children(node, True))
 
 
@@ -1447,7 +1676,12 @@ def _input_parameter_roots_query(function, node, use, seen, depth, local):
             roots.append(function['parameters'].index(name))
             found.add(roots[0])
         inner = (*seen, (name, local.get('declaration_id') if local else None))
-        sources = ((origin, event, inner) for origin, event in function.root_origins(name, local, use))
+        point = node.get('byte_start')
+        # A call defines through its operands only after evaluating them, so a read inside the call's own
+        # operand list never sees that call's definitions.
+        sources = ((origin, event, inner) for origin, event in function.root_origins(name, local, use)
+                   if not ('callee' in event and point is not None
+                           and event['byte_start'] <= point < event.get('byte_end', event['byte_start'])))
     else:
         sources = ((child, use, seen) for child in _input_children(node, False))
     for source, event, path in sources:
