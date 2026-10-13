@@ -36,4 +36,6 @@ make -C tests/mboot/host/bootloader test-app APP="$PWD/ports/stm32/build-NUCLEO_
 
 `hw/dfu_confine.py`, `hw/powercut.py`, `hw/tear_probe.py` and `fi_sweep.py` operate on real targets. Read their command-line options before use and identify the debug probe by its serial number. `dfu_raw.py` supplies the standard DFU/vendor protocol used by this facility; the established STM32 DfuSe implementation has a different transfer contract.
 
-The optional runtime module and persistent update-history suites belong to separate follow-ups, not this main integration.
+## Python module
+
+`test_module.py` and `test_module_single.py` exercise the `mboot` module on the unix port's `mboot` (two slots with swap) and `mboot_single` variants, which keep flash in a file. The `ci_mboot_unix_build` and `ci_mboot_unix_run_tests` functions of `tools/ci.sh` build the variants and run the tests from `tests/`. The update audit log is covered by the `host/core` and `host/bootloader` suites and by the module tests.
