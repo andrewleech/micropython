@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import fake_elf
 from mpy_analysis.firmware_capture import capture_make
 from mpy_analysis.firmware_capture_receipt import merge_receipts, receipt_from_journal, receipt_id
 from mpy_analysis.firmware_receipt import FirmwareReceiptError, validate_firmware_receipt
@@ -253,7 +254,7 @@ def _synthetic_receipt(
     compiler = record(tool, tool.read_bytes(), "tool")
     source_record = {**record(source, source.read_bytes(), "source")}
     obj = record(build / "main.o", b"object", "object")
-    elf = record(build / "firmware.elf", b"ELF", "elf")
+    elf = record(build / "firmware.elf", fake_elf(sections=[(".text", 0x1000, 0x20)]), "elf")
     map_file = record(build / "firmware.map", map_text.format(obj=obj["path"]).encode(), "map")
     base = {
         "schema": "mpy-firmware-action-event/v1",
@@ -298,13 +299,31 @@ def _synthetic_receipt(
 
 GOOD_MAP = (
     "GNU ld (GNU Binutils) 2.40\nLOAD {obj}\n\nDiscarded input sections\n\n"
-    "Linker script and memory map\n .text 0x00001000 0x10 {obj}\n"
+    "Linker script and memory map\n.text 0x00001000 0x20\n .text 0x00001000 0x10 {obj}\n"
 )
 
 
 def test_synthetic_baseline_is_complete(tmp_path):
     receipt = _synthetic_receipt(tmp_path, GOOD_MAP)
     assert receipt["status"] == "complete"
+
+
+def test_map_that_does_not_describe_the_elf_is_rejected(tmp_path):
+    moved = GOOD_MAP.replace(" .text 0x00001000 0x10", " .text 0x00005000 0x10")
+    with pytest.raises(FirmwareReceiptError, match="does not describe the final ELF"):
+        _synthetic_receipt(tmp_path, moved)
+    renamed = GOOD_MAP.replace(".text 0x00001000 0x20\n", ".other 0x00001000 0x20\n")
+    with pytest.raises(FirmwareReceiptError, match="does not describe the final ELF"):
+        _synthetic_receipt(tmp_path, renamed, name="second", repository="second-repository")
+
+
+def test_dynamic_requirements_must_match_the_final_elf(tmp_path):
+    receipt = _synthetic_receipt(tmp_path, GOOD_MAP)
+    assert receipt["images"][0]["link"]["dynamic_needed"] == []
+    receipt["images"][0]["link"]["dynamic_needed"] = ["libmissing.so.1"]
+    receipt["receipt_id"] = receipt_id(receipt)
+    with pytest.raises(FirmwareReceiptError, match="dynamic_needed does not match"):
+        validate_firmware_receipt(receipt)
 
 
 @pytest.mark.parametrize(
@@ -327,7 +346,7 @@ def test_unsupported_or_malformed_maps_cannot_be_complete(tmp_path, map_text):
 def test_linker_generated_stub_sections_are_recorded_without_blocking_closure(tmp_path):
     map_text = (
         "GNU ld (GNU Binutils) 2.40\nLOAD {obj}\nLOAD linker stubs\n\nDiscarded input sections\n\n"
-        "Linker script and memory map\n .text 0x00001000 0x10 {obj}\n"
+        "Linker script and memory map\n.text 0x00001000 0x20\n .text 0x00001000 0x10 {obj}\n"
         " .text.stub 0x00001010 0x8 linker stubs\n"
     )
     receipt = _synthetic_receipt(tmp_path, map_text)

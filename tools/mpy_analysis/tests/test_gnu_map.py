@@ -72,7 +72,7 @@ Linker script and memory map
     assert result["allocated_sections"][0]["sections"][0]["section"] == ".text.entry"
 
 
-def test_gnu_map_separate_properties_and_as_needed_sections():
+def test_gnu_map_separate_properties_and_ignored_as_needed_sections():
     text = """Archive member included to satisfy reference by file (symbol)
 /usr/lib/libgcc.a(member.o)
                               /tmp/build/main.o (__aeabi_f2d)
@@ -90,9 +90,7 @@ Linker script and memory map
 """
     result = parse_gnu_map(text)
     assert result["extracted_archive_members"][0]["member"] == "member.o"
-    assert result["as_needed_libraries"] == [
-        {"name": "libc.so.6", "file": "/tmp/build/main.o", "symbol": "exit"}
-    ]
+    assert "as_needed_libraries" not in result
     assert result["discarded_sections"][0]["identity"]["path"] == "/tmp/build/dead.o"
     assert result["allocated_sections"][0]["identity"]["path"] == "/tmp/build/main.o"
 

@@ -2,6 +2,7 @@
 
 import json
 import os
+import struct
 import sys
 from pathlib import Path
 
@@ -13,6 +14,30 @@ def write(root, rel, text=""):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     return path
+
+
+def fake_elf(label: bytes = b"", sections=()) -> bytes:
+    """A minimal valid ELF64 file; trailing label bytes make the hash distinct.
+
+    sections is a sequence of (name, address, size) allocated sections for the section header table.
+    """
+    ident = b"\x7fELF" + bytes([2, 1, 1, 0]) + bytes(8)
+    if not sections:
+        return ident + struct.pack("<HHIQQQIHHHHHH", 2, 62, 1, 0, 0, 0, 0, 64, 0, 0, 64, 0, 0) + label
+    names = b"\0" + b"".join(name.encode() + b"\0" for name, _, _ in sections) + b".shstrtab\0"
+    strtab_offset = 64 + len(label)
+    table_offset = strtab_offset + len(names)
+    headers = bytes(64)
+    position = 1
+    for name, address, size in sections:
+        headers += struct.pack("<IIQQQQIIQQ", position, 1, 2, address, 0, size, 0, 0, 1, 0)
+        position += len(name) + 1
+    headers += struct.pack("<IIQQQQIIQQ", position, 3, 0, 0, strtab_offset, len(names), 0, 0, 1, 0)
+    count = len(sections) + 2
+    header = struct.pack(
+        "<HHIQQQIHHHHHH", 2, 62, 1, 0, 0, table_offset, 0, 64, 0, 0, 64, count, count - 1
+    )
+    return ident + header + label + names + headers
 
 
 def entry(root, source, deps, directory=None, obj=None, write_dep=True):

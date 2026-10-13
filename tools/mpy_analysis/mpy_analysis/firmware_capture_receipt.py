@@ -10,10 +10,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .argv_tokens import enables_lto
+from .argv_tokens import enables_lto, flatten
+from .elf_evidence import dynamic_needed
 from .firmware_receipt import receipt_id, validate_firmware_receipt
 from .gnu_map import parse_gnu_map
-from .system_packages import identify_system_file
+from .toolchain_runtime import classify, machine_flags
 
 
 def _digest(path: Path) -> str:
@@ -159,17 +160,29 @@ def _bindings(path: str, source_roots: dict[str, Path]) -> list[dict[str, str]]:
     return [{"root": name, "path": relative}]
 
 
-def _within_toolchain(path: str, toolchain: dict[tuple[str, str], dict[str, Any]]) -> bool:
-    """True when path lies inside the installation prefix of the captured compiler."""
-    compilers = [record for (role, _), record in toolchain.items() if role == "cc"]
-    if len(compilers) != 1:
-        return False
-    prefix = Path(compilers[0]["path"]).resolve().parent.parent
-    return Path(path).resolve().is_relative_to(prefix)
+def _compiler(toolchain: dict[tuple[str, str], dict[str, Any]]) -> dict[str, Any] | None:
+    """The one captured compiler, or None when the capture did not observe exactly one."""
+    compilers = [record for (role, _), record in sorted(toolchain.items()) if role == "cc"]
+    return compilers[0] if len(compilers) == 1 else None
 
 
-def _system_package(path: str) -> tuple[dict[str, Any] | None, str | None]:
-    return identify_system_file(path)
+def _runtime_identity(
+    path: str, compiler: dict[str, Any] | None, flags: tuple[str, ...]
+) -> tuple[dict[str, Any] | None, str]:
+    """Identify a statically linked compiler runtime or C library file through the compiler."""
+    if compiler is None:
+        return None, "no single captured compiler to identify the runtime"
+    kind, library, reason = classify(path, compiler["path"], flags)
+    if kind == "compiler-runtime":
+        return {
+            "toolchain": {
+                "role": "cc",
+                "executable": {"path": compiler["path"], "sha256": compiler["sha256"]},
+            }
+        }, ""
+    if kind == "c-library":
+        return {"c_library": library}, ""
+    return None, reason
 
 
 def _implicit_input(
@@ -177,13 +190,13 @@ def _implicit_input(
     *,
     allocated: set[str],
     archive_members: dict[str, set[str]],
-    as_needed: list[dict[str, str]],
-    matched: set[int],
+    compiler: dict[str, Any] | None,
+    flags: tuple[str, ...],
 ) -> tuple[dict[str, Any] | None, str]:
     """Account for a file the linker loaded that was not a captured link operand.
 
-    Contributing files must be owned by an installed package; files that contribute nothing
-    are recorded with their hash only.
+    Static files that contribute must be identified as compiler runtime or C library; shared
+    libraries are resolved at load time and recorded through the ELF's DT_NEEDED list instead.
     """
     file = Path(path)
     if not file.is_file():
@@ -195,44 +208,36 @@ def _implicit_input(
         "evidence": "GNU ld map LOAD record without a captured link command operand",
     }
     suffix = file.suffix.lower()
-    head = file.read_bytes()[:4]
-    needed = [
-        index
-        for index, item in enumerate(as_needed)
-        if "name" in item and (file.parent / item["name"]).resolve() == file
-    ]
     if suffix in (".o", ".obj"):
         entry["kind"] = "object"
         contributes = path in allocated
-        entry["linkage"] = "static"
     elif suffix in (".a", ".lib"):
         entry["kind"] = "archive"
         contributes = path in archive_members
-        entry["linkage"] = "static"
         if contributes:
             entry["contributing_members"] = sorted(archive_members[path])
-    elif head == b"\x7fELF":
+    elif file.read_bytes()[:4] == b"\x7fELF":
         entry["kind"] = "shared-library"
-        contributes = bool(needed)
-        entry["linkage"] = "dynamic"
-        matched.update(needed)
+        entry["disposition"] = "dynamic"
+        entry["reason"] = "resolved at load time; the final ELF's DT_NEEDED list records the requirement"
+        return entry, ""
     else:
         entry["kind"] = "script"
         contributes = False
     if not contributes:
         entry["disposition"] = "no-contribution"
-        entry.pop("linkage", None)
         entry["reason"] = (
             "linker script"
             if entry["kind"] == "script"
-            else "GNU ld records no allocated sections or as-needed reference for this input"
+            else "GNU ld records no allocated sections from this input"
         )
         return entry, ""
-    package, failure = _system_package(path)
-    if package is None:
-        return None, f"GNU map LOAD input contributes but has no verified package identity: {failure}"
+    identity, failure = _runtime_identity(path, compiler, flags)
+    if identity is None:
+        return None, f"GNU map LOAD input contributes but is not identified: {failure}"
     entry["disposition"] = "contributed"
-    entry["package"] = package
+    entry["linkage"] = "static"
+    entry.update(identity)
     return entry, ""
 
 
@@ -552,14 +557,15 @@ def receipt_from_journal(
     operands = []
     unresolved = []
     implicit_inputs = []
-    as_needed_matched = set()
+    compiler = _compiler(toolchain)
+    link_flags = machine_flags(flatten(link_action["argv"], Path(link_action["cwd"])))
     for path in sorted(map_only_loads):
         entry, failure = _implicit_input(
             path,
             allocated=allocated,
             archive_members=toolchain_archive_members,
-            as_needed=parsed["as_needed_libraries"] if parsed is not None else [],
-            matched=as_needed_matched,
+            compiler=compiler,
+            flags=link_flags,
         )
         if entry is not None:
             implicit_inputs.append(entry)
@@ -579,15 +585,6 @@ def receipt_from_journal(
         for submodule in repository["unverified_submodules"]
         if any((Path(repository["path"]) / submodule) in path.parents for path in consumed_paths)
     )
-    if parsed is not None:
-        unresolved.extend(
-            {
-                "path": item.get("name", item.get("raw", "unknown as-needed library")),
-                "reason": "GNU map identifies an as-needed library without a resolved link input",
-            }
-            for index, item in enumerate(parsed["as_needed_libraries"])
-            if index not in as_needed_matched
-        )
     archive_actions = {}
     for action in actions:
         if action["kind"] == "archive":
@@ -662,26 +659,18 @@ def receipt_from_journal(
                 "disposition": "contributed",
                 "evidence": "captured linker-script argument",
             }
-        elif suffix in (".a", ".lib") and path in toolchain_archive_members and _within_toolchain(path, toolchain):
-            compiler = next(
-                record for (role, _), record in sorted(toolchain.items()) if role == "cc"
-            )
+        elif (
+            suffix in (".a", ".lib")
+            and path in toolchain_archive_members
+            and _runtime_identity(path, compiler, link_flags)[0] is not None
+        ):
             operand = {
                 "kind": "library",
                 "input": input_record,
                 "disposition": "contributed",
-                "toolchain": {"role": "cc", "executable": {"path": compiler["path"], "sha256": compiler["sha256"]}},
+                **_runtime_identity(path, compiler, link_flags)[0],
                 "contributing_members": sorted(toolchain_archive_members[path]),
-                "evidence": "GNU ld map allocates sections from this archive under the captured compiler installation",
-            }
-        elif suffix in (".a", ".lib") and path in toolchain_archive_members and _system_package(path)[0]:
-            operand = {
-                "kind": "library",
-                "input": input_record,
-                "disposition": "contributed",
-                "system_package": _system_package(path)[0],
-                "contributing_members": sorted(toolchain_archive_members[path]),
-                "evidence": "GNU ld map allocates sections from this archive; installed package database owns the file",
+                "evidence": "GNU ld map allocates sections from this archive; the captured compiler resolves it as its own runtime or C library",
             }
         else:
             reason = "system library, response file or prebuilt input lacks qualified source accounting"
@@ -787,6 +776,7 @@ def receipt_from_journal(
             "operands": operands,
             "discarded_sections": discarded,
             "implicit_inputs": implicit_inputs,
+            "dynamic_needed": dynamic_needed(Path(elf_record["path"])),
             "linker_generated_sections": linker_generated,
             "unresolved": unresolved_rows,
             "lto": lto,

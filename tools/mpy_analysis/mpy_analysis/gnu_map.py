@@ -13,6 +13,10 @@ _ARCHIVE_ID = re.compile(r"^(?P<archive>.+)\((?P<member>[^()]*)\)$")
 _SECTION_ROW = re.compile(
     rf"^\s+(?P<section>\S+)\s+(?P<address>{_ADDRESS})\s+(?P<size>{_ADDRESS})\s+(?P<identity>.+?)\s*$"
 )
+# An output section header starts in column one: name, then optionally address, size and load address.
+_OUTPUT_SECTION = re.compile(
+    rf"^(?P<name>[^\s=]+)(?:\s+{_ADDRESS}\s+{_ADDRESS})?(?:\s+load address\s+{_ADDRESS})?\s*$"
+)
 _EXTRACTED_HEADER = "Archive member included to satisfy reference by file (symbol)"
 
 
@@ -65,7 +69,6 @@ def parse_gnu_map(text: str, *, base_dir: str | os.PathLike[str] | None = None) 
     root = Path(base_dir if base_dir is not None else os.getcwd()).resolve(strict=False)
     lines = text.splitlines()
     loads: list[dict[str, str]] = []
-    as_needed_libraries: list[dict[str, str]] = []
     extracted: dict[tuple[str, str], dict[str, Any]] = {}
     discarded: list[dict[str, Any]] = []
     allocated: dict[tuple[str, ...], dict[str, Any]] = {}
@@ -77,6 +80,7 @@ def parse_gnu_map(text: str, *, base_dir: str | os.PathLike[str] | None = None) 
     recognized = False
     pending_archive: tuple[str, str] | None = None
     pending_section: str | None = None
+    output_section: str | None = None
 
     for number, line in enumerate(lines, 1):
         stripped = line.strip()
@@ -104,8 +108,11 @@ def parse_gnu_map(text: str, *, base_dir: str | os.PathLike[str] | None = None) 
             recognized = True
             continue
         if stripped == "As-needed library included to satisfy reference by file (symbol)":
+            # Shared libraries are recorded from the final ELF's DT_NEEDED list, not the map.
             mode = "as-needed"
             recognized = True
+            continue
+        if mode == "as-needed" and not stripped.startswith(("LOAD ", "Linker script and memory map")):
             continue
         if stripped.startswith("Linker script and memory map"):
             mode = "allocated"
@@ -119,19 +126,6 @@ def parse_gnu_map(text: str, *, base_dir: str | os.PathLike[str] | None = None) 
                 value = _single_operand(operand_text, number)
                 loads.append({"kind": "path", **_path_fields(value, root)})
             recognized = True
-            continue
-        if mode == "as-needed":
-            row = re.match(r"^\s*(?P<name>\S+)\s{2,}(?P<file>.+?)\s+\((?P<symbol>.*)\)\s*$", line)
-            if row:
-                as_needed_libraries.append(
-                    {
-                        "name": row.group("name"),
-                        "file": row.group("file"),
-                        "symbol": row.group("symbol"),
-                    }
-                )
-            else:
-                as_needed_libraries.append({"raw": stripped})
             continue
         if mode == "extracted":
             combined = re.match(r"^\s*(.+\([^()]+\))\s{2,}(.+?)\s+\((.*)\)\s*$", line)
@@ -197,6 +191,12 @@ def parse_gnu_map(text: str, *, base_dir: str | os.PathLike[str] | None = None) 
             )
             pending_archive = key
             continue
+        if mode == "allocated" and line[:1] not in (" ", "\t"):
+            header = _OUTPUT_SECTION.match(line)
+            if header:
+                output_section = header.group("name")
+                pending_section = None
+                continue
         if mode == "discarded" or mode == "allocated":
             row = _SECTION_ROW.match(line)
             section = row.group("section") if row else None
@@ -238,6 +238,7 @@ def parse_gnu_map(text: str, *, base_dir: str | os.PathLike[str] | None = None) 
             identity = _identity(identity_text.strip(), number)
             record = {
                 "section": section,
+                "output_section": output_section if mode == "allocated" else None,
                 "address": int(address, 16),
                 "size": int(size, 16),
                 "identity": identity,
@@ -262,7 +263,6 @@ def parse_gnu_map(text: str, *, base_dir: str | os.PathLike[str] | None = None) 
         "format": "gnu-ld-map",
         "loads": loads,
         "extracted_archive_members": list(extracted.values()),
-        "as_needed_libraries": as_needed_libraries,
         "discarded_sections": discarded,
         "allocated_sections": list(allocated.values()),
         "ambiguities": ambiguities,

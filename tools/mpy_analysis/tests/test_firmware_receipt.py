@@ -7,6 +7,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from conftest import fake_elf
+from mpy_analysis.elf_evidence import dynamic_needed
 from mpy_analysis.firmware_receipt import (
     FirmwareReceiptError,
     receipt_id,
@@ -24,7 +26,7 @@ def make_receipt(root: Path):
     compiler = path_record(root / "tools" / "cc", b"compiler", role="compiler", version="test-1")
     obj = path_record(root / "build" / "unit.o", b"object", role="object")
     link_operand = {**obj, "role": "link-operand"}
-    elf = path_record(root / "build" / "firmware.elf", b"elf", role="elf")
+    elf = path_record(root / "build" / "firmware.elf", fake_elf(), role="elf")
     map_file = path_record(root / "build" / "firmware.map", b"map", role="map")
     binary = path_record(root / "build" / "firmware.bin", b"binary", role="binary")
     build_id = "a" * 64
@@ -98,6 +100,7 @@ def make_receipt(root: Path):
                         }
                     ],
                     "discarded_sections": [],
+                    "dynamic_needed": [],
                     "unresolved": [],
                     "lto": "disabled",
                 },
@@ -466,6 +469,7 @@ def test_actual_native_archive_selection_is_bound_to_elf(tmp_path):
                         "evidence": "GNU ld Discarded input sections",
                     }
                 ],
+                "dynamic_needed": dynamic_needed(elf),
                 "unresolved": [],
                 "lto": "disabled",
             },

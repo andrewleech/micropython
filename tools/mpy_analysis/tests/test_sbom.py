@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from conftest import fake_elf
 from mpy_analysis import sbom, scope
 from test_firmware_inventory import make_inventory
 
@@ -133,7 +134,7 @@ def firmware_receipt(inventory, app, build_dir, source_path="selected.c"):
     obj, elf, map_file = (build_dir / name for name in ("selected.o", "firmware.elf", "firmware.map"))
     for path, content in (
         (obj, b"object"),
-        (elf, b"ELF"),
+        (elf, fake_elf()),
         (map_file, b"link map"),
     ):
         path.write_bytes(content)
@@ -224,6 +225,7 @@ def firmware_receipt(inventory, app, build_dir, source_path="selected.c"):
                         }
                     ],
                     "discarded_sections": [],
+                    "dynamic_needed": [],
                     "unresolved": [],
                     "lto": "disabled",
                 },
@@ -358,9 +360,9 @@ def test_cli_accepts_build_receipt_and_emits_firmware_sbom(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    document = json.loads((output_dir / "sbom.json").read_text())
+    document = json.loads((output_dir / "sbom.spdx.json").read_text())
     summary = json.loads((output_dir / "sbom-summary.json").read_text())
-    assert any(component["type"] == "firmware" for component in document["components"])
+    assert any(package.get("primaryPackagePurpose") == "FIRMWARE" for package in document["packages"])
     assert summary["link_closure"]["status"] == "complete"
 
 
@@ -719,8 +721,25 @@ def test_cli_supports_output_inside_project_build_directory(tmp_path):
         )
         == 0
     )
-    sbom.validate_cyclonedx(json.loads((output / "sbom.json").read_text()))
-    assert json.loads((output / "sbom-summary.json").read_text())["status"] == "generated"
+    document = json.loads((output / "sbom.spdx.json").read_text())
+    from mpy_analysis.sbom_spdx import validate_spdx
+
+    validate_spdx(document)
+    summary = json.loads((output / "sbom-summary.json").read_text())
+    assert summary["status"] == "generated"
+    assert (summary["document_format"], summary["document_file"]) == ("SPDX-2.3", "sbom.spdx.json")
+    assert not (output / "sbom.json").exists()
+
+    other = tmp_path / "cyclonedx-output"
+    assert (
+        sbom.main(
+            ["--scope", str(path), "--micropython-root", str(MPY_ROOT), "--output-dir", str(other), "--format", "cyclonedx"]
+        )
+        == 0
+    )
+    sbom.validate_cyclonedx(json.loads((other / "sbom.json").read_text()))
+    assert not (other / "sbom.spdx.json").exists()
+    assert json.loads((other / "sbom-summary.json").read_text())["document_format"] == "CycloneDX-1.6"
 
 
 @pytest.mark.parametrize("failure", ["scope", "profile"])

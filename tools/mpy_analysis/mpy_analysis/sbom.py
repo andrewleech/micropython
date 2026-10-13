@@ -22,6 +22,7 @@ from .firmware_receipt import load_firmware_receipt, validate_firmware_receipt
 from .generic_inventory import assemble
 from .metadata import collect_metadata
 from .metadata_bom import valid_uri, validate_cyclonedx
+from .sbom_spdx import cyclonedx_to_spdx, serialize_spdx
 from .scope import FROZEN_GROUP, parse_scope, source_path
 
 
@@ -253,76 +254,76 @@ def _generator_input(builder: _Builder, binding: tuple[str, str]) -> str | None:
     )
 
 
-def _system_package_components(builder: _Builder, link: dict[str, Any]) -> set[str]:
-    """Add one component per installed package that supplied linked files.
+def _runtime_components(
+    builder: _Builder, link: dict[str, Any], toolchain: list[dict[str, Any]], build_id: str
+) -> set[str]:
+    """Add components for statically linked compiler runtime files and C library files.
 
-    Package identity comes from the package database record captured with the receipt;
-    each linked file is a nested file component with its SHA-256 and linkage.
+    Compiler runtime files carry the compiler release version. C library files are grouped
+    under one library component whose version comes from the library's header macros.
     """
-    files: dict[tuple[str, ...], list[dict[str, Any]]] = {}
-    packages: dict[tuple[str, ...], dict[str, Any]] = {}
+    references = set()
+    libraries: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
 
-    def collect(package: dict[str, Any], path: str, sha256: str, linkage: str, members: list[str]) -> None:
-        key = (package["manager"], package["name"], package["version"], package["architecture"])
-        packages[key] = package
-        files.setdefault(key, []).append(
-            {
-                "type": "file",
-                "name": path,
-                "hashes": [{"alg": "SHA-256", "content": sha256}],
-                "properties": _properties(
+    def collect(item: dict[str, Any], path: str, sha256: str, members: list[str]) -> None:
+        if "c_library" in item:
+            library = item["c_library"]
+            libraries.setdefault((library["name"], library["version"], library["version_source"]), []).append(
+                {
+                    "type": "file",
+                    "name": path,
+                    "hashes": [{"alg": "SHA-256", "content": sha256}],
+                    "properties": _properties({"linkage": "static", "contributing-members": members or None}),
+                }
+            )
+        elif "toolchain" in item:
+            compiler = next(
+                tool
+                for tool in toolchain
+                if tool["role"] == item["toolchain"]["role"]
+                and tool["executable"]["path"] == item["toolchain"]["executable"]["path"]
+            )
+            references.add(
+                builder.add(
+                    "toolchain-library",
+                    [build_id, sha256],
                     {
-                        "linkage": linkage,
-                        "package-md5sum": package["md5sum"],
-                        "contributing-members": members or None,
-                    }
-                ),
-            }
-        )
+                        "type": "library",
+                        "name": Path(path).name,
+                        "version": compiler["version"],
+                        "hashes": [{"alg": "SHA-256", "content": sha256}],
+                        "properties": _properties(
+                            {
+                                "toolchain-compiler": compiler["executable"]["path"],
+                                "toolchain-compiler-sha256": compiler["executable"]["sha256"],
+                                "contributing-members": str(len(members)) if members else None,
+                            }
+                        ),
+                    },
+                )
+            )
 
     for operand in link["operands"]:
-        if operand["disposition"] == "contributed" and "system_package" in operand:
-            collect(
-                operand["system_package"],
-                operand["input"]["path"],
-                operand["input"]["sha256"],
-                "static",
-                operand["contributing_members"],
-            )
+        if operand["disposition"] == "contributed" and operand["kind"] == "library":
+            collect(operand, operand["input"]["path"], operand["input"]["sha256"], operand["contributing_members"])
     for entry in link.get("implicit_inputs", []):
         if entry["disposition"] == "contributed":
-            collect(
-                entry["package"],
-                entry["path"],
-                entry["sha256"],
-                entry["linkage"],
-                entry.get("contributing_members", []),
-            )
-    references = set()
-    for key, package in sorted(packages.items()):
-        distro = package["distro"]
-        purl = f"pkg:deb/{quote(distro['id'], safe='')}/{quote(package['name'], safe='')}@{quote(package['version'], safe='~')}"
-        qualifiers = [f"arch={quote(package['architecture'], safe='')}"] if package["architecture"] else []
-        if distro["id"] and distro["version_id"]:
-            qualifiers.append(f"distro={quote(distro['id'] + '-' + distro['version_id'], safe='')}")
-        component = {
-            "type": "library",
-            "name": package["name"],
-            "version": package["version"],
-            "components": sorted(files[key], key=lambda item: item["name"]),
-            "properties": _properties(
+            collect(entry, entry["path"], entry["sha256"], entry.get("contributing_members", []))
+    for (name, version, source), files in sorted(libraries.items()):
+        references.add(
+            builder.add(
+                "c-library",
+                [name, version, build_id],
                 {
-                    "package-manager": package["manager"],
-                    "package-architecture": package["architecture"] or None,
-                    "selection": "linked-system-package",
-                }
-            ),
-        }
-        if distro["id"]:
-            component["purl"] = purl + ("?" + "&".join(qualifiers) if qualifiers else "")
-        if package["maintainer"]:
-            component["supplier"] = {"name": package["maintainer"]}
-        references.add(builder.add("system-package", list(key), component))
+                    "type": "library",
+                    "name": name,
+                    "version": version,
+                    "purl": f"pkg:generic/{quote(name, safe='')}@{quote(version, safe='')}",
+                    "components": sorted(files, key=lambda item: item["name"]),
+                    "properties": _properties({"selection": "linked-c-library", "version-source": source}),
+                },
+            )
+        )
     return references
 
 
@@ -410,6 +411,7 @@ def _attach_firmware_images(
             "hashes": [{"alg": "SHA-256", "content": link["elf"]["sha256"]}],
             "properties": _properties(
                 {
+                    "dynamic-needed": link["dynamic_needed"] or None,
                     "build-id": validated["build_id"],
                     "receipt-id": validated["receipt_id"],
                     "image-role": image["role"],
@@ -426,35 +428,7 @@ def _attach_firmware_images(
         reference = builder.add(
             "firmware-image", [validated["build_id"], image["id"]], component
         )
-        for operand in link["operands"]:
-            if operand["disposition"] != "contributed" or "toolchain" not in operand:
-                continue
-            compiler = next(
-                tool
-                for tool in validated["toolchain"]
-                if tool["role"] == operand["toolchain"]["role"]
-                and tool["executable"]["path"] == operand["toolchain"]["executable"]["path"]
-            )
-            library_path = Path(operand["input"]["path"])
-            library = builder.add(
-                "toolchain-library",
-                [validated["build_id"], operand["input"]["sha256"]],
-                {
-                    "type": "library",
-                    "name": library_path.name,
-                    "version": compiler["version"],
-                    "hashes": [{"alg": "SHA-256", "content": operand["input"]["sha256"]}],
-                    "properties": _properties(
-                        {
-                            "toolchain-compiler": compiler["executable"]["path"],
-                            "toolchain-compiler-sha256": compiler["executable"]["sha256"],
-                            "contributing-members": str(len(operand["contributing_members"])),
-                        }
-                    ),
-                },
-            )
-            mapped.add(library)
-        mapped.update(_system_package_components(builder, link))
+        mapped.update(_runtime_components(builder, link, validated["toolchain"], validated["build_id"]))
         builder.dependencies[reference] = mapped
         root_dependencies.add(reference)
         images.append(
@@ -826,11 +800,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="generation.json companion for --link-inventory; defaults to its sibling",
     )
+    parser.add_argument(
+        "--format",
+        choices=("spdx", "cyclonedx"),
+        default="spdx",
+        help="document format to write: sbom.spdx.json (SPDX 2.3) or sbom.json (CycloneDX 1.6)",
+    )
     args = parser.parse_args(argv)
     try:
         scope_path = args.scope.resolve()
         output = args.output_dir.resolve()
-        destinations = [output / "sbom.json", output / "sbom-summary.json"]
+        documents = {"cyclonedx": output / "sbom.json", "spdx": output / "sbom.spdx.json"}
+        summary_path = output / "sbom-summary.json"
+        destinations = [*documents.values(), summary_path]
         input_error = None
         try:
             data = json.loads(scope_path.read_text(encoding="utf-8"))
@@ -856,8 +838,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         output.mkdir(parents=True, exist_ok=True)
         receipt["scope_file"] = str(scope_path)
         receipt["scope_sha256"] = hashlib.sha256(scope_path.read_bytes()).hexdigest()
-        for path, value in zip(destinations, (document, receipt)):
-            path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        receipt["document_format"] = "SPDX-2.3" if args.format == "spdx" else "CycloneDX-1.6"
+        receipt["document_file"] = documents[args.format].name
+        rendered = (
+            serialize_spdx(cyclonedx_to_spdx(document))
+            if args.format == "spdx"
+            else (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        )
+        documents[args.format].write_bytes(rendered)
+        summary_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"SBOM: {receipt['component_count']} components; {receipt['coverage_status']}")
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"sbom: {exc}", file=sys.stderr)

@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 from .argv_tokens import enables_lto
+from .elf_evidence import dynamic_needed, section_table
+from .gnu_map import parse_gnu_map
 
 SCHEMA = "mpy-firmware-build/v1"
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -253,33 +255,20 @@ def _validate_linker_generated(link, image_id):
                 raise FirmwareReceiptError(f"{label}.{field} must be a non-negative integer")
 
 
-def _validate_system_package(package, path, label, verify_files):
-    package = _object(package, f"{label} package")
-    if package.get("manager") != "dpkg":
-        raise FirmwareReceiptError(f"{label} package manager is unsupported: {path}")
-    for field in ("name", "version"):
-        _text(package.get(field), f"{label} package {field}")
-    for field in ("architecture", "maintainer"):
-        if not isinstance(package.get(field), str):
-            raise FirmwareReceiptError(f"{label} package {field} must be text: {path}")
-    md5sum = package.get("md5sum")
-    if not isinstance(md5sum, str) or len(md5sum) != 32 or any(c not in "0123456789abcdef" for c in md5sum):
-        raise FirmwareReceiptError(f"{label} package md5sum must be a lowercase MD5 digest: {path}")
-    distro = _object(package.get("distro"), f"{label} package distro")
-    for field in ("id", "version_id"):
-        if not isinstance(distro.get(field), str):
-            raise FirmwareReceiptError(f"{label} package distro {field} must be text: {path}")
-    if verify_files:
-        digest = hashlib.md5(usedforsecurity=False)
-        try:
-            digest.update(Path(path).read_bytes())
-        except OSError as exc:
-            raise FirmwareReceiptError(f"cannot verify package checksum: {path}") from exc
-        if digest.hexdigest() != md5sum:
-            raise FirmwareReceiptError(f"stale system file does not match its package checksum: {path}")
+def _validate_c_library(library, label):
+    library = _object(library, label)
+    for field in ("name", "version", "version_source"):
+        _text(library.get(field), f"{label} {field}")
 
 
-def _validate_implicit_inputs(link, image_id, operand_paths, verify_files):
+def _validate_library_members(operand, path, image_id):
+    members = operand.get("contributing_members")
+    if not isinstance(members, list) or not members or not all(isinstance(item, str) and item for item in members):
+        raise FirmwareReceiptError(f"image {image_id} library must list contributing members: {path}")
+    _text(operand.get("evidence"), f"image {image_id} library evidence")
+
+
+def _validate_implicit_inputs(link, image_id, operand_paths, verify_files, toolchain_executables):
     entries = link.get("implicit_inputs", [])
     if not isinstance(entries, list):
         raise FirmwareReceiptError(f"image {image_id}.link.implicit_inputs must be an array")
@@ -296,25 +285,89 @@ def _validate_implicit_inputs(link, image_id, operand_paths, verify_files):
         seen.add(path)
         if entry.get("origin") != "gnu-map-load":
             raise FirmwareReceiptError(f"{label}.origin is unsupported")
-        if entry.get("kind") not in ("object", "archive", "shared-library", "script"):
+        kind = entry.get("kind")
+        if kind not in ("object", "archive", "shared-library", "script"):
             raise FirmwareReceiptError(f"{label}.kind is unsupported")
         _text(entry.get("evidence"), f"{label}.evidence")
         disposition = entry.get("disposition")
-        if disposition == "no-contribution":
+        if (disposition == "dynamic") != (kind == "shared-library"):
+            raise FirmwareReceiptError(f"{label} dynamic disposition applies only to shared libraries")
+        if disposition in ("no-contribution", "dynamic"):
             _text(entry.get("reason"), f"{label}.reason")
         elif disposition == "contributed":
-            if entry["kind"] == "script" or entry.get("linkage") not in ("static", "dynamic"):
-                raise FirmwareReceiptError(f"{label} contributes without a code linkage")
-            if entry["kind"] == "archive":
+            if kind == "script" or entry.get("linkage") != "static":
+                raise FirmwareReceiptError(f"{label} contributes without static linkage")
+            if kind == "archive":
                 members = entry.get("contributing_members")
                 if not isinstance(members, list) or not members or not all(
                     isinstance(item, str) and item for item in members
                 ):
                     raise FirmwareReceiptError(f"{label} archive must list contributing members")
-            _validate_system_package(entry.get("package"), path, label, verify_files)
+            if "c_library" in entry:
+                _validate_c_library(entry["c_library"], label)
+            elif "toolchain" in entry:
+                toolchain = _object(entry["toolchain"], f"{label}.toolchain")
+                executable = _object(toolchain.get("executable"), f"{label}.toolchain.executable")
+                if toolchain_executables.get((toolchain.get("role"), executable.get("path"))) != executable.get("sha256"):
+                    raise FirmwareReceiptError(f"{label} is not bound to a captured toolchain tool: {path}")
+            else:
+                raise FirmwareReceiptError(f"{label} contributes without a compiler runtime or C library identity")
         else:
             raise FirmwareReceiptError(f"{label}.disposition must be explicit")
 
+
+def _validate_dynamic_needed(link, image_id, verify_files):
+    needed = link.get("dynamic_needed")
+    if not isinstance(needed, list) or not all(isinstance(item, str) and item for item in needed):
+        raise FirmwareReceiptError(f"image {image_id}.link.dynamic_needed must list sonames")
+    if verify_files:
+        try:
+            actual = dynamic_needed(Path(link["elf"]["path"]))
+        except (OSError, ValueError) as error:
+            raise FirmwareReceiptError(f"cannot read DT_NEEDED from the final ELF: {error}") from error
+        if actual != needed:
+            raise FirmwareReceiptError(f"image {image_id} dynamic_needed does not match the final ELF")
+
+
+def _validate_map_matches_elf(link, image_id, verify_files):
+    """Every input section the GNU map places in an allocated output section must start inside it.
+
+    This ties the parsed map to the final ELF structurally: a map that does not describe the
+    ELF it was recorded with fails here instead of producing wrong contribution evidence. Only
+    the start address is compared because the linker deduplicates merged string sections, so an
+    input's mapped size can run past the end of its output section.
+    """
+    if not verify_files or link.get("linker_format") != "gnu-ld-map":
+        return
+    map_path = Path(link["map"]["path"])
+    try:
+        parsed = parse_gnu_map(map_path.read_text(encoding="utf-8", errors="strict"), base_dir=map_path.parent)
+        table = section_table(Path(link["elf"]["path"]))
+    except (OSError, ValueError) as error:
+        raise FirmwareReceiptError(f"image {image_id} map or ELF cannot be cross-checked: {error}") from error
+    problems = []
+    for group in parsed["allocated_sections"]:
+        for row in group["sections"]:
+            output, size = row["output_section"], row["size"]
+            if not size:
+                continue
+            if output is None:
+                problems.append(f"{row['section']} has no output section (map line {row['line']})")
+                continue
+            elf = table.get(output)
+            if elf is None:
+                if size:
+                    problems.append(f"output section {output} is absent from the ELF (map line {row['line']})")
+                continue
+            if not elf["allocated"]:
+                continue
+            if not elf["start"] <= row["address"] < elf["end"]:
+                problems.append(
+                    f"{row['section']} at {row['address']:#x} is outside ELF section {output} "
+                    f"(map line {row['line']})"
+                )
+    if problems:
+        raise FirmwareReceiptError(f"image {image_id} map does not describe the final ELF: " + "; ".join(problems[:3]))
 
 
 def _validate_link_operands(link, image_id, link_id, action_inputs, repo_names, verify_files, toolchain_executables):
@@ -345,16 +398,9 @@ def _validate_link_operands(link, image_id, link_id, action_inputs, repo_names, 
             _text(operand.get("reason"), f"image {image_id} no-contribution reason")
         if disposition == "unsupported":
             _text(operand.get("reason"), f"image {image_id} unsupported-input reason")
-        if disposition == "contributed" and kind == "library" and "system_package" in operand:
-            _validate_system_package(
-                operand["system_package"], path, f"image {image_id} system library", verify_files
-            )
-            members = operand.get("contributing_members")
-            if not isinstance(members, list) or not members or not all(
-                isinstance(item, str) and item for item in members
-            ):
-                raise FirmwareReceiptError(f"system library must list contributing members: {path}")
-            _text(operand.get("evidence"), f"image {image_id} system library evidence")
+        if disposition == "contributed" and kind == "library" and "c_library" in operand:
+            _validate_c_library(operand["c_library"], f"image {image_id} C library {path}")
+            _validate_library_members(operand, path, image_id)
         elif disposition == "contributed" and kind == "library" and "toolchain" in operand:
             _validate_toolchain_library(operand, path, image_id, toolchain_executables)
         elif disposition == "contributed" and kind in ("object", "archive", "prebuilt", "library"):
@@ -541,7 +587,9 @@ def validate_firmware_receipt(
         by_operand = _validate_link_operands(
             link, image_id, link_id, action_inputs, repo_names, verify_files, toolchain_executables
         )
-        _validate_implicit_inputs(link, image_id, set(by_operand), verify_files)
+        _validate_implicit_inputs(link, image_id, set(by_operand), verify_files, toolchain_executables)
+        _validate_dynamic_needed(link, image_id, verify_files)
+        _validate_map_matches_elf(link, image_id, verify_files)
         _validate_linker_generated(link, image_id)
         _validate_object_accounting(
             image, image_id, repo_names, compiled_objects, by_operand, verify_files
