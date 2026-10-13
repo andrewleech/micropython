@@ -499,3 +499,47 @@ def test_library_json_conflicts_with_a_pinned_application_declaration(tmp_path):
     assert matrix["fields"]["name"]["status"] == "known"
     component = next(item for item in document["components"] if item["name"] == "declared-lib")
     assert "version" not in component
+
+
+CMAKE_CHAIN = """cmake_minimum_required(VERSION 3.5)
+include(GNUInstallDirs)
+if(SYNTHETIC_CXX)
+    project("Synthetic Stack" LANGUAGES C CXX VERSION 7.1.0)
+else()
+    project("Synthetic Stack" LANGUAGES C VERSION 7.1.0)
+endif()
+"""
+
+
+def test_conditional_cmake_project_identical_on_every_path_identifies_the_library(tmp_path):
+    inventory, _ = direct_dependency(
+        tmp_path,
+        {
+            "source.py": "value = 1\n",
+            "CMakeLists.txt": CMAKE_CHAIN,
+            "LICENSES/MIT.txt": "MIT text\n",
+        },
+    )
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
+    component = next(item for item in document["components"] if item["name"] == "Synthetic Stack")
+    assert component["version"] == "7.1.0"
+    matrix = boundary_matrix(receipt, "separate")
+    assert matrix["boundary_kind"] == "native-project"
+    assert matrix["boundary_issues"] == []
+    assert matrix["fields"]["name"]["evidence"][0]["parser"] == "native-literal-1"
+
+
+def test_conditional_cmake_project_without_every_path_stays_unresolved(tmp_path):
+    inventory, _ = direct_dependency(
+        tmp_path,
+        {
+            "source.py": "value = 1\n",
+            "CMakeLists.txt": CMAKE_CHAIN.replace("else()", "elseif(SYNTHETIC_OTHER)"),
+        },
+    )
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
+    assert all(item["name"] != "Synthetic Stack" for item in document["components"])
+    matrix = boundary_matrix(receipt, "separate")
+    assert matrix["fields"]["name"]["status"] == "unsupported"
+    assert "no else()" in matrix["fields"]["name"]["issues"][0]["reason"]
+    assert matrix["boundary_kind"] == "repository"

@@ -1547,3 +1547,175 @@ def test_library_json_licence_conflicts_with_mixed_nested_licensing(tmp_path):
         if issue["field"] == "license" and issue["status"] == "conflicting"
     )
     assert set(conflict["values"]) == {"MIT", "GPL-2.0-only"}
+
+
+def chain(first, second, tail="", head=""):
+    return f"{head}if(SYNTHETIC_FLAG)\n{first}\nelse()\n{second}\nendif()\n{tail}"
+
+
+BOTH = 'project("Synthetic Native" LANGUAGES {languages} VERSION 3.6.6 DESCRIPTION "Shared")'
+
+
+def test_conditional_project_identical_on_every_path_is_literal_metadata():
+    text = chain(
+        BOTH.format(languages="C CXX"),
+        BOTH.format(languages="C"),
+        head="cmake_minimum_required(VERSION 3.5)\ninclude(GNUInstallDirs)\n",
+        tail="include(GNUInstallDirs)\nadd_subdirectory(library)\n",
+    )
+    fields, issues = parse_native(text, "CMakeLists.txt")
+    assert fields == {
+        "name": "Synthetic Native",
+        "version": "3.6.6",
+        "description": "Shared",
+    }
+    assert issues == []
+
+
+def test_elseif_and_nested_chains_must_all_agree():
+    leaf = "project(synthetic VERSION 1.2)"
+    text = f"if(A)\n{leaf}\nelseif(B)\nif(C)\n{leaf}\nelse()\n{leaf}\nendif()\nelse()\n{leaf}\nendif()\n"
+    assert parse_native(text, "CMakeLists.txt") == ({"name": "synthetic", "version": "1.2"}, [])
+
+
+def test_conditional_project_known_per_field_only_where_paths_agree():
+    text = chain(
+        "project(synthetic VERSION 1.0 DESCRIPTION shared)",
+        "project(synthetic VERSION 2.0 DESCRIPTION shared)",
+    )
+    fields, issues = parse_native(text, "CMakeLists.txt")
+    assert fields == {"name": "synthetic", "description": "shared"}
+    assert [(row["field"], "differ" in row["reason"]) for row in issues] == [("version", True)]
+    text = chain("project(synthetic VERSION 1.0)", "project(synthetic)")
+    fields, issues = parse_native(text, "CMakeLists.txt")
+    assert "version" not in fields
+    assert any(row["field"] == "version" for row in issues)
+    text = chain("project(first VERSION 1.0)", "project(second VERSION 1.0)")
+    fields, issues = parse_native(text, "CMakeLists.txt")
+    assert fields == {"version": "1.0"}
+    assert any(row["field"] == "name" for row in issues)
+
+
+def test_conditional_project_expansion_is_never_resolved_even_when_repeated():
+    text = chain(
+        'project("${SYNTHETIC_NAME}" VERSION 1.0)', 'project("${SYNTHETIC_NAME}" VERSION 1.0)'
+    )
+    fields, issues = parse_native(text, "CMakeLists.txt")
+    assert fields == {"version": "1.0"}
+    assert any("expansion" in row["reason"] for row in issues if row["field"] == "name")
+
+
+def test_conditional_project_repeated_keyword_stays_conflicting():
+    text = chain(
+        "project(synthetic VERSION 1 VERSION 2)", "project(synthetic VERSION 1 VERSION 2)"
+    )
+    fields, issues = parse_native(text, "CMakeLists.txt")
+    assert "version" not in fields
+    assert {row.get("status") for row in issues if row["field"] == "version"} == {"conflicting"}
+
+
+LEAF = "project(synthetic VERSION 1.0)"
+
+
+@pytest.mark.parametrize(
+    "text,reason",
+    [
+        (f"if(A)\n{LEAF}\nendif()\n", "no else()"),
+        (f"if(A)\n{LEAF}\nelseif(B)\n{LEAF}\nendif()\n", "no else()"),
+        (f"if(A)\n{LEAF}\nelse()\nendif()\n", "declares no project()"),
+        (f"if(A)\nelse()\n{LEAF}\nendif()\n", "declares no project()"),
+        (f"if(A)\n{LEAF}\nelse()\n{LEAF}\n{LEAF}\nendif()\n", "more than one"),
+        (f"if(A)\n{LEAF}\nelse()\nmessage(STATUS x)\n{LEAF}\nendif()\n", "more than one"),
+        (f"if(A)\n{LEAF}\nelse()\nset(X 1)\nendif()\n", "other than project()"),
+        (f"if(A)\n{LEAF}\nelse()\nmessage(STATUS x)\nendif()\n", "other than project()"),
+        (f"if(A)\n{LEAF}\nelse()\nif(B)\n{LEAF}\nendif()\nendif()\n", "no else()"),
+        (f"if(A)\nif(B)\n{LEAF}\nelse()\n{LEAF}\nendif()\nendif()\n", "no else()"),
+        (
+            f"if(A)\n{LEAF}\nelse()\nforeach(i a)\n{LEAF}\nendforeach()\nendif()\n",
+            "other than project()",
+        ),
+        (f"if(A)\n{LEAF}\nelse()\n{LEAF}\nendif()\nproject(other VERSION 2)\n", "ambiguous"),
+        (f"project(other VERSION 2)\nif(A)\n{LEAF}\nelse()\n{LEAF}\nendif()\n", "ambiguous"),
+        (
+            f"if(A)\n{LEAF}\nelse()\n{LEAF}\nendif()\nif(B)\n{LEAF}\nelse()\n{LEAF}\nendif()\n",
+            "ambiguous",
+        ),
+        (f"function(wrap)\nif(A)\n{LEAF}\nelse()\n{LEAF}\nendif()\nendfunction()\n", "ambiguous"),
+        (f"while(A)\nif(B)\n{LEAF}\nelse()\n{LEAF}\nendif()\nendwhile()\n", "ambiguous"),
+        (f"macro(project)\nendmacro()\nif(A)\n{LEAF}\nelse()\n{LEAF}\nendif()\n", "overridden"),
+    ],
+)
+def test_conditional_project_is_unsupported_unless_every_path_declares_it_once(text, reason):
+    fields, issues = parse_native(text, "CMakeLists.txt")
+    assert fields == {}
+    assert issues
+    assert all(reason in row["reason"] for row in issues)
+
+
+@pytest.mark.parametrize(
+    "extra,reason",
+    [
+        ("set(PROJECT_VERSION 9)", "PROJECT_VERSION is assigned"),
+        ("set(CMAKE_PROJECT_VERSION 9)", "CMAKE_PROJECT_VERSION is assigned"),
+        ('set(PROJECT_NAME "other" CACHE STRING "" FORCE)', "PROJECT_NAME is assigned"),
+        ("set(synthetic_VERSION 9)", "synthetic_VERSION is assigned"),
+        ("unset(PROJECT_VERSION)", "PROJECT_VERSION is assigned"),
+        ('option(PROJECT_DESCRIPTION "x" ON)', "PROJECT_DESCRIPTION is assigned"),
+        ("set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)", "CMAKE_MODULE_PATH"),
+        ("include(cmake/version.cmake)", "include()"),
+        ("include(${CMAKE_SOURCE_DIR}/version.cmake)", "include()"),
+        ("include(GNUInstallDirs OPTIONAL)", "include()"),
+        ('cmake_language(EVAL CODE "project(x VERSION 2)")', "cmake_language"),
+        ("return()", "return()"),
+    ],
+)
+@pytest.mark.parametrize("position", ["before", "after"])
+def test_conditional_project_rejects_assignment_or_indirection_anywhere(extra, reason, position):
+    body = chain(LEAF, LEAF)
+    text = f"{extra}\n{body}" if position == "before" else f"{body}{extra}\n"
+    fields, issues = parse_native(text, "CMakeLists.txt")
+    assert fields == {}
+    assert issues
+    assert all(reason in row["reason"] for row in issues)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "if(A)\nelse()\nelse()\nendif()\n",
+        "else()\n",
+        "if(A)\nendwhile()\n",
+        "elseif(A)\nendif()\n",
+    ],
+)
+def test_misplaced_or_mismatched_control_blocks_are_unsupported(text):
+    fields, issues = parse_native(text, "CMakeLists.txt")
+    assert fields == {}
+    assert issues
+
+
+def test_conditional_cmake_project_establishes_a_native_boundary_and_identity(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "CMakeLists.txt": chain(BOTH.format(languages="C CXX"), BOTH.format(languages="C")),
+            "src/item.c": "int item;\n",
+        },
+    )
+    result = collect(tmp_path, [tmp_path / "src/item.c"])
+    assert result["fields"]["name"] == "Synthetic Native"
+    assert result["fields"]["version"] == "3.6.6"
+    write_files(
+        tmp_path,
+        {
+            "CMakeLists.txt": chain(
+                BOTH.format(languages="C CXX"),
+                BOTH.format(languages="C"),
+                tail="set(PROJECT_VERSION 1)\n",
+            )
+        },
+    )
+    result = collect(tmp_path, [tmp_path / "src/item.c"])
+    assert "name" not in result["fields"]
+    assert "version" not in result["fields"]
+    assert "unsupported" in statuses(result, "version")

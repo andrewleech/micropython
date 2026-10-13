@@ -52,12 +52,25 @@ def _cmake_tokens(text: str) -> list[tuple[str, bool]]:
     return tokens
 
 
-def _cmake(text: str) -> tuple[dict, list[dict]]:
-    tokens = _cmake_tokens(text)
-    declarations = []
+_BLOCKS = ("foreach", "while", "function", "macro", "block")
+_CLOSERS = {
+    "endif": "if",
+    "endforeach": "foreach",
+    "endwhile": "while",
+    "endfunction": "function",
+    "endmacro": "macro",
+    "endblock": "block",
+}
+_PROJECT_FIELDS = ("name", "version", "description", "url", "metadata")
+_PROJECT_VARIABLE = re.compile(
+    r"(?:CMAKE_)?PROJECT_(?:NAME|VERSION(?:_MAJOR|_MINOR|_PATCH|_TWEAK)?|DESCRIPTION|HOMEPAGE_URL)"
+)
+_CMAKE_MODULE = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
+
+
+def _cmake_commands(tokens: list[tuple[str, bool]]) -> list[tuple[str, list[tuple[str, bool]]]]:
+    commands = []
     index = 0
-    control_depth = 0
-    project_command_unresolved = False
     while index < len(tokens):
         command = tokens[index][0].lower()
         if index + 1 >= len(tokens) or tokens[index + 1][0] != "(":
@@ -76,39 +89,55 @@ def _cmake(text: str) -> tuple[dict, list[dict]]:
             index += 1
         if depth:
             raise ValueError("unterminated CMake command")
-        if command in ("function", "macro") and (
-            not args
-            or args[0][0].casefold() == "project"
-            or any(marker in args[0][0] for marker in ("$", ";", "\\", "(", ")"))
-        ):
-            project_command_unresolved = True
-        if command in ("endif", "endforeach", "endwhile", "endfunction", "endmacro", "endblock"):
-            control_depth -= 1
-            if control_depth < 0:
+        commands.append((command, args))
+    return commands
+
+
+def _cmake_tree(commands: list[tuple[str, list[tuple[str, bool]]]]) -> list[tuple]:
+    """Nest commands into ``("command", name, args)`` and ``("block", kind, branches)`` nodes.
+
+    ``branches`` lists ``(keyword, args, body)``; only ``if`` has more than one branch.
+    """
+    root: list[tuple] = []
+    stack: list[tuple[list[tuple], list[tuple]]] = []
+    body = root
+    for command, args in commands:
+        if command in ("if", *_BLOCKS):
+            branches = [(command, args, [])]
+            body.append(("block", command, branches))
+            stack.append((branches, body))
+            body = branches[0][2]
+        elif command in ("elseif", "else"):
+            if not stack or stack[-1][0][0][0] != "if" or stack[-1][0][-1][0] == "else":
+                raise ValueError("misplaced CMake elseif/else")
+            branches = stack[-1][0]
+            branches.append((command, args, []))
+            body = branches[-1][2]
+        elif command in _CLOSERS:
+            if not stack or stack[-1][0][0][0] != _CLOSERS[command]:
                 raise ValueError("unmatched CMake control block")
-        if command == "project":
-            declarations.append((args, control_depth))
-        if command in ("if", "foreach", "while", "function", "macro", "block"):
-            control_depth += 1
-    if control_depth:
+            body = stack.pop()[1]
+        else:
+            body.append(("command", command, args))
+    if stack:
         raise ValueError("unterminated CMake control block")
-    if project_command_unresolved:
-        return {}, [
-            {
-                "field": field,
-                "reason": "builtin CMake project command is overridden or its identity is unresolved",
-            }
-            for field in ("name", "version", "description", "url")
-        ]
-    if len(declarations) != 1 or declarations[0][1]:
-        return {}, [
-            {
-                "field": field,
-                "reason": "CMake project declaration is absent, ambiguous or conditional",
-            }
-            for field in ("name", "version", "description")
-        ]
-    args = declarations[0][0]
+    return root
+
+
+def _commands_in(body: list[tuple]):
+    for node in body:
+        if node[0] == "command":
+            yield node
+        else:
+            for _, _, inner in node[2]:
+                yield from _commands_in(inner)
+
+
+def _project_count(body: list[tuple]) -> int:
+    return sum(1 for node in _commands_in(body) if node[1] == "project")
+
+
+def _project_fields(args: list[tuple[str, bool]]) -> tuple[dict, list[dict]]:
     fields = {}
     issues = []
     seen = set()
@@ -168,6 +197,147 @@ def _cmake(text: str) -> tuple[dict, list[dict]]:
                 )
             index += 1
     return fields, issues
+
+
+def _unsupported(reason: str) -> tuple[dict, list[dict]]:
+    return {}, [{"field": field, "reason": reason} for field in ("name", "version", "description")]
+
+
+def _declared_on_every_path(
+    branches: list[tuple],
+) -> tuple[list[list[tuple[str, bool]]], str | None]:
+    """Return the project() arguments of each path through an if/elseif/else chain.
+
+    Every branch must hold exactly one project() command or one nested chain that is
+    itself complete, and the outermost chain must end in else(); otherwise some path
+    declares no project() or more than one, and the reason says which.
+    """
+    if branches[-1][0] != "else":
+        return [], "a conditional chain has no else() branch, so one path declares no project()"
+    declared = []
+    for _, _, body in branches:
+        if not body:
+            return [], "a conditional branch declares no project()"
+        if len(body) > 1:
+            return [], "a conditional branch holds more than one command or nested construct"
+        node = body[0]
+        if node[0] == "command" and node[1] == "project":
+            declared.append(node[2])
+        elif node[0] == "block" and node[1] == "if":
+            inner, reason = _declared_on_every_path(node[2])
+            if reason:
+                return [], reason
+            declared.extend(inner)
+        else:
+            return [], "a conditional branch holds a command other than project()"
+    return declared, None
+
+
+def _indirection(body: list[tuple], names: set[str]) -> str | None:
+    """Name a construct outside the declaration that could change or hide the project() result.
+
+    Included CMake modules are trusted only when named bare (resolved from CMake's own
+    module path); a file include, ``cmake_language``, a modified ``CMAKE_MODULE_PATH``,
+    an early ``return()`` or an assignment to a project variable is not.
+    """
+    variables = {
+        f"{name}_{suffix}"
+        for name in names
+        for suffix in (
+            "VERSION",
+            "VERSION_MAJOR",
+            "VERSION_MINOR",
+            "VERSION_PATCH",
+            "VERSION_TWEAK",
+            "DESCRIPTION",
+            "HOMEPAGE_URL",
+        )
+    }
+    for _, command, args in _commands_in(body):
+        if command == "return":
+            return "return() can end the file before the declaration is reached"
+        if command == "cmake_language":
+            return "cmake_language() runs code that is not evaluated"
+        if command == "include" and not (len(args) == 1 and _CMAKE_MODULE.fullmatch(args[0][0])):
+            return "include() of a file or with options can redefine the project command"
+        if command in ("set", "unset", "option") and args:
+            variable = args[0][0]
+            if variable == "CMAKE_MODULE_PATH":
+                return "CMAKE_MODULE_PATH is modified, so included modules are not CMake's own"
+            if _PROJECT_VARIABLE.fullmatch(variable) or variable in variables:
+                return f"{variable} is assigned outside project()"
+    return None
+
+
+def _conditional_declaration(root: list[tuple], branches: list[tuple]) -> tuple[dict, list[dict]]:
+    """Resolve a project() declared in every branch of one chain, field by field.
+
+    A field is known only when every path through the chain gives it the same literal;
+    the conditions themselves are never evaluated, so the value cannot depend on them.
+    """
+    declared, reason = _declared_on_every_path(branches)
+    if reason:
+        return _unsupported(f"conditional CMake project declaration is not sound: {reason}")
+    parsed = [_project_fields(args) for args in declared]
+    reason = _indirection(root, {fields["name"] for fields, _ in parsed if "name" in fields})
+    if reason:
+        return _unsupported(f"conditional CMake project declaration is not sound: {reason}")
+    fields: dict = {}
+    issues: list[dict] = []
+    for field in _PROJECT_FIELDS:
+        states = [
+            (
+                found.get(field),
+                [json.dumps(row, sort_keys=True) for row in rows if row["field"] == field],
+            )
+            for found, rows in parsed
+        ]
+        if all(state == states[0] for state in states):
+            if states[0][0] is not None:
+                fields[field] = states[0][0]
+            issues.extend(json.loads(row) for row in states[0][1])
+        else:
+            issues.append(
+                {
+                    "field": field,
+                    "reason": f"conditional CMake project declarations differ in {field}",
+                }
+            )
+    return fields, issues
+
+
+def _cmake(text: str) -> tuple[dict, list[dict]]:
+    commands = _cmake_commands(_cmake_tokens(text))
+    root = _cmake_tree(commands)
+    if any(
+        command in ("function", "macro")
+        and (
+            not args
+            or args[0][0].casefold() == "project"
+            or any(marker in args[0][0] for marker in ("$", ";", "\\", "(", ")"))
+        )
+        for command, args in commands
+    ):
+        return {}, [
+            {
+                "field": field,
+                "reason": "builtin CMake project command is overridden or its identity is unresolved",
+            }
+            for field in ("name", "version", "description", "url")
+        ]
+    total = _project_count(root)
+    direct = [node for node in root if node[0] == "command" and node[1] == "project"]
+    if total == 1 and len(direct) == 1:
+        return _project_fields(direct[0][2])
+    chains = [node for node in root if node[0] == "block" and _project_count([node])]
+    if (
+        len(chains) == 1
+        and chains[0][1] == "if"
+        and not direct
+        and _project_count(chains) == total
+    ):
+        return _conditional_declaration(root, chains[0][2])
+    return _unsupported("CMake project declaration is absent, ambiguous or conditional")
 
 
 _MESON_TOKEN = re.compile(
