@@ -1,4 +1,4 @@
-"""Repeated dependency selection and input resolution still detect inputs changing during collection."""
+"""Dependency selection and input resolution still detect inputs changing during collection."""
 import os
 import shutil
 from pathlib import Path
@@ -17,9 +17,11 @@ needs_gcc = pytest.mark.skipif(shutil.which('gcc') is None, reason='needs the se
 def fresh_caches():
     compiler.clear_resolution_cache()
     compiler.clear_replay_cache()
+    compiler.clear_input_table()
     yield
     compiler.clear_resolution_cache()
     compiler.clear_replay_cache()
+    compiler.clear_input_table()
 
 
 def extract(directory, wrapper_body, arguments):
@@ -40,8 +42,8 @@ def test_header_losing_an_include_after_discovery_is_rejected(tmp_path):
     (tmp_path / 'a.c').write_text('#include "h.h"\nint f(void) { return X; }\n')
     (tmp_path / 'h.h').write_text('#include "old.h"\n')
     (tmp_path / 'old.h').write_text('#define X 1\n')
-    # The first -M run reports the real rule, then a concurrent edit drops the include from h.h.
-    body = (f'for a in "$@"; do if [ "$a" = "-M" ] && [ ! -e {tmp_path}/edited ]; then gcc "$@"; s=$?;'
+    # The first pass 1 reads h.h before it is captured, then a concurrent edit drops the include.
+    body = (f'for a in "$@"; do if [ "$a" = "-dI" ] && [ ! -e {tmp_path}/edited ]; then gcc "$@"; s=$?;'
             f' printf "#define X 1\\n" > {tmp_path}/h.h; touch {tmp_path}/edited; exit $s; fi; done\nexec gcc "$@"\n')
     with pytest.raises(RuntimeError, match='compiler dependency selection changed during collection'):
         extract(tmp_path, body, [])
@@ -53,7 +55,7 @@ def test_shadowing_header_created_after_expansion_is_rejected(tmp_path):
     (tmp_path / 'inc2').mkdir()
     (tmp_path / 'a.c').write_text('#include <h.h>\nint f(void) { return X; }\n')
     (tmp_path / 'inc2' / 'h.h').write_text('#define X 2\n')
-    # The constant probe (-E -x c, from stdin) is the last compiler run before post-expansion validation.
+    # Pass 2 (-E -fpreprocessed -x c, from stdin) is the last compiler run before the selection check.
     body = (f'for a in "$@"; do if [ "$a" = "-x" ]; then gcc "$@"; s=$?;'
             f' printf "#define X 1\\n" > {tmp_path}/inc1/h.h; exit $s; fi; done\nexec gcc "$@"\n')
     with pytest.raises(RuntimeError, match='compiler dependency selection changed after expansion'):
