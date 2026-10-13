@@ -136,6 +136,7 @@ def _validate_actions(actions, build_id, verify_files):
     outputs = {}
     output_versions = {}
     compiled_objects = {}
+    object_captures = {}
     allowed_kinds = {"compile", "assemble", "archive", "link", "generate", "transform", "sign", "package", "deploy"}
     for index, raw in enumerate(actions):
         action = _object(raw, f"actions[{index}]")
@@ -200,10 +201,25 @@ def _validate_actions(actions, build_id, verify_files):
                 if not Path(dependency_path).is_absolute():
                     raise FirmwareReceiptError(f"{dependency_label}.path must be absolute")
                 digest = _digest(dependency.get("sha256"), f"{dependency_label}.sha256")
+                written = dependency.get("written_path")
+                if written is not None and not (isinstance(written, str) and Path(written).is_absolute()):
+                    raise FirmwareReceiptError(f"{dependency_label}.written_path must be an absolute path")
                 captured_input = action_inputs[action_id].get(dependency_path)
                 if captured_input is None or captured_input["sha256"] != digest:
                     raise FirmwareReceiptError(f"{dependency_label} is not bound to a captured action input")
         action_outputs = _records(action.get("outputs"), f"action {action_id}.outputs", verify_files=False)
+        capture = action.get("dependency_capture")
+        if capture is not None:
+            capture = _object(capture, f"action {action_id}.dependency_capture")
+            if capture.get("status") not in ("collected", "not-requested", "failed"):
+                raise FirmwareReceiptError(f"action {action_id}.dependency_capture.status is unknown")
+            if capture["status"] == "collected":
+                if capture.get("system_headers") not in ("included", "omitted"):
+                    raise FirmwareReceiptError(f"action {action_id}.dependency_capture lacks system_headers")
+                if len(evidence) != 1:
+                    raise FirmwareReceiptError(f"action {action_id} claims collected dependencies without one depfile")
+            else:
+                _text(capture.get("reason"), f"action {action_id}.dependency_capture.reason")
         for output in action_outputs:
             role = _text(output.get("role"), f"action {action_id} output role")
             path = output["path"]
@@ -217,6 +233,7 @@ def _validate_actions(actions, build_id, verify_files):
             if kind in ("compile", "assemble") and role == "object":
                 image = _text(action.get("image"), f"action {action_id}.image")
                 compiled_objects[(image, path)] = output
+                object_captures[(image, path)] = (kind, capture)
         if kind == "link" and not action_outputs:
             raise FirmwareReceiptError(f"link action {action_id} has no output")
     if verify_files:
@@ -226,7 +243,7 @@ def _validate_actions(actions, build_id, verify_files):
                 f"action {action_id} final output",
                 verify_files=True,
             )
-    return action_inputs, outputs, output_versions, compiled_objects
+    return action_inputs, outputs, output_versions, compiled_objects, object_captures
 
 def _validate_toolchain_library(operand, path, image_id, toolchain_executables):
     toolchain = _object(operand.get("toolchain"), f"image {image_id} toolchain library {path}")
@@ -548,7 +565,7 @@ def validate_firmware_receipt(
         toolchain_executables[(tool["role"], executable["path"])] = executable["sha256"]
 
     actions = receipt.get("actions")
-    action_inputs, outputs, output_versions, compiled_objects = _validate_actions(
+    action_inputs, outputs, output_versions, compiled_objects, object_captures = _validate_actions(
         actions, build_id, verify_files
     )
 
@@ -631,6 +648,12 @@ def validate_firmware_receipt(
                 raise FirmwareReceiptError(f"complete receipt contains unsupported link evidence: {image['id']}")
             if any(row["disposition"] == "unsupported" for row in image["object_accounting"]):
                 raise FirmwareReceiptError(f"complete receipt contains unsupported object accounting: {image['id']}")
+            for row in image["object_accounting"]:
+                _, capture = object_captures[(image["id"], row["object"]["path"])]
+                if row["disposition"] == "contributed" and capture is not None and capture["status"] != "collected":
+                    raise FirmwareReceiptError(
+                        f"complete receipt contains a compile without captured headers: {row['object']['path']}"
+                    )
             lto_enabled = str(configuration["variables"].get("LTO", "")).lower() in (
                 "1",
                 "true",

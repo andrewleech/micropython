@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -24,7 +25,7 @@ all: $(BUILD)/firmware.elf
 $(BUILD):
 \tmkdir -p $@
 $(BUILD)/main.o: $(ROOT)/src/main.c | $(BUILD)
-\t$(CC) $(CFLAGS) -c $< -o $@
+\t$(CC) $(CFLAGS) -MD -MF $(@:.o=.d) -c $< -o $@
 """
 MAIN_C = "int main(void) { return 0; }\n"
 
@@ -33,7 +34,20 @@ def _git(root, *arguments):
     subprocess.run(["git", "-C", str(root), *arguments], check=True)
 
 
-def _capture(tmp_path, link_rule, *, main_c=MAIN_C, variables=(), build_id="a" * 64, name="fixture", extra=None):
+def _capture(
+    tmp_path,
+    link_rule,
+    *,
+    main_c=MAIN_C,
+    variables=(),
+    build_id="a" * 64,
+    name="fixture",
+    extra=None,
+    preamble=PREAMBLE,
+    cross_compile="",
+    source_roots=None,
+    repo_files=None,
+):
     """Run capture_make over a committed fixture repository; return (exit code, paths)."""
     root = tmp_path / name
     src = root / "src"
@@ -43,7 +57,10 @@ def _capture(tmp_path, link_rule, *, main_c=MAIN_C, variables=(), build_id="a" *
     (src / "main.c").write_text(main_c)
     for filename, content in (extra or {}).items():
         (src / filename).write_text(content)
-    (make_dir / "Makefile").write_text(PREAMBLE + link_rule)
+    for filename, content in (repo_files or {}).items():
+        (root / filename).parent.mkdir(parents=True, exist_ok=True)
+        (root / filename).write_text(content)
+    (make_dir / "Makefile").write_text(preamble + link_rule)
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     _git(root, "config", "user.email", "sbom-test@example.invalid")
     _git(root, "config", "user.name", "SBOM Test")
@@ -71,8 +88,8 @@ def _capture(tmp_path, link_rule, *, main_c=MAIN_C, variables=(), build_id="a" *
         port="native",
         target="native",
         variant="controls",
-        source_roots={"fixture": src},
-        cross_compile="",
+        source_roots={name: root / relative for name, relative in (source_roots or {"fixture": "src"}).items()},
+        cross_compile=cross_compile,
         variables=list(variables),
         targets=["all"],
     )
@@ -254,6 +271,7 @@ def _synthetic_receipt(
     compiler = record(tool, tool.read_bytes(), "tool")
     source_record = {**record(source, source.read_bytes(), "source")}
     obj = record(build / "main.o", b"object", "object")
+    depfile = record(build / "main.d", f"{obj['path']}: {source_record['path']}\n".encode(), "dependency-file")
     elf = record(build / "firmware.elf", fake_elf(sections=[(".text", 0x1000, 0x20)]), "elf")
     map_file = record(build / "firmware.map", map_text.format(obj=obj["path"]).encode(), "map")
     base = {
@@ -268,7 +286,24 @@ def _synthetic_receipt(
         "dependencies_discovered_after_action": [],
     }
     events = [
-        {**base, "kind": "compile", "argv": [compiler["path"], "-c", source["path"] if (source := source_record) else "", "-o", obj["path"]], "started_ns": 1, "finished_ns": 2, "inputs": [source_record], "outputs": [obj]},
+        {
+            **base,
+            "kind": "compile",
+            "argv": [compiler["path"], "-c", source_record["path"], "-o", obj["path"]],
+            "started_ns": 1,
+            "finished_ns": 2,
+            "inputs": [source_record],
+            "outputs": [obj],
+            "dependency_evidence": [
+                {
+                    "path": depfile["path"],
+                    "sha256": depfile["sha256"],
+                    "captured_ns": 1,
+                    "dependencies": [{"path": source_record["path"], "sha256": source_record["sha256"]}],
+                }
+            ],
+            "dependency_capture": {"status": "collected", "system_headers": "included"},
+        },
         {
             **base,
             "kind": "link",
@@ -413,3 +448,62 @@ def test_object_from_an_uncaptured_compiler_blocks_completeness(tmp_path):
         item["reason"] == "contributing object source is outside declared roots"
         for item in link["unresolved"]
     )
+
+
+def _fake_toolchain(tmp_path, monkeypatch, gcc_tail=""):
+    """A toolchain prefix `fake-` whose gcc runs the real gcc and then the given shell lines."""
+    directory = tmp_path / "fake-bin"
+    directory.mkdir()
+    real_gcc = shutil.which("gcc")
+    gcc = directory / "fake-gcc"
+    gcc.write_text(f'#!/bin/sh\n{real_gcc} "$@" || exit $?\n{gcc_tail}\n')
+    gcc.chmod(0o755)
+    for tool in ("g++", "as", "ld", "ar", "objcopy", "strip"):
+        (directory / f"fake-{tool}").symlink_to(shutil.which(tool))
+    monkeypatch.setenv("PATH", f"{directory}:{os.environ['PATH']}")
+    return "fake-"
+
+
+def test_compile_without_a_dependency_file_request_blocks_the_complete_claim(tmp_path):
+    code, paths = _capture(
+        tmp_path,
+        LINK.format(map="-Wl,-Map=$(BUILD)/firmware.map"),
+        preamble=PREAMBLE.replace(" -MD -MF $(@:.o=.d)", ""),
+    )
+    assert code == 0
+    receipt = _receipt(paths)
+    link = receipt["images"][0]["link"]
+    assert receipt["status"] == "incomplete" and link["status"] == "incomplete"
+    assert any("requests no dependency file" in item["reason"] for item in link["unresolved"])
+    assert receipt["actions"][0]["dependency_capture"]["status"] == "not-requested"
+    validate_firmware_receipt(receipt)
+
+
+def test_unparsable_dependency_file_blocks_the_complete_claim(tmp_path, monkeypatch):
+    prefix = _fake_toolchain(
+        tmp_path,
+        monkeypatch,
+        'for arg in "$@"; do case "$arg" in *.d) printf "broken" > "$arg";; esac; done',
+    )
+    code, paths = _capture(
+        tmp_path, LINK.format(map="-Wl,-Map=$(BUILD)/firmware.map"), cross_compile=prefix
+    )
+    assert code == 0
+    receipt = _receipt(paths)
+    link = receipt["images"][0]["link"]
+    assert receipt["status"] == "incomplete"
+    assert any("not a make rule" in item["reason"] for item in link["unresolved"])
+    compile_action = next(action for action in receipt["actions"] if action["kind"] == "compile")
+    assert compile_action["dependency_capture"]["status"] == "failed"
+    assert compile_action["dependency_evidence"] == []
+
+
+def test_complete_receipt_cannot_hide_a_compile_without_captured_headers(tmp_path):
+    code, paths = _capture(tmp_path, LINK.format(map="-Wl,-Map=$(BUILD)/firmware.map"))
+    receipt = _receipt(paths)
+    assert code == 0 and receipt["status"] == "complete"
+    compile_action = next(action for action in receipt["actions"] if action["kind"] == "compile")
+    compile_action["dependency_capture"] = {"status": "failed", "reason": "forged"}
+    receipt["receipt_id"] = receipt_id(receipt)
+    with pytest.raises(FirmwareReceiptError, match="without captured headers"):
+        validate_firmware_receipt(receipt)

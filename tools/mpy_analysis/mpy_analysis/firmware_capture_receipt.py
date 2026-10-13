@@ -472,6 +472,7 @@ def receipt_from_journal(
             "capture_started_ns": event["started_ns"],
             "capture_finished_ns": event["finished_ns"],
             "dependency_evidence": event.get("dependency_evidence", []),
+            **({"dependency_capture": event["dependency_capture"]} if "dependency_capture" in event else {}),
         }
         actions.append(action)
         tool = event["executable"]
@@ -511,6 +512,7 @@ def receipt_from_journal(
 
     source_for_object = {}
     object_records = {}
+    object_action = {}
     for action in actions:
         if action["kind"] not in ("compile", "assemble"):
             continue
@@ -518,6 +520,7 @@ def receipt_from_journal(
         for output in action["outputs"]:
             if output["role"] == "object":
                 object_records[output["path"]] = output
+                object_action[output["path"]] = action
                 bindings = []
                 if len(source_inputs) == 1:
                     bindings = _bindings(source_inputs[0]["path"], source_roots)
@@ -739,6 +742,18 @@ def receipt_from_journal(
             row["reason"] = reason
             unresolved.append({"path": path, "reason": reason})
         object_accounting.append(row)
+        action = object_action[path]
+        capture = action.get("dependency_capture") if action["kind"] == "compile" else None
+        if disposition == "contributed" and action["kind"] == "compile" and (
+            capture is None or capture["status"] != "collected"
+        ):
+            unresolved.append(
+                {
+                    "path": path,
+                    "reason": "headers consumed by this compile are not captured: "
+                    + (capture["reason"] if capture else "the action recorded no dependency capture"),
+                }
+            )
 
     if map_error:
         unresolved.append({"path": str(Path(map_file).resolve()), "reason": f"unsupported map evidence: {map_error}"})

@@ -109,6 +109,24 @@ def first_rule(text):
     return None
 
 
+class DepfileError(ValueError):
+    """A dependency file does not hold the make rule a compiler writes."""
+
+
+def depfile_prerequisites(text):
+    """The prerequisites of the first rule of a dependency file, or DepfileError.
+
+    Unlike first_rule, a file with no rule or a rule without prerequisites is an error: a compiler
+    that succeeded always names at least its source.
+    """
+    rule = first_rule(text.replace("\r\n", "\n"))
+    if rule is None:
+        raise DepfileError("no make rule")
+    if not rule:
+        raise DepfileError("the make rule names no prerequisites")
+    return rule
+
+
 def objects_on_disk(build_dir, exclude):
     """Object files belonging to this configuration. A configuration's build directory can contain
     another's: the bootloader builds into build-$(BOARD)/mboot, nested inside the firmware's own

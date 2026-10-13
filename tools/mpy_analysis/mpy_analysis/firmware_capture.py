@@ -6,7 +6,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import shlex
 import shutil
 import subprocess
@@ -18,12 +17,13 @@ from typing import Sequence
 
 from .argv_tokens import flatten as _flatten
 from .argv_tokens import resolve_arg as _resolve_arg
+from .compdb import DepfileError, depfile_prerequisites
 from .firmware_capture_receipt import receipt_from_journal
 
 _PROBES = {"-dumpmachine", "-print-file-name=libgcc.a", "-print-prog-name=ld"}
 _OUTPUT_OPTIONS = {"-o", "-MF", "-MT", "-MQ", "-Map"}
 _PATH_OPTIONS = {"-include", "-imacros", "-T", "-L", "-I", "-isystem", "-iquote"}
-_DEPFILE_CONTINUATION = re.compile(r"\\\r?\n")
+_SOURCE_SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".s", ".sx")
 
 
 def _sha256(path: Path) -> str:
@@ -44,46 +44,116 @@ def _file_record(path: Path, role: str) -> dict[str, str] | None:
         return None
 
 
-def _depfile_inputs(path: Path, cwd: Path) -> list[Path]:
-    try:
-        text = path.read_text(encoding="utf-8", errors="strict")
-    except (OSError, UnicodeError):
-        return []
-    text = _DEPFILE_CONTINUATION.sub(" ", text)
-    colon = text.find(":")
-    if colon < 0:
-        return []
-    try:
-        words = shlex.split(text[colon + 1 :], posix=True)
-    except ValueError:
-        return []
-    return [candidate for word in words if (candidate := _resolve_arg(word, cwd)) is not None]
+class _DepfileFailure(Exception):
+    """The compiler's dependency output could not be read as complete evidence."""
 
-def _depfile_evidence(argv: list[str], cwd: Path) -> list[dict]:
-    evidence = []
-    for index, arg in enumerate(argv[:-1]):
-        if arg != "-MF":
-            continue
-        depfile = _resolve_arg(argv[index + 1], cwd)
+
+def _depfile_request(argv: list[str], cwd: Path) -> dict | None:
+    """Where a GCC-style command writes its dependency file, or None when the command names none.
+
+    ``-MD`` and ``-MMD`` ask for a file: ``-MF`` names it, otherwise it is the output name with a
+    ``.d`` suffix (or the input stem when there is no ``-o``). ``-MF`` alone does not make the
+    compiler write anything, so it is a request only when the file exists afterwards.
+    """
+    tokens = _flatten(argv, cwd)
+    explicit = output = system_headers = None
+    for index, token in enumerate(tokens):
+        following = tokens[index + 1] if index + 1 < len(tokens) else None
+        if token in ("-MD", "-MMD"):
+            system_headers = "omitted" if token == "-MMD" else "included"
+        elif token == "-MF" and following is not None:
+            explicit = following
+        elif token.startswith("-MF") and len(token) > 3:
+            explicit = token[3:]
+        elif token == "-o" and following is not None:
+            output = following
+        elif token.startswith("-o") and len(token) > 2:
+            output = token[2:]
+    if explicit is None and system_headers is None:
+        return None
+    if explicit is not None:
+        path = Path(explicit)
+    elif output is not None:
+        path = Path(output).with_suffix(".d")
+    else:
+        sources = [
+            Path(token)
+            for token in tokens
+            if Path(token).suffix.lower() in _SOURCE_SUFFIXES and _resolve_arg(token, cwd) is not None
+        ]
+        if len(sources) != 1:
+            return {"requested": True, "path": None, "system_headers": system_headers}
+        path = Path(sources[0].stem + ".d")
+    return {
+        "requested": system_headers is not None,
+        "path": path if path.is_absolute() else cwd / path,
+        "system_headers": system_headers or "included",
+    }
+
+
+def _dependency_record(word: str, cwd: Path) -> dict[str, str]:
+    """The canonical path and hash of one depfile prerequisite; the path as written when it differs."""
+    written = Path(os.path.normpath(word if os.path.isabs(word) else cwd / word))
+    record = _file_record(written, "compiler-dependency")
+    if record is None:
+        raise _DepfileFailure(f"dependency is not a readable file: {word}")
+    entry = {"path": record["path"], "sha256": record["sha256"]}
+    if str(written) != record["path"]:
+        entry["written_path"] = str(written)
+    return entry
+
+
+def _depfile_evidence(role: str, kind: str, argv: list[str], cwd: Path) -> tuple[list[dict], dict | None]:
+    """Dependency evidence of a finished action and, for a compile, whether it is complete.
+
+    A compile that asked for no dependency file, or whose file is missing, unreadable or does not
+    parse as one make rule, is reported with the reason; it never yields partial evidence.
+    """
+    needed = role in ("cc", "cxx") and kind == "compile"
+    request = _depfile_request(argv, cwd)
+    if request is None:
+        reason = "the compile command requests no dependency file (-MD, -MMD)"
+        return [], {"status": "not-requested", "reason": reason} if needed else None
+    depfile = request["path"]
+    try:
         if depfile is None:
-            continue
+            raise _DepfileFailure("the dependency file name cannot be derived from the command")
+        try:
+            text = depfile.read_text(encoding="utf-8", errors="strict")
+        except FileNotFoundError:
+            if not request["requested"]:
+                return [], {"status": "not-requested", "reason": "-MF names a file but no -MD or -MMD requests one"} if needed else None
+            raise _DepfileFailure(f"dependency file was not written: {depfile}") from None
+        except (OSError, UnicodeError) as error:
+            raise _DepfileFailure(f"dependency file is unreadable: {error}") from error
+        try:
+            words = depfile_prerequisites(text)
+        except DepfileError as error:
+            raise _DepfileFailure(f"dependency file is not a make rule: {error}") from error
+        dependencies = [_dependency_record(word, cwd) for word in words]
         record = _file_record(depfile, "dependency-file")
         if record is None:
-            continue
-        dependencies = []
-        for path in _depfile_inputs(depfile, cwd):
-            dependency = _file_record(path, "compiler-dependency")
-            if dependency is not None:
-                dependencies.append({"path": dependency["path"], "sha256": dependency["sha256"]})
-        evidence.append(
-            {
-                "path": record["path"],
-                "sha256": record["sha256"],
-                "captured_ns": time.time_ns(),
-                "dependencies": sorted(dependencies, key=lambda item: item["path"]),
-            }
-        )
-    return evidence
+            raise _DepfileFailure(f"dependency file is not a regular file: {depfile}")
+    except _DepfileFailure as failure:
+        return [], {"status": "failed", "reason": str(failure)} if needed else None
+    if request["system_headers"] == "omitted" and "-isystem" in argv:
+        capture = {
+            "status": "failed",
+            "reason": "-MMD omits headers from system directories while -isystem directories are in use",
+        }
+    else:
+        capture = {"status": "collected", "system_headers": request["system_headers"]}
+    evidence = [
+        {
+            "path": record["path"],
+            "sha256": record["sha256"],
+            "captured_ns": time.time_ns(),
+            "dependencies": sorted(
+                {item["path"]: item for item in dependencies}.values(), key=lambda item: item["path"]
+            ),
+        }
+    ]
+    return evidence, capture if needed else None
 
 
 
@@ -153,14 +223,6 @@ def _action_inputs(role: str, kind: str, argv: list[str], cwd: Path) -> list[dic
             else:
                 input_role = "tool-input"
             candidates[str(candidate.resolve())] = (candidate, input_role)
-
-    if role in ("cc", "cxx") and kind == "compile":
-        for index, arg in enumerate(argv[:-1]):
-            if arg == "-MF":
-                depfile = _resolve_arg(argv[index + 1], cwd)
-                if depfile is not None:
-                    for dependency in _depfile_inputs(depfile, cwd):
-                        candidates.setdefault(str(dependency.resolve()), (dependency, "compiler-dependency"))
 
     return [
         record
@@ -250,7 +312,15 @@ def run_tool(role: str, executable: Path, argv: list[str], *, journal: Path, ima
             inputs.append(item)
             post_action_dependencies.append(item["path"])
             captured_paths.add(item["path"])
-    dependency_evidence = _depfile_evidence(argv, cwd) if result.returncode == 0 else []
+    dependency_evidence, dependency_capture = (
+        _depfile_evidence(role, kind, argv, cwd) if result.returncode == 0 else ([], None)
+    )
+    for evidence in dependency_evidence:
+        for dependency in evidence["dependencies"]:
+            if dependency["path"] not in captured_paths:
+                inputs.append({**{key: dependency[key] for key in ("path", "sha256")}, "role": "compiler-dependency"})
+                post_action_dependencies.append(dependency["path"])
+                captured_paths.add(dependency["path"])
     _append_event(
         journal,
         {
@@ -270,6 +340,7 @@ def run_tool(role: str, executable: Path, argv: list[str], *, journal: Path, ima
             "changed_inputs_during_action": changed_inputs,
             "dependencies_discovered_after_action": post_action_dependencies,
             "dependency_evidence": dependency_evidence,
+            **({"dependency_capture": dependency_capture} if dependency_capture else {}),
         },
     )
     return result.returncode

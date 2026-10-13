@@ -3,6 +3,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 from mpy_analysis.firmware_capture import run_tool
 
 
@@ -162,3 +163,97 @@ def test_ld_wrapper_records_direct_map_output_and_link_operands(tmp_path):
         str(elf.resolve()),
         str(map_file.resolve()),
     }
+
+
+def _compiler(tmp_path: Path, depfile_text: str | None) -> Path:
+    """A compiler that writes the object and, when given, the dependency file named by -MF."""
+    body = (
+        "import pathlib, sys\n"
+        "args = sys.argv[1:]\n"
+        "pathlib.Path(args[args.index('-o') + 1]).write_bytes(b'object')\n"
+    )
+    if depfile_text is not None:
+        body += f"pathlib.Path(args[args.index('-MF') + 1]).write_text({depfile_text!r})\n"
+    return fake_tool(tmp_path / "cc", body)
+
+
+def _compile(tmp_path: Path, tool: Path, *flags: str) -> dict:
+    source = tmp_path / "input.c"
+    source.write_text("int main(void) { return 0; }\n")
+    journal = tmp_path / "actions.jsonl"
+    assert run_tool(
+        "cc", tool, ["-c", str(source), "-o", str(tmp_path / "input.o"), *flags],
+        journal=journal, image_id="application", build_id="a" * 64,
+    ) == 0
+    [event] = read_events(journal)
+    return event
+
+
+def test_compile_without_a_dependency_file_request_is_reported(tmp_path):
+    event = _compile(tmp_path, _compiler(tmp_path, None))
+    assert event["dependency_capture"]["status"] == "not-requested"
+    assert event["dependency_evidence"] == []
+
+
+def test_dependency_file_that_was_not_written_is_reported(tmp_path):
+    event = _compile(tmp_path, _compiler(tmp_path, None), "-MD", "-MF", str(tmp_path / "input.d"))
+    assert event["dependency_capture"]["status"] == "failed"
+    assert "was not written" in event["dependency_capture"]["reason"]
+    assert event["dependency_evidence"] == []
+
+
+@pytest.mark.parametrize(
+    "text, reason",
+    [
+        ("", "no make rule"),
+        ("input.o\n", "no make rule"),
+        ("input.o:\n", "no prerequisites"),
+        ("input.o: input.c missing-header.h\n", "not a readable file"),
+    ],
+)
+def test_unusable_dependency_file_yields_no_partial_evidence(tmp_path, text, reason):
+    event = _compile(tmp_path, _compiler(tmp_path, text), "-MD", "-MF", str(tmp_path / "input.d"))
+    assert event["dependency_capture"]["status"] == "failed"
+    assert reason in event["dependency_capture"]["reason"]
+    assert event["dependency_evidence"] == []
+    assert [item["role"] for item in event["inputs"]] == ["source"]
+
+
+def test_dependency_file_name_defaults_to_the_output_name_with_a_d_suffix(tmp_path):
+    header = tmp_path / "config.h"
+    header.write_text("#define VALUE 1\n")
+    tool = fake_tool(
+        tmp_path / "cc",
+        "import pathlib, sys\n"
+        "args = sys.argv[1:]\n"
+        "out = pathlib.Path(args[args.index('-o') + 1])\n"
+        "out.write_bytes(b'object')\n"
+        f"out.with_suffix('.d').write_text(str(out) + ': ' + {str(tmp_path / 'input.c')!r} + ' ' + {str(header)!r} + '\\n')",
+    )
+    event = _compile(tmp_path, tool, "-MMD")
+    assert event["dependency_capture"] == {"status": "collected", "system_headers": "omitted"}
+    [evidence] = event["dependency_evidence"]
+    assert evidence["path"] == str((tmp_path / "input.d").resolve())
+    assert str(header.resolve()) in {item["path"] for item in evidence["dependencies"]}
+
+
+def test_mmd_with_isystem_directories_cannot_be_complete(tmp_path):
+    tool = _compiler(tmp_path, f"input.o: {tmp_path / 'input.c'}\n")
+    event = _compile(tmp_path, tool, "-MMD", "-MF", str(tmp_path / "input.d"), "-isystem", str(tmp_path))
+    assert event["dependency_capture"]["status"] == "failed"
+    assert "-isystem" in event["dependency_capture"]["reason"]
+
+
+def test_dependency_reached_through_a_symlink_keeps_the_written_path(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    header = real / "config.h"
+    header.write_text("#define VALUE 1\n")
+    alias = tmp_path / "alias.h"
+    alias.symlink_to(header)
+    tool = _compiler(tmp_path, f"input.o: {tmp_path / 'input.c'} {alias}\n")
+    event = _compile(tmp_path, tool, "-MD", "-MF", str(tmp_path / "input.d"))
+    [evidence] = event["dependency_evidence"]
+    entry = next(item for item in evidence["dependencies"] if item["path"] == str(header.resolve()))
+    assert entry["written_path"] == str(alias)
+    assert str(header.resolve()) in {item["path"] for item in event["inputs"]}

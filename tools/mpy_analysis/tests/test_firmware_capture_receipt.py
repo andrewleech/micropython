@@ -368,7 +368,7 @@ $(BUILD):
 
 $(BUILD)/%.o: $(ROOT)/source/%.c | $(BUILD)
 \tmkdir -p $(dir $@)
-\t$(CC) $(CFLAGS) -c $< -o $@
+\t$(CC) $(CFLAGS) -MD -MF $(@:.o=.d) -c $< -o $@
 
 $(BUILD)/libfixture.a: $(BUILD)/used.o $(BUILD)/unused.o
 \t$(AR) rcs $@ $^
@@ -532,7 +532,7 @@ $(BUILD):
 \tmkdir -p $@
 
 $(BUILD)/main.o: $(ROOT)/src/main.c | $(BUILD)
-\t$(CC) -c $< -o $@
+\t$(CC) -MD -MF $(@:.o=.d) -c $< -o $@
 
 $(BUILD)/firmware.elf: $(BUILD)/main.o
 \t$(CC) -nostdlib -Wl,-e,main -Wl,-Map=$(BUILD)/firmware.map -o $@ $< $(LIBGCC)
@@ -605,10 +605,10 @@ $(BUILD)/generated.c: $(ROOT)/src/gen.py $(ROOT)/src/value.txt | $(BUILD)
 \t$(PYTHON) $(ROOT)/src/gen.py --input $(ROOT)/src/value.txt --output-source $@
 
 $(BUILD)/%.o: $(BUILD)/%.c
-\t$(CC) -c $< -o $@
+\t$(CC) -MD -MF $(@:.o=.d) -c $< -o $@
 
 $(BUILD)/main.o: $(ROOT)/src/main.c | $(BUILD)
-\t$(CC) -c $< -o $@
+\t$(CC) -MD -MF $(@:.o=.d) -c $< -o $@
 
 $(BUILD)/firmware.elf: $(BUILD)/main.o $(BUILD)/generated.o
 \t$(CC) -nostdlib -Wl,-e,main -Wl,-Map=$(BUILD)/firmware.map -o $@ $^
@@ -731,15 +731,15 @@ $(BUILD):
 \tmkdir -p $@
 
 $(BUILD)/main.o: $(ROOT)/src/main.c | $(BUILD)
-\t$(CC) -c $< -o $@
+\t$(CC) -MD -MF $(@:.o=.d) -c $< -o $@
 
 $(BUILD)/left/same.o: $(ROOT)/src/left/same.c | $(BUILD)
 \tmkdir -p $(dir $@)
-\t$(CC) -c $< -o $@
+\t$(CC) -MD -MF $(@:.o=.d) -c $< -o $@
 
 $(BUILD)/right/same.o: $(ROOT)/src/right/same.c | $(BUILD)
 \tmkdir -p $(dir $@)
-\t$(CC) -c $< -o $@
+\t$(CC) -MD -MF $(@:.o=.d) -c $< -o $@
 
 $(BUILD)/libduplicate.a: $(BUILD)/left/same.o $(BUILD)/right/same.o
 \t$(AR) q $@ $^
@@ -810,7 +810,7 @@ $(BUILD):
 \tmkdir -p $@
 
 $(BUILD)/main.o: $(ROOT)/src/main.c | $(BUILD)
-\t$(CC) -c $< -o $@
+\t$(CC) -MD -MF $(@:.o=.d) -c $< -o $@
 
 $(BUILD)/firmware.elf: $(BUILD)/main.o
 \t$(CC) -Wl,-Map=$(BUILD)/firmware.map -o $@ $^
@@ -997,7 +997,7 @@ $(BUILD):
 \tmkdir -p $@
 
 $(BUILD)/main.o: $(ROOT)/src/main.c | $(BUILD)
-\t$(CC) -c $< -o $@
+\t$(CC) -MD -MF $(@:.o=.d) -c $< -o $@
 
 $(BUILD)/firmware.elf: $(BUILD)/main.o
 \t$(CC) -Wl,-Map=$(BUILD)/firmware.map -o $@ $<
