@@ -41,6 +41,25 @@ Files the linker loaded without a captured operand (crt objects, system archives
 
 The map is tied to the final ELF structurally: every input section with a non-zero size must lie in an output section that exists in the ELF's section header table (pyelftools), starting inside it when that section is allocated. A map that does not describe the ELF it was recorded with fails validation and produces no receipt. `link.dynamic_needed` lists the ELF's `DT_NEEDED` sonames and is re-read from the ELF when files are verified.
 
+## Capturing a build
+
+`python -m mpy_analysis.firmware_capture` runs GNU Make for one image and writes the receipt. It refuses a non-empty build directory (the build runs from scratch under the wrapper) and journal or receipt paths that already exist. Unix example:
+
+```sh
+python -m mpy_analysis.firmware_capture \
+  --micropython-root "$MPY" --make-dir "$MPY/ports/unix" \
+  --build-dir out/build --journal out/actions.jsonl --receipt out/receipt.json \
+  --elf out/build/micropython --map out/build/micropython.map \
+  --image-id unix --image-role application --build-id "$BUILD_ID" \
+  --port unix --target x86_64-linux-gnu --variant standard \
+  --source-root mbedtls="$MPY/lib/mbedtls" \
+  --source-root micropython-lib="$MPY/lib/micropython-lib"
+```
+
+`--build-id` is a SHA-256 hex digest shared by every image of one build (the receipt validator requires that form; the examples hash a label with the source revision). Each submodule or other tree that contributes sources is named with `--source-root NAME=PATH`; the MicroPython checkout is always the root `micropython`. `--variable NAME=VALUE` passes a make variable (`BOARD=...`), `--cross-compile` sets the toolchain prefix and `--make-target` selects targets. Application and bootloader are captured by two runs with the same `--build-id` and different `--image-id` and `--image-role`; `mpy_analysis.firmware_capture_receipt.merge_receipts([app, boot])` merges them into one receipt that keeps both images. The exit status is 2 when the capture itself fails; a build that ran but is not fully accounted gives an `incomplete` receipt with the exact entries.
+
+The selected scope is generated separately with `python -m mpy_analysis.scope --compile-database ...`. A compilation database built from the captured compile and assemble actions (`kind` `compile`/`assemble` in the journal) keeps the scope aligned with what was built. Then run `sast-sbom --scope ... --build-receipt ...` and `sast-sbom-policy` as described below.
+
 ## Usage
 
 The Python API accepts a receipt object or a JSON file path:
