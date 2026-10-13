@@ -68,7 +68,7 @@ _TOOLS_DIR = os.path.join(_REPO_ROOT, "tools")
 if _TOOLS_DIR not in sys.path:
     sys.path.insert(0, _TOOLS_DIR)
 
-import pydfu  # noqa: E402  (must come after sys.path and usb mock)
+import pydfu
 
 # ---------------------------------------------------------------------------
 # DFU constants (the same values as in pydfu.py).
@@ -297,7 +297,7 @@ class TestPageEraseDfuSe(unittest.TestCase):
         pydfu.page_erase(_TEST_BASE)
         dnload_calls = [c for c in self.dev.calls if c[1] == _DFU_DNLOAD]
         payload = bytes(dnload_calls[0][4])
-        cmd, addr = struct.unpack("<BI", payload)
+        _cmd, addr = struct.unpack("<BI", payload)
         self.assertEqual(addr, _TEST_BASE)
 
 

@@ -173,7 +173,7 @@ def page_size_for(addr):
     for segment in __mem_layout:
         if segment["addr"] <= addr <= segment["last_addr"]:
             return segment["page_size"]
-    raise ValueError("Address 0x%x not found in memory layout" % addr)
+    raise ValueError(f"Address 0x{addr:x} not found in memory layout")
 
 
 def init(**kwargs):
@@ -336,8 +336,8 @@ def write_memory(addr, buf, progress=None, progress_addr=0, progress_size=0):
             offset = cur_addr - __region_base
             if offset % __cfg_descr.wTransferSize != 0:
                 raise SystemExit(
-                    "pydfu: address 0x%x is not aligned to wTransferSize=%d "
-                    "(region base 0x%x)" % (cur_addr, __cfg_descr.wTransferSize, __region_base)
+                    f"pydfu: address 0x{cur_addr:x} is not aligned to "
+                    f"wTransferSize={__cfg_descr.wTransferSize} (region base 0x{__region_base:x})"
                 )
             wblock = offset // __cfg_descr.wTransferSize
         __dev.ctrl_transfer(
@@ -378,8 +378,8 @@ def write_page(buf, xfer_offset):
         offset = cur_addr - __region_base
         if offset % __cfg_descr.wTransferSize != 0:
             raise SystemExit(
-                "pydfu: address 0x%x is not aligned to wTransferSize=%d "
-                "(region base 0x%x)" % (cur_addr, __cfg_descr.wTransferSize, __region_base)
+                f"pydfu: address 0x{cur_addr:x} is not aligned to "
+                f"wTransferSize={__cfg_descr.wTransferSize} (region base 0x{__region_base:x})"
             )
         wblock = offset // __cfg_descr.wTransferSize
     __dev.ctrl_transfer(0x21, __DFU_DNLOAD, wblock, __DFU_INTERFACE, buf, __TIMEOUT)
@@ -391,7 +391,7 @@ def write_page(buf, xfer_offset):
     check_status("write memory", __DFU_STATE_DFU_DOWNLOAD_IDLE)
 
     if __verbose:
-        print("Write: 0x%x " % (cur_addr))
+        print(f"Write: 0x{cur_addr:x} ")
 
 
 def exit_dfu():
@@ -410,7 +410,7 @@ def exit_dfu():
             # dfuMANIFEST-WAIT-RESET, or dfuERROR if the image was rejected.
             stat = __dev.ctrl_transfer(0xA1, __DFU_GETSTATUS, 0, __DFU_INTERFACE, 6, 20000)
             if stat[4] == __DFU_STATE_DFU_ERROR:
-                raise SystemExit("DFU: image rejected (status 0x%02x)" % stat[0])
+                raise SystemExit(f"DFU: image rejected (status 0x{stat[0]:02x})")
             # bitWillDetach is 0, so the device leaves DFU mode on a USB reset from the host.
             __dev.reset()
 

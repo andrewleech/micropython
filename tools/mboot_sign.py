@@ -76,8 +76,9 @@ try:
     from intelhex import IntelHex
 except ImportError as exc:
     sys.exit(
-        "mboot_sign: cannot import imgtool dependencies (%s); install the packages in %s"
-        % (exc, IMGTOOL_DIR / "requirements.txt")
+        "mboot_sign: cannot import imgtool dependencies ({}); install the packages in {}".format(
+            exc, IMGTOOL_DIR / "requirements.txt"
+        )
     )
 
 DEFAULT_KEY = TOP / "tests" / "mboot" / "keys" / "test-ecdsa-p256.pem"
@@ -103,7 +104,7 @@ def _load_cryptography_public(path):
     except ValueError:
         key = serialization.load_pem_public_key(data)
     except TypeError:
-        raise SignError("%s: password protected keys are not supported" % path)
+        raise SignError(f"{path}: password protected keys are not supported")
     return key
 
 
@@ -112,7 +113,7 @@ def load_public_key(path):
     try:
         return _load_cryptography_public(path)
     except (ValueError, UnsupportedAlgorithm) as exc:
-        raise SignError("%s: cannot load key: %s" % (path, exc))
+        raise SignError(f"{path}: cannot load key: {exc}")
 
 
 def public_key_spki(key):
@@ -149,10 +150,10 @@ def check_key(path, production, top=TOP):
         return None
     if production:
         raise SignError(
-            "%s is a public test key (same public key as %s); refusing to use it with "
-            "MBOOT_PRODUCTION=1" % (path, Path(match).relative_to(top))
+            f"{path} is a public test key (same public key as {Path(match).relative_to(top)}); refusing to use it with "
+            "MBOOT_PRODUCTION=1"
         )
-    sys.stderr.write("WARNING: signing with a public test key (%s)\n" % path)
+    sys.stderr.write(f"WARNING: signing with a public test key ({path})\n")
     return match
 
 
@@ -191,7 +192,7 @@ def layout_from_json(doc):
     initial_args}. Key files are relative to the repository root unless absolute."""
     try:
         if doc["schema"] != LAYOUT_SCHEMA:
-            raise SignError("layout schema %r, expected %d" % (doc["schema"], LAYOUT_SCHEMA))
+            raise SignError(f"layout schema {doc['schema']!r}, expected {LAYOUT_SCHEMA}")
         areas = doc["areas"]
         secondary = areas.get("secondary")
         dfu = doc.get("dfu") or {}
@@ -214,7 +215,7 @@ def layout_from_json(doc):
             key_hashes=list(doc["keys"]["pub_sha256"]),
         )
     except (KeyError, TypeError, ValueError) as exc:
-        raise SignError("layout JSON does not have the expected content: %r" % (exc,))
+        raise SignError(f"layout JSON does not have the expected content: {exc!r}")
 
 
 def load_layout(path):
@@ -222,7 +223,7 @@ def load_layout(path):
         with open(path) as f:
             doc = json.load(f)
     except (OSError, ValueError) as exc:
-        raise SignError("%s: cannot read layout: %s" % (path, exc))
+        raise SignError(f"{path}: cannot read layout: {exc}")
     return layout_from_json(doc)
 
 
@@ -230,8 +231,7 @@ def check_known_key(layout, key_path):
     """The bootloader only accepts images signed by one of its built-in public keys."""
     if public_fingerprint(key_path) not in layout.key_hashes:
         raise SignError(
-            "%s is not one of the bootloader keys (MBOOT_PUBKEYS), the image would be rejected"
-            % key_path
+            f"{key_path} is not one of the bootloader keys (MBOOT_PUBKEYS), the image would be rejected"
         )
 
 
@@ -270,8 +270,7 @@ def resolve_args(layout, args, version=None, counter=None):
         value = get_option(args, names)
         if value is None or int(value, 0) != expect:
             raise SignError(
-                "imgtool arguments and layout disagree on the %s (%s vs 0x%x)"
-                % (what, value, expect)
+                f"imgtool arguments and layout disagree on the {what} ({value} vs 0x{expect:x})"
             )
     return args
 
@@ -283,7 +282,7 @@ def imgtool_sign(args):
         with contextlib.redirect_stdout(out):
             imgmain.sign.main(args=args, prog_name="imgtool sign", standalone_mode=False)
     except click.ClickException as exc:
-        raise SignError("imgtool sign: %s" % exc.format_message())
+        raise SignError(f"imgtool sign: {exc.format_message()}")
 
 
 # ---------------------------------------------------------------------------
@@ -330,25 +329,23 @@ def checked_image(path, layout, key_path):
     try:
         result = imgimage.Image.verify(str(path), imgkeys.load(str(key_path)))[0]
         if result != imgimage.VerifyResult.OK:
-            raise SignError("%s: imgtool verify: %s" % (path, result.name))
+            raise SignError(f"{path}: imgtool verify: {result.name}")
         info = image_info(read_image_file(path))
         if info.hdr_size != layout.header_size:
             raise SignError(
-                "%s: header size 0x%x, layout has 0x%x" % (path, info.hdr_size, layout.header_size)
+                f"{path}: header size 0x{info.hdr_size:x}, layout has 0x{layout.header_size:x}"
             )
         if info.total > layout.max_image_size:
             raise SignError(
-                "%s: image is 0x%x bytes, limit is 0x%x"
-                % (path, info.total, layout.max_image_size)
+                f"{path}: image is 0x{info.total:x} bytes, limit is 0x{layout.max_image_size:x}"
             )
         if info.total < layout.min_image_size:
             raise SignError(
-                "%s: image is 0x%x bytes, the layout takes at least 0x%x (an image of at most one "
+                f"{path}: image is 0x{info.total:x} bytes, the layout takes at least 0x{layout.min_image_size:x} (an image of at most one "
                 "erase unit cannot be swapped safely with swap using offset)"
-                % (path, info.total, layout.min_image_size)
             )
         if info.prot.get(TLV_LAYOUT_ID) != layout.layout_id.to_bytes(4, "big"):
-            raise SignError("%s: layout id TLV is missing or not %08x" % (path, layout.layout_id))
+            raise SignError(f"{path}: layout id TLV is missing or not {layout.layout_id:08x}")
     except SignError:
         Path(path).unlink()
         raise
@@ -360,9 +357,10 @@ def checked_image(path, layout, key_path):
 
 
 def _describe(path, info, key_path):
+    major, minor, patch, build = info.version
     print(
-        "%s: %d bytes, version %d.%d.%d+%d, counter %s, key %s"
-        % (path, info.total, *info.version, info.counter, public_fingerprint(key_path)[:8])
+        f"{path}: {info.total} bytes, version {major}.{minor}.{patch}+{build}, "
+        f"counter {info.counter}, key {public_fingerprint(key_path)[:8]}"
     )
 
 
@@ -371,7 +369,7 @@ def cmd_sign(args, layout):
     imgargs = resolve_args(layout, layout.sign_args, args.version, args.security_counter)
     if args.external == "digest":
         imgtool_sign(imgargs + ["--vector-to-sign", "digest", infile, outfile])
-        print("%s: SHA-256 to be signed: %s" % (outfile, Path(outfile).read_bytes().hex()))
+        print(f"{outfile}: SHA-256 to be signed: {Path(outfile).read_bytes().hex()}")
         return 0
     if args.external == "apply":
         key = args.pubkey or layout.key_files[layout.key_id]
@@ -402,9 +400,9 @@ def cmd_initial(args, layout):
         info = checked_image(hex_path, layout, args.key)
         ih = IntelHex(str(hex_path))
         if ih.minaddr() != layout.primary_addr:
-            raise SignError("%s does not start at the primary slot address" % hex_path)
+            raise SignError(f"{hex_path} does not start at the primary slot address")
         if ih.maxaddr() >= layout.primary_addr + layout.primary_size:
-            raise SignError("%s extends beyond the primary slot" % hex_path)
+            raise SignError(f"{hex_path} extends beyond the primary slot")
         ih.padding = erased
         binary = ih.tobinstr(start=layout.primary_addr, size=layout.primary_size)
     Path(args.output).write_bytes(binary)
@@ -416,14 +414,16 @@ def cmd_dfu(args, layout):
     if layout.dfu_addr is None:
         raise SignError("the layout has no DFU update address (MBOOT_DFU=0)")
     cmd = [sys.executable, str(TOP / "tools" / "dfu.py")]
-    cmd += ["-b", "0x%08x:%s" % (layout.dfu_addr, args.input)]
+    cmd += ["-b", f"0x{layout.dfu_addr:08x}:{args.input}"]
     if layout.dfu_vid is not None and layout.dfu_pid is not None:
-        cmd += ["-D", "0x%04x:0x%04x" % (layout.dfu_vid, layout.dfu_pid)]
+        cmd += ["-D", f"0x{layout.dfu_vid:04x}:0x{layout.dfu_pid:04x}"]
     cmd.append(args.output)
-    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    res = subprocess.run(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False
+    )
     if res.returncode:
-        raise SignError("tools/dfu.py failed: %s" % res.stdout.strip())
-    print("%s: DfuSe image for address 0x%08x" % (args.output, layout.dfu_addr))
+        raise SignError(f"tools/dfu.py failed: {res.stdout.strip()}")
+    print(f"{args.output}: DfuSe image for address 0x{layout.dfu_addr:08x}")
     return 0
 
 
@@ -433,9 +433,9 @@ def cmd_check_key(args, layout):
     for path in args.keys:
         match = known.get(public_fingerprint(path))
         if match is None:
-            print("%s: not a known test key" % path)
+            print(f"{path}: not a known test key")
         else:
-            print("%s: public test key (%s)" % (path, Path(match).relative_to(TOP)))
+            print(f"{path}: public test key ({Path(match).relative_to(TOP)})")
             if args.production:
                 status = 1
     return status
@@ -514,7 +514,7 @@ def main(argv=None):
             layout = load_layout(args.layout)
         return COMMANDS[args.cmd](args, layout)
     except SignError as exc:
-        sys.stderr.write("mboot_sign: error: %s\n" % exc)
+        sys.stderr.write(f"mboot_sign: error: {exc}\n")
         return 1
 
 

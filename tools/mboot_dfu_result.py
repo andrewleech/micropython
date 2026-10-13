@@ -61,13 +61,13 @@ SOURCES = {0: "boot", 1: "dfu", 2: "fsload", 3: "app"}
 
 
 def name_of(table, value):
-    return table.get(value, "UNKNOWN(%d)" % value)
+    return table.get(value, f"UNKNOWN({value})")
 
 
 def decode_result(data):
     """Decode a 16-byte mboot_dfu_recovery_result_t."""
     if len(data) != 16:
-        raise ValueError("a DFU result is 16 bytes, got %d" % len(data))
+        raise ValueError(f"a DFU result is 16 bytes, got {len(data)}")
     seq, code, source, phase, detail, reserved = struct.unpack(DFU_RESULT_FMT, data)
     return {
         "seq": seq,
@@ -94,21 +94,14 @@ def main():
     try:
         res = decode_result(bytes.fromhex(args.result))
     except ValueError as e:
-        print("error: %s" % e, file=sys.stderr)
+        print(f"error: {e}", file=sys.stderr)
         return 1
     if args.json:
         print(json.dumps(res))
     else:
         print(
-            "seq %d code %d (%s) source %s phase %d detail 0x%08x"
-            % (
-                res["seq"],
-                res["code"],
-                res["code_name"],
-                res["source_name"],
-                res["phase"],
-                res["detail"],
-            )
+            f"seq {res['seq']} code {res['code']} ({res['code_name']}) "
+            f"source {res['source_name']} phase {res['phase']} detail 0x{res['detail']:08x}"
         )
     return 0
 

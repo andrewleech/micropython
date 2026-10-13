@@ -128,7 +128,7 @@ def macro_name(name):
 # Macros of mboot_layout.h that are read. An area the configuration does not have is absent from
 # the result; feature flags may be absent or numerically zero.
 NAMES = (
-    [macro_name("%s_%s" % (a.upper(), f)) for a in AREAS for f in ("ADDR", "SIZE", "UNIT")]
+    [macro_name(f"{a.upper()}_{f}") for a in AREAS for f in ("ADDR", "SIZE", "UNIT")]
     + [
         macro_name(n)
         for n in (
@@ -180,9 +180,9 @@ NAMES = (
             "MIN_IMAGE_SIZE",
         )
     ]
-    + ["MICROPY_HW_MBOOT_DEV%d_%s" % (d, f) for d in (0, 1) for f in DEVICE_FIELDS]
+    + [f"MICROPY_HW_MBOOT_DEV{d}_{f}" for d in (0, 1) for f in DEVICE_FIELDS]
     + [
-        "MICROPY_HW_MBOOT_DEV%d_RUN%d_%s" % (d, j, f)
+        f"MICROPY_HW_MBOOT_DEV{d}_RUN{j}_{f}"
         for d in (0, 1)
         for j in range(MAX_RUNS)
         for f in ("SIZE", "ERASE")
@@ -313,9 +313,9 @@ def evaluate(expr):
 def probe(cmd):
     """Values of NAMES as the preprocessor sees them. A name that is not defined is absent."""
     text = '#include "mboot_layout.h"\n#define V(n) @ #n n\n'
-    text += "".join("V(%s)\n" % n for n in NAMES)
+    text += "".join(f"V({n})\n" for n in NAMES)
     r = subprocess.run(
-        cmd + ["-E", "-P", "-x", "c", "-"], input=text, capture_output=True, text=True
+        cmd + ["-E", "-P", "-x", "c", "-"], input=text, capture_output=True, text=True, check=False
     )
     if r.returncode != 0:
         sys.exit("mboot_gen: the preprocessor failed:\n" + r.stderr)
@@ -334,9 +334,9 @@ def read_mpy_version():
     text = (TOP / "py" / "mpconfig.h").read_text()
     parts = []
     for name in ("MAJOR", "MINOR", "MICRO"):
-        m = re.search(r"^#define MICROPY_VERSION_%s\s+([0-9]+)\s*$" % name, text, re.M)
+        m = re.search(rf"^#define MICROPY_VERSION_{name}\s+([0-9]+)\s*$", text, re.MULTILINE)
         if not m:
-            sys.exit("mboot_gen: MICROPY_VERSION_%s not found in py/mpconfig.h" % name)
+            sys.exit(f"mboot_gen: MICROPY_VERSION_{name} not found in py/mpconfig.h")
         parts.append(int(m.group(1)))
     return tuple(parts)
 
@@ -345,31 +345,32 @@ def build(v, board):
     g = lambda n, d=None: v.get(macro_name(n), d)
     devices = []
     for d in (0, 1):
-        if "MICROPY_HW_MBOOT_DEV%d_BASE" % d not in v:
+        dev = f"MICROPY_HW_MBOOT_DEV{d}_"
+        if dev + "BASE" not in v:
             break
         runs = []
         off = 0
-        for j in range(v["MICROPY_HW_MBOOT_DEV%d_RUNS" % d]):
-            size = v["MICROPY_HW_MBOOT_DEV%d_RUN%d_SIZE" % (d, j)]
+        for j in range(v[dev + "RUNS"]):
+            size = v[f"{dev}RUN{j}_SIZE"]
             runs.append(
                 {
                     "off": off,
                     "size": size,
-                    "erase": v["MICROPY_HW_MBOOT_DEV%d_RUN%d_ERASE" % (d, j)],
+                    "erase": v[f"{dev}RUN{j}_ERASE"],
                 }
             )
             off += size
         devices.append(
             {
                 "id": d,
-                "name": v["MICROPY_HW_MBOOT_DEV%d_NAME" % d],
-                "base": v["MICROPY_HW_MBOOT_DEV%d_BASE" % d],
-                "size": v["MICROPY_HW_MBOOT_DEV%d_SIZE" % d],
+                "name": v[dev + "NAME"],
+                "base": v[dev + "BASE"],
+                "size": v[dev + "SIZE"],
                 "runs": runs,
-                "write": v["MICROPY_HW_MBOOT_DEV%d_WRITE" % d],
-                "erased_val": v["MICROPY_HW_MBOOT_DEV%d_ERASED_VAL" % d],
-                "mapped": v["MICROPY_HW_MBOOT_DEV%d_MAPPED" % d],
-                "ecc": v["MICROPY_HW_MBOOT_DEV%d_ECC" % d],
+                "write": v[dev + "WRITE"],
+                "erased_val": v[dev + "ERASED_VAL"],
+                "mapped": v[dev + "MAPPED"],
+                "ecc": v[dev + "ECC"],
             }
         )
     areas = {}
@@ -389,8 +390,8 @@ def build(v, board):
         }
     header = g("HEADER_SIZE")
     max_align = g("MAX_ALIGN_VALUE")
-    layout_id = "%08x" % g("LAYOUT_ID")
-    version = "%d.%d.%d" % read_mpy_version()
+    layout_id = "{:08x}".format(g("LAYOUT_ID"))
+    version = ".".join(str(n) for n in read_mpy_version())
 
     if g("POLICY_SINGLE"):
         policy = "single"
@@ -413,7 +414,7 @@ def build(v, board):
         rollback = "none"
     fsload = [t for t in FSLOAD_TYPES if g("FSLOAD_" + t.upper())]
 
-    sign_args = ["--version", version + "+0", "--header-size", "0x%X" % header, "--pad-header"]
+    sign_args = ["--version", version + "+0", "--header-size", f"0x{header:X}", "--pad-header"]
     if policy == "overwrite-external":
         sign_args.append("--overwrite-only")
     sign_args += ["--align", str(g("MAX_WRITE_UNIT"))]
@@ -421,7 +422,7 @@ def build(v, board):
         sign_args += ["--max-align", str(max_align)]
     sign_args += [
         "--slot-size",
-        "0x%X" % areas["primary"]["size"],
+        "0x{:X}".format(areas["primary"]["size"]),
         "--max-sectors",
         str(g("MAX_IMG_SECTORS")),
         "--erased-val",
@@ -431,7 +432,7 @@ def build(v, board):
         "--public-key-format",
         "hash",
         "--custom-tlv",
-        "0x%04X" % LAYOUT_TLV_TAG,
+        f"0x{LAYOUT_TLV_TAG:04X}",
         "0x" + layout_id,
     ]
     # Image for the first programming of the primary slot. It carries the trailer magic and
@@ -497,16 +498,16 @@ def render_ld(lay):
     # Plain assignments rather than PROVIDE: ld accepts them in MEMORY expressions.
     for area in ("boot", "primary", "secondary"):
         if area in a:
-            out.append("MBOOT_%s_START = 0x%08X;" % (area.upper(), a[area]["addr"]))
-            out.append("MBOOT_%s_SIZE = 0x%X;" % (area.upper(), a[area]["size"]))
-    out.append("MBOOT_HEADER_SIZE = 0x%X;" % lay["header_size"])
-    out.append("MBOOT_MAX_IMAGE_SIZE = 0x%X;" % lay["max_image_size"])
+            out.append("MBOOT_{}_START = 0x{:08X};".format(area.upper(), a[area]["addr"]))
+            out.append("MBOOT_{}_SIZE = 0x{:X};".format(area.upper(), a[area]["size"]))
+    out.append("MBOOT_HEADER_SIZE = 0x{:X};".format(lay["header_size"]))
+    out.append("MBOOT_MAX_IMAGE_SIZE = 0x{:X};".format(lay["max_image_size"]))
     out.append("MBOOT_APP_START = MBOOT_PRIMARY_START + MBOOT_HEADER_SIZE;")
-    out.append("MBOOT_APP_LEN = 0x%X;" % lay["app_len"])
+    out.append("MBOOT_APP_LEN = 0x{:X};".format(lay["app_len"]))
     for area in ("seccnt", "shadow", "scratch", "intent", "fs"):
         if area in a:
-            out.append("MBOOT_%s_START = 0x%08X;" % (area.upper(), a[area]["addr"]))
-            out.append("MBOOT_%s_SIZE = 0x%X;" % (area.upper(), a[area]["size"]))
+            out.append("MBOOT_{}_START = 0x{:08X};".format(area.upper(), a[area]["addr"]))
+            out.append("MBOOT_{}_SIZE = 0x{:X};".format(area.upper(), a[area]["size"]))
     return "\n".join(out) + "\n"
 
 
@@ -514,9 +515,9 @@ def render_mk(lay):
     fsload = lay["fsload"]
     pairs = [
         ("MBOOT_LAYOUT_ID", lay["layout_id"]),
-        ("MBOOT_APP_LINK_ADDR", "0x%08X" % lay["app_start"]),
-        ("MBOOT_PRIMARY_ADDR", "0x%08X" % lay["areas"]["primary"]["addr"]),
-        ("MBOOT_DFU_UPDATE_ADDR", "0x%08X" % lay["dfu"]["update_addr"]),
+        ("MBOOT_APP_LINK_ADDR", "0x{:08X}".format(lay["app_start"])),
+        ("MBOOT_PRIMARY_ADDR", "0x{:08X}".format(lay["areas"]["primary"]["addr"])),
+        ("MBOOT_DFU_UPDATE_ADDR", "0x{:08X}".format(lay["dfu"]["update_addr"])),
         ("MBOOT_DFU_ENABLE", str(int(lay["dfu"]["enabled"]))),
         ("MBOOT_DFU_FLASH_WRITE_ALIGN", str(lay["dfu"]["write_align"])),
         ("MBOOT_POLICY", lay["policy"]),
@@ -535,7 +536,7 @@ def render_mk(lay):
         ("MBOOT_IMGTOOL_INITIAL_ARGS", " ".join(lay["imgtool"]["initial_args"])),
     ]
     out = ["# Generated by tools/mboot_gen.py. Do not edit.", ""]
-    return "\n".join(out + ["%s := %s" % (k, v) if v else "%s :=" % k for k, v in pairs]) + "\n"
+    return "\n".join(out + [f"{k} := {v}" if v else f"{k} :=" for k, v in pairs]) + "\n"
 
 
 def load_key(path):
@@ -546,7 +547,7 @@ def load_key(path):
 
     key = keys.load(str(path))
     if key is None or type(key).__name__ not in ("ECDSA256P1", "ECDSA256P1Public"):
-        sys.exit("mboot_gen: %s is not an ECDSA P-256 key" % path)
+        sys.exit(f"mboot_gen: {path} is not an ECDSA P-256 key")
     return key
 
 
@@ -556,11 +557,11 @@ def render_keys_c(key, path):
     buf = io.StringIO()
     key.emit_c_public(file=buf, name_suffix="_0")
     return (
-        "// Generated by tools/mboot_gen.py from %s. Do not edit.\n\n"
-        '#include "bootutil/sign_key.h"\n\n%s\n'
-        "const struct bootutil_key bootutil_keys[] = {\n"
-        "    {\n        .key = ecdsa_pub_key_0,\n        .len = &ecdsa_pub_key_0_len,\n    },\n};\n"
-        "const int bootutil_key_cnt = 1;\n" % (path, buf.getvalue().rstrip("\n"))
+        "// Generated by tools/mboot_gen.py from {}. Do not edit.\n\n"
+        '#include "bootutil/sign_key.h"\n\n{}\n'
+        "const struct bootutil_key bootutil_keys[] = {{\n"
+        "    {{\n        .key = ecdsa_pub_key_0,\n        .len = &ecdsa_pub_key_0_len,\n    }},\n}};\n"
+        "const int bootutil_key_cnt = 1;\n".format(path, buf.getvalue().rstrip("\n"))
     )
 
 
