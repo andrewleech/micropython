@@ -407,8 +407,13 @@ def receipt_from_journal(
         except ValueError:
             return False
 
+    consumers: dict[str, set[int]] = {}
+    for number, event in enumerate(events):
+        for item in event["inputs"]:
+            consumers.setdefault(item["path"], set()).add(number)
+
     selected_events = []
-    for event in events:
+    for number, event in enumerate(events):
         outputs = event["outputs"]
         output_paths = {item["path"] for item in outputs}
         relevant = event["kind"] in ("compile", "assemble", "archive") and any(
@@ -421,8 +426,14 @@ def receipt_from_journal(
             and Path(item["path"]).suffix.lower() in (".bin", ".hex", ".dfu", ".pack")
             for item in outputs
         )
+        # A shell recipe line (``cp x.d x.P``) is kept only when a later action consumes what it wrote.
         relevant = relevant or event["kind"] in ("transform", "generate") and (
-            event.get("in_observed_generator") or any(in_build(item["path"]) for item in outputs)
+            event.get("in_observed_generator")
+            or any(in_build(item["path"]) for item in outputs)
+            and (
+                event.get("derivation") != "shell-command"
+                or any(consumers.get(path, set()) - {number} for path in output_paths)
+            )
         )
         relevant = relevant or event["kind"] == "link" and any(
             in_build(item["path"]) and item["path"].endswith((".o", ".obj")) for item in outputs

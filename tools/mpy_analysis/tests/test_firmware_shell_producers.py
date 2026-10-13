@@ -95,3 +95,17 @@ def test_header_written_where_the_command_does_not_name_it_stays_a_gap(tmp_path)
     _, summary = generate(built)
     assert summary["firmware_completeness"] == "not-established"
     assert "linked-header-not-in-selected-scope" in gap_kinds(summary)
+
+
+def test_dependency_file_post_processing_does_not_enter_the_receipt(tmp_path):
+    makefile = (
+        "ROOT := $(abspath ..)\n.PHONY: all\nall: $(BUILD)/firmware.elf\n$(BUILD):\n\tmkdir -p $@\n"
+        "$(BUILD)/main.o: $(ROOT)/src/main.c | $(BUILD)\n"
+        "\t$(CC) -MD -MF $(@:.o=.d) -c $< -o $@\n"
+        "\tcp $(@:.o=.d) $(@:.o=.P); rm -f $(@:.o=.d)\n"
+    ) + LINK.format(objects="$(BUILD)/main.o")
+    built = capture(tmp_path, files={"src/main.c": "int main(void) { return 0; }\n"}, makefile=makefile)
+    assert built.exit_code == 0 and built.receipt["status"] == "complete", built.image["link"]["unresolved"]
+    assert (built.build / "main.P").is_file() and not (built.build / "main.d").exists()
+    assert not [action for action in built.receipt["actions"] if action.get("derivation")]
+    validate_firmware_receipt(built.receipt)

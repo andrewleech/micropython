@@ -663,6 +663,13 @@ def run_tool(
             return result.returncode
         in_place = {item["path"] for item in outputs} if kind == "transform" else set()
         in_place |= written & set(before)
+        if role == "shell":
+            # A recipe line may delete a file it read (``cp x.d x.P; rm -f x.d``). The hash taken
+            # before the line ran is all that is left of it, so it is recorded as ephemeral.
+            for item in inputs:
+                if not Path(item["path"]).exists():
+                    item["role"] = "ephemeral-input"
+                    in_place.add(item["path"])
         changed_inputs = sorted(
             path for path, digest in before.items() if after.get(path) != digest and path not in in_place
         )
