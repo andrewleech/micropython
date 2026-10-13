@@ -83,6 +83,10 @@ sast-sbom --scope scope.json --micropython-root "$MPY" \
 
 `generation.json` is read from the inventory's directory by default; `--link-generation` selects another companion. This posthoc input is a distinct evidence contract, not a `mpy-firmware-build/v1` receipt. It does not capture event-time build actions, prove archive-member selection, establish transforms or deployment outputs, or qualify weak/COMDAT and LTO contribution. It cannot be combined with `--build-receipt` and never marks firmware closure complete.
 
+## Deployment
+
+A receipt records the images a build produced and their deployment artifact hashes, not which of them reach a device or what else the device carries. An application-owned `mpy-deployment/v1` manifest, passed with `sast-sbom --deployment`, binds deployed image files to receipt images by `receipt_image` id or exact hash and adds `deployment_completeness` to the summary. A receipt image that the manifest neither lists nor excludes with a reason makes the deployment `not-established`. See the README section "Deployment manifest".
+
 ## Adapter and evidence boundary
 
 A receipt is not a build-capture mechanism. A production adapter must observe the real build process rather than replay a compilation database or inspect old artifacts after the fact. It must keep application and bootloader images separate, capture actual successful link and transform actions, retain compiler / assembler outputs, archives and member selections, linker scripts, response files, generated and system inputs, and bind the final ELF / deployment artifacts to that same build ID. If the adapter cannot resolve an input class or linker format, it must emit an incomplete receipt with the exact missing evidence, not infer inclusion from source names or file presence.
