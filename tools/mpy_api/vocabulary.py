@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+from .structure import json_pieces
+
 
 ATOM_KINDS = frozenset({"None", "bool", "int", "str", "bytes", "bytearray", "float", "complex",
                         "object", "list", "dict", "set", "tuple"})
@@ -28,12 +30,24 @@ def canonical_default(contract):
     return {**contract, "kind": _DEFAULT_KINDS[kind]} if kind in _DEFAULT_KINDS else contract
 
 
+# The encoder ``json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(",", ":"))`` uses.
+_JSON = json.JSONEncoder(sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+
+
+def canonical_json(value):
+    """Return ``json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(",", ":"))``,
+    with a ``ChainView`` encoded as the JSON array of its items.
+
+    ``json_pieces`` hands the value, or each of its containers, to the C encoder whole when it is at most
+    ``structure._C_ENCODER_HEIGHT`` levels high and holds no ChainView, and walks the rest on an explicit stack."""
+    return "".join(json_pieces(value, _JSON, 0))
+
+
 def union_descriptor(descriptors):
     atoms = {}
     for descriptor in descriptors:
         children = descriptor["alternatives"] if descriptor.get("kind") == "union" else [descriptor]
         for child in children:
-            key = json.dumps(child, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
-            atoms[key] = child
+            atoms[canonical_json(child)] = child
     values = [atoms[key] for key in sorted(atoms)]
     return values[0] if len(values) == 1 else {"kind": "union", "alternatives": values}

@@ -1,12 +1,13 @@
 """Bounded source-qualified runtime helper and argument-table contracts."""
 import re
-from copy import deepcopy
 from functools import cached_property
 from bisect import bisect_right
 from collections.abc import Mapping
 from heapq import merge
+from .chains import ChainView
 from .frontend import constant
 from .bindings import call_parts, constant_value, errors_at, intersect, strip_outer
+from .structure import deep_copy
 
 CONSTRUCTORS = {'mp_obj_new_bool': 'bool', 'mp_obj_new_int': 'int', 'mp_obj_new_int_from_uint': 'int', 'mp_obj_new_int_from_ll': 'int', 'mp_obj_new_int_from_ull': 'int', 'mp_obj_new_bytes': 'bytes', 'mp_obj_new_bytes_from_vstr': 'bytes', 'mp_obj_new_str': 'str', 'mp_obj_new_str_from_utf8_vstr': 'str'}
 CONSTRUCTORS.update({'mp_obj_new_list': 'list', 'mp_obj_new_float': 'float'})
@@ -17,6 +18,8 @@ INPUT_HELPERS.update({'mp_obj_str_get_data': 'str-or-bytes', 'check_is_str_or_by
                       'str_check_arg_type': 'same-native-string-family'})
 
 _INPUT_DEPTH = 16
+_OPERAND = object()
+_UNEVALUATED = object()
 
 
 class _QueryFunction(Mapping):
@@ -396,50 +399,49 @@ def _unparen(node):
     return node or {}
 
 
-def _mentions(node, name):
-    if not node:
-        return False
-    if node.get('kind') == 'identifier' and node.get('expression') == name:
-        return True
+def _child_nodes(node):
+    """Dict values and dict list items of node, in field order."""
+    children = []
     for value in node.values():
         if isinstance(value, dict):
-            if _mentions(value, name):
-                return True
+            children.append(value)
         elif isinstance(value, list):
-            for item in value:
-                if isinstance(item, dict) and _mentions(item, name):
-                    return True
+            children.extend(item for item in value if isinstance(item, dict))
+    return children
+
+
+def _mentions(node, name):
+    stack = [node] if node else []
+    while stack:
+        node = stack.pop()
+        if node.get('kind') == 'identifier' and node.get('expression') == name:
+            return True
+        stack.extend(reversed(_child_nodes(node)))
     return False
 
 
 def _address_mentions(node, name):
-    if not node:
-        return False
-    if node.get('kind') == 'pointer_expression' and node.get('expression', '').startswith('& ') and _mentions(node, name):
-        return True
-    for value in node.values():
-        if isinstance(value, dict):
-            if _address_mentions(value, name):
-                return True
-        elif isinstance(value, list):
-            for item in value:
-                if isinstance(item, dict) and _address_mentions(item, name):
-                    return True
+    stack = [node] if node else []
+    while stack:
+        node = stack.pop()
+        if node.get('kind') == 'pointer_expression' and node.get('expression', '').startswith('& ') and _mentions(node, name):
+            return True
+        stack.extend(reversed(_child_nodes(node)))
     return False
 
 
 def _collect_address_names(node, address_names):
     """Identifiers under node; those under an address-of expression are added to address_names."""
-    mentioned = {node.get('expression')} if node.get('kind') == 'identifier' else set()
-    for value in node.values():
-        if isinstance(value, dict):
-            mentioned |= _collect_address_names(value, address_names)
-        elif isinstance(value, list):
-            for item in value:
-                if isinstance(item, dict):
-                    mentioned |= _collect_address_names(item, address_names)
-    if node.get('kind') == 'pointer_expression' and node.get('expression', '').startswith('& '):
-        address_names |= mentioned
+    mentioned = set()
+    stack = [(node, False)]
+    while stack:
+        node, addressed = stack.pop()
+        addressed = addressed or node.get('kind') == 'pointer_expression' and node.get('expression', '').startswith('& ')
+        if node.get('kind') == 'identifier':
+            mentioned.add(node.get('expression'))
+            if addressed:
+                address_names.add(node.get('expression'))
+        stack.extend((child, addressed) for child in reversed(_child_nodes(node)))
     return mentioned
 
 
@@ -490,15 +492,20 @@ def _applicable(definition, use):
 
 
 def _exclusive(left, right):
+    """Whether some guard of ``left`` and some guard of ``right`` take opposite branches of one condition."""
     right_guards = right.get('guards', [])
     if not right_guards:
         return False
+    branches = {}
     for a in left.get('guards', []):
-        if a.get('condition_id') is None:
-            continue
-        for b in right_guards:
-            if a.get('condition_id') == b.get('condition_id') and a['condition'] == b['condition'] and a['branch'] != b['branch']:
-                return True
+        if a.get('condition_id') is not None:
+            branches.setdefault((a['condition_id'], a['condition']), set()).add(a['branch'])
+    if not branches:
+        return False
+    for b in right_guards:
+        taken = branches.get((b.get('condition_id'), b['condition']))
+        if taken and (len(taken) > 1 or b['branch'] not in taken):
+            return True
     return False
 
 def event_applicability(function, event, specialization=None, assumed_guards=()):
@@ -515,7 +522,7 @@ def event_applicability(function, event, specialization=None, assumed_guards=())
         reasons.append('event lacks a structured source interval')
     result = {'resolution': 'unresolved', 'kind': 'successful-path-dominance', 'unresolved': reasons}
     if assumed_guards:
-        result['assumed_guards'] = deepcopy(assumed_guards)
+        result['assumed_guards'] = deep_copy(assumed_guards)
     if reasons:
         return result
     environment = dict(function['constants'])
@@ -526,41 +533,76 @@ def event_applicability(function, event, specialization=None, assumed_guards=())
     def contains(start, end):
         return (start is not None and end is not None
                 and start <= event['byte_start'] < event['byte_end'] <= end)
-    def visit(node, states, in_loop=False):
-        kind = node.get('kind')
-        if kind == 'block':
-            for child in node.get('children', []):
-                if not states:
-                    break
-                states = visit(child, states, in_loop)
-            return states
-        if kind == 'if':
-            if not in_loop and contains(node.get('condition_start'), node.get('condition_end')):
+    flow = events['flow']
+    def visit():
+        """Exit states of the whole flow table entered with state False.
+
+        Work items are ('node', position, states, in_loop); ('block', position, index, in_loop),
+        which continues a block at child ``index`` from the newest value; ('union', count), which
+        replaces the newest ``count`` values with their union; and ('loop', states), which replaces
+        the loop body's exit states with the states the loop was entered with."""
+        work, values = [('node', 0, {False}, False)], []
+        while work:
+            item = work.pop()
+            tag = item[0]
+            if tag == 'block':
+                _, position, index, in_loop = item
+                states = values.pop()
+                children = flow[position].get('children', [])
+                if states and index < len(children):
+                    work.append(('block', position, index + 1, in_loop))
+                    work.append(('node', children[index], states, in_loop))
+                else:
+                    values.append(states)
+                continue
+            if tag == 'union':
+                count = item[1]
+                merged = set().union(*values[-count:])
+                del values[-count:]
+                values.append(merged)
+                continue
+            if tag == 'loop':
+                values[-1] = item[1]
+                continue
+            _, position, states, in_loop = item
+            node = flow[position]
+            kind = node.get('kind')
+            if kind == 'block':
+                values.append(states)
+                work.append(('block', position, 0, in_loop))
+                continue
+            if kind == 'if':
+                if not in_loop and contains(node.get('condition_start'), node.get('condition_end')):
+                    states = {True}
+                value = _constant_at(function, node['condition'], node, environment)
+                assumed = assumptions.get(node.get('byte_start'))
+                if assumed is not None:
+                    if value is not None and bool(value) != assumed:
+                        values.append(set())
+                        continue
+                    value = assumed
+                branches = [node['then'] if value else node['else']] if value is not None else [node['then'], node['else']]
+                work.append(('union', len(branches)))
+                work.extend(('node', branch, states, in_loop) for branch in reversed(branches))
+                continue
+            if kind == 'loop':
+                # Both zero-trip fallthrough and body exits remain possible; no event
+                # in an unassessed loop gains a guaranteed-execution certificate.
+                work.append(('loop', states))
+                work.append(('node', node['body'], states, True))
+                continue
+            if not in_loop and contains(node.get('byte_start'), node.get('byte_end')):
                 states = {True}
-            value = _constant_at(function, node['condition'], node, environment)
-            assumed = assumptions.get(node.get('byte_start'))
-            if assumed is not None:
-                if value is not None and bool(value) != assumed:
-                    return set()
-                value = assumed
-            branches = [node['then'] if value else node['else']] if value is not None else [node['then'], node['else']]
-            return set().union(*(visit(branch, states, in_loop) for branch in branches))
-        if kind == 'loop':
-            # Both zero-trip fallthrough and body exits remain possible; no event
-            # in an unassessed loop gains a guaranteed-execution certificate.
-            visit(node['body'], states, True)
-            return states
-        if not in_loop and contains(node.get('byte_start'), node.get('byte_end')):
-            states = {True}
-        if kind == 'return':
-            successes.update(states)
-            return set()
-        if kind == 'call':
-            call = calls.get(node.get('byte_start'))
-            if _qualified_error_exit(call):
-                return set()
-        return states
-    successes.update(visit(events['flow'], {False}))
+            if kind == 'return':
+                successes.update(states)
+                states = set()
+            elif kind == 'call':
+                call = calls.get(node.get('byte_start'))
+                if _qualified_error_exit(call):
+                    states = set()
+            values.append(states)
+        return values.pop()
+    successes.update(visit())
     if successes == {True}:
         result['resolution'] = 'bounded-resolved'
     else:
@@ -622,18 +664,23 @@ def _scalar_formal(function, name):
 
 
 def _scalar_read(node):
-    node = _unparen(node)
-    kind = node.get('kind')
-    if kind in ('identifier', 'number_literal', 'char_literal'):
-        return True
-    if kind == 'binary_expression' and node.get('operator') in {
-            '+', '-', '*', '/', '%', '<<', '>>', '&', '|', '^', '==', '!=', '<', '<=', '>', '>=', '&&', '||'}:
-        return _scalar_read(node.get('left')) and _scalar_read(node.get('right'))
-    if kind == 'unary_expression' and node.get('operator') in ('+', '-', '~', '!'):
-        return _scalar_read(node.get('argument'))
-    if kind == 'cast_expression' and node.get('type', {}).get('expression') in _C_INTEGER_TYPES:
-        return _scalar_read(node.get('value'))
-    return False
+    stack = [node]
+    while stack:
+        node = _unparen(stack.pop())
+        kind = node.get('kind')
+        if kind in ('identifier', 'number_literal', 'char_literal'):
+            continue
+        if kind == 'binary_expression' and node.get('operator') in {
+                '+', '-', '*', '/', '%', '<<', '>>', '&', '|', '^', '==', '!=', '<', '<=', '>', '>=', '&&', '||'}:
+            stack.append(node.get('right'))
+            stack.append(node.get('left'))
+        elif kind == 'unary_expression' and node.get('operator') in ('+', '-', '~', '!'):
+            stack.append(node.get('argument'))
+        elif kind == 'cast_expression' and node.get('type', {}).get('expression') in _C_INTEGER_TYPES:
+            stack.append(node.get('value'))
+        else:
+            return False
+    return True
 
 def _constant_at(function, expression, use, environment=None):
     """Evaluate only lexically visible constants or separately supplied bindings."""
@@ -847,53 +894,68 @@ def _storage_unchanged(function, name, use, definition=None, after=None, protect
 
 
 def source_reference(function, expression, use=None, seen=()):
-    use = use or {}
-    expression = strip_outer(expression or '')
-    if function['events'].get('semantic_unassessed') or expression in seen:
-        return None
-    local = _local_definition(function, expression, use)
-    if local:
-        if local.get('loops') or not _applicable(local, use) or not _unchanged(function, expression, use, local):
-            return None
-        initializer = local.get('initializer_node') or local.get('initializer') or {}
-        origin = source_reference(function, initializer.get('expression'), local.get('definition_use', local), (*seen, expression))
-        return {**origin, 'alias_evidence': origin.get('alias_evidence', []) + [
-            {'declaration_id': local.get('declaration_id'), 'source_span': local['source_span']}]} if origin else None
-    if expression in function['parameters'] and _unchanged(function, expression, use):
-        return {'kind': 'c-parameter', 'scope': function['id'], 'parameter': function['parameters'].index(expression)}
-    vector = re.fullmatch(r'(\w+) \[ (.*?) \]', expression)
-    if vector:
-        index = _constant_at(function, vector[2], use)
-        parameter = source_reference(function, vector[1], use, seen)
-        if (parameter and parameter['kind'] == 'c-parameter' and isinstance(index, int)
-                and not isinstance(index, bool) and index >= 0
-                and _storage_unchanged(function, function['parameters'][parameter['parameter']], use)):
-            return {'kind': 'vector-item', 'scope': function['id'], 'vector_parameter': parameter['parameter'], 'index': index}
-    field = re.fullmatch(r'(\w+) \[ (.*?) \] \. (u_obj|u_int|u_bool)', expression)
-    if field:
-        index = _constant_at(function, field[2], use)
-        parsers = [call for call in function['events']['calls']
-                   if call_parts(call['expression'])[0] == 'mp_arg_parse_all' and qualified_template(call)
-                   and len(call_parts(call['expression'])[1]) == 6
-                   and call_parts(call['expression'])[1][-1] == field[1]
-                   and not call.get('loops') and _applicable(call, use)
-                   and (not use or call.get('byte_start', 0) < use.get('byte_start', -1))]
-        carrier = _local(function, field[1], use)
-        if (len(parsers) == 1 and carrier and carrier.get('type_expression') == 'mp_arg_val_t'
-                and _local(function, field[1], parsers[0]) == carrier and isinstance(index, int)):
-            parser = parsers[0]
-            args = call_parts(parser['expression'])[1]
-            tables = [v for v in function['events']['variables'] if v['name'] == args[-2] and v.get('type_expression') == 'mp_arg_t']
-            rows = list(argument_table_rows(tables[0], function, function['constants'], {})) if len(tables) == 1 else []
-            row = next((r for r in rows if r['table_entry_index'] == index), None)
-            count_expression = re.sub(r'sizeof \( ' + re.escape(args[-2]) + r' \) / sizeof \( \( ' + re.escape(args[-2]) + r' \) \[ 0 \] \)', str(len(rows)), args[3])
-            count = _constant_at(function, count_expression, parser)
-            if (row and row['row_resolution'] == 'resolved' and row['table_count_resolution'] == 'resolved'
-                    and count == len(rows) and _storage_unchanged(
-                        function, field[1], use, carrier, after=parser.get('byte_end', parser['byte_start']))):
-                return {'kind': 'parser-field', 'scope': function['id'], 'table_id': row['table_id'],
-                        'table_entry_index': index, 'storage_field': field[3]}
-    return None
+    # A local alias defers its reference to its initializer's, and a vector item to its vector operand's; each
+    # deferred completion waits on `pending`, innermost last.
+    pending = []
+    while True:
+        use = use or {}
+        expression = strip_outer(expression or '')
+        reference = None
+        if not function['events'].get('semantic_unassessed') and expression not in seen:
+            local = _local_definition(function, expression, use)
+            if local:
+                if not (local.get('loops') or not _applicable(local, use) or not _unchanged(function, expression, use, local)):
+                    initializer = local.get('initializer_node') or local.get('initializer') or {}
+                    pending.append(('alias', local))
+                    expression, use, seen = initializer.get('expression'), local.get('definition_use', local), (*seen, expression)
+                    continue
+            elif expression in function['parameters'] and _unchanged(function, expression, use):
+                reference = {'kind': 'c-parameter', 'scope': function['id'], 'parameter': function['parameters'].index(expression)}
+            else:
+                vector = re.fullmatch(r'(\w+) \[ (.*?) \]', expression)
+                if vector:
+                    pending.append(('vector', use, _constant_at(function, vector[2], use)))
+                    expression = vector[1]
+                    continue
+                field = re.fullmatch(r'(\w+) \[ (.*?) \] \. (u_obj|u_int|u_bool)', expression)
+                if field:
+                    index = _constant_at(function, field[2], use)
+                    parsers = [call for call in function['events']['calls']
+                               if call_parts(call['expression'])[0] == 'mp_arg_parse_all' and qualified_template(call)
+                               and len(call_parts(call['expression'])[1]) == 6
+                               and call_parts(call['expression'])[1][-1] == field[1]
+                               and not call.get('loops') and _applicable(call, use)
+                               and (not use or call.get('byte_start', 0) < use.get('byte_start', -1))]
+                    carrier = _local(function, field[1], use)
+                    if (len(parsers) == 1 and carrier and carrier.get('type_expression') == 'mp_arg_val_t'
+                            and _local(function, field[1], parsers[0]) == carrier and isinstance(index, int)):
+                        parser = parsers[0]
+                        args = call_parts(parser['expression'])[1]
+                        tables = [v for v in function['events']['variables'] if v['name'] == args[-2] and v.get('type_expression') == 'mp_arg_t']
+                        rows = list(argument_table_rows(tables[0], function, function['constants'], {})) if len(tables) == 1 else []
+                        row = next((r for r in rows if r['table_entry_index'] == index), None)
+                        count_expression = re.sub(r'sizeof \( ' + re.escape(args[-2]) + r' \) / sizeof \( \( ' + re.escape(args[-2]) + r' \) \[ 0 \] \)', str(len(rows)), args[3])
+                        count = _constant_at(function, count_expression, parser)
+                        if (row and row['row_resolution'] == 'resolved' and row['table_count_resolution'] == 'resolved'
+                                and count == len(rows) and _storage_unchanged(
+                                    function, field[1], use, carrier, after=parser.get('byte_end', parser['byte_start']))):
+                            reference = {'kind': 'parser-field', 'scope': function['id'], 'table_id': row['table_id'],
+                                         'table_entry_index': index, 'storage_field': field[3]}
+        while pending:
+            completion = pending.pop()
+            if completion[0] == 'alias':
+                local = completion[1]
+                reference = {**reference, 'alias_evidence': reference.get('alias_evidence', []) + [
+                    {'declaration_id': local.get('declaration_id'), 'source_span': local['source_span']}]} if reference else None
+            else:
+                # A vector expression ends in `]`, so it is never also a parser-field expression.
+                _, use, index = completion
+                parameter, reference = reference, None
+                if (parameter and parameter['kind'] == 'c-parameter' and isinstance(index, int)
+                        and not isinstance(index, bool) and index >= 0
+                        and _storage_unchanged(function, function['parameters'][parameter['parameter']], use)):
+                    reference = {'kind': 'vector-item', 'scope': function['id'], 'vector_parameter': parameter['parameter'], 'index': index}
+        return reference
 
 
 def direct_parameter(function, expression, use=None):
@@ -902,19 +964,40 @@ def direct_parameter(function, expression, use=None):
 
 
 def _type_selector(function, expression, use, seen=()):
-    if expression in seen:
+    while expression not in seen:
+        local = _local_definition(function, expression, use or {})
+        if local and not local.get('loops') and _unchanged(function, expression, use, local):
+            initializer = local.get('initializer_node') or local.get('initializer') or {}
+            expression, use, seen = initializer.get('expression', ''), local.get('definition_use', local), (*seen, expression)
+            continue
+        helper, values = call_parts(expression)
+        if helper == 'mp_obj_get_type' and len(values) == 1 and qualified_template(event_call(function, expression, (use or {}).get('source_span'))):
+            return source_reference(function, values[0], use)
         return None
-    local = _local_definition(function, expression, use or {})
-    if local and not local.get('loops') and _unchanged(function, expression, use, local):
-        initializer = local.get('initializer_node') or local.get('initializer') or {}
-        return _type_selector(function, initializer.get('expression', ''), local.get('definition_use', local), (*seen, expression))
-    helper, values = call_parts(expression)
-    if helper == 'mp_obj_get_type' and len(values) == 1 and qualified_template(event_call(function, expression, (use or {}).get('source_span'))):
-        return source_reference(function, values[0], use)
     return None
 
 
 def return_contract(expression, function, contracts, location=None, use=None, seen=()):
+    """Value contract of a returned C expression.
+
+    Nested element and initializer contracts are evaluated by _return_contract_steps frames on an explicit stack:
+    a frame yields the arguments of a nested contract and is sent its result.
+    """
+    stack = [_return_contract_steps(expression, function, contracts, location, use, seen)]
+    result = None
+    while stack:
+        try:
+            request = stack[-1].send(result)
+        except StopIteration as finished:
+            stack.pop()
+            result = finished.value
+            continue
+        stack.append(_return_contract_steps(*request))
+        result = None
+    return result
+
+
+def _return_contract_steps(expression, function, contracts, location=None, use=None, seen=()):
     use = use or next((event for event in function['events']['returns'] if event['expression'] == expression and (location is None or intersect(event['source_span'], location))), {})
     if not expression:
         return {'kind': 'void-C-return', 'reason': 'bare C return does not denote Python None', 'evidence': expression}
@@ -962,10 +1045,11 @@ def return_contract(expression, function, contracts, location=None, use=None, se
             extent = _constant_at(function, dimensions[0]['expression'], local) if len(dimensions) == 1 and dimensions[0]['expression'] else len(children) if len(dimensions) == 1 else None
         if isinstance(count, int) and not isinstance(count, bool) and count >= 0 and count == len(children) == extent:
             item_guards = local.get('guards', []) if local else use.get('guards', [])
-            elements = [return_contract(item['expression'], function, contracts,
+            elements = []
+            for item in children:
+                elements.append((yield (item['expression'], function, contracts,
                                         {'byte_start': item['byte_start'], 'byte_end': item['byte_end']},
-                                        {**item, 'byte_end': items.get('byte_end', item['byte_end']), 'guards': item_guards}, seen)
-                        for item in children]
+                                        {**item, 'byte_end': items.get('byte_end', item['byte_end']), 'guards': item_guards}, seen)))
             return {'kind': 'tuple', 'length': count, 'length_expression': arguments[0], 'elements': elements,
                     'cardinality_authority': 'constructor count equals structured initializer and declaration extent',
                     'evidence': expression, 'callee': call['callee']}
@@ -976,7 +1060,7 @@ def return_contract(expression, function, contracts, location=None, use=None, se
     if local and not local.get('loops') and expression not in seen and _applicable(local, use):
         initializer = local.get('initializer_node') or local.get('initializer') or {}
         if _unchanged(function, expression, use, local, ('mp_obj_list_append',)):
-            value = return_contract(initializer.get('expression'), function, contracts, local['source_span'], local.get('definition_use', local), (*seen, expression))
+            value = yield (initializer.get('expression'), function, contracts, local['source_span'], local.get('definition_use', local), (*seen, expression))
             if value['kind'] == 'list':
                 if _point(use) is None:
                     return {'kind': 'unresolved', 'reason': 'list mutation accounting requires ordered use metadata', 'evidence': expression}
@@ -1027,7 +1111,10 @@ def return_contract(expression, function, contracts, location=None, use=None, se
                 allocation_name, allocation_arguments = call_parts(value['evidence'])
                 empty = allocation_name == 'mp_obj_new_list' and len(allocation_arguments) == 2 and _constant_at(function, allocation_arguments[0], root.get('definition_use', root)) == 0
                 if empty and all(qualified_template(c) for c in appends):
-                    value['elements'] = [return_contract(call_parts(c['expression'])[1][1], function, contracts, c['source_span'], c, seen) for c in appends]
+                    elements = []
+                    for c in appends:
+                        elements.append((yield (call_parts(c['expression'])[1][1], function, contracts, c['source_span'], c, seen)))
+                    value['elements'] = elements
                     value['builder_authority'] = 'empty local list allocation and complete lexical declaration-alias qualified append sites'
                     value['element_resolution'] = 'unresolved' if any(element['kind'] == 'unresolved' for element in value['elements']) else 'bounded-resolved'
                     value['element_unresolved'] = sorted({element.get('reason', 'element relation unresolved') for element in value['elements'] if element['kind'] == 'unresolved'})
@@ -1042,24 +1129,34 @@ def return_contract(expression, function, contracts, location=None, use=None, se
 
 
 def remap_return(contract, arguments, outer, callee, use=None):
-    mapped = deepcopy(contract)
-    ref = contract.get('source_ref')
-    if ref and ref.get('scope') == callee['id'] and ref['kind'] in ('c-parameter', 'vector-item'):
-        index = ref.get('parameter', ref.get('vector_parameter'))
-        actual = arguments[index] if index < len(arguments) else None
-        target = source_reference(outer, actual, use)
-        if target and ref['kind'] == 'vector-item' and target['kind'] == 'c-parameter':
-            target = {'kind': 'vector-item', 'scope': outer['id'], 'vector_parameter': target['parameter'], 'index': ref['index']}
-        if target:
-            mapped.update(source_ref=target, scope=outer['id'], callee_relation=contract)
-            mapped.pop('argument', None)
-            if target['kind'] == 'c-parameter' and mapped['kind'] == 'argument':
-                mapped['argument'] = target['parameter']
+    # Element contracts are remapped in preorder; each lands in its parent's mapped element list.
+    result = None
+    stack = [(contract, None)]
+    while stack:
+        contract, parent = stack.pop()
+        mapped = deep_copy(contract)
+        ref = contract.get('source_ref')
+        if ref and ref.get('scope') == callee['id'] and ref['kind'] in ('c-parameter', 'vector-item'):
+            index = ref.get('parameter', ref.get('vector_parameter'))
+            actual = arguments[index] if index < len(arguments) else None
+            target = source_reference(outer, actual, use)
+            if target and ref['kind'] == 'vector-item' and target['kind'] == 'c-parameter':
+                target = {'kind': 'vector-item', 'scope': outer['id'], 'vector_parameter': target['parameter'], 'index': ref['index']}
+            if target:
+                mapped.update(source_ref=target, scope=outer['id'], callee_relation=contract)
+                mapped.pop('argument', None)
+                if target['kind'] == 'c-parameter' and mapped['kind'] == 'argument':
+                    mapped['argument'] = target['parameter']
+            else:
+                mapped.update(kind='unresolved', reason='helper source reference forwarding is not qualified')
+        if parent is None:
+            result = mapped
         else:
-            mapped.update(kind='unresolved', reason='helper source reference forwarding is not qualified')
-    if contract.get('elements'):
-        mapped['elements'] = [remap_return(e, arguments, outer, callee, use) for e in contract['elements']]
-    return mapped
+            parent.append(mapped)
+        if contract.get('elements'):
+            elements = mapped['elements'] = []
+            stack.extend((element, elements) for element in reversed(contract['elements']))
+    return result
 
 
 def constraint_binding(expression, function, use=None):
@@ -1073,6 +1170,7 @@ def constraint_binding(expression, function, use=None):
 def argument_table_rows(variable, function, environment, contracts):
     """Retain every initializer ordinal, including unsupported field syntax."""
     initializers = variable.get('initializer_rows', [])
+    nodes = variable.get('initializer_nodes', [])
     dimensions = variable.get('array_dimensions', [])
     declared_count = _constant_at(function, dimensions[0]['expression'], variable, environment) if len(dimensions) == 1 and dimensions[0]['expression'] else None
     inferred = len(dimensions) == 1 and not dimensions[0]['expression']
@@ -1085,14 +1183,14 @@ def argument_table_rows(variable, function, environment, contracts):
         field_names = ('qst', 'flags', 'defval')
         if initializer['syntax_kind'] != 'initializer_list':
             reasons.append('array row is not an ordinary aggregate initializer; original ordinal is not a proven array index')
-        for field in initializer.get('fields', []):
+        for field in (nodes[position] for position in initializer.get('fields', [])):
             target = None
             value = field
             if field['syntax_kind'] == 'initializer_pair':
-                designators = field.get('designators', [])
+                designators = [nodes[position] for position in field.get('designators', [])]
                 spelling = designators[0]['expression'] if len(designators) == 1 else ''
                 target = spelling.replace(' ', '').removeprefix('.') if spelling.startswith('.') else None
-                value = field.get('value')
+                value = nodes[field['value']] if field.get('value') is not None else None
                 if target in field_names: next_field = field_names.index(target) + 1
             elif next_field < len(field_names):
                 target = field_names[next_field]
@@ -1117,11 +1215,11 @@ def argument_table_rows(variable, function, environment, contracts):
             default_contract = {'kind': 'zero-initialized-aggregate-storage', 'evidence': initializer['expression'],
                                 'reason': 'omitted aggregate member is C zero-initialized; no Python default or accepted domain is inferred'}
         else:
-            members = default.get('fields', []) if default['syntax_kind'] == 'initializer_list' else []
+            members = [nodes[position] for position in default.get('fields', [])] if default['syntax_kind'] == 'initializer_list' else []
             member = members[0] if len(members) == 1 else None
-            designators = member.get('designators', []) if member else []
+            designators = [nodes[position] for position in member.get('designators', [])] if member else []
             spelling = designators[0]['expression'].replace(' ', '') if len(designators) == 1 else ''
-            value = member.get('value') if member and member['syntax_kind'] == 'initializer_pair' else None
+            value = nodes[member['value']] if member and member['syntax_kind'] == 'initializer_pair' and member.get('value') is not None else None
             if spelling in ('.u_rom_obj', '.u_obj', '.u_bool', '.u_int') and value is not None:
                 storage_field = spelling[1:]
                 expression = value['expression']
@@ -1148,7 +1246,8 @@ def argument_table_rows(variable, function, environment, contracts):
                'default_resolution': 'unresolved' if default_reasons else 'storage-only',
                'default_unresolved': default_reasons, 'accepted_input': 'carrier/accepted-domain-unresolved',
                'python_parameter_default_resolution': 'unassessed parser flag/default interpretation',
-               'source_span': initializer['source_span'], 'scope': function['id']}
+               'source_span': initializer['source_span'], 'scope': function['id'],
+               'initializer_nodes': nodes}
 
 
 def semantics(function, functions, errors, contracts, specialization=None, depth=0, linked_functions=None):
@@ -1181,8 +1280,48 @@ def semantics(function, functions, errors, contracts, specialization=None, depth
         if key not in condition_values:
             condition_values[key] = _constant_at(function, expression, {'byte_start': point}, environment)
         return condition_values[key]
+    # Guards from the frontend are views into the function's guard table; their condition values
+    # and path admission are evaluated once per table entry, extending the enclosing entry's result.
+    # An entry is evaluated only after every entry enclosing it.
+    guard_tables = {}
+    def guard_table(guards):
+        state = guard_tables.get(id(guards.parents))
+        if state is None:
+            state = guard_tables[id(guards.parents)] = (guards.parents, [_UNEVALUATED] * len(guards.parents), {})
+        return state
+    def entry_value(guards, values, position):
+        if values[position] is _UNEVALUATED:
+            guard = guards.items[position]
+            values[position] = condition_value(guard['condition'], guard['condition_id'])
+        return values[position]
+    def guard_values(guards):
+        """Condition value of each guard on ``guards``, outermost first."""
+        if not isinstance(guards, ChainView):
+            return None
+        _, values, _ = guard_table(guards)
+        pending, position = [], guards.position
+        while position is not None and values[position] is _UNEVALUATED:
+            pending.append(position)
+            position = guards.parents[position]
+        for position in reversed(pending):
+            entry_value(guards, values, position)
+        return guards.over(values)
     def selected(event):
-        for guard in event.get('guards', []):
+        guards = event.get('guards', [])
+        if isinstance(guards, ChainView):
+            _, values, admits = guard_table(guards)
+            pending, position = [], guards.position
+            while position is not None and position not in admits:
+                pending.append(position)
+                position = guards.parents[position]
+            admitted = admits[position] if position is not None else True
+            for position in reversed(pending):
+                if admitted:
+                    value = entry_value(guards, values, position)
+                    admitted = value is None or bool(value) == (guards.items[position]['branch'] == 'then')
+                admits[position] = admitted
+            return admitted
+        for guard in guards:
             value = condition_value(guard['condition'], guard.get('condition_id', event.get('byte_start')))
             if value is not None and bool(value) != (guard['branch'] == 'then'): return False
         return True
@@ -1235,7 +1374,11 @@ def semantics(function, functions, errors, contracts, specialization=None, depth
                                                'byte_start': write.get('byte_start'), 'byte_end': write.get('byte_end'),
                                                'loops': write.get('loops', []), 'conditional_evaluation': write.get('conditional_evaluation', [])})
     for returned in events['returns']:
-        result['branch_selection'].append({'source_span': returned['source_span'], 'selected': selected(returned), 'guards': returned.get('guards', []), 'evaluated_conditions': [condition_value(g['condition'], g.get('condition_id', returned.get('byte_start'))) for g in returned.get('guards', [])]})
+        guards = returned.get('guards', [])
+        evaluated = guard_values(guards)
+        if evaluated is None:
+            evaluated = [condition_value(g['condition'], g.get('condition_id', returned.get('byte_start'))) for g in guards]
+        result['branch_selection'].append({'source_span': returned['source_span'], 'selected': selected(returned), 'guards': guards, 'evaluated_conditions': evaluated})
         if not selected(returned) or flow_closed is not None and returned.get('byte_start') not in reachable:
             continue
         helper, args = call_parts(returned['expression'])
@@ -1349,14 +1492,15 @@ def semantics(function, functions, errors, contracts, specialization=None, depth
 
 
 def _constant_operand(expression, function, use, environment, seen=()):
-    value = _constant_at(function, expression, use, environment)
-    if value is not None:
-        return value
-    local = _local_definition(function, expression, use)
-    if local and expression not in seen and not local.get('loops') and _applicable(local, use) and _unchanged(function, expression, use, local):
+    while True:
+        value = _constant_at(function, expression, use, environment)
+        if value is not None:
+            return value
+        local = _local_definition(function, expression, use)
+        if not (local and expression not in seen and not local.get('loops') and _applicable(local, use) and _unchanged(function, expression, use, local)):
+            return None
         initializer = local.get('initializer_node') or local.get('initializer') or {}
-        return _constant_operand(initializer.get('expression', ''), function, local.get('definition_use', local), environment, (*seen, expression))
-    return None
+        expression, use, seen = initializer.get('expression', ''), local.get('definition_use', local), (*seen, expression)
 
 
 def _selected_helpers(call, name, functions, linked_functions, caller=None):
@@ -1581,15 +1725,16 @@ def _array_element(function, node, use):
 
 def _address_targets(function, node, use, found):
     """Add to found the bindings node's value may be a pointer into the own storage of, without following aliases."""
-    node = _unparen(node)
-    if not node:
-        return
-    target = _address_target(function, node, use)
-    if target is not None:
-        found.add(target[0])
-    if not _array_element(function, node, use):
-        for child in _input_children(node, True):
-            _address_targets(function, child, use, found)
+    stack = [node]
+    while stack:
+        node = _unparen(stack.pop())
+        if not node:
+            continue
+        target = _address_target(function, node, use)
+        if target is not None:
+            found.add(target[0])
+        if not _array_element(function, node, use):
+            stack.extend(reversed(list(_input_children(node, True))))
 
 
 def _input_binding_mention(function, node, use, name, declaration, seen=(), depth=0, address=False):
@@ -1728,10 +1873,10 @@ def _private_input_slot(function, name, use, permitted_pointer=None):
 def _private_input_lvalue(function, node, use):
     """Recognise only unescaped C slots, owned arrays and direct local addresses."""
     node = _unparen(node)
+    while node.get('kind') == 'field_expression' and node.get('operator') == '.':
+        node = _unparen(node.get('argument'))
     if node.get('kind') == 'identifier':
         return _private_input_slot(function, node.get('expression'), use)
-    if node.get('kind') == 'field_expression' and node.get('operator') == '.':
-        return _private_input_lvalue(function, node.get('argument'), use)
     if node.get('kind') == 'subscript_expression':
         base = _unparen(node.get('argument'))
         local = _local(function, base.get('expression'), use) if base.get('kind') == 'identifier' else None
@@ -1823,38 +1968,32 @@ def _input_uses(function, selected, composed_calls=(), converted_calls=(), lifte
                           'resolution': 'unresolved', 'source_span': call['source_span'], 'callee': call.get('callee'),
                           'byte_start': call.get('byte_start'), 'byte_end': call.get('byte_end'),
                           'reason': 'unassessed parser output-storage consumer can constrain an original object field'})
+    def references(node, event):
+        stack = [node]
+        while stack:
+            child = stack.pop()
+            ref = source_reference(function, child.get('expression'), event) if child.get('kind') != 'field_identifier' else None
+            if ref:
+                yield ref
+            elif child.get('kind') == 'identifier':
+                for root in _input_parameter_roots(function, child, event):
+                    yield function.parameter_ref(root)
+            stack.extend(reversed(_child_nodes(child)))
     def inspect(node, event):
-        if not node:
-            return
-        if node.get('kind') in ('subscript_expression', 'field_expression') and source_reference(function, node.get('expression'), event):
-            return
-        if node.get('kind') in ('binary_expression', 'conditional_expression', 'cast_expression', 'pointer_expression', 'unary_expression', 'update_expression', 'subscript_expression', 'field_expression', 'comma_expression'):
-            def references(child):
-                ref = source_reference(function, child.get('expression'), event) if child.get('kind') != 'field_identifier' else None
-                if ref:
-                    yield ref
-                elif child.get('kind') == 'identifier':
-                    for root in _input_parameter_roots(function, child, event):
-                        yield function.parameter_ref(root)
-                for value in child.values():
-                    if isinstance(value, dict):
-                        yield from references(value)
-                    elif isinstance(value, list):
-                        for item in value:
-                            if isinstance(item, dict):
-                                yield from references(item)
-            for reference in {_reference_key(ref): ref for ref in references(node)}.values():
-                uses({'source_ref': reference, 'helper': None, 'guards': event.get('guards', []),
-                      'resolution': 'unresolved', 'source_span': event.get('source_span'),
-                      'reason': 'non-call derived operation requires an accepted-domain proof'})
-            return
-        for value in node.values():
-            if isinstance(value, dict):
-                inspect(value, event)
-            elif isinstance(value, list):
-                for item in value:
-                    if isinstance(item, dict):
-                        inspect(item, event)
+        stack = [node]
+        while stack:
+            node = stack.pop()
+            if not node:
+                continue
+            if node.get('kind') in ('subscript_expression', 'field_expression') and source_reference(function, node.get('expression'), event):
+                continue
+            if node.get('kind') in ('binary_expression', 'conditional_expression', 'cast_expression', 'pointer_expression', 'unary_expression', 'update_expression', 'subscript_expression', 'field_expression', 'comma_expression'):
+                for reference in {_reference_key(ref): ref for ref in references(node, event)}.values():
+                    uses({'source_ref': reference, 'helper': None, 'guards': event.get('guards', []),
+                          'resolution': 'unresolved', 'source_span': event.get('source_span'),
+                          'reason': 'non-call derived operation requires an accepted-domain proof'})
+                continue
+            stack.extend(reversed(_child_nodes(node)))
     for event in (function['events']['returns'] + function['events']['writes'] + function['events']['conditions']
                   + function['events']['calls'] + function['events']['variables'] + function['events'].get('expressions', [])
                   + function['events'].get('control_expressions', [])):
@@ -1908,11 +2047,11 @@ def _certified_parser_consumer(use, conversion):
 
 def bind_public_contracts(summary, public_bindings):
     """Compose source facts with qualified inventory bindings without mutation."""
-    result = deepcopy(summary)
-    parameters = deepcopy(public_bindings.get('parameters', []))
-    receiver = deepcopy(public_bindings.get('receiver'))
+    result = deep_copy(summary)
+    parameters = deep_copy(public_bindings.get('parameters', []))
+    receiver = deep_copy(public_bindings.get('receiver'))
     if receiver and 'binding_authority' not in receiver:
-        receiver['binding_authority'] = deepcopy(receiver.get('authority', {}))
+        receiver['binding_authority'] = deep_copy(receiver.get('authority', {}))
     all_bindings = parameters + ([receiver] if receiver else [])
     by_reference = {}
     name_counts = {}
@@ -1933,45 +2072,55 @@ def bind_public_contracts(summary, public_bindings):
         return matches[0] if len(matches) == 1 and name_counts.get(matches[0].get('name')) == 1 else None
 
     def compose(contract):
-        copied = deepcopy(contract)
-        binding = lookup(contract.get('source_ref'))
-        if contract.get('kind') == 'argument':
-            if binding:
-                copied['exported_argument'] = binding['name']
-                copied['public_binding_authority'] = binding['binding_authority']
-                native = binding.get('native_type')
+        # Element contracts are composed in preorder; each lands in its parent's copied element list.
+        composed = None
+        stack = [(contract, None)]
+        while stack:
+            contract, parent = stack.pop()
+            copied = deep_copy(contract)
+            binding = lookup(contract.get('source_ref'))
+            if contract.get('kind') == 'argument':
+                if binding:
+                    copied['exported_argument'] = binding['name']
+                    copied['public_binding_authority'] = binding['binding_authority']
+                    native = binding.get('native_type')
+                    if isinstance(native, dict):
+                        native = native.get('name', native.get('kind'))
+                    if binding is receiver:
+                        copied.pop('exported_argument', None)
+                        if native in ('str', 'bytes', 'bytearray') and binding.get('nominal_authority_resolution') in ('resolved', 'bounded-resolved'):
+                            copied.update(kind=native, native_identity_relation=deep_copy(contract))
+                        else:
+                            copied['selected_receiver_binding'] = deep_copy(binding)
+                            copied['representation_resolution'] = 'unresolved'
+                            copied['representation_unresolved'] = ['native owner occurrence does not establish complete unbound receiver acceptance']
+                    if not binding.get('required', False):
+                        copied['optional_identity'] = True
+                        if binding.get('default_contract') is not None:
+                            copied['default_contract'] = binding['default_contract']
+                else:
+                    copied.update(kind='unresolved', reason='return source reference lacks unique qualified public binding')
+            elif contract.get('kind') == 'same-native-family':
+                native = binding.get('native_type') if binding else None
                 if isinstance(native, dict):
                     native = native.get('name', native.get('kind'))
-                if binding is receiver:
-                    copied.pop('exported_argument', None)
-                    if native in ('str', 'bytes', 'bytearray') and binding.get('nominal_authority_resolution') in ('resolved', 'bounded-resolved'):
-                        copied.update(kind=native, native_identity_relation=deepcopy(contract))
-                    else:
-                        copied['selected_receiver_binding'] = deepcopy(binding)
-                        copied['representation_resolution'] = 'unresolved'
-                        copied['representation_unresolved'] = ['native owner occurrence does not establish complete unbound receiver acceptance']
-                if not binding.get('required', False):
-                    copied['optional_identity'] = True
-                    if binding.get('default_contract') is not None:
-                        copied['default_contract'] = binding['default_contract']
+                target = contract.get('native_family_mapping', {}).get(native)
+                if target in ('str', 'bytes', 'bytearray') and contract.get('family_resolution') == 'bounded-resolved' and binding and binding.get('nominal_authority_resolution') in ('resolved', 'bounded-resolved'):
+                    copied.update(kind=target, native_family_relation=deep_copy(contract),
+                                  public_binding_authority=binding['binding_authority'])
+                else:
+                    copied['representation_resolution'] = 'unresolved'
+                    copied['representation_unresolved'] = ['selected native builder family has no qualified receiver-domain nominal specialization']
+                    if binding:
+                        copied['selected_receiver_binding'] = deep_copy(binding)
+            if parent is None:
+                composed = copied
             else:
-                copied.update(kind='unresolved', reason='return source reference lacks unique qualified public binding')
-        elif contract.get('kind') == 'same-native-family':
-            native = binding.get('native_type') if binding else None
-            if isinstance(native, dict):
-                native = native.get('name', native.get('kind'))
-            target = contract.get('native_family_mapping', {}).get(native)
-            if target in ('str', 'bytes', 'bytearray') and contract.get('family_resolution') == 'bounded-resolved' and binding and binding.get('nominal_authority_resolution') in ('resolved', 'bounded-resolved'):
-                copied.update(kind=target, native_family_relation=deepcopy(contract),
-                              public_binding_authority=binding['binding_authority'])
-            else:
-                copied['representation_resolution'] = 'unresolved'
-                copied['representation_unresolved'] = ['selected native builder family has no qualified receiver-domain nominal specialization']
-                if binding:
-                    copied['selected_receiver_binding'] = deepcopy(binding)
-        if 'elements' in contract:
-            copied['elements'] = [compose(element) for element in contract['elements']]
-        return copied
+                parent.append(copied)
+            if 'elements' in contract:
+                elements = copied['elements'] = []
+                stack.extend((element, elements) for element in reversed(contract['elements']))
+        return composed
 
     result['returns'] = [compose(contract) for contract in summary.get('returns', [])]
     public = []
@@ -1987,16 +2136,16 @@ def bind_public_contracts(summary, public_bindings):
             relation = fact.get('bindings', [{}])[0] if fact.get('bindings') else {}
             if _reference_key(relation.get('source_ref', relation)) in refs:
                 constraints.append({'kind': domain_kinds.get(fact['contract'], fact['contract']),
-                                    'guards': deepcopy(fact.get('guards', [])),
-                                    'domain_authority': deepcopy(fact.get('domain_authority', {})),
-                                    'successful_path_applicability': deepcopy(fact.get('successful_path_applicability', {})),
-                                    'operands': deepcopy(fact.get('arguments', [])),
+                                    'guards': deep_copy(fact.get('guards', [])),
+                                    'domain_authority': deep_copy(fact.get('domain_authority', {})),
+                                    'successful_path_applicability': deep_copy(fact.get('successful_path_applicability', {})),
+                                    'operands': deep_copy(fact.get('arguments', [])),
                                     'resolution': fact.get('domain_authority', {}).get('resolution', 'unresolved'),
-                                    'source_ref': deepcopy(relation.get('source_ref', relation)),
+                                    'source_ref': deep_copy(relation.get('source_ref', relation)),
                                     'evidence': {'callee': fact.get('callee'), 'source_span': fact.get('source_span')},
                                     'applicability': 'supplied-input'})
                 if fact.get('extent') is not None:
-                    constraints[-1]['extent'] = deepcopy(fact['extent'])
+                    constraints[-1]['extent'] = deep_copy(fact['extent'])
         vector_carriers = {(reference.get('scope'), reference.get('vector_parameter'))
                            for reference in binding.get('source_refs', []) if reference.get('kind') == 'vector-item'}
         uses = [use for use in summary.get('input_uses', [])
@@ -2019,8 +2168,8 @@ def bind_public_contracts(summary, public_bindings):
         if conversion_kind in ('object', 'integer-conversion-capability'):
             kinds.add(conversion_kind)
             constraints.append({'kind': conversion_kind, 'guards': [], 'applicability': 'supplied-input',
-                                'domain_authority': deepcopy(conversion.get('helper_contract_authority', {})),
-                                'resolution': 'bounded-resolved', 'evidence': deepcopy(conversion.get('authority', conversion))})
+                                'domain_authority': deep_copy(conversion.get('helper_contract_authority', {})),
+                                'resolution': 'bounded-resolved', 'evidence': deep_copy(conversion.get('authority', conversion))})
         unknown_uses = any(use['resolution'] == 'unresolved' for use in uses)
         if 'object' in kinds and len(kinds - {'object'}) == 1 and narrow <= kinds:
             kinds.discard('object')
@@ -2044,10 +2193,10 @@ def bind_public_contracts(summary, public_bindings):
             reasons = sorted(set(reasons))
         record = {'name': binding['name'], 'accepted_domain': {
             'resolution': 'bounded-resolved' if domain else 'unresolved', 'contract': domain,
-            'reasons': reasons, 'authority': [deepcopy(authority)] + [deepcopy(constraint.get('domain_authority', {})) for constraint in constraints] if domain else []},
-            'constraints': constraints, 'binding_authority': deepcopy(authority)}
+            'reasons': reasons, 'authority': [deep_copy(authority)] + [deep_copy(constraint.get('domain_authority', {})) for constraint in constraints] if domain else []},
+            'constraints': constraints, 'binding_authority': deep_copy(authority)}
         if binding.get('result_storage') is not None:
-            record['result_storage'] = deepcopy(binding['result_storage'])
+            record['result_storage'] = deep_copy(binding['result_storage'])
         if domain and domain['kind'] in ('integer-conversion-capability', 'readable-buffer-capability', 'writable-buffer-capability', 'tuple-or-list/exact-length'):
             record['accepted_domain'].update(representation_resolution='unresolved',
                                             representation_unresolved=['target native capability has no qualified checker representation'])
@@ -2170,8 +2319,8 @@ def _terminal_literal_message(call, failure, definitions):
             or message.get('byte_start') != call.get('byte_start') or message.get('byte_end') != call.get('byte_end')):
         return None
     return {'resolution': 'bounded-resolved', 'kind': 'literal-terminal-error-operand',
-            'function_id': function['id'], 'callee': deepcopy(call['callee']),
-            'source_span': deepcopy(call['source_span']), 'authority': deepcopy(row['authority'])}
+            'function_id': function['id'], 'callee': deep_copy(call['callee']),
+            'source_span': deep_copy(call['source_span']), 'authority': deep_copy(row['authority'])}
 
 
 def _source_body(definitions, name, call, suffix):
@@ -2189,25 +2338,43 @@ def _source_body(definitions, name, call, suffix):
 
 def _protocol_shape(node):
     """Compare bounded source expressions without erasing casts or operands."""
-    node = _unparen(node)
-    kind = node.get('kind')
-    if kind == 'number_literal':
-        return ('number', constant(node.get('expression', ''), {}))
-    if kind == 'identifier':
-        return ('identifier', node.get('expression'))
-    if kind == 'binary_expression':
-        return (node.get('operator'), _protocol_shape(node.get('left')), _protocol_shape(node.get('right')))
-    if kind in ('pointer_expression', 'unary_expression', 'update_expression'):
-        return (node.get('operator'), _protocol_shape(node.get('argument')))
-    if kind == 'cast_expression':
-        return ('cast', node.get('type', {}).get('expression'), _protocol_shape(node.get('value')))
-    if kind == 'field_expression':
-        return (node.get('operator'), _protocol_shape(node.get('argument')), node.get('field', {}).get('expression'))
-    if kind == 'subscript_expression':
-        return ('index', _protocol_shape(node.get('argument')), _protocol_shape(node.get('index')))
-    if kind == 'sizeof_expression':
-        return ('sizeof', node.get('expression'))
-    return ('unsupported', kind, node.get('expression'))
+    # Work items are nodes to describe and (operand count, template) pairs that, once the operand shapes are on
+    # top of `values`, assemble a shape with each operand shape in place of an _OPERAND marker.
+    values, work = [], [(node, None)]
+    while work:
+        item, template = work.pop()
+        if template is not None:
+            operands = iter(values[-item:])
+            del values[-item:]
+            values.append(tuple(next(operands) if part is _OPERAND else part for part in template))
+            continue
+        node = _unparen(item)
+        kind = node.get('kind')
+        operands = ()
+        if kind == 'number_literal':
+            shape = ('number', constant(node.get('expression', ''), {}))
+        elif kind == 'identifier':
+            shape = ('identifier', node.get('expression'))
+        elif kind == 'binary_expression':
+            shape, operands = (node.get('operator'), _OPERAND, _OPERAND), (node.get('left'), node.get('right'))
+        elif kind in ('pointer_expression', 'unary_expression', 'update_expression'):
+            shape, operands = (node.get('operator'), _OPERAND), (node.get('argument'),)
+        elif kind == 'cast_expression':
+            shape, operands = ('cast', node.get('type', {}).get('expression'), _OPERAND), (node.get('value'),)
+        elif kind == 'field_expression':
+            shape, operands = (node.get('operator'), _OPERAND, node.get('field', {}).get('expression')), (node.get('argument'),)
+        elif kind == 'subscript_expression':
+            shape, operands = ('index', _OPERAND, _OPERAND), (node.get('argument'), node.get('index'))
+        elif kind == 'sizeof_expression':
+            shape = ('sizeof', node.get('expression'))
+        else:
+            shape = ('unsupported', kind, node.get('expression'))
+        if operands:
+            work.append((len(operands), shape))
+            work.extend((operand, None) for operand in reversed(operands))
+        else:
+            values.append(shape)
+    return values[0]
 
 
 def _tag_object_authority(definitions, call, role='mp_obj_is_obj'):
@@ -2217,7 +2384,7 @@ def _tag_object_authority(definitions, call, role='mp_obj_is_obj'):
     events = function['events']
     if (events.get('writes') or events.get('calls') or events.get('variables') or events.get('expressions')
             or events.get('conditions') or events.get('control_flow_unresolved')
-            or any(node.get('kind') not in ('block', 'fallthrough', 'return') for node in _protocol_flow(events.get('flow', {})))
+            or not events.get('flow') or any(node.get('kind') not in ('block', 'fallthrough', 'return') for node in _protocol_flow(events['flow']))
             or len(events.get('returns', [])) != 1):
         return None
     returned = events['returns'][0]
@@ -2230,7 +2397,7 @@ def _tag_object_authority(definitions, call, role='mp_obj_is_obj'):
         return None
     return {'resolution': 'bounded-resolved', 'kind': 'selected-A-object-tag-predicate',
             'mask': 3, 'object_tag': 0, 'function_id': function['id'],
-            'source_span': function['source_span'], 'authority': deepcopy(definitions[role]['authority'])}
+            'source_span': function['source_span'], 'authority': deep_copy(definitions[role]['authority'])}
 
 
 def _configured_tagged_word(expression):
@@ -2284,7 +2451,7 @@ def _native_getter_authority(definitions, call, contracts):
     events = function['events']
     returned = events.get('returns', [])
     if (events.get('writes') or events.get('expressions') or events.get('control_flow_unresolved') or len(returned) != 2
-            or any(node.get('kind') not in ('block', 'fallthrough', 'if', 'return') for node in _protocol_flow(events.get('flow', {})))
+            or not events.get('flow') or any(node.get('kind') not in ('block', 'fallthrough', 'if', 'return') for node in _protocol_flow(events['flow']))
             or len(events.get('conditions', [])) != 1
             or len(events.get('calls', [])) != 1 or len(events.get('variables', [])) != 2):
         return None
@@ -2335,28 +2502,31 @@ def _native_getter_authority(definitions, call, contracts):
     return {'resolution': 'bounded-resolved', 'kind': 'selected-A-native-type-projection',
             'function_id': function['id'], 'source_span': function['source_span'],
             'heap_projection': 'unchanged object base.type', 'immediate_type_table': expected,
-            'object_tag_authority': tag, 'authority': deepcopy(definitions['mp_obj_get_type']['authority'])}
+            'object_tag_authority': tag, 'authority': deep_copy(definitions['mp_obj_get_type']['authority'])}
 
 
-def _protocol_flow(node):
-    yield node
-    for child in node.get('children', []):
-        yield from _protocol_flow(child)
-    for key in ('then', 'else', 'body'):
-        if node.get(key):
-            yield from _protocol_flow(node[key])
+def _protocol_flow(flow, position=0):
+    """Nodes of the flow-table subtree at ``position``, in preorder."""
+    stack = [position]
+    while stack:
+        node = flow[stack.pop()]
+        yield node
+        nested = [*node.get('children', ()), *(node[key] for key in ('then', 'else', 'body') if node.get(key) is not None)]
+        stack.extend(reversed(nested))
 
 
 def _protocol_scoped_uses(function, local, node):
     if not isinstance(node, dict):
         return True
-    if node.get('kind') == 'identifier' and node.get('expression') in local:
-        binding = _local(function, node['expression'], node)
-        if not binding or binding.get('declaration_id') != local[node['expression']].get('declaration_id'):
-            return False
-    return all(_protocol_scoped_uses(function, local, value) if isinstance(value, dict) else
-               all(_protocol_scoped_uses(function, local, child) for child in value if isinstance(child, dict))
-               if isinstance(value, list) else True for value in node.values())
+    stack = [node]
+    while stack:
+        node = stack.pop()
+        if node.get('kind') == 'identifier' and node.get('expression') in local:
+            binding = _local(function, node['expression'], node)
+            if not binding or binding.get('declaration_id') != local[node['expression']].get('declaration_id'):
+                return False
+        stack.extend(reversed(_child_nodes(node)))
+    return True
 
 
 def _gc_region_authority(function):
@@ -2397,7 +2567,8 @@ def _gc_region_authority(function):
             or _protocol_shape(local['ret_ptr'].get('initializer_node')) !=
                ('cast', 'void *', ('+', area_field('gc_pool_start'), ('*', ident('start_block'), block_size)))):
         return None
-    flows = list(_protocol_flow(events.get('flow', {})))
+    flow = events.get('flow') or []
+    flows = list(_protocol_flow(flow)) if flow else []
     labels = [node for node in flows if node.get('kind') == 'label']
     jumps = [node for node in flows if node.get('kind') == 'goto']
     scans = [node for node in flows if node.get('kind') == 'loop'
@@ -2411,7 +2582,7 @@ def _gc_region_authority(function):
             or scan.get('update_expression') != 'i ++'
             or any(jump.get('target') != 'found' or jump['byte_start'] >= label['byte_start'] for jump in jumps)):
         return None
-    free_checks = [node for node in _protocol_flow(scan['body']) if node.get('kind') == 'if'
+    free_checks = [node for node in _protocol_flow(flow, scan['body']) if node.get('kind') == 'if'
                    and node.get('condition') != '++ n_free >= n_blocks']
     if len(free_checks) != 4:
         return None
@@ -2421,15 +2592,15 @@ def _gc_region_authority(function):
         guard = {'condition': check['condition'], 'condition_id': check['byte_start']}
         if _protocol_shape(_guard_node(function, guard)) != ('==', ('&', ident('a'), num(3 << (2 * ordinal))), num(0)):
             return None
-        children = list(_protocol_flow(check.get('then', {})))
+        children = list(_protocol_flow(flow, check['then']))
         inner = [node for node in children if node.get('kind') == 'if']
         goto = [node for node in children if node.get('kind') == 'goto']
         if len(inner) != 1 or inner[0].get('condition') != '++ n_free >= n_blocks' or len(goto) != 1:
             return None
-        successful = list(_protocol_flow(inner[0].get('then', {})))
+        successful = list(_protocol_flow(flow, inner[0]['then']))
         if (any(node.get('kind') not in ('block', 'fallthrough', 'goto') for node in successful)
                 or [node['byte_start'] for node in successful if node.get('kind') == 'goto'] != [goto[0]['byte_start']]
-                or any(node.get('kind') == 'goto' for node in _protocol_flow(inner[0].get('else', {})))):
+                or any(node.get('kind') == 'goto' for node in _protocol_flow(flow, inner[0]['else']))):
             return None
         branch_writes = [write for write in writes if any(
             entry['condition_id'] == check['byte_start'] for entry in write.get('guards', []))]
@@ -2671,7 +2842,7 @@ def _allocator_failure_authority(definitions, call):
             return None
     return {'resolution': 'bounded-resolved', 'kind': 'selected-terminal-allocation-failure',
             'function_id': function['id'], 'source_span': function['source_span'],
-            'authority': deepcopy(definitions['m_malloc_fail']['authority']),
+            'authority': deep_copy(definitions['m_malloc_fail']['authority']),
             'terminal_errors': exits, 'terminal_message_authority': message_authorities}
 
 
@@ -2721,8 +2892,8 @@ def _fresh_allocator_authority(definitions, allocation_call):
         return None
     return {'resolution': 'bounded-resolved', 'kind': 'selected-size-forwarding-gc-allocation',
             'function_id': function['id'], 'source_span': function['source_span'],
-            'authority': deepcopy(definitions['m_malloc']['authority']),
-            'gc_authority': deepcopy(definitions['gc_alloc']['authority']), 'reservation': reservation,
+            'authority': deep_copy(definitions['m_malloc']['authority']),
+            'gc_authority': deep_copy(definitions['gc_alloc']['authority']), 'reservation': reservation,
             'failure_authority': failure_authorities}
 
 
@@ -2896,13 +3067,13 @@ def checked_receiver_authority(definitions):
             'allocator_authority': allocator_witness,
             'native_getter_authority': getter_witness, 'object_predicate_authority': object_witness,
             'fresh_region_authority': fresh,
-            'dispatch_guard_authority': {'guards': deepcopy(guards), 'configured_flags': {
+            'dispatch_guard_authority': {'guards': deep_copy(guards), 'configured_flags': {
                 name: contracts[name] for name in ('binds_self_flag', 'builtin_fun_flag', 'instance_type_flag') if name in contracts},
                 'instance_predicate': 'compiled-source-flag-projection' if instance_inline else 'selected-source-call'},
             'terminal_message_authority': message_authorities,
-            'checked_type_connection': {'type_source_span': type_definition['source_span'], 'slot': deepcopy(slots[0]), 'authority': deepcopy(call_slot)},
+            'checked_type_connection': {'type_source_span': type_definition['source_span'], 'slot': deep_copy(slots[0]), 'authority': deep_copy(call_slot)},
             'lookup_connection': {'function_id': loader['id'], 'source_span': connected_call['source_span'],
-                                  'callee': connected_call['callee'], 'authority': deepcopy(dispatch_connection)},
+                                  'callee': connected_call['callee'], 'authority': deep_copy(dispatch_connection)},
             'functions': [{'function_id': row['function']['id'], 'source_span': row['function']['source_span'],
                            'authority': row['authority']} for row in rows],
             'check_source_span': failures[0]['source_span'], 'wrapper_source_span': wrapped[0]['source_span'],
@@ -2913,30 +3084,64 @@ def _flow_paths(function, environment):
     events = function['events']
     calls_by_point = {call.get('byte_start'): call for call in events['calls']}
     reachable, error_exits = set(), []
-    def close(node):
-        kind = node.get('kind')
-        if kind == 'return':
-            reachable.add(node['byte_start'])
-            return True
-        if kind == 'call':
-            call = calls_by_point.get(node['byte_start'])
-            if _qualified_error_exit(call):
-                error_exits.append({'callee': call['callee'], 'source_span': call['source_span'], 'guards': call.get('guards', [])})
-                return True
-            return False
-        if kind == 'block':
-            return any(close(child) for child in node.get('children', []))
-        if kind == 'if':
-            value = _constant_at(function, node['condition'], node, environment)
-            if value is not None:
-                return close(node['then'] if value else node['else'])
-            then = close(node['then'])
-            otherwise = close(node['else'])
-            return then and otherwise
-        if kind == 'loop':
-            close(node['body'])
-        return False
-    return (close(events['flow']) if events.get('flow') else None), reachable, error_exits
+    flow = events.get('flow')
+    def close():
+        """Whether every path through the flow table ends in a return or a qualified error exit.
+
+        Work items are ('node', position); ('any', position, index), which continues a block at
+        child ``index`` unless the newest value already closes it; ('and',), which replaces the
+        two newest values with their conjunction; and ('open',), which replaces the newest value
+        with False."""
+        work, values = [('node', 0)], []
+        while work:
+            item = work.pop()
+            tag = item[0]
+            if tag == 'any':
+                _, position, index = item
+                children = flow[position].get('children', [])
+                if values[-1] or index >= len(children):
+                    continue
+                values.pop()
+                work.append(('any', position, index + 1))
+                work.append(('node', children[index]))
+                continue
+            if tag == 'and':
+                otherwise = values.pop()
+                values[-1] = values[-1] and otherwise
+                continue
+            if tag == 'open':
+                values[-1] = False
+                continue
+            node = flow[item[1]]
+            kind = node.get('kind')
+            if kind == 'return':
+                reachable.add(node['byte_start'])
+                values.append(True)
+            elif kind == 'call':
+                call = calls_by_point.get(node['byte_start'])
+                if _qualified_error_exit(call):
+                    error_exits.append({'callee': call['callee'], 'source_span': call['source_span'], 'guards': call.get('guards', [])})
+                    values.append(True)
+                else:
+                    values.append(False)
+            elif kind == 'block':
+                values.append(False)
+                work.append(('any', item[1], 0))
+            elif kind == 'if':
+                value = _constant_at(function, node['condition'], node, environment)
+                if value is not None:
+                    work.append(('node', node['then'] if value else node['else']))
+                else:
+                    work.append(('and',))
+                    work.append(('node', node['else']))
+                    work.append(('node', node['then']))
+            elif kind == 'loop':
+                work.append(('open',))
+                work.append(('node', node['body']))
+            else:
+                values.append(False)
+        return values.pop()
+    return (close() if flow else None), reachable, error_exits
 
 
 def _small_integer_decode(node, parameter, contracts):
@@ -3020,17 +3225,7 @@ def _checked_integer_body(body, functions, contracts, linked_functions):
             or (writes[2].get('value_node') or {}).get('expression') != '- val'
             or (writes[3].get('value_node') or {}).get('expression') != 'val' or writes[3].get('guards') or writes[3].get('loops')):
         return unresolved
-    def loop_nodes(node):
-        if node.get('kind') == 'loop':
-            yield node
-        for value in node.values():
-            if isinstance(value, dict):
-                yield from loop_nodes(value)
-            elif isinstance(value, list):
-                for child in value:
-                    if isinstance(child, dict):
-                        yield from loop_nodes(child)
-    loops = list(loop_nodes(native.get('flow', {})))
+    loops = [node for node in native.get('flow', []) if node.get('kind') == 'loop']
     if (len(loops) != 1 or loops[0].get('loop_kind') != 'while_statement'
             or strip_outer(loops[0].get('condition_expression', '')) != 'd > i -> dig'
             or any(write.get('loops') != [loops[0]['byte_start']] for write in writes[:2])
@@ -3236,10 +3431,15 @@ def input_helper_authority(call, function, functions, contracts, linked_function
                     node = next(iter(node.get('children', [])), {})
                 return node or {}
             def conjuncts(node):
-                node = unwrap(node)
-                if node.get('kind') == 'binary_expression' and node.get('operator') == '&&':
-                    return conjuncts(node.get('left')) + conjuncts(node.get('right'))
-                return [node]
+                leaves, stack = [], [node]
+                while stack:
+                    node = unwrap(stack.pop())
+                    if node.get('kind') == 'binary_expression' and node.get('operator') == '&&':
+                        stack.append(node.get('right'))
+                        stack.append(node.get('left'))
+                    else:
+                        leaves.append(node)
+                return leaves
             leaves = conjuncts(condition.get('expression_node'))
             comparisons = [node for node in leaves if node.get('kind') == 'binary_expression' and node.get('operator') == '==']
             native_tests = []
@@ -3304,9 +3504,22 @@ def input_helper_authority(call, function, functions, contracts, linked_function
 
 
 def _qualify_builder(contract, function, functions, linked_functions, contracts):
+    # A contract's elements are qualified, in order, before the contract that holds them.
+    stack = [(contract, False)]
+    while stack:
+        current, elements_qualified = stack.pop()
+        if 'elements' in current and not elements_qualified:
+            stack.append((current, True))
+            stack.extend((element, False) for element in reversed(current['elements']))
+        else:
+            _qualify_builder_contract(current, function, functions, linked_functions, contracts)
+    return contract
+
+
+def _qualify_builder_contract(contract, function, functions, linked_functions, contracts):
+    """Qualify one contract whose elements are already qualified."""
     if 'elements' in contract:
-        contract['elements'] = [_qualify_builder(element, function, functions, linked_functions, contracts)
-                                for element in contract['elements']]
+        contract['elements'] = list(contract['elements'])
         if contract.get('kind') == 'list':
             unresolved = [reason for element in contract['elements'] for reason in
                           (element.get('family_unresolved', []) if element.get('family_resolution') == 'unresolved'

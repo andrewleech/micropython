@@ -1,7 +1,6 @@
 """Build-selected MicroPython API inventory, with explicit bounded coverage."""
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-import copy
 import functools
 import gc
 import hashlib
@@ -18,6 +17,7 @@ from .bindings import definitions, registration_records, call_parts, scalar_fiel
 from .semantics import semantics, direct_parameter, bind_public_contracts, checked_receiver_authority, input_helper_authority, lexical_constant, event_applicability
 from .link import collect_ownership, join
 from .frozen_payload import collect_frozen_payload
+from .structure import deep_copy
 
 
 def _resolution(status, reasons=(), **evidence):
@@ -217,17 +217,11 @@ def _parser_protocol(facts, function):
            for index, c_type in enumerate(types)):
         return None
     n_pos, pos, kws, n_allowed, allowed, out = params
-    root = events.get('flow', {})
-
-    def walk(node):
-        yield node
-        for key in ('then', 'else', 'body'):
-            if isinstance(node.get(key), dict):
-                yield from walk(node[key])
-        for child in node.get('children', []):
-            yield from walk(child)
-
-    nodes = list(walk(root))
+    flow = events.get('flow')
+    if not flow:
+        return None
+    root = flow[0]
+    nodes = flow
     loops = [node for node in nodes if node.get('kind') == 'loop']
     if len(loops) != 1:
         return None
@@ -240,9 +234,9 @@ def _parser_protocol(facts, function):
 
     def children(block):
         while (block.get('kind') == 'block' and len(block.get('children', [])) == 1
-               and block['children'][0].get('kind') == 'block'):
-            block = block['children'][0]
-        return block.get('children', [])
+               and flow[block['children'][0]].get('kind') == 'block'):
+            block = flow[block['children'][0]]
+        return [flow[position] for position in block.get('children', [])]
 
     def branch(block, condition):
         candidates = [block] if block.get('kind') == 'if' else children(block)
@@ -257,11 +251,12 @@ def _parser_protocol(facts, function):
         matches = [write for write in events['writes'] if write['expression'] == expression]
         return matches[0] if len(matches) == 1 and guard_key(matches[0].get('guards', [])) == expected else None
 
-    positional = branch(loop['body'], 'i < ' + n_pos)
-    conversion = branch(loop['body'], '( ' + allowed + ' [ i ] . flags & MP_ARG_KIND_MASK ) == MP_ARG_BOOL')
+    body = flow[loop['body']]
+    positional = branch(body, 'i < ' + n_pos)
+    conversion = branch(body, '( ' + allowed + ' [ i ] . flags & MP_ARG_KIND_MASK ) == MP_ARG_BOOL')
     if not positional or not conversion:
         return None
-    integer = branch(conversion['else'], '( ' + allowed + ' [ i ] . flags & MP_ARG_KIND_MASK ) == MP_ARG_INT')
+    integer = branch(flow[conversion['else']], '( ' + allowed + ' [ i ] . flags & MP_ARG_KIND_MASK ) == MP_ARG_INT')
     if not integer:
         return None
     boolean_guard = [(conversion['byte_start'], 'then')]
@@ -271,16 +266,16 @@ def _parser_protocol(facts, function):
             or not guarded_write(out + ' [ i ] . u_int = mp_obj_get_int ( given_arg )', integer_guard)
             or not guarded_write(out + ' [ i ] . u_obj = given_arg', object_guard)):
         return None
-    top_ifs = [node for node in loop['body'].get('children', []) if node.get('kind') == 'if']
+    top_ifs = [flow[position] for position in body.get('children', []) if flow[position].get('kind') == 'if']
     if len(top_ifs) != 2:
         return None
-    keyword_only = branch(positional['then'], allowed + ' [ i ] . flags & MP_ARG_KW_ONLY')
-    missing_candidates = [node for node in children(positional['else']) if node.get('kind') == 'if'
+    keyword_only = branch(flow[positional['then']], allowed + ' [ i ] . flags & MP_ARG_KW_ONLY')
+    missing_candidates = [node for node in children(flow[positional['else']]) if node.get('kind') == 'if'
                           and strip_outer(node['condition']) in ('kw == 0', 'kw == ( ( void * ) 0 )')]
     if not keyword_only or len(missing_candidates) != 1:
         return None
     missing = missing_candidates[0]
-    required = branch(missing['then'], allowed + ' [ i ] . flags & MP_ARG_REQUIRED')
+    required = branch(flow[missing['then']], allowed + ' [ i ] . flags & MP_ARG_REQUIRED')
     if not required:
         return None
     positional_guard = [(positional['byte_start'], 'then')]
@@ -292,19 +287,20 @@ def _parser_protocol(facts, function):
     if not given_pos or not given_kw or not default:
         return None
     continues = [node for node in nodes if node.get('kind') == 'continue']
-    if (len(continues) != 1 or not any(node is continues[0] for node in missing['then'].get('children', []))
+    missing_then = flow[missing['then']].get('children', [])
+    if (len(continues) != 1 or not any(flow[position] is continues[0] for position in missing_then)
             or continues[0]['byte_start'] <= default.get('byte_end', -1)
-            or missing['then']['children'][-1] is not continues[0]):
+            or flow[missing_then[-1]] is not continues[0]):
         return None
     gotos = [node for node in nodes if node.get('kind') == 'goto']
     labels = [node for node in nodes if node.get('kind') == 'label']
     if (len(gotos) != 1 or gotos[0].get('target') != 'extra_positional'
             or len(labels) != 1 or labels[0].get('name') != 'extra_positional'
-            or not any(node is gotos[0] for node in keyword_only['then'].get('children', []))):
+            or not any(flow[position] is gotos[0] for position in flow[keyword_only['then']].get('children', []))):
         return None
     pos_excess = branch(root, 'pos_found < ' + n_pos)
     kw_excess = branch(root, 'kws_found < ' + kws + ' -> used')
-    if not pos_excess or not kw_excess or not any(node is labels[0] for node in pos_excess['then'].get('children', [])):
+    if not pos_excess or not kw_excess or not any(flow[position] is labels[0] for position in flow[pos_excess['then']].get('children', [])):
         return None
     root_control = [node for node in children(root) if node.get('kind') != 'fallthrough']
     if root_control != [loop, pos_excess, kw_excess]:
@@ -1104,13 +1100,31 @@ def _normal_surface(raw, inputs, resolve, present, root):
                 'diagnostic_stage': 'selected-linked-semantics'}
         return semantic_cache[function['id']]
 
+    def complete(steps):
+        """Run a ``symbol``/``class_symbol`` generator to its return value.
+
+        A generator yields ``(function, argument)`` to receive the return value of
+        ``function(argument)``; suspended generators wait on an explicit stack."""
+        stack, value = [steps], None
+        while True:
+            try:
+                function, argument = stack[-1].send(value)
+            except StopIteration as stop:
+                stack.pop()
+                if not stack:
+                    return stop.value
+                value = stop.value
+            else:
+                stack.append(function(argument))
+                value = None
+
     def symbol(binding):
         identity = binding['identity']
         target_id = identity.get('object_id')
         source = identity['source_span']
-        shape = copy.deepcopy(binding.get('callshape'))
+        shape = deep_copy(binding.get('callshape'))
         kind = 'function' if shape and shape.get('callable') is not False else 'constant' if binding['value_contract']['kind'] not in ('object-reference', 'unresolved') else 'unknown'
-        availability = copy.deepcopy(binding['availability'])
+        availability = deep_copy(binding['availability'])
         availability['status'] = 'resolved' if identity.get('object_kind') in ('wrapper', 'type', 'module') or binding['value_contract']['kind'] not in ('object-reference', 'unresolved') else 'unresolved'
         if any('ambiguous repeated export' in reason for reason in binding['unresolved']):
             availability['status'] = 'conflict'
@@ -1150,10 +1164,10 @@ def _normal_surface(raw, inputs, resolve, present, root):
                                              'returns': (summary or {}).get('return_resolution', 'unresolved')}
         target = containers.get(target_id)
         if target and target['kind'] == 'type':
-            definition = class_symbol(target)
+            definition = yield class_symbol, target
             result.update(kind='class', type_identity=target_id)
             if target_id not in constructing:
-                result.update({key: copy.deepcopy(definition[key]) for key in ('members', 'bases', 'declared_bases', 'base_identities', 'base_resolution', 'slots', 'attribute_policy', 'constructor')})
+                result.update({key: deep_copy(definition[key]) for key in ('members', 'bases', 'declared_bases', 'base_identities', 'base_resolution', 'slots', 'attribute_policy', 'constructor')})
         elif target and target['kind'] == 'module':
             result.update(kind='module', module_identity=target_id)
         return result
@@ -1312,7 +1326,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
     receiver_check = checked_receiver_authority(receiver_definitions)
 
     def compose_policy(container, members):
-        policy = copy.deepcopy(container['attribute_policy'])
+        policy = deep_copy(container['attribute_policy'])
         framework_attributes = []
         if framework and any(test['name'] == '__class__' for test in framework[1]['handler_attribute_tests']):
             test = next(test for test in framework[1]['handler_attribute_tests'] if test['name'] == '__class__')
@@ -1473,7 +1487,10 @@ def _normal_surface(raw, inputs, resolve, present, root):
         result['constructor'] = constructor(container)
         types[identity] = result
         constructing.add(identity)
-        result['members'] = [symbol(b) for b in bindings_by_container.get((container['translation_unit'], container['name']), [])]
+        members = []
+        for binding in bindings_by_container.get((container['translation_unit'], container['name']), []):
+            members.append((yield symbol, binding))
+        result['members'] = members
         policy = compose_policy(container, result['members'])
         flags = container.get('type_flags_value')
         instance_flag = constant(facts_by_tu[container['translation_unit']].get('contracts', {}).get('instance_type_flag', ''),
@@ -1487,7 +1504,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
             names = re.findall(r'& (\w+)', slot.get('expression') or '')
             parent, status = resolve(names[-1], container['translation_unit']) if len(names) == 1 else (None, 'unsupported parent slot')
             if parent and parent[1]['kind'] == 'type' and parent[1]['id'] in containers and parent[1]['id'] not in constructing:
-                parent_type = class_symbol(containers[parent[1]['id']])
+                parent_type = yield class_symbol, containers[parent[1]['id']]
                 result['declared_bases'].append(parent_type['name'])
                 result['base_identities'].append(parent_type['identity'])
                 lookup_stops = [condition for fn in (type_framework[0]['functions'] if type_framework else [])
@@ -1507,7 +1524,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
                 for member in ([] if parent_lookup_stops else parent_type['members']):
                     if member['name'] in own:
                         continue
-                    inherited = {**copy.deepcopy(member), 'inherited_from': parent_type['identity']}
+                    inherited = {**deep_copy(member), 'inherited_from': parent_type['identity']}
                     if not instance_inheritance:
                         if not type_framework:
                             continue
@@ -1533,11 +1550,11 @@ def _normal_surface(raw, inputs, resolve, present, root):
         return result
 
     for container in raw['containers']:
-        if container['kind'] == 'type': class_symbol(container)
+        if container['kind'] == 'type': complete(class_symbol(container))
     modules = []
     for container in raw['containers']:
         if container['kind'] != 'module': continue
-        exports = [symbol(b) for b in bindings_by_container.get((container['translation_unit'], container['name']), [])]
+        exports = [complete(symbol(b)) for b in bindings_by_container.get((container['translation_unit'], container['name']), [])]
         rows = container['import_policy'].get('selected_table_evidence', [])
         names = sorted({row['name'] for row in rows})
         if not names:
@@ -1551,6 +1568,60 @@ def _normal_surface(raw, inputs, resolve, present, root):
                             'exports': exports, 'attribute_policy': policy, 'import_policy': container['import_policy'],
                             'resolution': _resolution('resolved', availability={'status': 'resolved', 'authority': 'selected module table and allocated owner'})})
     return sorted(modules, key=lambda m: (m['name'], m['identity'])), sorted(types.values(), key=lambda t: t['identity']), diagnostics
+
+
+def _nested_initializer(nodes, position):
+    """Initializer fact at ``position`` with its table references replaced by nested facts.
+
+    Only a row keeps its ``initializer_ordinal``; facts nested below it are published without one."""
+    root = dict(nodes[position])
+    stack = [root]
+    while stack:
+        fact = stack.pop()
+        nested = []
+        for key in ('fields', 'designators'):
+            if key in fact:
+                fact[key] = [dict(nodes[child]) for child in fact[key]]
+                nested.extend(fact[key])
+        if fact.get('value') is not None:
+            fact['value'] = dict(nodes[fact['value']])
+            nested.append(fact['value'])
+        for child in nested:
+            child.pop('initializer_ordinal', None)
+        stack.extend(nested)
+    return root
+
+
+def _publish_initializers(inventory):
+    """Replace initializer table references in ``inventory`` with nested facts, dropping the tables.
+
+    Definitions and argument-table rows carry the ``initializer_nodes`` table their initializer facts
+    refer into; the published inventory holds the nested facts instead, so it needs no table."""
+    # Position maps per shared table; each entry holds its table so the id stays unique during the walk.
+    positions = {}
+    stack = [inventory]
+    while stack:
+        value = stack.pop()
+        if isinstance(value, list):
+            stack.extend(item for item in value if isinstance(item, (dict, list)))
+            continue
+        nodes = value.pop('initializer_nodes', None)
+        if nodes is not None:
+            position = positions.get(id(nodes))
+            if position is None:
+                position = positions[id(nodes)] = (nodes, {id(node): index for index, node in enumerate(nodes)})
+            position = position[1]
+            if value.get('initializer_rows'):
+                value['initializer_rows'] = [_nested_initializer(nodes, position[id(row)]) for row in value['initializer_rows']]
+            if 'raw_type_members' in value:
+                value['raw_type_members'] = {
+                    name: [_nested_initializer(nodes, position[id(member)]) if member is not None else None for member in members]
+                    for name, members in value['raw_type_members'].items()}
+            if 'table_id' in value and isinstance(value.get('initializer'), dict):
+                value['initializer'] = _nested_initializer(nodes, position[id(value['initializer'])])
+                value['fields'] = {name: _nested_initializer(nodes, position[id(field)]) for name, field in value['fields'].items()}
+            continue
+        stack.extend(item for item in value.values() if isinstance(item, (dict, list)))
 
 
 def _public_translation_unit(facts):
@@ -1587,7 +1658,6 @@ _EXTRACTION = None
 
 def _extract_worker(index):
     gc.disable()
-    gc.collect()
     records, compdb, root = _EXTRACTION
     try:
         return True, _extract(records[index], compdb, root), None
@@ -1631,31 +1701,23 @@ def _extract_parallel(records, compdb, root, jobs, concurrent=None):
 
 
 def _extract_serial(records, compdb, root):
-    """Extract translation units in record order, reclaiming each record's cyclic garbage once.
-
-    Surviving results are frozen so later collections only scan the newest record's objects."""
-    results = []
-    for record in records:
-        results.append(_extract(record, compdb, root))
-        gc.collect()
-        gc.freeze()
-    return results
+    """Extract translation units in record order."""
+    return [_extract(record, compdb, root) for record in records]
 
 
 def _gc_paused(function):
     """Run ``function`` without automatic cyclic collection.
 
     Extraction allocates millions of long-lived containers, which automatic collection rescans
-    repeatedly; the extraction paths collect explicitly per record instead."""
+    repeatedly. Per-record extraction creates no reference cycles, so its garbage is freed by
+    reference counting without collection."""
     @functools.wraps(function)
     def paused(*args, **kwargs):
-        enabled, frozen = gc.isenabled(), gc.get_freeze_count()
+        enabled = gc.isenabled()
         gc.disable()
         try:
             return function(*args, **kwargs)
         finally:
-            if not frozen and gc.get_freeze_count():
-                gc.unfreeze()
             if enabled:
                 gc.enable()
     return paused
@@ -1744,11 +1806,14 @@ def collect_inventory(*, database: Path, root: Path, build_dir: Path, port: str,
     def runtime_name(name):
         evidence = qstrs.get(name, {})
         return evidence.get('value', name) if evidence.get('status') == 'resolved' else name
-    def normalize_names(value):
-        if isinstance(value, list):
-            for item in value:
-                normalize_names(item)
-        elif isinstance(value, dict):
+    def normalize_names(root):
+        """Decode qstr identifiers in every dict reachable from ``root``, visiting dicts in preorder."""
+        stack = [root]
+        while stack:
+            value = stack.pop()
+            if isinstance(value, list):
+                stack.extend(item for item in reversed(value) if isinstance(item, (list, dict)))
+                continue
             for field in ('name', 'export', 'alias_of', 'qstr', 'exported_argument'):
                 if isinstance(value.get(field), str):
                     encoded = value[field]
@@ -1759,9 +1824,8 @@ def collect_inventory(*, database: Path, root: Path, build_dir: Path, port: str,
             for field in ('bases', 'declared_bases'):
                 if isinstance(value.get(field), list):
                     value[field] = [runtime_name(name) for name in value[field]]
-            for field, item in list(value.items()):
-                if field != 'qstr_identifiers':
-                    normalize_names(item)
+            stack.extend(item for field, item in reversed(list(value.items()))
+                         if field != 'qstr_identifiers' and isinstance(item, (list, dict)))
     normalize_names(modules)
     normalize_names(types)
     modules.sort(key=lambda module: (module['name'], module['identity']))
@@ -1772,7 +1836,7 @@ def collect_inventory(*, database: Path, root: Path, build_dir: Path, port: str,
     for facts in inputs:
         facts['input']['input_snapshots'] = compiler.public_inputs(facts['input']['input_snapshots'])
     ownership['input_snapshots'] = compiler.public_inputs(ownership['input_snapshots'])
-    return {'schema_version': 1,
+    inventory = {'schema_version': 1,
             'build': {'port': port, 'target': target, 'variant': variant, 'root': str(root), 'build_dir': str(build_dir),
                       'source_revision': source_revision,
                       'compiler_database': {'path': str(database), 'sha256': database_snapshot['sha256']},
@@ -1804,3 +1868,5 @@ def collect_inventory(*, database: Path, root: Path, build_dir: Path, port: str,
                            'packages': {package: importlib.metadata.version(package) for package in ('tree-sitter', 'tree-sitter-c')},
                            'ownership': ownership, 'binding_ownership_resolutions': raw['ownership_resolutions'],
                            'raw_bindings': raw['bindings'], 'selected_import_rows': raw['import_rows']}}
+    _publish_initializers(inventory)
+    return inventory

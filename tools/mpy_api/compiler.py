@@ -131,31 +131,40 @@ def authority(root):
     return module
 
 
-def expand_arguments(argv, directory, stack=(), *, snapshots=None):
+def expand_arguments(argv, directory, *, snapshots=None):
     """Expand compiler/linker response operands, preserving their content identity."""
     if snapshots is None:
         snapshots = {}
-    expanded, inputs = [], {}
-    for operand in argv:
-        if operand.startswith('@'):
-            path = (Path(directory) / operand[1:]).absolute()
-            resolved = path.resolve(strict=True)
-            if resolved in stack:
-                raise ValueError(f'recursive compiler/linker response file: {path}')
-            content, snapshot = read_input(path)
-            nested, identities = expand_arguments(shlex.split(content.decode()), directory, (*stack, resolved), snapshots=snapshots)
-            expanded.extend(nested)
-            inputs.update(identities)
-            if snapshots is not None:
-                merged = reconcile_inputs([('previous response operands', snapshots), ('response operand ' + str(path), {str(path): snapshot})])
-                snapshots.clear()
-                snapshots.update(merged)
-            if str(path) in inputs and inputs[str(path)] != snapshot['sha256']:
-                raise RuntimeError(f'conflicting response file content: {path}')
-            inputs[str(path)] = snapshot['sha256']
-        else:
+    # One frame per operand list being expanded: its remaining operands, its expanded operands,
+    # its response identities, the resolved response files enclosing it, and the response
+    # operand ``(path, snapshot)`` it expands within the frame below (None for ``argv``).
+    frames = [(iter(argv), [], {}, (), None)]
+    while True:
+        operands, expanded, inputs, stack, response = frames[-1]
+        for operand in operands:
+            if operand.startswith('@'):
+                path = (Path(directory) / operand[1:]).absolute()
+                resolved = path.resolve(strict=True)
+                if resolved in stack:
+                    raise ValueError(f'recursive compiler/linker response file: {path}')
+                content, snapshot = read_input(path)
+                frames.append((iter(shlex.split(content.decode())), [], {}, (*stack, resolved), (path, snapshot)))
+                break
             expanded.append(operand)
-    return expanded, inputs
+        else:
+            frames.pop()
+            if response is None:
+                return expanded, inputs
+            path, snapshot = response
+            _, outer_expanded, outer_inputs, _, _ = frames[-1]
+            outer_expanded.extend(expanded)
+            outer_inputs.update(inputs)
+            merged = reconcile_inputs([('previous response operands', snapshots), ('response operand ' + str(path), {str(path): snapshot})])
+            snapshots.clear()
+            snapshots.update(merged)
+            if str(path) in outer_inputs and outer_inputs[str(path)] != snapshot['sha256']:
+                raise RuntimeError(f'conflicting response file content: {path}')
+            outer_inputs[str(path)] = snapshot['sha256']
 
 
 def clean_flags(record):

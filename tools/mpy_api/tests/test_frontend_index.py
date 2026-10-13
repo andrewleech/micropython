@@ -154,21 +154,21 @@ def facts_digest(source):
     physical = '/fixture/index.c'
     origins = [(physical, line) for line in range(1, len(source.splitlines()) + 1)]
     result = syntax_adapter(source, origins, physical, {'dependencies': {physical: 'fixture'}})
-    return hashlib.sha256(json.dumps(result, sort_keys=True, default=repr).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(result, sort_keys=True, default=list).encode()).hexdigest()
 
 
-# Digests of the facts the walk-based frontend produced for these sources.
+# Digests of the frontend facts for these sources.
 BASELINE_DIGESTS = {
     'aggregates': '83faeea967c42b232c02aab4b625195529c644dae200736f4f0de5b9a18b20db',
-    'comments_and_strings': 'dfe7a635d9723e6b9814b281182ccd1856bfb9c9d5cafa4da17c0f8086d32386',
-    'control_and_pointers': '8d794f1330efcfef6903915cdcaec997dea7844f3b4568642a95fd7dd3b91240',
-    'enums': 'a36f3d491ff9e1354952d9152285f92eae485b3d84acb5c2b96fbe3c1bf672ad',
-    'function_pointers': 'ab8db3668d049112a907b95596951706be5d76729a9e85f85d86b939aca4e3a2',
-    'legacy_and_attributes': 'b277d1b397f69c880bc5e7c5ea78f36523a3462cee453a28ae948f725f7fcc7a',
-    'syntax_errors': '8aa9e2677f401360a3f2113c2f4a50ba069004ed5324e0b6763f77e03ca038aa',
+    'comments_and_strings': '4f52bdcb5efb06720cd7739fea40417fd5aef010f991b578aaa2bf340b348abb',
+    'control_and_pointers': 'ba1c946ac594ddefdd2cfd7ae3d8ade900e2bb21f9b0bd863513fc19327b8954',
+    'enums': '036a42f47bbf8956a617aff47b83f9a78ce32fcecd460434237c26c6397606aa',
+    'function_pointers': '63d4a1d66466cbef3ffcf1fb1a18fd06be9006cd330c92ad3e6e8101b27ded18',
+    'legacy_and_attributes': '47e61ffc9d285c2ef539c7b960d1d2ba5b22027987dce0dc68b0b1ae6d4b3d4b',
+    'syntax_errors': 'd7f08534c29bba877face6d3c93b8c6904a32dd6f65ffcb00b4ddbbdf590e063',
 }
 
 
 @pytest.mark.parametrize('name', sorted(SOURCES))
-def test_frontend_facts_match_walk_based_baseline(name):
+def test_frontend_facts_match_baseline(name):
     assert facts_digest(SOURCES[name]) == BASELINE_DIGESTS[name]

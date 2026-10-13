@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import keyword
 import unicodedata
 from typing import Any
 
-from .vocabulary import ATOM_KINDS, canonical_contract, canonical_default
+from .vocabulary import ATOM_KINDS, canonical_contract, canonical_default, canonical_json
 
 
 _RESOLVED = {"resolved", "bounded-resolved", "source-resolved", "selected-source"}
@@ -32,12 +31,11 @@ def _status(value: Any) -> str:
     return value.get("status", "unresolved") if isinstance(value, dict) else str(value)
 
 
-def _stable(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+_END = object()
 
 
 def _comment(value: Any) -> str:
-    return _stable(value).replace("\n", " ").replace("\r", " ")
+    return canonical_json(value).replace("\n", " ").replace("\r", " ")
 
 
 def _gaps(record: dict) -> list[str]:
@@ -68,15 +66,14 @@ class _Renderer:
         self.inventory = inventory
         self.module = module
         self.typevars: dict[str, str] = {}
-        self.types = {_stable(item.get("identity")): item for item in inventory.get("types", [])}
+        self.types = {canonical_json(item.get("identity")): item for item in inventory.get("types", [])}
         self.names: set[str] = set()
 
-        def visit(symbols: list[dict]) -> None:
-            for symbol in symbols:
-                self.names.add(str(symbol.get("name")))
-                visit(symbol.get("members", []))
-
-        visit(module.get("exports", []))
+        pending = list(reversed(list(module.get("exports", []))))
+        while pending:
+            symbol = pending.pop()
+            self.names.add(str(symbol.get("name")))
+            pending.extend(reversed(list(symbol.get("members", []))))
         self.any_name = self.support_name("_mpy_Any")
         self.typevar_name = self.support_name("_mpy_TypeVar")
 
@@ -93,31 +90,56 @@ class _Renderer:
         declaration["reasons"] = sorted(set(declaration.get("reasons", []) + [reason]))
 
     def contract(self, contract: Any, relations: dict[str, str] | None = None) -> str:
+        # Union alternatives render depth first through an explicit stack of
+        # (pending alternatives, rendered parts) frames.
+        text, alternatives = self._contract_step(contract, relations)
+        if alternatives is None:
+            return text
+        stack = [(alternatives, [])]
+        while True:
+            pending, parts = stack[-1]
+            child = next(pending, _END)
+            if child is not _END:
+                text, alternatives = self._contract_step(child, relations)
+                if alternatives is None:
+                    parts.append(text)
+                else:
+                    stack.append((alternatives, []))
+                continue
+            stack.pop()
+            parts = sorted(set(parts))
+            text = " | ".join(parts) if parts and self.any_name not in parts else self.any_name
+            if not stack:
+                return text
+            stack[-1][1].append(text)
+
+    def _contract_step(self, contract: Any, relations: dict[str, str] | None) -> tuple[str | None, Any]:
+        """Return (annotation, None), or (None, an iterator over the alternatives)
+        for a union whose alternatives still need rendering."""
         if not isinstance(contract, dict):
-            return self.any_name
+            return self.any_name, None
         if "resolution" in contract and _status(contract["resolution"]) not in _RESOLVED:
-            return self.any_name
+            return self.any_name, None
         contract = canonical_contract(contract)
         kind = contract.get("kind")
         if kind in ("argument", "argument-table"):
             name = contract.get("exported_argument")
-            return (relations or {}).get(name, self.any_name)
+            return (relations or {}).get(name, self.any_name), None
         if kind in ("integer-conversion-capability", "readable-buffer-capability", "writable-buffer-capability", "tuple-or-list/exact-length"):
             self.representation_gap(self.module, f"{kind} is source-qualified; target native acceptance has no qualified declaration representation")
-            return self.any_name
+            return self.any_name, None
         if kind == "tuple" and "elements" in contract:
             self.representation_gap(self.module, "tuple element contracts are retained in inventory; target builtin type parameters are unqualified")
         if kind == "union":
-            parts = sorted(set(self.contract(item, relations) for item in contract.get("alternatives", [])))
-            return " | ".join(parts) if parts and self.any_name not in parts else self.any_name
+            return None, iter(contract.get("alternatives", []))
         if kind not in ATOM_KINDS:
-            return self.any_name
+            return self.any_name, None
         atom = kind
         nominal = atom
         if nominal in self.names and self.module.get("name") != "builtins":
             self.representation_gap(self.module, f"annotation type {nominal} is shadowed by a runtime declaration")
-            return self.any_name
-        return atom
+            return self.any_name, None
+        return atom, None
 
     def default(self, parameter: dict) -> str:
         contract = parameter.get("default_contract", {})
@@ -144,7 +166,9 @@ class _Renderer:
         names = set(required)
         found: set[str] = set()
 
-        def visit(contract: dict) -> None:
+        pending = list(reversed(list(semantics.get("returns", []))))
+        while pending:
+            contract = pending.pop()
             if contract.get("kind") == "argument" or contract.get("kind") == "argument-table" and contract.get("storage_field") == "u_obj":
                 name = contract.get("exported_argument")
                 parameter = required.get(name)
@@ -156,11 +180,7 @@ class _Renderer:
             if name := contract.get("exported_argument"):
                 if name not in names and any(p["name"] == name and p.get("required") is not True for p in parameters):
                     self.representation_gap(symbol, "optional passthrough parameter/default relation is not expressible by an unconstrained TypeVar")
-            for child in contract.get("alternatives", []):
-                visit(child)
-
-        for contract in semantics.get("returns", []):
-            visit(contract)
+            pending.extend(reversed(list(contract.get("alternatives", []))))
         result = {}
         for parameter in parameters:
             if parameter["name"] not in found and _status(parameter.get("type_resolution")) in _RESOLVED:
@@ -168,7 +188,7 @@ class _Renderer:
                 if annotation != self.any_name:
                     result[parameter["name"]] = annotation
         for name in sorted(found):
-            key = _stable([self.module.get("identity"), symbol.get("identity"), name])
+            key = canonical_json([self.module.get("identity"), symbol.get("identity"), name])
             variable = self.support_name("_T_" + hashlib.sha256(key.encode()).hexdigest()[:16])
             self.typevars[variable] = name
             result[name] = variable
@@ -308,22 +328,27 @@ class _Renderer:
         parts = sorted(set(self.contract(item, relations) for item in returns))
         return " | ".join(parts) if parts and self.any_name not in parts else self.any_name
 
-    def symbol(self, symbol: dict, indent: str = "", *, in_class: bool = False) -> list[str]:
+    def symbol(self, symbol: dict, indent: str = "", *, in_class: bool = False) -> tuple[list[str], dict | None]:
+        """Return the declaration lines and, for a class, its merged definition.
+
+        A class's lines end at its header; ``symbols`` renders the definition's
+        members and completes the class with ``class_lines``.
+        """
         name = symbol.get("name")
         if not _identifier(name):
             self.representation_gap(symbol, "runtime export name is not a Python declaration identifier")
-            return [f"{indent}# Unrenderable runtime name: {_comment(symbol)}"]
+            return [f"{indent}# Unrenderable runtime name: {_comment(symbol)}"], None
         lines = [f"{indent}# Resolution gap: {gap}" for gap in _gaps(symbol)]
         kind = symbol.get("kind", "unknown")
         if in_class and symbol.get("attribute_scope") == "class":
             self.representation_gap(symbol, "metaclass-only attribute lookup cannot be expressed as an ordinary instance field")
-            return [f"{indent}# Class-only attribute declaration gap: {_comment(symbol)}"]
+            return [f"{indent}# Class-only attribute declaration gap: {_comment(symbol)}"], None
         if not _available(symbol):
             self.representation_gap(symbol, "runtime name availability is unqualified; no named declaration is emitted")
-            return lines + [f"{indent}# Unqualified availability candidate: {_comment(symbol)}"]
+            return lines + [f"{indent}# Unqualified availability candidate: {_comment(symbol)}"], None
         alias = symbol.get("alias_binding") or {}
         if _status(alias) in _RESOLVED and _identifier(alias.get("target_name")):
-            return lines + [f"{indent}{name} = {alias['target_name']}"]
+            return lines + [f"{indent}{name} = {alias['target_name']}"], None
         binding = symbol.get("import_binding")
         if binding and not in_class:
             imported = binding.get("module", "")
@@ -331,10 +356,10 @@ class _Renderer:
             level = binding.get("level", 0)
             if (not imported or _qualified(imported)) and type(level) is int and level >= 0:
                 if imported_name and _identifier(imported_name):
-                    return lines + [f"from {'.' * level}{imported} import {imported_name} as {name}"]
+                    return lines + [f"from {'.' * level}{imported} import {imported_name} as {name}"], None
                 if imported and not level:
-                    return lines + [f"import {imported} as {name}"]
-            return lines + [f"{indent}# Import binding is unresolved: {_comment(binding)}", f"{indent}{name}: {self.any_name}"]
+                    return lines + [f"import {imported} as {name}"], None
+            return lines + [f"{indent}# Import binding is unresolved: {_comment(binding)}", f"{indent}{name}: {self.any_name}"], None
         if kind == "function" and (symbol.get("callshape") or {}).get("callable") is not False:
             signature, gaps, relations = self.signature(symbol, in_class)
             lines.extend(f"{indent}# Resolution gap: {gap}" for gap in gaps)
@@ -343,7 +368,7 @@ class _Renderer:
                 lines.append(f"{indent}@{descriptor}")
             lines.append(f"{indent}def {name}({signature}) -> {self.result(symbol, relations)}: ...")
         elif kind == "class":
-            shared = self.types.get(_stable(symbol.get("type_identity")), {})
+            shared = self.types.get(canonical_json(symbol.get("type_identity")), {})
             definition = {**shared, **symbol}
             represented_constructor = any(
                 member.get("name") in ("__new__", "__init__") and member.get("kind") == "function" and
@@ -358,39 +383,70 @@ class _Renderer:
             if _status(definition.get("resolution", {}).get("bases", "resolved")) not in _RESOLVED:
                 bases = []
             lines.append(f"{indent}class {name}{'(' + ', '.join(bases) + ')' if bases else ''}:")
-            members = self.symbols(definition.get("members", []), indent + "    ", in_class=True)
-            members += _policy_lines(definition.get("attribute_policy", {}), indent + "    ",
-                                     module=False, names={m.get("name") for m in definition.get("members", [])
-                                                          if _available(m) and m.get("attribute_scope") != "class"}, any_name=self.any_name)
-            if definition.get("slots"):
-                members.append(f"{indent}    # Protocol slot evidence: {_comment(definition['slots'])}")
-            lines.extend(members + [indent + "    ..."])
+            return lines, definition
         else:
             lines.append(f"{indent}{name}: {self.contract(symbol.get('value_contract'))}")
+        return lines, None
+
+    def class_lines(self, lines: list[str], definition: dict, indent: str, members: list[str]) -> list[str]:
+        """Complete a class declaration from ``symbol`` with its rendered member lines."""
+        members += _policy_lines(definition.get("attribute_policy", {}), indent + "    ",
+                                 module=False, names={m.get("name") for m in definition.get("members", [])
+                                                      if _available(m) and m.get("attribute_scope") != "class"}, any_name=self.any_name)
+        if definition.get("slots"):
+            members.append(f"{indent}    # Protocol slot evidence: {_comment(definition['slots'])}")
+        lines.extend(members + [indent + "    ..."])
         return lines
 
     def symbols(self, symbols: list[dict], indent: str = "", *, in_class: bool = False) -> list[str]:
+        # Class members render depth first through an explicit stack of member
+        # list frames; a frame with a pending class completes it once the frame
+        # for that class's members is exhausted.
+        frames = [self._symbols_frame(symbols, indent, in_class)]
+        while True:
+            frame = frames[-1]
+            entry = next(frame["groups"], None)
+            if entry is None:
+                frames.pop()
+                if not frames:
+                    return frame["lines"]
+                parent = frames[-1]
+                lines, definition = parent["pending"]
+                parent["pending"] = None
+                parent["lines"].extend(self.class_lines(lines, definition, parent["indent"], frame["lines"]))
+                continue
+            lines, definition = self._group_lines(frame, *entry)
+            if definition is None:
+                frame["lines"].extend(lines)
+            else:
+                frame["pending"] = (lines, definition)
+                frames.append(self._symbols_frame(definition.get("members", []), frame["indent"] + "    ", True))
+
+    def _symbols_frame(self, symbols: list[dict], indent: str, in_class: bool) -> dict:
         grouped: dict[str, list[dict]] = {}
         for symbol in symbols:
             grouped.setdefault(str(symbol.get("name")), []).append(symbol)
-        lines = []
-        for name, group in sorted(grouped.items()):
-            unique = {_stable(symbol): symbol for symbol in group}
-            if len(unique) > 1:
-                for candidate in group:
-                    self.representation_gap(candidate, "conflicting export definitions cannot be expressed as one qualified declaration")
-                lines.append(f"{indent}# Conflicting export definitions: {_comment(group)}")
-                if _identifier(name) and any(_available(candidate) and
-                                             (not in_class or candidate.get("attribute_scope") != "class") for candidate in group):
-                    lines.append(f"{indent}{name}: {self.any_name}")
-            else:
-                symbol = next(iter(unique.values()))
-                alias = symbol.get("alias_of")
-                if (_identifier(alias) and alias != name and alias in grouped and
-                        "alias_target_identity" not in symbol and any(_available(target) for target in grouped[alias])):
-                    symbol = {**symbol, "alias_binding": {"target_name": alias, "status": "resolved"}}
-                lines.extend(self.symbol(symbol, indent, in_class=in_class))
-        return lines
+        return {"grouped": grouped, "groups": iter(sorted(grouped.items())), "indent": indent,
+                "in_class": in_class, "lines": [], "pending": None}
+
+    def _group_lines(self, frame: dict, name: str, group: list[dict]) -> tuple[list[str], dict | None]:
+        """Return the lines for one name of a member list and, for a class, its definition."""
+        indent, in_class, grouped = frame["indent"], frame["in_class"], frame["grouped"]
+        unique = {canonical_json(symbol): symbol for symbol in group}
+        if len(unique) > 1:
+            for candidate in group:
+                self.representation_gap(candidate, "conflicting export definitions cannot be expressed as one qualified declaration")
+            lines = [f"{indent}# Conflicting export definitions: {_comment(group)}"]
+            if _identifier(name) and any(_available(candidate) and
+                                         (not in_class or candidate.get("attribute_scope") != "class") for candidate in group):
+                lines.append(f"{indent}{name}: {self.any_name}")
+            return lines, None
+        symbol = next(iter(unique.values()))
+        alias = symbol.get("alias_of")
+        if (_identifier(alias) and alias != name and alias in grouped and
+                "alias_target_identity" not in symbol and any(_available(target) for target in grouped[alias])):
+            symbol = {**symbol, "alias_binding": {"target_name": alias, "status": "resolved"}}
+        return self.symbol(symbol, indent, in_class=in_class)
 
     def render(self) -> str:
         body = self.symbols(self.module.get("exports", []))
@@ -417,7 +473,7 @@ def render_declarations(inventory: dict) -> dict[str, str]:
     if inventory.get("schema_version") != 1:
         raise ValueError("declaration rendering requires inventory schema_version=1")
     result: dict[str, str] = {}
-    for module in sorted(inventory.get("modules", []), key=lambda m: (m.get("name", ""), _stable(m.get("identity")))):
+    for module in sorted(inventory.get("modules", []), key=lambda m: (m.get("name", ""), canonical_json(m.get("identity")))):
         name = module.get("name")
         if not _qualified(name):
             raise ValueError(f"module has no safe Python import path: {name!r}")
