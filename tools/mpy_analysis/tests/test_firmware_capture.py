@@ -289,3 +289,25 @@ def test_generator_outputs_are_the_build_files_it_created_or_rewrote(tmp_path):
     assert {Path(item["path"]).name: item["sha256"] for item in event["inputs"]}["rewritten.h"] == hashlib.sha256(
         b"old\n"
     ).hexdigest()
+
+
+def test_capture_wrappers_named_by_a_generator_are_not_inputs(tmp_path, monkeypatch):
+    wrappers = tmp_path / "wrappers"
+    wrappers.mkdir()
+    compiler_wrapper = wrappers / "cc"
+    compiler_wrapper.write_text("#!/bin/sh\n")
+    script = tmp_path / "gen.py"
+    script.write_text("print('generator')\n")
+    build = tmp_path / "build"
+    build.mkdir()
+    tool = fake_tool(tmp_path / "python", f"open({str(build / 'out.h')!r}, 'w').write('x')")
+    monkeypatch.setenv("MPY_CAPTURE_WRAPPER_DIR", str(wrappers))
+    journal = tmp_path / "actions.jsonl"
+
+    assert run_tool(
+        "python", tool, [str(script), str(compiler_wrapper)], journal=journal, image_id="application",
+        build_id="a" * 64, build_dir=build,
+    ) == 0
+
+    [event] = read_events(journal)
+    assert [Path(item["path"]).name for item in event["inputs"]] == ["gen.py"]

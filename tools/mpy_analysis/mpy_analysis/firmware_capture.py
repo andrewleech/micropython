@@ -25,6 +25,7 @@ _PROBES = {"-dumpmachine", "-print-file-name=libgcc.a", "-print-prog-name=ld"}
 _OUTPUT_OPTIONS = {"-o", "-MF", "-MT", "-MQ", "-Map"}
 _PATH_OPTIONS = {"-include", "-imacros", "-T", "-L", "-I", "-isystem", "-iquote"}
 _SOURCE_SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".s", ".sx")
+_WRAPPER_DIR = "MPY_CAPTURE_WRAPPER_DIR"
 
 
 def _sha256(path: Path) -> str:
@@ -304,6 +305,15 @@ def _tree_state(root: Path | None) -> dict[str, tuple[int, int, int]]:
     return state
 
 
+def _outside_wrappers(items: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Drop the capture's own tool wrappers, which a generator may name on its command line."""
+    directory = os.environ.get(_WRAPPER_DIR)
+    if not directory:
+        return items
+    root = Path(directory).resolve()
+    return [item for item in items if not Path(item["path"]).is_relative_to(root)]
+
+
 def run_tool(
     role: str,
     executable: Path,
@@ -321,13 +331,13 @@ def run_tool(
     executable_record = _file_record(executable, "tool")
     if executable_record is None:
         raise RuntimeError(f"capture tool executable is not a readable file: {executable}")
-    inputs = _action_inputs(role, kind, argv, cwd)
+    inputs = _outside_wrappers(_action_inputs(role, kind, argv, cwd))
     before = {item["path"]: item["sha256"] for item in inputs}
     watched = build_dir if role == "python" and kind == "generate" else None
     tree_before = _tree_state(watched)
     started = time.time_ns()
     result = subprocess.run([str(executable), *argv])
-    after_inputs = _action_inputs(role, kind, argv, cwd)
+    after_inputs = _outside_wrappers(_action_inputs(role, kind, argv, cwd))
     after = {item["path"]: item["sha256"] for item in after_inputs}
     outputs = _action_outputs(role, kind, argv, cwd) if result.returncode == 0 else []
     written: set[str] = set()
@@ -474,6 +484,7 @@ def capture_make(
             _make_tool_wrapper(wrapper, role, Path(executable), journal, image_id, build_id, build)
             make_vars.append(f"{name}={wrapper}")
         environment = os.environ.copy()
+        environment[_WRAPPER_DIR] = str(wrappers)
         package_root = str(Path(__file__).resolve().parents[1])
         environment["PYTHONPATH"] = package_root + os.pathsep + environment.get("PYTHONPATH", "")
         result = subprocess.run(
