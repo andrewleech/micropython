@@ -121,7 +121,7 @@ def test_input_mutated_during_action_is_explicit(tmp_path):
     source.write_text("before")
     tool = fake_tool(
         tmp_path / "cc",
-        "import pathlib, sys\nsource = pathlib.Path(sys.argv[-1])\nsource.write_text('after')\npathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_bytes(b'object')",
+        "import pathlib, sys\nif sys.argv[1:] == ['--version']:\n    raise SystemExit(0)\nsource = pathlib.Path(sys.argv[-1])\nsource.write_text('after')\npathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_bytes(b'object')",
     )
     journal = tmp_path / "actions.jsonl"
 
