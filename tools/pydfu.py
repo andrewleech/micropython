@@ -17,9 +17,10 @@ import inspect
 import re
 import struct
 import sys
+import zlib
+
 import usb.core
 import usb.util
-import zlib
 
 # USB request __TIMEOUT
 __TIMEOUT = 4000
@@ -245,7 +246,7 @@ def get_status():
 def check_status(stage, expected):
     status = get_status()
     if status != expected:
-        raise SystemExit("DFU: %s failed (%s)" % (stage, __DFU_STATUS_STR.get(status, status)))
+        raise SystemExit(f"DFU: {stage} failed ({__DFU_STATUS_STR.get(status, status)})")
 
 
 def mass_erase():
@@ -270,7 +271,7 @@ def mass_erase():
 def page_erase(addr):
     """Erases a single page."""
     if __verbose:
-        print("Erasing page: 0x%x..." % (addr))
+        print(f"Erasing page: 0x{addr:x}...")
 
     if __dfuse:
         # DfuSe: send DNLOAD with first byte=0x41 and page address
@@ -314,8 +315,8 @@ def write_memory(addr, buf, progress=None, progress_addr=0, progress_size=0):
     while xfer_bytes < xfer_total:
         if __verbose and xfer_count % 512 == 0:
             print(
-                "Addr 0x%x %dKBs/%dKBs..."
-                % (xfer_base + xfer_bytes, xfer_bytes // 1024, xfer_total // 1024)
+                f"Addr 0x{xfer_base + xfer_bytes:x} "
+                f"{xfer_bytes // 1024}KBs/{xfer_total // 1024}KBs..."
             )
         if progress and xfer_count % 2 == 0:
             progress(progress_addr, xfer_base + xfer_bytes - progress_addr, progress_size)
@@ -456,7 +457,7 @@ def read_dfu_file(filename):
     If an error occurs while parsing the file, then None is returned.
     """
 
-    print("File: {}".format(filename))
+    print(f"File: {filename}")
     with open(filename, "rb") as fin:
         data = fin.read()
     crc = compute_crc(data[:-4])
@@ -472,7 +473,8 @@ def read_dfu_file(filename):
     #   B   uint8_t     targets     Number of targets
     dfu_prefix, data = consume("<5sBIB", data, "signature version size targets")
     print(
-        "    %(signature)s v%(version)d, image size: %(size)d, targets: %(targets)d" % dfu_prefix
+        f"    {dfu_prefix['signature']} v{dfu_prefix['version']}, "
+        f"image size: {dfu_prefix['size']}, targets: {dfu_prefix['targets']}"
     )
     for target_idx in range(dfu_prefix["targets"]):
         # Decode the Image Prefix
@@ -494,8 +496,10 @@ def read_dfu_file(filename):
         else:
             img_prefix["name"] = ""
         print(
-            "    %(signature)s %(num)d, alt setting: %(altsetting)s, "
-            'name: "%(name)s", size: %(size)d, elements: %(elements)d' % img_prefix
+            f"    {img_prefix['signature']} {img_prefix['num']}, "
+            f"alt setting: {img_prefix['altsetting']}, "
+            f'name: "{img_prefix["name"]}", size: {img_prefix["size"]}, '
+            f"elements: {img_prefix['elements']}"
         )
 
         target_size = img_prefix["size"]
@@ -510,7 +514,10 @@ def read_dfu_file(filename):
             #   I   uint32_t    element     Size
             elem_prefix, target_data = consume("<2I", target_data, "addr size")
             elem_prefix["num"] = elem_idx
-            print("      %(num)d, address: 0x%(addr)08x, size: %(size)d" % elem_prefix)
+            print(
+                f"      {elem_prefix['num']}, address: 0x{elem_prefix['addr']:08x}, "
+                f"size: {elem_prefix['size']}"
+            )
             elem_size = elem_prefix["size"]
             elem_data = target_data[:elem_size]
             target_data = target_data[elem_size:]
@@ -518,7 +525,7 @@ def read_dfu_file(filename):
             elements.append(elem_prefix)
 
         if len(target_data):
-            print("target %d PARSE ERROR" % target_idx)
+            print(f"target {target_idx} PARSE ERROR")
 
     # Decode DFU Suffix
     #
@@ -535,11 +542,12 @@ def read_dfu_file(filename):
         struct.unpack("<4H3sBI", data[:16]), "device product vendor dfu ufd len crc"
     )
     print(
-        "    usb: %(vendor)04x:%(product)04x, device: 0x%(device)04x, "
-        "dfu: 0x%(dfu)04x, %(ufd)s, %(len)d, 0x%(crc)08x" % dfu_suffix
+        f"    usb: {dfu_suffix['vendor']:04x}:{dfu_suffix['product']:04x}, "
+        f"device: 0x{dfu_suffix['device']:04x}, dfu: 0x{dfu_suffix['dfu']:04x}, "
+        f"{dfu_suffix['ufd']}, {dfu_suffix['len']}, 0x{dfu_suffix['crc']:08x}"
     )
     if crc != dfu_suffix["crc"]:
-        print("CRC ERROR: computed crc32 is 0x%08x" % crc)
+        print(f"CRC ERROR: computed crc32 is 0x{crc:08x}")
         return
     data = data[16:]
     if data:
@@ -549,7 +557,7 @@ def read_dfu_file(filename):
     return elements
 
 
-class FilterDFU(object):
+class FilterDFU:
     """Class for filtering USB devices to identify devices which are in DFU
     mode.
     """
@@ -593,9 +601,7 @@ def list_dfu_devices(*args, **kwargs):
         raise SystemExit("No DFU capable devices found")
     for device in devices:
         print(
-            "Bus {} Device {:03d}: ID {:04x}:{:04x}".format(
-                device.bus, device.address, device.idVendor, device.idProduct
-            )
+            f"Bus {device.bus} Device {device.address:03d}: ID {device.idVendor:04x}:{device.idProduct:04x}"
         )
         layout = get_memory_layout(device)
         print("Memory Layout")
@@ -660,7 +666,7 @@ def cli_progress(addr, offset, size):
     except OSError:
         pass  # Ignore Windows CLI "WinError 87" on Python 3.6
     if offset == size:
-        print("")
+        print()
 
 
 def main():
