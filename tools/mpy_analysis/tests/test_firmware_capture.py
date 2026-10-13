@@ -257,3 +257,35 @@ def test_dependency_reached_through_a_symlink_keeps_the_written_path(tmp_path):
     entry = next(item for item in evidence["dependencies"] if item["path"] == str(header.resolve()))
     assert entry["written_path"] == str(alias)
     assert str(header.resolve()) in {item["path"] for item in event["inputs"]}
+
+
+def test_generator_outputs_are_the_build_files_it_created_or_rewrote(tmp_path):
+    build = tmp_path / "build"
+    (build / "genhdr").mkdir(parents=True)
+    untouched = build / "genhdr" / "untouched.h"
+    untouched.write_text("same\n")
+    rewritten = build / "genhdr" / "rewritten.h"
+    rewritten.write_text("old\n")
+    script = tmp_path / "gen.py"
+    script.write_text("print('generator')\n")
+    tool = fake_tool(
+        tmp_path / "python",
+        "import pathlib, sys\n"
+        f"root = pathlib.Path({str(build)!r})\n"
+        "(root / 'genhdr' / 'created.h').write_text('new\\n')\n"
+        "(root / 'genhdr' / 'rewritten.h').write_text('rewritten with a different size\\n')\n",
+    )
+    journal = tmp_path / "actions.jsonl"
+
+    assert run_tool(
+        "python", tool, [str(script), str(rewritten)], journal=journal, image_id="application",
+        build_id="a" * 64, build_dir=build,
+    ) == 0
+
+    [event] = read_events(journal)
+    assert event["kind"] == "generate"
+    assert {Path(item["path"]).name for item in event["outputs"]} == {"created.h", "rewritten.h"}
+    assert event["changed_inputs_during_action"] == []
+    assert {Path(item["path"]).name: item["sha256"] for item in event["inputs"]}["rewritten.h"] == hashlib.sha256(
+        b"old\n"
+    ).hexdigest()

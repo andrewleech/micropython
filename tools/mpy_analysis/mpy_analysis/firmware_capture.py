@@ -8,6 +8,7 @@ import json
 import os
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -286,7 +287,33 @@ def _append_event(path: Path, event: dict) -> None:
         os.close(descriptor)
 
 
-def run_tool(role: str, executable: Path, argv: list[str], *, journal: Path, image_id: str, build_id: str) -> int:
+def _tree_state(root: Path | None) -> dict[str, tuple[int, int, int]]:
+    """Size, modification time and inode of every regular file under root."""
+    state: dict[str, tuple[int, int, int]] = {}
+    if root is None:
+        return state
+    for directory, _, names in os.walk(root):
+        for name in names:
+            path = os.path.join(directory, name)
+            try:
+                info = os.lstat(path)
+            except OSError:
+                continue
+            if stat.S_ISREG(info.st_mode):
+                state[path] = (info.st_size, info.st_mtime_ns, info.st_ino)
+    return state
+
+
+def run_tool(
+    role: str,
+    executable: Path,
+    argv: list[str],
+    *,
+    journal: Path,
+    image_id: str,
+    build_id: str,
+    build_dir: Path | None = None,
+) -> int:
     cwd = Path.cwd().resolve()
     kind = _kind(role, argv)
     if kind is None:
@@ -296,19 +323,34 @@ def run_tool(role: str, executable: Path, argv: list[str], *, journal: Path, ima
         raise RuntimeError(f"capture tool executable is not a readable file: {executable}")
     inputs = _action_inputs(role, kind, argv, cwd)
     before = {item["path"]: item["sha256"] for item in inputs}
+    watched = build_dir if role == "python" and kind == "generate" else None
+    tree_before = _tree_state(watched)
     started = time.time_ns()
     result = subprocess.run([str(executable), *argv])
     after_inputs = _action_inputs(role, kind, argv, cwd)
     after = {item["path"]: item["sha256"] for item in after_inputs}
     outputs = _action_outputs(role, kind, argv, cwd) if result.returncode == 0 else []
+    written: set[str] = set()
+    if result.returncode == 0 and watched is not None:
+        # A generator may write its result to standard output redirected by the shell, so the
+        # files it created or rewrote under the build directory are its outputs.
+        journal_path = str(Path(journal).resolve())
+        known = {item["path"] for item in outputs}
+        for path, state in sorted(_tree_state(watched).items()):
+            if tree_before.get(path) != state and path != journal_path:
+                record = _file_record(Path(path), "output")
+                if record is not None and record["path"] not in known:
+                    outputs.append(record)
+                    written.add(record["path"])
     in_place = {item["path"] for item in outputs} if kind == "transform" else set()
+    in_place |= written & set(before)
     changed_inputs = sorted(
         path for path, digest in before.items() if after.get(path) != digest and path not in in_place
     )
     captured_paths = set(before)
     post_action_dependencies = []
     for item in after_inputs:
-        if item["path"] not in captured_paths:
+        if item["path"] not in captured_paths and item["path"] not in written:
             inputs.append(item)
             post_action_dependencies.append(item["path"])
             captured_paths.add(item["path"])
@@ -346,7 +388,9 @@ def run_tool(role: str, executable: Path, argv: list[str], *, journal: Path, ima
     return result.returncode
 
 
-def _make_tool_wrapper(path: Path, role: str, executable: Path, journal: Path, image_id: str, build_id: str) -> None:
+def _make_tool_wrapper(
+    path: Path, role: str, executable: Path, journal: Path, image_id: str, build_id: str, build_dir: Path
+) -> None:
     command = [
         sys.executable,
         "-m",
@@ -362,6 +406,8 @@ def _make_tool_wrapper(path: Path, role: str, executable: Path, journal: Path, i
         image_id,
         "--build-id",
         build_id,
+        "--build-dir",
+        str(build_dir),
         "--",
         '"$@"',
     ]
@@ -425,7 +471,7 @@ def capture_make(
         make_vars = [f"BUILD={build}"]
         for name, (role, executable) in tools.items():
             wrapper = wrappers / name.lower()
-            _make_tool_wrapper(wrapper, role, Path(executable), journal, image_id, build_id)
+            _make_tool_wrapper(wrapper, role, Path(executable), journal, image_id, build_id, build)
             make_vars.append(f"{name}={wrapper}")
         environment = os.environ.copy()
         package_root = str(Path(__file__).resolve().parents[1])
@@ -469,6 +515,7 @@ def _tool_main(argv: Sequence[str]) -> int:
     parser.add_argument("--journal", type=Path, required=True)
     parser.add_argument("--image-id", required=True)
     parser.add_argument("--build-id", required=True)
+    parser.add_argument("--build-dir", type=Path, default=None)
     parser.add_argument("args", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     arguments = args.args[1:] if args.args[:1] == ["--"] else args.args
@@ -479,6 +526,7 @@ def _tool_main(argv: Sequence[str]) -> int:
         journal=args.journal,
         image_id=args.image_id,
         build_id=args.build_id,
+        build_dir=args.build_dir,
     )
 
 

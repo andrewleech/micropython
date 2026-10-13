@@ -507,3 +507,27 @@ def test_complete_receipt_cannot_hide_a_compile_without_captured_headers(tmp_pat
     receipt["receipt_id"] = receipt_id(receipt)
     with pytest.raises(FirmwareReceiptError, match="without captured headers"):
         validate_firmware_receipt(receipt)
+
+
+GENERATED_HEADER_RULE = (
+    "$(BUILD)/gen.h: $(ROOT)/src/gen.py | $(BUILD)\n"
+    "\t$(PYTHON) $(ROOT)/src/gen.py > $@\n"
+    "$(BUILD)/main.o: $(BUILD)/gen.h\n"
+)
+
+
+def test_generator_output_written_through_a_shell_redirect_is_captured(tmp_path):
+    code, paths = _capture(
+        tmp_path,
+        GENERATED_HEADER_RULE + LINK.format(map="-Wl,-Map=$(BUILD)/firmware.map"),
+        main_c='#include "gen.h"\nint main(void) { return VALUE; }\n',
+        extra={"gen.py": "print('#define VALUE 3')\n"},
+        variables=["CFLAGS=-I" + str(tmp_path / "fixture-build")],
+    )
+    assert code == 0
+    receipt = _receipt(paths)
+    generator = next(action for action in receipt["actions"] if action["kind"] == "generate")
+    assert [Path(item["path"]).name for item in generator["outputs"]] == ["gen.h"]
+    assert generator["outputs"][0]["sha256"] == hashlib.sha256(b"#define VALUE 3\n").hexdigest()
+    assert [Path(item["path"]).name for item in generator["inputs"]] == ["gen.py"]
+    validate_firmware_receipt(receipt)
