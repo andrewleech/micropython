@@ -4,12 +4,11 @@
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ProcessPoolExecutor
+from itertools import chain
 import hashlib
 import importlib
 import importlib.metadata
 import json
-import multiprocessing
 import os
 from pathlib import Path
 import subprocess
@@ -17,64 +16,68 @@ import sys
 import tempfile
 
 
-def _dumps(value):
-    return json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False)
+# Canonical JSON is compact, key-sorted and ASCII-only (valid UTF-8 for any str, lone surrogates
+# included). With no ``indent`` the encoder runs its C implementation.
+_ENCODER = json.JSONEncoder(sort_keys=True, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
+_SPLIT_DEPTH = 4
+_BLOCK_CHARS = 1 << 20
 
 
-_LEAVES = None
-_SPLIT_DEPTH = 3
+def canonical_chunks(value, depth=0):
+    """Yield the canonical JSON text of ``value`` in pieces whose concatenation is ``_ENCODER.encode(value)``.
+
+    Non-empty containers down to ``_SPLIT_DEPTH`` are walked here, in sorted key order for
+    dicts whose keys are all ``str``; every other value is encoded whole by the C encoder, so
+    the text held at once is bounded by the largest value at that depth."""
+    if depth < _SPLIT_DEPTH and value:
+        if isinstance(value, dict) and all(isinstance(key, str) for key in value):
+            separator = "{"
+            for key in sorted(value):
+                yield separator + _ENCODER.encode(key) + ":"
+                separator = ","
+                yield from canonical_chunks(value[key], depth + 1)
+            yield "}"
+            return
+        if isinstance(value, (list, tuple)):
+            separator = "["
+            for item in value:
+                yield separator
+                separator = ","
+                yield from canonical_chunks(item, depth + 1)
+            yield "]"
+            return
+    yield _ENCODER.encode(value)
 
 
-def _split(value, level, depth, pieces):
-    """Lay out ``value`` as indented JSON text: literal strings and leaf values left to encode.
-
-    Containers down to ``_SPLIT_DEPTH`` are written key by key, leaves (value, nesting level)
-    are appended unencoded. Joining the encoded pieces equals ``_dumps(value)``."""
-    if depth < _SPLIT_DEPTH and isinstance(value, dict) and value and all(isinstance(key, str) for key in value):
-        pad = "  " * (level + 1)
-        pieces.append("{\n")
-        for position, key in enumerate(sorted(value)):
-            if position:
-                pieces.append(",\n")
-            pieces.append(pad + json.dumps(key, ensure_ascii=False) + ": ")
-            _split(value[key], level + 1, depth + 1, pieces)
-        pieces.append("\n" + "  " * level + "}")
-    elif depth < _SPLIT_DEPTH and isinstance(value, list) and value:
-        pad = "  " * (level + 1)
-        pieces.append("[\n")
-        for position, item in enumerate(value):
-            if position:
-                pieces.append(",\n")
-            pieces.append(pad)
-            _split(item, level + 1, depth + 1, pieces)
-        pieces.append("\n" + "  " * level + "]")
-    else:
-        pieces.append((value, level))
+def _blocks(pieces):
+    pending, chars = [], 0
+    for piece in pieces:
+        pending.append(piece)
+        chars += len(piece)
+        if chars >= _BLOCK_CHARS:
+            yield "".join(pending).encode("ascii")
+            pending, chars = [], 0
+    if pending:
+        yield "".join(pending).encode("ascii")
 
 
-def _encode_leaf(index):
-    value, level = _LEAVES[index]
-    text = _dumps(value)
-    if level:
-        text = text.replace("\n", "\n" + "  " * level)
-    return text.encode("utf-8")
+def write_canonical(value, stream):
+    """Write canonical JSON and a final newline to binary ``stream`` and return its ``bytes`` and ``sha256``.
+
+    The text is produced and written in blocks, so neither the document text nor its bytes
+    are held whole and the identity needs no second read."""
+    digest = hashlib.sha256()
+    size = 0
+    for block in _blocks(chain(canonical_chunks(value), ("\n",))):
+        stream.write(block)
+        digest.update(block)
+        size += len(block)
+    return {"bytes": size, "sha256": digest.hexdigest()}
 
 
-def canonical_bytes(value, jobs=1):
-    """Canonical JSON bytes; ``jobs`` > 1 encodes the large sub-values in forked worker processes."""
-    if jobs == 1:
-        return (_dumps(value) + "\n").encode("utf-8")
-    global _LEAVES
-    pieces = []
-    _split(value, 0, 0, pieces)
-    _LEAVES = [piece for piece in pieces if isinstance(piece, tuple)]
-    try:
-        with ProcessPoolExecutor(max_workers=jobs, mp_context=multiprocessing.get_context("fork")) as pool:
-            encoded = iter(pool.map(_encode_leaf, range(len(_LEAVES)), chunksize=max(1, len(_LEAVES) // (jobs * 16))))
-            parts = [next(encoded) if isinstance(piece, tuple) else piece.encode("utf-8") for piece in pieces]
-    finally:
-        _LEAVES = None
-    return b"".join(parts) + b"\n"
+def canonical_bytes(value):
+    """Canonical JSON bytes of a value small enough to hold whole."""
+    return (_ENCODER.encode(value) + "\n").encode("ascii")
 
 
 def file_identity(path):
@@ -243,15 +246,15 @@ def qualify_frozen_payload(inventory, modules):
             "status": "resolved", "sha256": source["sha256"], "source": source["source"]}
 
 
-def write_generation(output, inventory, declarations, identities, *, notices, verify, jobs=1):
+def write_generation(output, inventory, declarations, identities, *, notices, verify):
     if output.exists() or output.is_symlink():
         raise FileExistsError(f"output already exists; use a fresh generation directory: {output}")
-    artifacts = {"inventory.json": canonical_bytes(inventory, jobs)}
+    artifacts = {}
     for name, content in declarations.items():
         path = Path(name)
         if path.is_absolute() or not path.parts or any(part in ("", ".", "..") for part in path.parts):
             raise ValueError(f"unsafe declaration output path: {name}")
-        if path.suffix != ".pyi" or name in artifacts or name == "generation.json":
+        if path.suffix != ".pyi" or name in artifacts:
             raise ValueError(f"invalid or duplicate declaration output path: {name}")
         artifacts[name] = content.encode("utf-8")
     for name, data in sorted(notices.items()):
@@ -262,24 +265,26 @@ def write_generation(output, inventory, declarations, identities, *, notices, ve
                 path.as_posix() != name or name in artifacts):
             raise ValueError(f"invalid enrichment notice output path or bytes: {name}")
         artifacts[name] = data
-    records = [{"path": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
-                "role": "inventory" if name == "inventory.json" else
-                "enrichment-license-notice" if name.startswith("enrichment-notices/") else
-                "runtime-builtins" if name == "typeshed/stdlib/builtins.pyi" else "runtime-module"}
-               for name, data in sorted(artifacts.items())]
-    body = {"schema_version": 1, "producer": "mpy-api", "build": inventory["build"],
-            "inputs": identities, "artifacts": records, "coverage": inventory["coverage"],
-            "typing_compatibility": {"status": "unverified", "reason": "generation is not supported builtin-aware checker approval"}}
-    body["generation_id"] = hashlib.sha256(canonical_bytes(body)).hexdigest()
-    artifacts["generation.json"] = canonical_bytes(body)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".mpy-api-", dir=output.parent) as temporary:
         staging = Path(temporary) / "generation"
         staging.mkdir()
+        with (staging / "inventory.json").open("xb") as stream:
+            identity = write_canonical(inventory, stream)
+        records = {"inventory.json": {"path": "inventory.json", **identity, "role": "inventory"}}
         for name, data in artifacts.items():
             destination = staging / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(data)
+            records[name] = {"path": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+                             "role": "enrichment-license-notice" if name.startswith("enrichment-notices/") else
+                             "runtime-builtins" if name == "typeshed/stdlib/builtins.pyi" else "runtime-module"}
+        body = {"schema_version": 1, "producer": "mpy-api", "build": inventory["build"],
+                "inputs": identities, "artifacts": [records[name] for name in sorted(records)],
+                "coverage": inventory["coverage"],
+                "typing_compatibility": {"status": "unverified", "reason": "generation is not supported builtin-aware checker approval"}}
+        body["generation_id"] = hashlib.sha256(canonical_bytes(body)).hexdigest()
+        (staging / "generation.json").write_bytes(canonical_bytes(body))
         if output.exists() or output.is_symlink():
             raise FileExistsError(f"output appeared during generation: {output}")
         verify()
@@ -394,7 +399,7 @@ def generate(args):
 
     return output, write_generation(output, inventory, declarations, identities,
                                     notices=enrichment["notice_artifacts"] if enrichment else {},
-                                    verify=verify_publication_inputs, jobs=args.jobs)
+                                    verify=verify_publication_inputs)
 
 
 def main(argv=None):

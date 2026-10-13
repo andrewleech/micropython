@@ -46,19 +46,19 @@ Omit manifest options only when the selected build has no `frozen_content.c`. A 
 
 The output directory must not exist, including as a symlink. Generation stages the complete output and publishes it as one directory; failure does not publish a successful receipt. Use a fresh directory for each run.
 
-`--jobs N` extracts translation units in N forked worker processes and encodes `inventory.json` with N workers, so it needs a platform with `fork`. Results are collected in compiler-database order and every artifact is byte-identical for any N. A failing translation unit raises the same error as serial extraction: the first failing record in order. Within one run, symlink and directory layout under dependency and probe paths are assumed fixed (each such path is resolved once). Consumed input files are not: a path containing a symlink is resolved before and after every read, and content, size, inode, timestamps and resolved target are verified. Dependency selection (`-M`/`-MM`) is re-run at each check point; only the compiler identity queries (`-dumpmachine`/`--version`) are run once per distinct flag set.
+`--jobs N` extracts translation units in N forked worker processes, so it needs a platform with `fork`. Results are collected in compiler-database order and every artifact is byte-identical for any N. A failing translation unit raises the same error as serial extraction: the first failing record in order. Within one run, symlink and directory layout under dependency and probe paths are assumed fixed (each such path is resolved once). Consumed input files are not: a path containing a symlink is resolved before and after every read, and content, size, inode, timestamps and resolved target are verified. Dependency selection (`-M`/`-MM`) is re-run at each check point; only the compiler identity queries (`-dumpmachine`/`--version`) are run once per distinct flag set.
 
 ## Output and consumer contract
 
 | Path | Role |
 |---|---|
-| `inventory.json` | Schema-v1 build identities, modules/types/symbols, call shapes, source evidence, resolution and coverage |
+| `inventory.json` | Schema-v1 build identities, modules/types/symbols, call shapes, source evidence, resolution and coverage; compact canonical JSON, a machine-read intermediate |
 | `modules/**/*.pyi` | Selected runtime module/frozen declarations; packages use `__init__.pyi` |
 | `typeshed/stdlib/builtins.pyi` | Generated selected-runtime builtin replacement, not an additive overlay |
 | `generation.json` | Schema-v1 producer/input identities, artifact sizes/hashes/roles, coverage and generation ID |
 | `enrichment-notices/**` | Captured third-party licence notices, when an enrichment manifest is supplied |
 
-`generation_id` hashes the canonical receipt before adding its own ID. Artifact hashes cover the inventory and declarations, not the receipt itself. Consumers should verify the receipt and all artifact hashes before using a generation, and retain its build/input identity alongside checker results.
+`inventory.json` and `generation.json` are canonical JSON: key-sorted, compact separators, ASCII-only, one trailing newline, so they are not formatted for reading (`python -m json.tool` or `jq` pretty-print them). `inventory.json` is encoded in bounded pieces and streamed to disk while its size and sha256 are computed, so no whole-document copy is held and the receipt needs no second read; the artifact hash is the hash of the file bytes. `generation_id` hashes the canonical receipt before adding its own ID. Artifact hashes cover the inventory and declarations, not the receipt itself. Consumers should verify the receipt and all artifact hashes before using a generation, and retain its build/input identity alongside checker results.
 
 `translation_units` retains every selected unit's inputs, definitions, frontend/projection evidence and function extraction overview. Function summaries include compiled identities, spans, parameter contracts, event counts, semantic resolutions and all gap/barrier reasons. `diagnostic_stage` distinguishes translation-unit extraction from selected-linked composition. Detailed internal branch graphs for unselected functions are not a published API; selected module/type/member fields retain their own branch/value evidence.
 
