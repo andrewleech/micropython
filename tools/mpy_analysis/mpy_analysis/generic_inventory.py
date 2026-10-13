@@ -11,6 +11,7 @@ from jsonschema import FormatChecker
 from .boundaries import discover_boundaries, metadata_context
 from .declarations import load_declarations, merge_declaration, revision_matches_selected
 from .metadata import collect_metadata
+from .fetch_provenance import summarise
 from .metadata_bom import valid_uri
 from .sbom_model import (
     LIBRARY,
@@ -143,6 +144,7 @@ def _dependency_component(
                 "metadata-evidence": metadata["evidence"],
                 "metadata-issues": metadata["issues"],
                 "declared-dependencies": metadata.get("declared_dependencies", []),
+                "fetch-provenance": boundary.get("fetch_provenance") or None,
             }
         ),
     )
@@ -182,7 +184,9 @@ def assemble(
     builder: Any, scope: dict[str, Any], declaration_files: list[Path]
 ) -> dict[str, Any]:
     declarations, declaration_issues = load_declarations(scope, declaration_files)
-    boundaries = discover_boundaries(scope, declared_boundaries=declarations)
+    boundaries = discover_boundaries(
+        scope, declared_boundaries=declarations, submodules=builder.submodules
+    )
     for boundary in boundaries:
         for candidate in boundary.get("candidates", []):
             if candidate.get("invalid_input"):
@@ -407,6 +411,7 @@ def assemble(
                 "evidence": metadata["evidence"],
                 "issues": metadata["issues"],
                 "declared_dependencies": metadata.get("declared_dependencies", []),
+                "fetch_provenance": boundary.get("fetch_provenance", []),
             }
         )
     for declaration in declarations:
@@ -420,6 +425,8 @@ def assemble(
                 }
             )
     builder.gaps.extend(declaration_issues)
+    fetched, fetch_gaps = summarise(boundaries, builder.submodules)
+    builder.gaps.extend(fetch_gaps)
     for package in packages.values():
         builder.depends_on[package_refs[package["id"]]].update(
             package_refs[identity] for identity in package["dependencies"]
@@ -452,6 +459,7 @@ def assemble(
     return {
         "roots": roots,
         "metadata": components,
+        "fetch_provenance": fetched,
         "metadata_inputs": sorted(metadata_inputs),
         "declarations": [
             {

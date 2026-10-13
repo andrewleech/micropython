@@ -21,6 +21,7 @@ dependencies = [
     "referencing>=0.30,<1",
     "tomli>=2; python_version < '3.11'",
     "pyelftools>=0.25",
+    "PyYAML>=6,<7",
 ]
 
 # The analysed project calls these; it does not carry them. A project installs this package from

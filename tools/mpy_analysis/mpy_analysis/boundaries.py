@@ -22,7 +22,9 @@ from typing import Any, Mapping, Sequence
 from .declarations import revision_matches_selected, selected_digest, source_binding
 from .metadata_bom import UnsupportedBomError, parse_json, read_bom
 from .metadata_native import parse_library_json, parse_native
+from .locks import LOCK_FILES, inspect_lock
 from .scope import FROZEN_GROUP, source_path
+from .submodules import SubmoduleInspector
 
 
 _PACKAGE_MARKERS = ("metadata.txt", "setup.py")
@@ -272,6 +274,10 @@ def _markers(directory: Path, root: Path, scope: dict[str, Any]) -> list[dict[st
     path = _marker(directory, "manifest.py", root)
     if path is not None:
         result.append({"kind": "candidate-manifest", "path": str(path)})
+    for name in LOCK_FILES:
+        path = _marker(directory, name, root)
+        if path is not None:
+            result.append(inspect_lock(path, name))
     result.extend(_generated_markers(scope, directory, root))
     return result
 
@@ -387,6 +393,16 @@ def _finalize_boundary(
             "Marker candidates do not independently establish selected package ownership.",
             candidates=weak,
         )
+    for item in value["candidates"]:
+        if item["kind"] == "lock-file" and item["status"] == "unsupported":
+            _issue(
+                value,
+                "unsupported-lock-format",
+                "unsupported",
+                item["reason"],
+                path=item["path"],
+                format=item["format"],
+            )
     value["candidates"].sort(
         key=lambda item: (
             item["directory"],
@@ -401,6 +417,7 @@ def discover_boundaries(
     scope: dict[str, Any],
     *,
     declared_boundaries: Sequence[Mapping[str, Any]] | None = None,
+    submodules: SubmoduleInspector | None = None,
 ) -> list[dict[str, Any]]:
     """Return physical boundaries, retaining every selected row exactly once.
 
@@ -415,8 +432,15 @@ def discover_boundaries(
     ``candidates``. Source records are not copied, deduplicated or rewritten;
     duplicate compiler commands and frozen import aliases remain distinct rows.
     Physical aliases coalesce boundary identity, never inventory rows.
+
+    ``fetch_provenance`` is the chain of Git submodule records enclosing the boundary,
+    outermost first (see ``submodules``): where the fetched checkout was declared to come
+    from, the commit the superproject pins, and the checkout's actual state. ``owns_root``
+    marks the record of the checkout whose root is the boundary directory. The evidence
+    never changes ownership or identity.
     """
     roots = {name: Path(value).resolve(strict=True) for name, value in scope["roots"].items()}
+    submodules = submodules or SubmoduleInspector()
     registry: dict[Path, dict[str, Any]] = {}
     candidate_evidence: dict[Path, list[dict[str, Any]]] = {}
     kinds: dict[Path, set[str]] = {}
@@ -448,6 +472,7 @@ def discover_boundaries(
                 "boundary_kind": "unresolved-root",
                 "issues": [],
                 "candidates": [],
+                "fetch_provenance": [],
             }
             kinds[directory] = set()
             candidate_evidence[directory] = []
@@ -594,6 +619,11 @@ def discover_boundaries(
                 if evidence_value not in value["candidates"]:
                     value["candidates"].append(evidence_value)
 
+    for directory in owned:
+        registry[directory]["fetch_provenance"] = [
+            {**record, "owns_root": record["directory"] == str(directory)}
+            for record in submodules.chain(directory)
+        ]
     for directory in owned:
         _finalize_boundary(
             registry[directory], kinds[directory], package_assertions.get(directory, {})

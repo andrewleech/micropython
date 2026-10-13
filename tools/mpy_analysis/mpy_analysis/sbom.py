@@ -37,6 +37,7 @@ from .sbom_model import (
 )
 from .sbom_spdx import serialize_spdx, to_spdx
 from .scope import FROZEN_GROUP, parse_scope, source_path
+from .submodules import SubmoduleInspector
 
 
 def _ref(kind: str, identity: Any) -> str:
@@ -58,6 +59,7 @@ FIRMWARE_BLOCKING_GAPS = frozenset(
         "posthoc-linked-source-not-in-selected-scope",
         "repository-provenance-unavailable",
         "selected-source-not-tracked",
+        "submodule-local-override",
     }
 )
 
@@ -101,6 +103,7 @@ class _Builder:
         self.tracked_files: dict[str, set[str]] = {}
         self.gaps: list[dict[str, Any]] = []
         self.sources: list[dict[str, Any]] = []
+        self.submodules = SubmoduleInspector()
 
     def add(
         self, kind: str, identity: Any, component: Component, *, parent: str | None = None
@@ -163,23 +166,39 @@ class _Builder:
             "vcs_url": vcs_url,
             "dirty": bool(status),
         }
-        parent_root = _git(Path(root).parent, "rev-parse", "--show-toplevel")
-        if parent_root and parent_root != root:
-            relative = Path(root).relative_to(parent_root).as_posix()
-            entry = _git(Path(parent_root), "ls-tree", "HEAD", "--", relative)
-            if entry:
-                fields = entry.split()
-                if len(fields) >= 3 and fields[1] == "commit":
-                    info["parent_gitlink"] = fields[2]
-                    if fields[2] != revision:
-                        self.gaps.append(
-                            {
-                                "kind": "checkout-gitlink-mismatch",
-                                "path": root,
-                                "gitlink": fields[2],
-                                "checkout": revision,
-                            }
-                        )
+        submodule = self.submodules.checkout_record(Path(root))
+        if submodule:
+            info["submodule"] = submodule
+            info["parent_gitlink"] = submodule["pinned_commit"]
+            findings = submodule["findings"]
+            if "head-differs-from-pin" in findings or "gitlink-not-committed" in findings:
+                gap = {
+                    "kind": "checkout-gitlink-mismatch",
+                    "path": root,
+                    "gitlink": submodule["pinned_commit"],
+                    "checkout": revision,
+                    "pin_source": "git-submodule",
+                }
+                if "index_commit" in submodule:
+                    gap["index_gitlink"] = submodule["index_commit"]
+                self.gaps.append(gap)
+            if "local-override" in findings:
+                self.gaps.append(
+                    {
+                        "kind": "submodule-local-override",
+                        "path": root,
+                        "declared_url": submodule["url"],
+                        "remote_url": submodule["remote_url"],
+                    }
+                )
+            if "not-registered-in-gitmodules" in findings:
+                self.gaps.append(
+                    {
+                        "kind": "repository-provenance-unavailable",
+                        "path": root,
+                        "reason": "the superproject records a gitlink without a .gitmodules URL",
+                    }
+                )
         component = Component(
             kind=LIBRARY,
             name=Path(root).name,
@@ -198,7 +217,13 @@ class _Builder:
         else:
             self.gaps.append({"kind": "repository-origin-unavailable", "path": root})
         if status:
-            self.gaps.append({"kind": "dirty-selected-repository", "path": root, "status": status})
+            gap = {"kind": "dirty-selected-repository", "path": root, "status": status}
+            changes = (submodule or {}).get("diff_from_pin") or (submodule or {}).get(
+                "diff_from_head"
+            )
+            if changes:
+                gap["tracked_changes"] = changes
+            self.gaps.append(gap)
         info["ref"] = self.add("repository", [root, revision], component)
         tracked = _git(Path(root), "ls-files", "-z")
         if tracked is None:
@@ -245,13 +270,18 @@ class _Builder:
             if tracked:
                 self.depends_on[repository["ref"]].add(reference)
             if not tracked:
-                self.gaps.append(
-                    {
-                        "kind": "selected-source-not-tracked",
-                        "path": str(path),
-                        "detail": "The file hash identifies this input; the repository revision does not identify its contents.",
+                gap = {
+                    "kind": "selected-source-not-tracked",
+                    "path": str(path),
+                    "detail": "The file hash identifies this input; the repository revision does not identify its contents.",
+                }
+                enclosing = self.submodules.chain(path.parent)
+                if enclosing and enclosing[-1]["checkout"] != "present":
+                    gap["submodule"] = {
+                        key: enclosing[-1].get(key)
+                        for key in ("path", "url", "pinned_commit", "checkout", "checkout_reason")
                     }
-                )
+                self.gaps.append(gap)
         self.sources.append(
             {
                 "group": group,
