@@ -80,7 +80,8 @@ SRC_C = \
 	mphalport_hw.c \
 	uart.c \
 	shared/libc/string0.c \
-	$(MBOOT_SRC_C)
+	$(MBOOT_SRC_C) \
+	$(MBOOT_MCU_SRC_C)
 
 # A SPI flash of the board (MICROPY_HW_MBOOT_SPIFLASH_* in mpconfigboard.h) uses the drivers of mboot.
 ifeq ($(MBOOT_SPIFLASH_ENABLE),1)

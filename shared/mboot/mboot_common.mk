@@ -7,6 +7,7 @@
 #   INC += $(MBOOT_INC)
 #   CFLAGS += $(MBOOT_CFLAGS)
 #   SRC_C += $(MBOOT_SRC_C)
+#   SRC_C += $(MBOOT_MCU_SRC_C)     (an MCU port with memory mapped flash, see below)
 #   SRC_C += $(MBOOT_GEN_SRC_C)     (absolute path under $(MBOOT_GEN_DIR))
 #
 # The configuration is C: the board's mpconfigboard.h and the port's mboot_dev.h behind
@@ -125,9 +126,16 @@ MBOOT_DFU_DIR := shared/mboot/dfu
 MBOOT_TINYUSB_SRC_C :=
 
 # Flash map, flash access policy, logging, request handoff and the update slot
-# session, in both roles. shadow.c and ecc.c have no code without the ECC policy.
+# session, in both roles. shadow.c has no code without the ECC policy.
 MBOOT_GLUE_SRC_C := $(addprefix $(MBOOT_SRC_DIR)/, \
-    flash_map.c flash_map_backend.c flash_internal.c shadow.c ecc.c backup_words.c record_ring.c request.c update.c mboot_crc32.c log.c printf_lite.c)
+    flash_map.c flash_map_backend.c shadow.c record_ring.c request.c update.c mboot_crc32.c log.c printf_lite.c)
+
+# The policy for a memory mapped internal flash on the controller primitives of the port, the ECC
+# event counters and the retention words in backup registers, and in the bootloader the Cortex-M
+# fault policy and the start-up. A port that implements these services itself, such as a host
+# build over a model of the flash, leaves them out; an MCU port lists $(MBOOT_MCU_SRC_C) with its
+# sources. ecc.c has no code without the ECC policy.
+MBOOT_MCU_SRC_C := $(addprefix $(MBOOT_SRC_DIR)/, flash_internal.c ecc.c backup_words.c)
 
 # A SPI flash as device 1 is driven through drivers/memory/spiflash.c, which the port provides.
 ifeq ($(MBOOT_SPIFLASH_ENABLE),1)
@@ -144,7 +152,8 @@ MBOOT_BOOTUTIL_SRC_C := $(addprefix $(MBOOT_BU_DIR)/, \
     tlv.c bootutil_find_key.c bootutil_img_hash.c bootutil_img_security_cnt.c image_validate.c \
     image_ecdsa.c bootutil_misc.c bootutil_area.c bootutil_loader.c bootutil_public.c \
     fault_injection_hardening.c)
-MBOOT_GLUE_SRC_C += $(addprefix $(MBOOT_SRC_DIR)/, security_cnt.c seccnt_flash.c arm_jump.c fault.c boot_info.c)
+MBOOT_GLUE_SRC_C += $(addprefix $(MBOOT_SRC_DIR)/, security_cnt.c seccnt_flash.c arm_jump.c)
+MBOOT_MCU_SRC_C += $(addprefix $(MBOOT_SRC_DIR)/, fault.c boot_info.c)
 ifeq ($(MBOOT_FIH),high)
 MBOOT_GLUE_SRC_C += $(MBOOT_SRC_DIR)/fih_delay_rng.c
 endif

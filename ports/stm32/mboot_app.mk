@@ -47,7 +47,7 @@ CFLAGS += $(MBOOT_CFLAGS) -DMICROPY_HW_MBOOT_APP=1
 # controller primitives under the flash policy of shared/mboot.
 SRC_C += mboot_port.c
 
-LIB_SRC_C += $(MBOOT_SRC_C)
+LIB_SRC_C += $(MBOOT_SRC_C) $(MBOOT_MCU_SRC_C)
 OBJ += $(MBOOT_GEN_SRC_C:.c=.o)
 
 # Bootutil is third party code; its warnings do not fail the build.
