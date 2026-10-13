@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 import hashlib
 import importlib
 import importlib.metadata
 import json
+import multiprocessing
 import os
 from pathlib import Path
 import subprocess
@@ -15,8 +17,64 @@ import sys
 import tempfile
 
 
-def canonical_bytes(value):
-    return (json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
+def _dumps(value):
+    return json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False)
+
+
+_LEAVES = None
+_SPLIT_DEPTH = 3
+
+
+def _split(value, level, depth, pieces):
+    """Lay out ``value`` as indented JSON text: literal strings and leaf values left to encode.
+
+    Containers down to ``_SPLIT_DEPTH`` are written key by key, leaves (value, nesting level)
+    are appended unencoded. Joining the encoded pieces equals ``_dumps(value)``."""
+    if depth < _SPLIT_DEPTH and isinstance(value, dict) and value and all(isinstance(key, str) for key in value):
+        pad = "  " * (level + 1)
+        pieces.append("{\n")
+        for position, key in enumerate(sorted(value)):
+            if position:
+                pieces.append(",\n")
+            pieces.append(pad + json.dumps(key, ensure_ascii=False) + ": ")
+            _split(value[key], level + 1, depth + 1, pieces)
+        pieces.append("\n" + "  " * level + "}")
+    elif depth < _SPLIT_DEPTH and isinstance(value, list) and value:
+        pad = "  " * (level + 1)
+        pieces.append("[\n")
+        for position, item in enumerate(value):
+            if position:
+                pieces.append(",\n")
+            pieces.append(pad)
+            _split(item, level + 1, depth + 1, pieces)
+        pieces.append("\n" + "  " * level + "]")
+    else:
+        pieces.append((value, level))
+
+
+def _encode_leaf(index):
+    value, level = _LEAVES[index]
+    text = _dumps(value)
+    if level:
+        text = text.replace("\n", "\n" + "  " * level)
+    return text.encode("utf-8")
+
+
+def canonical_bytes(value, jobs=1):
+    """Canonical JSON bytes; ``jobs`` > 1 encodes the large sub-values in forked worker processes."""
+    if jobs == 1:
+        return (_dumps(value) + "\n").encode("utf-8")
+    global _LEAVES
+    pieces = []
+    _split(value, 0, 0, pieces)
+    _LEAVES = [piece for piece in pieces if isinstance(piece, tuple)]
+    try:
+        with ProcessPoolExecutor(max_workers=jobs, mp_context=multiprocessing.get_context("fork")) as pool:
+            encoded = iter(pool.map(_encode_leaf, range(len(_LEAVES)), chunksize=max(1, len(_LEAVES) // (jobs * 16))))
+            parts = [next(encoded) if isinstance(piece, tuple) else piece.encode("utf-8") for piece in pieces]
+    finally:
+        _LEAVES = None
+    return b"".join(parts) + b"\n"
 
 
 def file_identity(path):
@@ -185,10 +243,10 @@ def qualify_frozen_payload(inventory, modules):
             "status": "resolved", "sha256": source["sha256"], "source": source["source"]}
 
 
-def write_generation(output, inventory, declarations, identities, *, notices, verify):
+def write_generation(output, inventory, declarations, identities, *, notices, verify, jobs=1):
     if output.exists() or output.is_symlink():
         raise FileExistsError(f"output already exists; use a fresh generation directory: {output}")
-    artifacts = {"inventory.json": canonical_bytes(inventory)}
+    artifacts = {"inventory.json": canonical_bytes(inventory, jobs)}
     for name, content in declarations.items():
         path = Path(name)
         if path.is_absolute() or not path.parts or any(part in ("", ".", "..") for part in path.parts):
@@ -336,7 +394,7 @@ def generate(args):
 
     return output, write_generation(output, inventory, declarations, identities,
                                     notices=enrichment["notice_artifacts"] if enrichment else {},
-                                    verify=verify_publication_inputs)
+                                    verify=verify_publication_inputs, jobs=args.jobs)
 
 
 def main(argv=None):

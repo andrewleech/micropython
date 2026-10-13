@@ -193,6 +193,7 @@ def collect_ownership(records, link):
         raise ValueError(f'selected ELF lacks symbols needed for allocated ownership; supply its unstripped linked image: {elf}')
     if not allocations:
         raise ValueError(f'selected map has no supported allocated object contributions: {map_path}')
+    allocated_elf_symbols = {(s['name'], s['address']) for s in elf_symbols if s['kind'] != 'U'}
     objects, receipts = [], [receipt]
     for record in records:
         obj = str(Path(record['object']).resolve())
@@ -208,7 +209,7 @@ def collect_ownership(records, link):
             for block in blocks:
                 if symbol['section'] == block['section'] and symbol['offset'] < block['size']:
                     address = block['address'] + symbol['offset']
-                    if any(s['name'] == symbol['name'] and s['address'] == address and s['kind'] != 'U' for s in elf_symbols):
+                    if (symbol['name'], address) in allocated_elf_symbols:
                         allocated_symbols.append({**symbol, 'address': address, 'authority': 'allocated-object-section-and-ELF-address'})
         objects.append({'object': {'path': obj, 'sha256': by_physical[obj]['sha256']}, 'translation_unit': record['physical'],
                         'symbols': rows, 'allocated_symbols': allocated_symbols, 'allocations': blocks})

@@ -46,6 +46,8 @@ Omit manifest options only when the selected build has no `frozen_content.c`. A 
 
 The output directory must not exist, including as a symlink. Generation stages the complete output and publishes it as one directory; failure does not publish a successful receipt. Use a fresh directory for each run.
 
+`--jobs N` extracts translation units in N forked worker processes and encodes `inventory.json` with N workers, so it needs a platform with `fork`. Results are collected in compiler-database order and every artifact is byte-identical for any N. A failing translation unit raises the same error as serial extraction: the first failing record in order. Within one run, symlink and directory layout under dependency and probe paths are assumed fixed (each such path is resolved once). Consumed input files are not: a path containing a symlink is resolved before and after every read, and content, size, inode, timestamps and resolved target are verified. Dependency selection (`-M`/`-MM`) is re-run at each check point; only the compiler identity queries (`-dumpmachine`/`--version`) are run once per distinct flag set.
+
 ## Output and consumer contract
 
 | Path | Role |
