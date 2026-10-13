@@ -915,7 +915,7 @@ def test_static_inputs_are_identified_through_the_captured_compiler(tmp_path):
 
     def classify(file):
         return _implicit_input(
-            str(file.resolve()), allocated=allocated, archive_members=archive_members, compiler=compiler, flags=()
+            str(file.resolve()), allocated=allocated, archive_members=archive_members, compiler=compiler, flag_sets=[()]
         )
 
     entry, failure = classify(crtbegin)
@@ -930,7 +930,7 @@ def test_static_inputs_are_identified_through_the_captured_compiler(tmp_path):
 
     layout.cache_clear()
     entry, failure = _implicit_input(
-        str(crtbegin.resolve()), allocated=allocated, archive_members={}, compiler=None, flags=()
+        str(crtbegin.resolve()), allocated=allocated, archive_members={}, compiler=None, flag_sets=[()]
     )
     assert entry is None and "no single captured compiler" in failure
 
@@ -948,7 +948,7 @@ def test_c_library_outside_the_configured_sysroot_is_not_identified(tmp_path):
     compiler = _fake_compiler(tmp_path, runtime_dir, library_dir, sysroot=tmp_path / "other-sysroot")
     layout.cache_clear()
     entry, failure = _implicit_input(
-        str(crt1.resolve()), allocated={str(crt1.resolve())}, archive_members={}, compiler=compiler, flags=()
+        str(crt1.resolve()), allocated={str(crt1.resolve())}, archive_members={}, compiler=compiler, flag_sets=[()]
     )
     assert entry is None and "outside the compiler's configured sysroot" in failure
 
@@ -959,7 +959,7 @@ def test_shared_library_is_recorded_without_package_identity(tmp_path):
     library = tmp_path / "libfixture.so.1"
     library.write_bytes(b"\x7fELF" + b"\0" * 12)
     entry, failure = _implicit_input(
-        str(library.resolve()), allocated=set(), archive_members={}, compiler=None, flags=()
+        str(library.resolve()), allocated=set(), archive_members={}, compiler=None, flag_sets=[()]
     )
     assert failure == "" and entry["disposition"] == "dynamic"
     assert not {"c_library", "toolchain", "linkage"} & set(entry)
@@ -1075,3 +1075,34 @@ $(BUILD)/firmware.elf: $(BUILD)/main.o
     assert "glibc" in names and "libc.so.6" not in names
     assert not any(item.get("purl", "").startswith("pkg:deb/") for item in document["components"])
     assert summary["firmware_completeness"] == "established"
+
+
+def test_runtime_directory_selected_by_compile_flags_is_found_when_the_link_has_none(tmp_path):
+    from mpy_analysis.firmware_capture_receipt import _flag_sets, _runtime_identity
+
+    default_dir = tmp_path / "gcc"
+    multilib_dir = tmp_path / "gcc" / "multi"
+    for directory in (default_dir, multilib_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    libgcc = multilib_dir / "libgcc.a"
+    libgcc.write_bytes(b"archive")
+    compiler_path = tmp_path / "multilib-cc"
+    compiler_path.write_text(
+        "#!/bin/sh\n"
+        'case "$*" in\n'
+        f'  *-print-libgcc-file-name*) case "$*" in *-mmulti*) echo "{multilib_dir}/libgcc.a";; *) echo "{default_dir}/libgcc.a";; esac;;\n'
+        '  *-print-sysroot*) echo "";;\n'
+        '  *-print-file-name=*) echo "libc.a";;\n'
+        "esac\n"
+    )
+    compiler_path.chmod(0o755)
+    compiler = {"path": str(compiler_path), "sha256": "0" * 64}
+    actions = [
+        {"kind": "compile", "argv": [str(compiler_path), "-mmulti", "-c", "a.c"], "cwd": str(tmp_path)},
+        {"kind": "link", "argv": [str(compiler_path), "-nostdlib", "-o", "firmware.elf", "a.o"], "cwd": str(tmp_path)},
+    ]
+    assert _flag_sets(actions) == [("-mmulti",), ()]
+    identity, failure = _runtime_identity(str(libgcc), compiler, _flag_sets(actions))
+    assert failure == "" and identity["toolchain"]["role"] == "cc"
+    identity, failure = _runtime_identity(str(libgcc), compiler, [()])
+    assert identity is None

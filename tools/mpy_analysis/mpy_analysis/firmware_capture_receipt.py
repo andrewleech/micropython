@@ -166,22 +166,39 @@ def _compiler(toolchain: dict[tuple[str, str], dict[str, Any]]) -> dict[str, Any
     return compilers[0] if len(compilers) == 1 else None
 
 
+def _flag_sets(actions: list[dict[str, Any]]) -> list[tuple[str, ...]]:
+    """Distinct multilib-selecting flag sets of the captured compile, assemble and link commands.
+
+    A link command need not repeat the machine flags the sources were compiled with, while the
+    build still names runtime files from the multilib directory those flags select.
+    """
+    sets: list[tuple[str, ...]] = []
+    for action in actions:
+        if action["kind"] in ("link", "compile", "assemble"):
+            flags = machine_flags(flatten(action["argv"], Path(action["cwd"])))
+            if flags not in sets:
+                sets.append(flags)
+    return sets
+
+
 def _runtime_identity(
-    path: str, compiler: dict[str, Any] | None, flags: tuple[str, ...]
+    path: str, compiler: dict[str, Any] | None, flag_sets: list[tuple[str, ...]]
 ) -> tuple[dict[str, Any] | None, str]:
     """Identify a statically linked compiler runtime or C library file through the compiler."""
     if compiler is None:
         return None, "no single captured compiler to identify the runtime"
-    kind, library, reason = classify(path, compiler["path"], flags)
-    if kind == "compiler-runtime":
-        return {
-            "toolchain": {
-                "role": "cc",
-                "executable": {"path": compiler["path"], "sha256": compiler["sha256"]},
-            }
-        }, ""
-    if kind == "c-library":
-        return {"c_library": library}, ""
+    reason = "no captured command flags to query the compiler with"
+    for flags in flag_sets:
+        kind, library, reason = classify(path, compiler["path"], flags)
+        if kind == "compiler-runtime":
+            return {
+                "toolchain": {
+                    "role": "cc",
+                    "executable": {"path": compiler["path"], "sha256": compiler["sha256"]},
+                }
+            }, ""
+        if kind == "c-library":
+            return {"c_library": library}, ""
     return None, reason
 
 
@@ -191,7 +208,7 @@ def _implicit_input(
     allocated: set[str],
     archive_members: dict[str, set[str]],
     compiler: dict[str, Any] | None,
-    flags: tuple[str, ...],
+    flag_sets: list[tuple[str, ...]],
 ) -> tuple[dict[str, Any] | None, str]:
     """Account for a file the linker loaded that was not a captured link operand.
 
@@ -232,7 +249,7 @@ def _implicit_input(
             else "GNU ld records no allocated sections from this input"
         )
         return entry, ""
-    identity, failure = _runtime_identity(path, compiler, flags)
+    identity, failure = _runtime_identity(path, compiler, flag_sets)
     if identity is None:
         return None, f"GNU map LOAD input contributes but is not identified: {failure}"
     entry["disposition"] = "contributed"
@@ -558,14 +575,14 @@ def receipt_from_journal(
     unresolved = []
     implicit_inputs = []
     compiler = _compiler(toolchain)
-    link_flags = machine_flags(flatten(link_action["argv"], Path(link_action["cwd"])))
+    flag_sets = _flag_sets(actions)
     for path in sorted(map_only_loads):
         entry, failure = _implicit_input(
             path,
             allocated=allocated,
             archive_members=toolchain_archive_members,
             compiler=compiler,
-            flags=link_flags,
+            flag_sets=flag_sets,
         )
         if entry is not None:
             implicit_inputs.append(entry)
@@ -662,13 +679,13 @@ def receipt_from_journal(
         elif (
             suffix in (".a", ".lib")
             and path in toolchain_archive_members
-            and _runtime_identity(path, compiler, link_flags)[0] is not None
+            and _runtime_identity(path, compiler, flag_sets)[0] is not None
         ):
             operand = {
                 "kind": "library",
                 "input": input_record,
                 "disposition": "contributed",
-                **_runtime_identity(path, compiler, link_flags)[0],
+                **_runtime_identity(path, compiler, flag_sets)[0],
                 "contributing_members": sorted(toolchain_archive_members[path]),
                 "evidence": "GNU ld map allocates sections from this archive; the captured compiler resolves it as its own runtime or C library",
             }
