@@ -159,7 +159,7 @@ To always read a positive integer
    stm32   BKP16R-BKP18R   ``rfcore_firmware.py`` on STM32WB
    stm32   last BKP reg    clock frequency (``MICROPY_HW_CLK_LAST_FREQ``)
    stm32   BKP31R (N6)     mboot bootloader entry
-   stm32   BKP28R-BKP30R   mboot handoff on STM32H5 Mboot applications
+   stm32   BKP27R-BKP30R   mboot handoff on STM32H5 and STM32F7 Mboot applications
    ======  ==============  =========================================================
 
    The buffer allows direct register access and can be combined with
