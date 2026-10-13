@@ -10,7 +10,7 @@ The optional :mod:`mboot` module provides access to update state and control fun
 
 **Availability:**
 
-* STM32 boards configured for Mboot, with ``MICROPY_PY_MBOOT=1``.
+* STM32 boards configured for Mboot, built with ``make MICROPY_PY_MBOOT=1``.
   The current board configurations are NUCLEO_H563ZI
   (STM32H5, two slots with swap using offset) and PYBD_SF6 (STM32F7, one slot
   with the ``single`` policy).
@@ -41,7 +41,7 @@ Querying the state
 
    *slot* is ``0`` for the primary slot (the running image) or ``1`` for the update slot. The update slot is read at the place where an update image starts, which is one flash erase unit after the start of the slot with swap using offset, the default swap mode, and at the start of the slot otherwise. With the ``single`` slot policy ``version(1)`` returns ``None``. Any other value of *slot* raises ``ValueError``.
 
-   This reads the header only. It does not tell whether the image is valid.
+   This reads the header only. It does not tell whether the image is valid. The build number is 0 for images built from the repository.
 
 .. function:: bootloader_info()
 
@@ -59,11 +59,11 @@ Querying the state
    * ``'confirmed'``: ``True`` if the image in the primary slot (the running image) is confirmed.
    * ``'pending'``: ``True`` if the next reset swaps or reverts, that is if ``'swap'`` is :data:`SWAP_TEST`, :data:`SWAP_PERM` or :data:`SWAP_REVERT`.
    * ``'secondary_valid_header'``: ``True`` if the update slot holds an image header at the place where an update image starts.
-   * ``'layout_mismatch'``: ``True`` if the layout identifier in the bootloader's information block differs from the one this firmware was built for. It is ``False`` when there is no information block. The bootloader rejects images built for a different layout, and :class:`Writer` and :func:`request_upgrade` refuse to run in that state.
+   * ``'layout_mismatch'``: ``True`` if the layout identifier in the bootloader's information block differs from the one this firmware was built for. It is ``False`` when there is no information block. The bootloader rejects downloaded and swapped-in images built for a different layout, and :class:`Writer` and :func:`request_upgrade` refuse to run in that state. An image that is already installed is not checked against the layout when it boots, so this flag is how firmware notices that it no longer matches its bootloader.
 
-   A test image that has booted and is not yet confirmed reports ``'swap'`` as :data:`SWAP_REVERT`, ``'pending'`` as ``True`` and ``'confirmed'`` as ``False``, because the next reset would revert it. An image that was programmed as the first image of a device, or that was confirmed, reports :data:`SWAP_NONE`, ``True`` and ``False``.
+   A test image that has booted and is not yet confirmed reports ``'swap'`` as :data:`SWAP_REVERT`, ``'pending'`` as ``True`` and ``'confirmed'`` as ``False``, because the next reset would revert it. An image that was programmed as the first image of a device, or that was confirmed, reports ``'swap'`` as :data:`SWAP_NONE`, ``'confirmed'`` as ``True`` and ``'pending'`` as ``False``.
 
-   With the ``single`` slot policy the result is always ``'swap'`` :data:`SWAP_NONE`, ``'confirmed'`` ``True`` and ``'pending'`` ``False``. Raises ``OSError(ENODEV)`` if the compiled-in flash layout does not match what the flash driver provides, and ``OSError(EIO)`` if a flash read fails.
+   With the ``single`` slot policy ``'swap'`` is :data:`SWAP_NONE`, ``'confirmed'`` is ``True``, ``'pending'`` and ``'secondary_valid_header'`` are ``False``, and ``'layout_mismatch'`` is reported as usual. Raises ``OSError(ENODEV)`` if the compiled-in flash layout does not match what the flash driver provides, and ``OSError(EIO)`` if a flash read fails.
 
 .. function:: slots()
 
@@ -79,7 +79,7 @@ Querying the state
    * *type* is a number that says what happened, *result* is a result code and *source* says who wrote the record (``0`` bootloader, ``1`` DFU, ``2`` fsload, ``3`` application). *detail* depends on the type. The module does not define named constants for these values.
    * The version tuple is the version of the image the record is about, or ``(0, 0, 0, 0)`` if there is none.
 
-   The update audit log is stored in a flash area of two sectors which is used as a ring, so only the most recent records are kept.
+   The update audit log is stored in a flash area of two sectors which is used as a ring, so only the most recent records are kept. The raw records also hold a hash prefix of the image, which this function does not return.
 
 Confirming and installing images
 --------------------------------
@@ -211,6 +211,8 @@ Errors
 Besides the ``ValueError`` and ``TypeError`` from argument checks, the functions of this module raise ``OSError`` with these error numbers:
 
 * ``EPERM``: the board uses the ``single`` slot policy and the call needs an update slot.
+* ``ENODEV``: the compiled-in flash layout does not match the flash driver, or the bootloader's layout identifier differs from the one this firmware was built for.
+* ``ENOENT``: :func:`request_fsload` was called with no *mount* on a board that has no application filesystem area.
 * ``EBADF``: a :class:`Writer` was used after it was finished or aborted, or after a newer writer was opened.
 * ``EINVAL``: the update slot holds no image header, or a :class:`Writer` was finished with an image of one erase unit or less with swap using offset.
 * ``ENOSPC``: a write would go past the end of the update slot.
