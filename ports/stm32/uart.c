@@ -38,6 +38,12 @@
 #include "irq.h"
 #include "pendsv.h"
 
+// The bootloader sets this to build only the hardware initialisation and the transmit of the
+// UART: it has no MicroPython runtime for the UART object registry and the interrupt handler.
+#ifndef MICROPY_HW_UART_NO_RUNTIME
+#define MICROPY_HW_UART_NO_RUNTIME (0)
+#endif
+
 #if defined(STM32F4) || defined(STM32L1)
 #define UART_RXNE_IS_SET(uart) ((uart)->SR & USART_SR_RXNE)
 #else
@@ -181,6 +187,8 @@ void uart_init0(void) {
     #endif
 }
 
+#if !MICROPY_HW_UART_NO_RUNTIME
+
 // unregister all interrupt sources
 void uart_deinit_all(void) {
     for (int i = 0; i < MP_ARRAY_SIZE(MP_STATE_PORT(machine_uart_obj_all)); i++) {
@@ -272,6 +280,8 @@ bool uart_exists(int uart_id) {
             return false;
     }
 }
+
+#endif // !MICROPY_HW_UART_NO_RUNTIME
 
 // assumes Init parameters have been set up correctly
 bool uart_init(machine_uart_obj_t *uart_obj,
@@ -1353,6 +1363,8 @@ void uart_tx_strn(machine_uart_obj_t *uart_obj, const char *str, uint len) {
     uart_tx_data(uart_obj, str, len, &errcode);
 }
 
+#if !MICROPY_HW_UART_NO_RUNTIME
+
 // This IRQ handler is set up to handle RXNE, IDLE and ORE interrupts only.
 // Notes:
 // - ORE (overrun error) is tied to the RXNE IRQ line.
@@ -1474,3 +1486,5 @@ const mp_irq_methods_t uart_irq_methods = {
 };
 
 MP_REGISTER_ROOT_POINTER(struct _machine_uart_obj_t *machine_uart_obj_all[MICROPY_HW_MAX_UART + MICROPY_HW_MAX_LPUART]);
+
+#endif // !MICROPY_HW_UART_NO_RUNTIME

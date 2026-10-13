@@ -262,6 +262,7 @@ SRC_C += \
 	led.c \
 	pin.c \
 	pin_defs_stm32.c \
+	mphalport_hw.c \
 	pin_named_pins.c \
 	bufhelper.c \
 	dma.c \
