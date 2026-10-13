@@ -12,6 +12,14 @@ from .boundaries import discover_boundaries
 from .declarations import load_declarations, merge_declaration, revision_matches_selected
 from .metadata import collect_metadata
 from .metadata_bom import valid_uri
+from .sbom_model import (
+    LIBRARY,
+    Component,
+    Contact,
+    ExternalReference,
+    Party,
+    property_values,
+)
 from .scope import FROZEN_GROUP, source_path
 
 REQUIRED = ("name", "version", "license", "license_applicability")
@@ -80,19 +88,53 @@ def _manifest_identity(
         )
 
 
+def _hashes(entries: list[dict[str, str]]) -> dict[str, str]:
+    """Neutral hash mapping from CycloneDX hash entries ("SHA-256" becomes "sha256")."""
+    return {item["alg"].lower().replace("sha-", "sha"): item["content"].lower() for item in entries}
+
+
+def _party(entity: dict[str, Any]) -> Party:
+    return Party(
+        name=entity.get("name"),
+        urls=list(entity.get("url", [])),
+        contacts=[
+            Contact(
+                name=item.get("name"),
+                email=item.get("email"),
+                phone=item.get("phone"),
+                extra={key: value for key, value in item.items() if key not in ("name", "email", "phone")},
+            )
+            for item in entity.get("contact", [])
+        ],
+        extra={key: value for key, value in entity.items() if key not in ("name", "url", "contact")},
+    )
+
+
+def _reference(entry: dict[str, Any]) -> ExternalReference:
+    return ExternalReference(
+        type=entry["type"],
+        url=entry["url"],
+        comment=entry.get("comment"),
+        hashes=_hashes(entry.get("hashes", [])),
+    )
+
+
 def _dependency_component(
     metadata: dict,
     boundary: dict,
     declaration: dict | None,
     repository: dict | None,
-    properties: Any,
-) -> dict:
-    """Render resolved facts and retain their discovery/manual provenance."""
+) -> Component:
+    """Render resolved facts and retain their discovery/manual provenance.
+
+    The declaration's CycloneDX component is read into model fields here.
+    """
     fields = metadata["fields"]
-    component = {
-        "type": declaration["component"].get("type", "library") if declaration else "library",
-        "name": fields.get("name", "unresolved:" + boundary["id"]),
-        "properties": properties(
+    declared = declaration["component"] if declaration else {}
+    component = Component(
+        kind=declared.get("type", LIBRARY),
+        name=fields.get("name", "unresolved:" + boundary["id"]),
+        properties=property_values(
             {
                 "boundary": boundary["id"],
                 "boundary-kind": boundary["boundary_kind"],
@@ -103,47 +145,41 @@ def _dependency_component(
                 "declared-dependencies": metadata.get("declared_dependencies", []),
             }
         ),
-    }
+    )
     for field in ("version", "description", "author", "copyright"):
         if fields.get(field):
-            component[field] = fields[field]
+            setattr(component, field, fields[field])
     if fields.get("license"):
-        component["licenses"] = [{"expression": fields["license"]}]
-    if metadata.get("license_texts"):
-        component["evidence"] = {
-            "licenses": [
-                {
-                    "license": {
-                        "name": identifier,
-                        "text": {"contentType": "text/plain", "content": item["text"]},
-                    }
-                }
-                for identifier, item in sorted(metadata["license_texts"].items())
-                if item["text"].strip()
-            ]
-        }
+        component.license = fields["license"]
+    component.license_texts = {
+        identifier: item["text"]
+        for identifier, item in sorted(metadata.get("license_texts", {}).items())
+        if item["text"].strip()
+    }
     references = []
     if repository and repository.get("vcs_url"):
-        references.append({"type": "vcs", "url": repository["vcs_url"]})
+        references.append(ExternalReference("vcs", repository["vcs_url"]))
     if fields.get("url") and valid_uri(fields["url"]):
-        references.append({"type": "website", "url": fields["url"]})
+        references.append(ExternalReference("website", fields["url"]))
     if declaration:
-        for reference in declaration["component"].get("externalReferences", []):
+        for entry in declared.get("externalReferences", []):
+            reference = _reference(entry)
             if reference not in references:
                 references.append(reference)
-        for key in ("supplier", "publisher", "purl", "cpe", "group"):
-            if declaration["component"].get(key):
-                component[key] = declaration["component"][key]
-        component["properties"].extend(
-            properties({"manual-declared-relationships": declaration["declared_relationships"]})
+        if declared.get("supplier"):
+            component.supplier = _party(declared["supplier"])
+        for key in ("publisher", "purl", "cpe", "group"):
+            if declared.get(key):
+                setattr(component, key, declared[key])
+        component.properties.update(
+            property_values({"manual-declared-relationships": declaration["declared_relationships"]})
         )
-    if references:
-        component["externalReferences"] = references
+    component.external_references = references
     return component
 
 
 def assemble(
-    builder: Any, scope: dict[str, Any], declaration_files: list[Path], properties: Any
+    builder: Any, scope: dict[str, Any], declaration_files: list[Path]
 ) -> dict[str, Any]:
     declarations, declaration_issues = load_declarations(scope, declaration_files)
     boundaries = discover_boundaries(scope, declared_boundaries=declarations)
@@ -248,13 +284,13 @@ def assemble(
                 }
             )
         fields = metadata["fields"]
-        component = _dependency_component(metadata, boundary, declaration, repository, properties)
+        component = _dependency_component(metadata, boundary, declaration, repository)
         manifests = [
             str(source_path(scope, packages[identity])) for identity in boundary["package_ids"]
         ]
         if manifests:
-            component["properties"].extend(
-                properties(
+            component.properties.update(
+                property_values(
                     {
                         "manifest": manifests[0],
                         "package-metadata": boundary.get("manifest_metadata", {}),
@@ -267,7 +303,7 @@ def assemble(
             package_refs[identity] = ref
         for group, record in boundary["sources"]:
             key = (group, record["root"], record["path"], record.get("target_path"))
-            builder.dependencies[ref].update(source_refs[key])
+            builder.depends_on[ref].update(source_refs[key])
             for row in builder.sources:
                 row_key = (row["group"], row["root"], row["path"], row.get("target_path"))
                 if row_key == key:
@@ -384,7 +420,7 @@ def assemble(
             )
     builder.gaps.extend(declaration_issues)
     for package in packages.values():
-        builder.dependencies[package_refs[package["id"]]].update(
+        builder.depends_on[package_refs[package["id"]]].update(
             package_refs[identity] for identity in package["dependencies"]
         )
     roots = set(selected_refs)
@@ -397,7 +433,7 @@ def assemble(
         if requirement["parent"] is not None:
             child = package_refs[requirement["package"]]
             parent = package_refs[requirement["parent"]]
-            builder.dependencies[parent].add(child)
+            builder.depends_on[parent].add(child)
             if child != parent and child not in direct:
                 roots.discard(child)
     complete = (

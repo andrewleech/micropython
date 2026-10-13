@@ -63,3 +63,12 @@ def entry(root, source, deps, directory=None, obj=None, write_dep=True):
 def write_db(path, entries):
     Path(path).write_text(json.dumps(entries, indent=1))
     return path
+
+
+def generate_cyclonedx(*args, **kwargs):
+    """Run sbom.generate_sbom and render its model as a CycloneDX document: (document, receipt)."""
+    from mpy_analysis import sbom
+    from mpy_analysis.sbom_cyclonedx import to_cyclonedx
+
+    model, receipt = sbom.generate_sbom(*args, **kwargs)
+    return to_cyclonedx(model), receipt

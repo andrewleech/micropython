@@ -3,8 +3,7 @@ import hashlib
 import json
 
 import pytest
-
-from mpy_analysis import sbom
+from conftest import generate_cyclonedx
 from mpy_analysis.declarations import load_declarations, merge_declaration, selected_digest
 from mpy_analysis.metadata import collect_metadata
 from mpy_analysis.scope import FROZEN_GROUP
@@ -833,7 +832,7 @@ def test_stale_disputed_correction_is_absent_from_bom_and_explicit_in_facts_matr
     )
     path.write_text(json.dumps(data))
     changed_path.write_text(changed_path.read_text() + "\n")
-    document, receipt = sbom.generate_sbom(
+    document, receipt = generate_cyclonedx(
         scope, micropython_root=MPY_ROOT, declaration_files=[path]
     )
     row = next(item for item in receipt["metadata"] if item["root"] == "external")

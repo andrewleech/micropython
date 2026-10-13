@@ -1,7 +1,9 @@
-"""CycloneDX inventories from the selected manifest and compiler scope.
+"""Neutral SBOM model of the selected manifest and compiler scope.
 
 Repository pins, selected source hashes and declared package/library versions
 are separate evidence. A compilation database does not establish link closure.
+``generate_sbom`` returns the format-neutral model; ``sbom_spdx`` and ``sbom_cyclonedx``
+write it.
 """
 
 from __future__ import annotations
@@ -21,25 +23,25 @@ from .firmware_inventory import load_posthoc_link_inventory
 from .firmware_receipt import load_firmware_receipt, validate_firmware_receipt
 from .generic_inventory import assemble
 from .metadata import collect_metadata
-from .metadata_bom import valid_uri, validate_cyclonedx
-from .sbom_spdx import cyclonedx_to_spdx, serialize_spdx
+from .metadata_bom import valid_uri
+from .sbom_cyclonedx import serialize_cyclonedx, to_cyclonedx
+from .sbom_model import (
+    APPLICATION,
+    FILE,
+    FIRMWARE,
+    LIBRARY,
+    Component,
+    ExternalReference,
+    Model,
+    property_values,
+)
+from .sbom_spdx import serialize_spdx, to_spdx
 from .scope import FROZEN_GROUP, parse_scope, source_path
 
 
 def _ref(kind: str, identity: Any) -> str:
     value = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     return f"urn:mpy:{kind}:{hashlib.sha256(value.encode()).hexdigest()}"
-
-
-def _properties(values: dict[str, Any]) -> list[dict[str, str]]:
-    return [
-        {
-            "name": f"mpy:{key}",
-            "value": value if isinstance(value, str) else json.dumps(value, sort_keys=True),
-        }
-        for key, value in sorted(values.items())
-        if value is not None
-    ]
 
 
 def _git(directory: Path, *arguments: str) -> str | None:
@@ -74,18 +76,31 @@ def _purl(url: str, revision: str, name: str) -> str:
 class _Builder:
     def __init__(self, scope: dict[str, Any]):
         self.scope = scope
-        self.components: dict[str, dict[str, Any]] = {}
-        self.dependencies: dict[str, set[str]] = {}
+        self.components: dict[str, Component] = {}
+        self.depends_on: dict[str, set[str]] = {}
+        self.dynamic_links: dict[str, list[str]] = {}
         self.repositories: dict[str, dict[str, Any] | None] = {}
         self.tracked_files: dict[str, set[str]] = {}
         self.gaps: list[dict[str, Any]] = []
         self.sources: list[dict[str, Any]] = []
 
-    def add(self, kind: str, identity: Any, component: dict[str, Any]) -> str:
+    def add(
+        self, kind: str, identity: Any, component: Component, *, parent: str | None = None
+    ) -> str:
+        """Register a component under a stable reference.
+
+        A component added again under the same reference replaces the earlier one together
+        with the components nested under it.
+        """
         reference = _ref(kind, identity)
-        component["bom-ref"] = reference
+        if reference in self.components:
+            for nested in [ref for ref, item in self.components.items() if item.parent == reference]:
+                del self.components[nested]
+        component.ref = reference
+        component.parent = parent
         self.components[reference] = component
-        self.dependencies.setdefault(reference, set())
+        if parent is None:
+            self.depends_on.setdefault(reference, set())
         return reference
 
     def repository(self, path: Path, *, declared_root: Path | None = None) -> dict[str, Any] | None:
@@ -147,17 +162,17 @@ class _Builder:
                                 "checkout": revision,
                             }
                         )
-        component: dict[str, Any] = {
-            "type": "library",
-            "name": Path(root).name,
-            "version": revision,
-            "properties": _properties(
+        component = Component(
+            kind=LIBRARY,
+            name=Path(root).name,
+            version=revision,
+            properties=property_values(
                 {**info, "selection": "selected-source-repository", "version-source": "git-commit"}
             ),
-        }
+        )
         if vcs_url:
-            component["externalReferences"] = [{"type": "vcs", "url": vcs_url}]
-            component["purl"] = _purl(vcs_url, revision, Path(root).name)
+            component.external_references = [ExternalReference("vcs", vcs_url)]
+            component.purl = _purl(vcs_url, revision, Path(root).name)
         elif origin:
             self.gaps.append(
                 {"kind": "repository-origin-unsupported", "path": root, "origin": origin}
@@ -180,32 +195,36 @@ class _Builder:
         content = path.read_bytes()
         digest = hashlib.sha256(content).hexdigest()
         identity = [record["root"], record["path"], record.get("target_path"), digest]
-        component = {
-            "type": "file",
-            "name": record.get("target_path", record["path"]),
-            "hashes": [
-                {"alg": "SHA-1", "content": hashlib.sha1(content, usedforsecurity=False).hexdigest()},
-                {"alg": "SHA-256", "content": digest},
-            ],
-            "properties": _properties(
-                {
-                    "root": record["root"],
-                    "path": record["path"],
-                    "owner": record["owner"],
-                    "selection": group,
-                    "target-path": record.get("target_path"),
-                }
+        reference = self.add(
+            "file",
+            identity,
+            Component(
+                kind=FILE,
+                name=record.get("target_path", record["path"]),
+                hashes={
+                    "sha1": hashlib.sha1(content, usedforsecurity=False).hexdigest(),
+                    "sha256": digest,
+                },
+                properties=property_values(
+                    {
+                        "root": record["root"],
+                        "path": record["path"],
+                        "owner": record["owner"],
+                        "selection": group,
+                        "target-path": record.get("target_path"),
+                    }
+                ),
             ),
-        }
-        reference = self.add("file", identity, component)
+        )
+        component = self.components[reference]
         repository = self.repository(path, declared_root=Path(self.scope["roots"][record["root"]]))
         tracked = None
         if repository:
             relative = path.relative_to(repository["directory"]).as_posix()
             tracked = relative in self.tracked_files[repository["directory"]]
-            component["properties"].extend(_properties({"git-tracked": tracked}))
+            component.properties.update(property_values({"git-tracked": tracked}))
             if tracked:
-                self.dependencies[repository["ref"]].add(reference)
+                self.depends_on[repository["ref"]].add(reference)
             if not tracked:
                 self.gaps.append(
                     {
@@ -239,11 +258,10 @@ def _generator_input(builder: _Builder, binding: tuple[str, str]) -> str | None:
     """
     root, path = binding
     owners = {
-        property_["value"]
+        builder.components[source["component"]].properties["owner"]
         for source in builder.sources
         if source["root"] == root
-        for property_ in builder.components[source["component"]]["properties"]
-        if property_["name"] == "mpy:owner"
+        and "owner" in builder.components[source["component"]].properties
     }
     if len(owners) != 1:
         return None
@@ -258,20 +276,20 @@ def _generator_input(builder: _Builder, binding: tuple[str, str]) -> str | None:
     )
 
 
-def _runtime_file_hashes(path: str, sha256: str) -> list[dict[str, str]]:
+def _runtime_file_hashes(path: str, sha256: str) -> dict[str, str]:
     """Return the receipt SHA-256 plus a SHA-1 of the file, which SPDX 2.3 requires for files.
 
     The SHA-1 is only taken from bytes whose SHA-256 equals the receipt's. A file that is no
     longer readable keeps its SHA-256 only and is then emitted as an SPDX package, not a file.
     """
-    hashes = [{"alg": "SHA-256", "content": sha256}]
+    hashes = {"sha256": sha256}
     try:
         content = Path(path).read_bytes()
     except OSError:
         return hashes
     if hashlib.sha256(content).hexdigest() != sha256:
         raise ValueError(f"linked runtime file changed since the receipt: {path}")
-    return [{"alg": "SHA-1", "content": hashlib.sha1(content, usedforsecurity=False).hexdigest()}, *hashes]
+    return {"sha1": hashlib.sha1(content, usedforsecurity=False).hexdigest(), **hashes}
 
 
 def _runtime_components(
@@ -283,18 +301,18 @@ def _runtime_components(
     under one library component whose version comes from the library's header macros.
     """
     references = set()
-    libraries: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    libraries: dict[tuple[str, str, str], list[Component]] = {}
 
     def collect(item: dict[str, Any], path: str, sha256: str, members: list[str]) -> None:
         if "c_library" in item:
             library = item["c_library"]
             libraries.setdefault((library["name"], library["version"], library["version_source"]), []).append(
-                {
-                    "type": "file",
-                    "name": path,
-                    "hashes": _runtime_file_hashes(path, sha256),
-                    "properties": _properties({"linkage": "static", "contributing-members": members or None}),
-                }
+                Component(
+                    kind=FILE,
+                    name=path,
+                    hashes=_runtime_file_hashes(path, sha256),
+                    properties=property_values({"linkage": "static", "contributing-members": members or None}),
+                )
             )
         elif "toolchain" in item:
             compiler = next(
@@ -307,12 +325,12 @@ def _runtime_components(
                 builder.add(
                     "toolchain-library",
                     [build_id, sha256],
-                    {
-                        "type": "library",
-                        "name": Path(path).name,
-                        "version": item["toolchain"]["release"],
-                        "hashes": [{"alg": "SHA-256", "content": sha256}],
-                        "properties": _properties(
+                    Component(
+                        kind=LIBRARY,
+                        name=Path(path).name,
+                        version=item["toolchain"]["release"],
+                        hashes={"sha256": sha256},
+                        properties=property_values(
                             {
                                 "toolchain-compiler": compiler["executable"]["path"],
                                 "toolchain-compiler-sha256": compiler["executable"]["sha256"],
@@ -320,7 +338,7 @@ def _runtime_components(
                                 "contributing-members": str(len(members)) if members else None,
                             }
                         ),
-                    },
+                    ),
                 )
             )
 
@@ -331,20 +349,20 @@ def _runtime_components(
         if entry["disposition"] == "contributed":
             collect(entry, entry["path"], entry["sha256"], entry.get("contributing_members", []))
     for (name, version, source), files in sorted(libraries.items()):
-        references.add(
-            builder.add(
-                "c-library",
-                [name, version, build_id],
-                {
-                    "type": "library",
-                    "name": name,
-                    "version": version,
-                    "purl": f"pkg:generic/{quote(name, safe='')}@{quote(version, safe='')}",
-                    "components": sorted(files, key=lambda item: item["name"]),
-                    "properties": _properties({"selection": "linked-c-library", "version-source": source}),
-                },
-            )
+        library_ref = builder.add(
+            "c-library",
+            [name, version, build_id],
+            Component(
+                kind=LIBRARY,
+                name=name,
+                version=version,
+                purl=f"pkg:generic/{quote(name, safe='')}@{quote(version, safe='')}",
+                properties=property_values({"selection": "linked-c-library", "version-source": source}),
+            ),
         )
+        for member in sorted(files, key=lambda item: item.name):
+            builder.add("c-library-file", [library_ref, member.name], member, parent=library_ref)
+        references.add(library_ref)
     return references
 
 
@@ -426,13 +444,12 @@ def _attach_firmware_images(
             if validated["status"] == "complete" and link["status"] == "complete" and not missing
             else "incomplete"
         )
-        component = {
-            "type": "firmware",
-            "name": image["id"],
-            "hashes": [{"alg": "SHA-256", "content": link["elf"]["sha256"]}],
-            "properties": _properties(
+        component = Component(
+            kind=FIRMWARE,
+            name=image["id"],
+            hashes={"sha256": link["elf"]["sha256"]},
+            properties=property_values(
                 {
-                    "dynamic-needed": link["dynamic_needed"] or None,
                     "build-id": validated["build_id"],
                     "receipt-id": validated["receipt_id"],
                     "image-role": image["role"],
@@ -445,12 +462,14 @@ def _attach_firmware_images(
                     "lto": link["lto"],
                 }
             ),
-        }
+        )
         reference = builder.add(
             "firmware-image", [validated["build_id"], image["id"]], component
         )
+        if link["dynamic_needed"]:
+            builder.dynamic_links[reference] = list(link["dynamic_needed"])
         mapped.update(_runtime_components(builder, link, validated["toolchain"], validated["build_id"]))
-        builder.dependencies[reference] = mapped
+        builder.depends_on[reference] = mapped
         root_dependencies.add(reference)
         images.append(
             {
@@ -505,11 +524,11 @@ def _attach_posthoc_firmware_image(
 
     image = evidence["image"]
     build = evidence["build"]
-    component = {
-        "type": "firmware",
-        "name": image["id"],
-        "hashes": [{"alg": "SHA-256", "content": image["elf"]["sha256"]}],
-        "properties": _properties(
+    component = Component(
+        kind=FIRMWARE,
+        name=image["id"],
+        hashes={"sha256": image["elf"]["sha256"]},
+        properties=property_values(
             {
                 "capture-authority": evidence["authority"],
                 "generation-id": evidence["generation"]["id"],
@@ -525,13 +544,13 @@ def _attach_posthoc_firmware_image(
                 "variant": build["variant"],
             }
         ),
-    }
+    )
     reference = builder.add(
         "posthoc-firmware-image",
         [evidence["generation"]["id"], image["id"]],
         component,
     )
-    builder.dependencies[reference] = mapped
+    builder.depends_on[reference] = mapped
     root_dependencies.add(reference)
     builder.gaps.append(
         {
@@ -572,8 +591,8 @@ def generate_sbom(
     build_receipt: Path | dict[str, Any] | None = None,
     posthoc_link_inventory: Path | None = None,
     link_generation: Path | None = None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Return generic selected-dependency components and field-level evidence."""
+) -> tuple[Model, dict[str, Any]]:
+    """Return the neutral SBOM model of the selected dependencies and field-level evidence."""
     if build_receipt is not None and posthoc_link_inventory is not None:
         raise ValueError("provide either an actual build receipt or a posthoc link inventory, not both")
     if link_generation is not None and posthoc_link_inventory is None:
@@ -622,7 +641,7 @@ def generate_sbom(
             builder.file(group, record)
     if not builder.sources:
         raise ValueError("SBOM requires selected frozen sources or compiler inputs")
-    inventory = assemble(builder, scope, list(declaration_files), _properties)
+    inventory = assemble(builder, scope, list(declaration_files))
     if "packages" not in scope:
         builder.gaps.append(
             {
@@ -642,30 +661,26 @@ def generate_sbom(
         )
     else:
         link_closure = None
-    component = {
-        "type": "application",
-        "name": scope["target"],
-        "bom-ref": build_ref,
-        "properties": _properties(
+    root = Component(
+        kind=APPLICATION,
+        name=scope["target"],
+        ref=build_ref,
+        properties=property_values(
             {
                 **build_identity,
                 "scope": "manifest-and-compiler-selected-sources",
                 "link-closure": link_closure["status"] if link_closure else "not-established",
             }
         ),
-    }
-    builder.dependencies[build_ref] = root_dependencies
-    document = {
-        "bomFormat": "CycloneDX",
-        "specVersion": "1.6",
-        "version": 1,
-        "metadata": {"component": component},
-        "components": [builder.components[key] for key in sorted(builder.components)],
-        "dependencies": [
-            {"ref": key, "dependsOn": sorted(builder.dependencies[key])}
-            for key in sorted(builder.dependencies)
-        ],
-    }
+    )
+    builder.depends_on[build_ref] = root_dependencies
+    model = Model(
+        root=build_ref,
+        name=scope["target"],
+        components={**builder.components, build_ref: root},
+        depends_on=builder.depends_on,
+        dynamic_links=builder.dynamic_links,
+    )
     unassessed = {
         group: len(records)
         for group, records in scope["groups"].items()
@@ -711,15 +726,15 @@ def generate_sbom(
         "link_closure": link_closure or {"status": "not-established"},
         "packages": scope.get("packages", []),
         "package_requirements": scope.get("package_requirements", []),
-        "component_count": len(builder.components),
+        "component_count": sum(1 for item in builder.components.values() if item.parent is None),
         "repositories": [
             builder.repositories[key]
             for key in sorted(builder.repositories)
             if builder.repositories[key] and builder.repositories[key]["directory"] == key
         ],
     }
-    validate_cyclonedx(document)
-    return document, receipt
+    model.check()
+    return model, receipt
 
 
 def _protected_inputs(scope_path: Path, data: Any) -> set[Path]:
@@ -848,7 +863,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if input_error is not None:
             raise input_error
         scope = parse_scope(data)
-        document, receipt = generate_sbom(
+        model, receipt = generate_sbom(
             scope,
             micropython_root=args.micropython_root,
             declaration_files=args.dependency_metadata,
@@ -856,16 +871,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             posthoc_link_inventory=args.link_inventory,
             link_generation=args.link_generation,
         )
+        rendered = (
+            serialize_spdx(to_spdx(model))
+            if args.format == "spdx"
+            else serialize_cyclonedx(to_cyclonedx(model))
+        )
         output.mkdir(parents=True, exist_ok=True)
         receipt["scope_file"] = str(scope_path)
         receipt["scope_sha256"] = hashlib.sha256(scope_path.read_bytes()).hexdigest()
         receipt["document_format"] = "SPDX-2.3" if args.format == "spdx" else "CycloneDX-1.6"
         receipt["document_file"] = documents[args.format].name
-        rendered = (
-            serialize_spdx(cyclonedx_to_spdx(document))
-            if args.format == "spdx"
-            else (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
-        )
         documents[args.format].write_bytes(rendered)
         summary_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"SBOM: {receipt['component_count']} components; {receipt['coverage_status']}")

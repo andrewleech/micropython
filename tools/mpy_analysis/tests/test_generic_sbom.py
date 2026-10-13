@@ -2,6 +2,7 @@ import json
 from copy import deepcopy
 
 import pytest
+from conftest import generate_cyclonedx
 from mpy_analysis import sbom
 from mpy_analysis.declarations import validate_document
 from mpy_analysis.scope import FROZEN_GROUP
@@ -33,7 +34,7 @@ def test_direct_frozen_dependency_uses_generic_declared_distribution_metadata(tm
             "setup.py": "from setuptools import setup\nsetup(name='distribution-fixture', version='2.2', license='MIT', url='https://example.invalid/project')\n",
         },
     )
-    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
     component = next(
         item for item in document["components"] if item["name"] == "distribution-fixture"
     )
@@ -56,7 +57,7 @@ def test_direct_frozen_dependency_uses_generic_declared_distribution_metadata(tm
 
 def test_complete_source_accounting_does_not_hide_missing_dependency_metadata(tmp_path):
     inventory, external = direct_dependency(tmp_path, {"source.py": "value = 1\n"})
-    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
     assert receipt["source_accounting"] == "accounted"
     assert receipt["metadata_completeness"] == "incomplete"
     assert receipt["coverage_status"] == "incomplete"
@@ -105,7 +106,7 @@ def test_pinned_application_declaration_fills_missing_package_license(tmp_path):
             }
         )
     )
-    document, receipt = sbom.generate_sbom(
+    document, receipt = generate_cyclonedx(
         inventory, micropython_root=MPY_ROOT, declaration_files=[path]
     )
     alpha = next(item for item in document["components"] if item["name"] == "alpha")
@@ -114,7 +115,7 @@ def test_pinned_application_declaration_fills_missing_package_license(tmp_path):
     assert matrix["fields"]["license"]["status"] == "known"
     assert any(item.get("origin") == "manual" for item in matrix["fields"]["license"]["evidence"])
     (library / "alpha/alpha.py").write_text("value = 99\n")
-    document, receipt = sbom.generate_sbom(
+    document, receipt = generate_cyclonedx(
         inventory, micropython_root=MPY_ROOT, declaration_files=[path]
     )
     alpha = next(item for item in document["components"] if item["name"] == "alpha")
@@ -156,7 +157,7 @@ def test_direct_and_transitive_requirements_both_retain_build_edges(tmp_path):
     inventory, app, library = selection(tmp_path)
     beta = next(item for item in inventory["packages"] if item["name"] == "beta")
     inventory["package_requirements"].append({"parent": None, "package": beta["id"]})
-    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
     components = {item["name"]: item for item in document["components"]}
     edges = {item["ref"]: item["dependsOn"] for item in document["dependencies"]}
     beta_ref = components["beta"]["bom-ref"]
@@ -170,7 +171,7 @@ def test_distribution_name_is_not_replaced_by_logical_require_name(tmp_path):
         "from setuptools import setup\n"
         "setup(name='distribution-alpha', version='2', license='MIT')\n"
     )
-    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
     component = next(
         item for item in document["components"] if item["name"] == "distribution-alpha"
     )
@@ -203,7 +204,7 @@ def test_physical_package_aliases_do_not_choose_first_conflicting_identity(tmp_p
     source["root"] = "alias"
     source["provenance"]["package_id"] = alias["id"]
     inventory["groups"][FROZEN_GROUP].append(source)
-    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
     rows = [
         row
         for row in receipt["sources"]
@@ -238,7 +239,7 @@ def test_invalid_optional_website_is_retained_but_not_emitted_as_url(tmp_path):
             ),
         },
     )
-    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
     component = next(item for item in document["components"] if item["name"] == "fixture")
     assert all(item["type"] != "website" for item in component.get("externalReferences", []))
     matrix = next(
@@ -311,7 +312,7 @@ def test_bound_parent_bom_and_nested_package_share_digest_not_licence_scope(tmp_
             }
         )
     )
-    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
     components = {item["name"]: item for item in document["components"]}
     parent = components["parent-fixture"]
     child = components["child-fixture"]

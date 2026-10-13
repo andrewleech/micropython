@@ -7,8 +7,12 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from conftest import fake_elf
+from conftest import fake_elf, generate_cyclonedx
 from mpy_analysis import sbom, scope
+from mpy_analysis.metadata_bom import validate_cyclonedx
+from mpy_analysis.sbom_cyclonedx import to_cyclonedx
+from mpy_analysis.sbom_model import ExternalReference
+from mpy_analysis.sbom_spdx import to_spdx
 from test_firmware_inventory import make_inventory
 
 MPY_ROOT = Path(__file__).resolve().parents[3]
@@ -81,7 +85,7 @@ def properties(component):
 
 def test_packages_use_selected_external_revision_and_transitive_dependencies(tmp_path):
     inventory, app, library = selection(tmp_path)
-    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
     components = {item["name"]: item for item in document["components"]}
     edges = {item["ref"]: item["dependsOn"] for item in document["dependencies"]}
     assert components["alpha"]["version"] == "2"
@@ -94,7 +98,7 @@ def test_packages_use_selected_external_revision_and_transitive_dependencies(tmp
     assert components["beta.py"]["bom-ref"] not in edges[components["alpha"]["bom-ref"]]
     assert "unused" not in components and "unused.py" not in components
     assert len(receipt["sources"]) == 3
-    assert document == sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)[0]
+    assert document == generate_cyclonedx(inventory, micropython_root=MPY_ROOT)[0]
 
 
 def test_compiler_actions_select_sources_without_repository_sweep(tmp_path):
@@ -115,7 +119,7 @@ def test_compiler_actions_select_sources_without_repository_sweep(tmp_path):
     inventory["groups"]["native"] = scope.collect_compdb_sources(
         database, roots=inventory["roots"], owners={"app": "application", "library": "external"}
     )
-    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
     files = [item for item in document["components"] if item["type"] == "file"]
     assert sum(item["name"] == "selected.c" for item in files) == 1
     assert all(item["name"] != "unused.c" for item in files)
@@ -265,7 +269,7 @@ def test_firmware_receipt_adds_linked_image_and_exact_source_dependency(tmp_path
     )
     evidence = firmware_receipt(inventory, app, tmp_path / "firmware-build")
 
-    document, receipt = sbom.generate_sbom(
+    document, receipt = generate_cyclonedx(
         inventory, micropython_root=MPY_ROOT, build_receipt=evidence
     )
     image = next(component for component in document["components"] if component["type"] == "firmware")
@@ -301,7 +305,7 @@ def test_unmatched_linked_source_remains_partial_in_sbom(tmp_path):
     )
     evidence = firmware_receipt(inventory, app, tmp_path / "firmware-build", "missing.c")
 
-    document, receipt = sbom.generate_sbom(
+    document, receipt = generate_cyclonedx(
         inventory, micropython_root=MPY_ROOT, build_receipt=evidence
     )
 
@@ -437,7 +441,7 @@ def test_dirty_source_hash_and_repository_revision_remain_distinct(tmp_path):
     revision = git(library, "rev-parse", "HEAD")
     content = b"value = 99\n"
     (library / "alpha/alpha.py").write_bytes(content)
-    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
     alpha = next(item for item in document["components"] if item["name"] == "alpha")
     source = next(item for item in document["components"] if item["name"] == "alpha.py")
     assert properties(alpha)["mpy:source-revision"] == revision
@@ -505,7 +509,7 @@ def test_generated_source_does_not_inherit_committed_content_provenance(tmp_path
     inventory["groups"]["native"] = scope.collect_compdb_sources(
         database, roots=inventory["roots"], owners={"app": "application", "library": "external"}
     )
-    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
     source = next(row for row in receipt["sources"] if row["path"] == "generated.c")
     assert source["git_tracked"] is False
     assert source["repository"] is None
@@ -559,7 +563,7 @@ def test_nested_native_project_retains_containing_repository_origin(tmp_path):
             )
         },
     }
-    document, receipt = sbom.generate_sbom(inventory, micropython_root=mpy)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=mpy)
     component = next(item for item in document["components"] if item["name"] == "portable_native")
     assert component["version"] == "1.2"
     assert component["externalReferences"] == [
@@ -574,7 +578,7 @@ def test_package_manifest_alias_uses_physical_repository_revision(tmp_path):
     inventory["roots"]["all"] = str(tmp_path)
     package = next(item for item in inventory["packages"] if item["name"] == "alpha")
     package["root"], package["path"] = "all", "application/manifest-alias.py"
-    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
     alpha = next(item for item in document["components"] if item["name"] == "alpha")
     assert properties(alpha)["mpy:source-revision"] == git(library, "rev-parse", "HEAD")
     assert properties(alpha)["mpy:manifest"] == str((library / "alpha/manifest.py").resolve())
@@ -742,7 +746,7 @@ def test_cli_supports_output_inside_project_build_directory(tmp_path):
         )
         == 0
     )
-    sbom.validate_cyclonedx(json.loads((other / "sbom.json").read_text()))
+    validate_cyclonedx(json.loads((other / "sbom.json").read_text()))
     assert not (other / "sbom.spdx.json").exists()
     assert json.loads((other / "sbom-summary.json").read_text())["document_format"] == "CycloneDX-1.6"
 
@@ -797,7 +801,7 @@ def test_cli_invalidates_safe_project_build_output_on_malformed_input(tmp_path, 
 def test_repository_origins_are_canonical_uris_with_raw_evidence(tmp_path, origin, canonical):
     inventory, app, library = selection(tmp_path)
     git(library, "remote", "set-url", "origin", origin)
-    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
     record = next(item for item in receipt["repositories"] if item["directory"] == str(library))
     assert record["origin"] == origin
     assert record["vcs_url"] == canonical
@@ -809,14 +813,14 @@ def test_repository_origins_are_canonical_uris_with_raw_evidence(tmp_path, origi
     assert parse_qs(urlparse(repository_component["purl"]).query)["vcs_url"] == [canonical]
     alpha = next(item for item in document["components"] if item["name"] == "alpha")
     assert {"type": "vcs", "url": canonical} in alpha["externalReferences"]
-    sbom.validate_cyclonedx(document)
+    validate_cyclonedx(document)
 
 
 def test_invalid_origin_remains_explicit_without_invalid_vcs_reference(tmp_path):
     inventory, app, library = selection(tmp_path)
     origin = "https://example.invalid/a b.git"
     git(library, "remote", "set-url", "origin", origin)
-    document, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
     record = next(item for item in receipt["repositories"] if item["directory"] == str(library))
     assert record["origin"] == origin
     assert record["vcs_url"] is None
@@ -829,28 +833,36 @@ def test_invalid_origin_remains_explicit_without_invalid_vcs_reference(tmp_path)
     )
     assert "externalReferences" not in repository_component
     assert "purl" not in repository_component
-    sbom.validate_cyclonedx(document)
+    validate_cyclonedx(document)
 
 
-def test_cli_rejects_final_bom_schema_failure_without_success_output(tmp_path, monkeypatch):
+@pytest.mark.parametrize("output_format", ["cyclonedx", "spdx"])
+def test_cli_rejects_final_document_failure_without_success_output(
+    tmp_path, monkeypatch, output_format
+):
     inventory, app, library = selection(tmp_path)
     original_assemble = sbom.assemble
 
     def invalid_component(builder, *args):
         result = original_assemble(builder, *args)
-        next(iter(builder.components.values()))["externalReferences"] = [
-            {"type": "website", "url": "https://example.invalid/invalid url"}
-        ]
+        component = next(iter(builder.components.values()))
+        if output_format == "cyclonedx":
+            component.external_references = [
+                ExternalReference("website", "https://example.invalid/invalid url")
+            ]
+        else:
+            component.hashes = {"crc32": "00"}
         return result
 
     monkeypatch.setattr(sbom, "assemble", invalid_component)
+    model, _ = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
     with pytest.raises(ValueError):
-        sbom.generate_sbom(inventory, micropython_root=MPY_ROOT)
+        (to_cyclonedx if output_format == "cyclonedx" else to_spdx)(model)
     path = tmp_path / "scope.json"
     path.write_text(json.dumps(inventory))
     output = app / "build"
     output.mkdir()
-    for name in ("sbom.json", "sbom-summary.json"):
+    for name in ("sbom.json", "sbom.spdx.json", "sbom-summary.json"):
         (output / name).write_text("stale success")
     assert (
         sbom.main(
@@ -861,11 +873,14 @@ def test_cli_rejects_final_bom_schema_failure_without_success_output(tmp_path, m
                 str(MPY_ROOT),
                 "--output-dir",
                 str(output),
+                "--format",
+                output_format,
             ]
         )
         == 2
     )
     assert not (output / "sbom.json").exists()
+    assert not (output / "sbom.spdx.json").exists()
     assert not (output / "sbom-summary.json").exists()
 
 
@@ -938,7 +953,7 @@ def test_posthoc_link_inventory_adds_only_incomplete_firmware_evidence(tmp_path)
     )
     path = make_inventory(tmp_path, app / "selected.c")
 
-    document, summary = sbom.generate_sbom(
+    document, summary = generate_cyclonedx(
         inventory, micropython_root=MPY_ROOT, posthoc_link_inventory=path
     )
 

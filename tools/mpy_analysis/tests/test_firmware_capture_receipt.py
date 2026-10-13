@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import fake_elf
+from conftest import fake_elf, generate_cyclonedx
 from mpy_analysis import sbom, scope
 from mpy_analysis.firmware_capture import capture_make
 from mpy_analysis.firmware_capture_receipt import (
@@ -462,7 +462,7 @@ $(BUILD)/firmware.bin: $(BUILD)/firmware.elf
     inventory["groups"]["native"] = scope.collect_compdb_sources(
         compdb, roots=inventory["roots"], owners={"fixture": "application"}
     )
-    document, summary = sbom.generate_sbom(
+    document, summary = generate_cyclonedx(
         inventory, micropython_root=mpy_root, build_receipt=receipt
     )
     firmware = next(item for item in document["components"] if item["type"] == "firmware")
@@ -683,7 +683,7 @@ $(BUILD)/firmware.elf: $(BUILD)/main.o $(BUILD)/generated.o
     inventory["groups"]["native"] = scope.collect_compdb_sources(
         compdb, roots=inventory["roots"], owners={"fixture": "application"}
     )
-    document, summary = sbom.generate_sbom(
+    document, summary = generate_cyclonedx(
         inventory, micropython_root=mpy_root, build_receipt=receipt_path
     )
     selections = {
@@ -1066,7 +1066,7 @@ $(BUILD)/firmware.elf: $(BUILD)/main.o
     inventory["groups"]["native"] = scope.collect_compdb_sources(
         compdb, roots=inventory["roots"], owners={"fixture": "application"}
     )
-    document, summary = sbom.generate_sbom(
+    document, summary = generate_cyclonedx(
         inventory, micropython_root=mpy_root, build_receipt=receipt_path
     )
     names = {item["name"] for item in document["components"]}

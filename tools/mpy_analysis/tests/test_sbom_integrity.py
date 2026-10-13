@@ -1,6 +1,6 @@
 import json
 
-from mpy_analysis import sbom
+from conftest import generate_cyclonedx
 from mpy_analysis.declarations import selected_digest
 from test_generic_sbom import direct_dependency
 from test_sbom import MPY_ROOT
@@ -61,7 +61,7 @@ def test_manual_license_text_conflict_remains_unresolved(tmp_path):
             }
         ],
     )
-    document, receipt = sbom.generate_sbom(
+    document, receipt = generate_cyclonedx(
         inventory,
         micropython_root=MPY_ROOT,
         declaration_files=[declaration],
@@ -92,7 +92,7 @@ def test_manual_copyright_does_not_overwrite_selected_source_assertion(tmp_path)
     data = json.loads(declaration.read_text())
     data["components"][0]["copyright"] = "2026 Copyright B"
     declaration.write_text(json.dumps(data))
-    document, receipt = sbom.generate_sbom(
+    document, receipt = generate_cyclonedx(
         inventory,
         micropython_root=MPY_ROOT,
         declaration_files=[declaration],

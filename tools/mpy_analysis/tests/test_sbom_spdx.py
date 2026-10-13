@@ -4,6 +4,9 @@ from collections import Counter
 
 import pytest
 from mpy_analysis import metadata_bom, sbom_spdx
+from mpy_analysis.sbom_cyclonedx import to_cyclonedx
+from mpy_analysis.sbom_model import Component, Contact, ExternalReference, Model, Party
+from mpy_analysis.sbom_spdx import to_spdx
 
 SHA256_A = "a" * 64
 SHA256_B = "b" * 64
@@ -19,127 +22,103 @@ REPO = "urn:mpy:repository:repo"
 SYSTEM = "urn:mpy:system-package:libffi8"
 SOURCE_FILE = "urn:mpy:file:main"
 VENDOR = "urn:mpy:dependency:vendor"
+LIBFFI_SO = "urn:mpy:file:libffi-so"
+LIBFFI_A = "urn:mpy:file:libffi-a"
 
 
-def props(**values):
-    return [{"name": name, "value": value} for name, value in values.items()]
-
-
-def cyclonedx():
-    application = {
-        "type": "application",
-        "bom-ref": APP,
-        "name": "x86_64-linux-gnu",
-        "properties": props(**{"mpy:port": "unix", "mpy:variant": "standard"}),
-    }
+def sample_model() -> Model:
     components = [
-        {
-            "type": "file",
-            "bom-ref": SOURCE_FILE,
-            "name": "py/main.c",
-            "hashes": [
-                {"alg": "SHA-256", "content": SHA256_A},
-                {"alg": "SHA-1", "content": SHA1_A},
-            ],
-            "copyright": "Copyright Example",
-            "properties": props(
-                **{"mpy:owner": "core", "mpy:path": "py/main.c", "mpy:selection": "native"}
-            ),
-        },
-        {
-            "type": "library",
-            "bom-ref": REPO,
-            "name": "micropython",
-            "version": "1.2.3",
-            "purl": "pkg:github/micropython/micropython@1.2.3",
-            "scope": "required",
-            "externalReferences": [{"type": "vcs", "url": "https://github.com/m/m.git"}],
-            "licenses": [{"license": {"id": "MIT"}}],
-            "properties": props(
-                **{
-                    "mpy:revision": "abc",
-                    "mpy:source:root": ".",
-                    "mpy:source:path": "py",
-                    "mpy:source:revision": "abc",
-                }
-            ),
-        },
-        {
-            "type": "library",
-            "bom-ref": VENDOR,
-            "name": "vendor-lib",
-            "description": "Vendor library",
-            "supplier": {"name": "Vendor Inc", "contact": [{"email": "a@example.invalid"}]},
-            "licenses": [
-                {"license": {"name": "LicenseRef-vendor", "text": {"content": LICENSE_TEXT}}}
-            ],
-            "evidence": {"identity": {"field": "name", "confidence": 1}},
-            "properties": props(**{"mpy:boundary": "vendor", "x:other": "kept"}),
-        },
-        {
-            "type": "library",
-            "bom-ref": SYSTEM,
-            "name": "libffi8",
-            "version": "3.4.6",
-            "purl": "pkg:deb/ubuntu/libffi8@3.4.6",
-            "scope": "optional",
-            "components": [
-                {
-                    "type": "file",
-                    "name": "/usr/lib/libffi.so.8.1.4",
-                    "hashes": [
-                        {"alg": "SHA-256", "content": SHA256_B},
-                        {"alg": "SHA-1", "content": SHA1_B},
-                    ],
-                    "properties": props(**{"mpy:linkage": "dynamic"}),
-                },
-                {
-                    "type": "file",
-                    "name": "/usr/lib/libffi.a",
-                    "hashes": [
-                        {"alg": "SHA-256", "content": SHA256_C},
-                        {"alg": "SHA-1", "content": SHA1_C},
-                    ],
-                },
-            ],
-            "properties": props(**{"mpy:package-manager": "dpkg"}),
-        },
-        {
-            "type": "firmware",
-            "bom-ref": FIRMWARE,
-            "name": "unix",
-            "hashes": [
-                {"alg": "SHA-256", "content": SHA256_B},
-                {"alg": "SHA-1", "content": SHA1_B},
-            ],
-            "properties": props(
-                **{
-                    "mpy:image-role": "application",
-                    "mpy:link-closure": "complete",
-                    "mpy:dynamic-needed": json.dumps(["libffi.so.8", "libc.so.6"]),
-                }
-            ),
-        },
+        Component(
+            kind="application",
+            ref=APP,
+            name="x86_64-linux-gnu",
+            properties={"port": "unix", "variant": "standard"},
+        ),
+        Component(
+            kind="file",
+            ref=SOURCE_FILE,
+            name="py/main.c",
+            hashes={"sha256": SHA256_A, "sha1": SHA1_A},
+            copyright="Copyright Example",
+            properties={"owner": "core", "path": "py/main.c", "selection": "native"},
+        ),
+        Component(
+            kind="library",
+            ref=REPO,
+            name="micropython",
+            version="1.2.3",
+            purl="pkg:github/micropython/micropython@1.2.3",
+            external_references=[ExternalReference("vcs", "https://github.com/m/m.git")],
+            license="MIT",
+            properties={
+                "revision": "abc",
+                "source:root": ".",
+                "source:path": "py",
+                "source:revision": "abc",
+            },
+        ),
+        Component(
+            kind="library",
+            ref=VENDOR,
+            name="vendor-lib",
+            description="Vendor library",
+            supplier=Party(name="Vendor Inc", contacts=[Contact(email="a@example.invalid")]),
+            publisher="Vendor Publisher",
+            group="org.vendor",
+            cpe="cpe:2.3:a:vendor:lib:1:*:*:*:*:*:*:*",
+            license="LicenseRef-vendor",
+            license_texts={"LicenseRef-vendor": LICENSE_TEXT},
+            properties={"boundary": "vendor"},
+        ),
+        Component(
+            kind="library",
+            ref=SYSTEM,
+            name="libffi8",
+            version="3.4.6",
+            purl="pkg:deb/ubuntu/libffi8@3.4.6",
+            properties={"package-manager": "dpkg"},
+        ),
+        Component(
+            kind="file",
+            ref=LIBFFI_SO,
+            name="/usr/lib/libffi.so.8.1.4",
+            hashes={"sha256": SHA256_B, "sha1": SHA1_B},
+            properties={"linkage": "dynamic"},
+            parent=SYSTEM,
+        ),
+        Component(
+            kind="file",
+            ref=LIBFFI_A,
+            name="/usr/lib/libffi.a",
+            hashes={"sha256": SHA256_C, "sha1": SHA1_C},
+            parent=SYSTEM,
+        ),
+        Component(
+            kind="firmware",
+            ref=FIRMWARE,
+            name="unix",
+            hashes={"sha256": SHA256_B, "sha1": SHA1_B},
+            properties={"image-role": "application", "link-closure": "complete"},
+        ),
     ]
-    return {
-        "bomFormat": "CycloneDX",
-        "specVersion": "1.6",
-        "version": 1,
-        "metadata": {"component": application},
-        "components": components,
-        "dependencies": [
-            {"ref": APP, "dependsOn": [FIRMWARE, REPO]},
-            {"ref": FIRMWARE, "dependsOn": [SOURCE_FILE, SYSTEM, VENDOR]},
-            {"ref": REPO, "dependsOn": [SOURCE_FILE]},
-            {"ref": SYSTEM, "dependsOn": []},
-            {"ref": VENDOR, "dependsOn": []},
-            {"ref": SOURCE_FILE, "dependsOn": []},
-        ],
-    }
+    return Model(
+        root=APP,
+        name="x86_64-linux-gnu",
+        components={item.ref: item for item in components},
+        depends_on={
+            APP: {FIRMWARE, REPO},
+            FIRMWARE: {SOURCE_FILE, SYSTEM, VENDOR},
+            REPO: {SOURCE_FILE},
+            SYSTEM: set(),
+            VENDOR: set(),
+            SOURCE_FILE: set(),
+        },
+        dynamic_links={FIRMWARE: ["libffi.so.8", "libc.so.6"]},
+    )
 
 
-def convert(document=None):
-    return sbom_spdx.cyclonedx_to_spdx(cyclonedx() if document is None else document)
+def convert(model=None):
+    return to_spdx(sample_model() if model is None else model)
 
 
 def by_name(spdx):
@@ -158,6 +137,12 @@ def merged_annotations(element):
     return merged
 
 
+def add(model, **fields):
+    component = Component(**fields)
+    model.components[component.ref] = component
+    return component
+
+
 def test_output_is_schema_valid_spdx_23():
     spdx = convert()
     sbom_spdx.validate_spdx(spdx)
@@ -173,11 +158,9 @@ def test_output_is_schema_valid_spdx_23():
 
 def test_every_component_is_a_package_or_file():
     spdx = convert()
-    document = cyclonedx()
-    count = 1 + len(document["components"]) + 2
-    # Application root and four top-level packages, one top-level file, two nested files,
+    # The application root and four top-level packages, one top-level file, two nested files,
     # plus two dynamic-link placeholders.
-    assert len(spdx["packages"]) + len(spdx["files"]) == count + 2
+    assert len(spdx["packages"]) + len(spdx["files"]) == 10
     assert {item["fileName"] for item in spdx["files"]} == {
         "py/main.c",
         "/usr/lib/libffi.so.8.1.4",
@@ -206,7 +189,7 @@ def test_relationship_types_and_counts():
     }
     assert len(relationships) == len(spdx["relationships"])
     assert ("SPDXRef-DOCUMENT", "DESCRIBES", ids["x86_64-linux-gnu"]) in relationships
-    # Each CycloneDX edge is one DEPENDS_ON.
+    # Each depends_on edge is one DEPENDS_ON.
     for source, target in (
         ("x86_64-linux-gnu", "unix"),
         ("x86_64-linux-gnu", "micropython"),
@@ -220,11 +203,12 @@ def test_relationship_types_and_counts():
     # Ownership: the repository package contains the file, the firmware only depends on it.
     assert (ids["micropython"], "CONTAINS", main) in relationships
     assert (ids["unix"], "CONTAINS", main) not in relationships
+    # Nested components are contained by their parent.
     for name in ("/usr/lib/libffi.so.8.1.4", "/usr/lib/libffi.a"):
         assert (ids["libffi8"], "CONTAINS", files[name]["SPDXID"]) in relationships
 
 
-def test_dynamic_needed_becomes_dynamic_link_placeholders():
+def test_dynamic_links_become_unversioned_placeholder_packages():
     spdx = convert()
     packages = by_name(spdx)
     links = [item for item in spdx["relationships"] if item["relationshipType"] == "DYNAMIC_LINK"]
@@ -236,66 +220,69 @@ def test_dynamic_needed_becomes_dynamic_link_placeholders():
         assert "versionInfo" not in placeholder
         assert placeholder["downloadLocation"] == "NOASSERTION"
         assert placeholder["filesAnalyzed"] is False
+        assert placeholder["licenseDeclared"] == "NOASSERTION"
 
 
 def test_shared_soname_has_one_placeholder():
-    document = cyclonedx()
-    document["components"].append(
-        {
-            "type": "firmware",
-            "bom-ref": "urn:mpy:firmware-image:second",
-            "name": "second",
-            "properties": props(**{"mpy:dynamic-needed": json.dumps(["libc.so.6"])}),
-        }
-    )
-    spdx = convert(document)
+    model = sample_model()
+    add(model, kind="firmware", ref="urn:mpy:firmware-image:second", name="second")
+    model.dynamic_links["urn:mpy:firmware-image:second"] = ["libc.so.6"]
+    spdx = convert(model)
     assert [item["name"] for item in spdx["packages"]].count("libc.so.6") == 1
     links = [item for item in spdx["relationships"] if item["relationshipType"] == "DYNAMIC_LINK"]
     assert len(links) == 3
 
 
-@pytest.mark.parametrize("value", ["not json", '{"a": 1}', '["ok", ""]', "[1]"])
-def test_malformed_dynamic_needed_is_rejected(value):
-    document = cyclonedx()
-    document["components"][-1]["properties"] = props(**{"mpy:dynamic-needed": value})
-    with pytest.raises(ValueError, match="dynamic-needed"):
-        convert(document)
+@pytest.mark.parametrize("value", [[""], [1], "libc.so.6"])
+def test_malformed_dynamic_links_are_rejected(value):
+    model = sample_model()
+    model.dynamic_links[FIRMWARE] = value
+    with pytest.raises(ValueError, match="sonames"):
+        convert(model)
 
 
 def test_checksums_are_preserved():
     spdx = convert()
     files = {item["fileName"]: item for item in spdx["files"]}
     assert files["py/main.c"]["checksums"] == [
-        {"algorithm": "SHA256", "checksumValue": SHA256_A},
         {"algorithm": "SHA1", "checksumValue": SHA1_A},
+        {"algorithm": "SHA256", "checksumValue": SHA256_A},
     ]
     assert files["/usr/lib/libffi.so.8.1.4"]["checksums"] == [
-        {"algorithm": "SHA256", "checksumValue": SHA256_B},
         {"algorithm": "SHA1", "checksumValue": SHA1_B},
+        {"algorithm": "SHA256", "checksumValue": SHA256_B},
     ]
     assert by_name(spdx)["unix"]["checksums"] == [
-        {"algorithm": "SHA256", "checksumValue": SHA256_B},
         {"algorithm": "SHA1", "checksumValue": SHA1_B},
+        {"algorithm": "SHA256", "checksumValue": SHA256_B},
     ]
+
+
+def test_unknown_hash_algorithm_is_rejected():
+    model = sample_model()
+    model.components[REPO].hashes = {"crc32": "00"}
+    with pytest.raises(ValueError, match="no SPDX equivalent"):
+        convert(model)
 
 
 def test_file_without_any_hash_becomes_file_purpose_package():
-    document = cyclonedx()
-    document["components"].append({"type": "file", "bom-ref": "urn:x", "name": "unhashed.bin"})
-    spdx = convert(document)
+    model = sample_model()
+    add(model, kind="file", ref="urn:x", name="unhashed.bin")
+    spdx = convert(model)
     package = by_name(spdx)["unhashed.bin"]
     assert package["primaryPackagePurpose"] == "FILE"
-    assert merged_annotations(package)["cyclonedx:type"] == "file"
+    assert package["downloadLocation"] == "NOASSERTION"
+    assert package["filesAnalyzed"] is False
+    assert "checksums" not in package
     assert "unhashed.bin" not in {item["fileName"] for item in spdx["files"]}
 
 
 def test_file_with_only_sha256_is_a_package_and_a_sha1_less_file_is_rejected():
-    document = cyclonedx()
-    document["components"].append(
-        {"type": "file", "bom-ref": "urn:y", "name": "sha256only.bin", "hashes": [{"alg": "SHA-256", "content": SHA256_C}]}
-    )
-    spdx = convert(document)
+    model = sample_model()
+    add(model, kind="file", ref="urn:y", name="sha256only.bin", hashes={"sha256": SHA256_C})
+    spdx = convert(model)
     package = by_name(spdx)["sha256only.bin"]
+    assert package["primaryPackagePurpose"] == "FILE"
     assert package["checksums"] == [{"algorithm": "SHA256", "checksumValue": SHA256_C}]
     assert "sha256only.bin" not in {item["fileName"] for item in spdx["files"]}
     for item in spdx["files"]:
@@ -305,13 +292,14 @@ def test_file_with_only_sha256_is_a_package_and_a_sha1_less_file_is_rejected():
 
 
 def test_uppercase_hash_content_is_lowercased():
-    document = cyclonedx()
-    document["components"][0]["hashes"][0]["content"] = SHA256_A.upper()
-    spdx = convert(document)
-    assert spdx["files"][0]["checksums"][0]["checksumValue"] == SHA256_A
+    model = sample_model()
+    model.components[SOURCE_FILE].hashes["sha256"] = SHA256_A.upper()
+    spdx = convert(model)
+    main = next(item for item in spdx["files"] if item["fileName"] == "py/main.c")
+    assert {"algorithm": "SHA256", "checksumValue": SHA256_A} in main["checksums"]
 
 
-def test_purl_supplier_version_description_copyright_scope():
+def test_purl_supplier_version_description_copyright_cpe():
     spdx = convert()
     packages = by_name(spdx)
     repo = packages["micropython"]
@@ -329,18 +317,58 @@ def test_purl_supplier_version_description_copyright_scope():
     vendor = packages["vendor-lib"]
     assert vendor["supplier"] == "Organization: Vendor Inc (a@example.invalid)"
     assert vendor["description"] == "Vendor library"
+    assert {
+        "referenceCategory": "SECURITY",
+        "referenceType": "cpe23Type",
+        "referenceLocator": "cpe:2.3:a:vendor:lib:1:*:*:*:*:*:*:*",
+    } in vendor["externalRefs"]
     files = {item["fileName"]: item for item in spdx["files"]}
     assert files["py/main.c"]["copyrightText"] == "Copyright Example"
     assert files["/usr/lib/libffi.a"]["copyrightText"] == "NOASSERTION"
-    # Scope has no SPDX field: it is annotated and marked on the dependency edge.
-    assert merged_annotations(packages["libffi8"])["cyclonedx:scope"] == "optional"
-    optional = [
-        item
-        for item in spdx["relationships"]
-        if item["relationshipType"] == "DEPENDS_ON"
-        and item["relatedSpdxElement"] == packages["libffi8"]["SPDXID"]
+    assert "versionInfo" not in packages["unix"]
+
+
+def test_website_reference_is_the_homepage_and_other_references_keep_their_type():
+    model = sample_model()
+    model.components[REPO].external_references = [
+        ExternalReference("website", "https://example.invalid/home"),
+        ExternalReference("website", "https://example.invalid/other"),
+        ExternalReference("vcs", "https://example.invalid/repo.git", comment="mirror"),
     ]
-    assert [item["comment"] for item in optional] == ["CycloneDX scope: optional"]
+    package = by_name(convert(model))["micropython"]
+    assert package["homepage"] == "https://example.invalid/home"
+    refs = [item for item in package["externalRefs"] if item["referenceCategory"] == "OTHER"]
+    assert [(item["referenceType"], item["referenceLocator"]) for item in refs] == [
+        ("website", "https://example.invalid/other"),
+        ("vcs", "https://example.invalid/repo.git"),
+    ]
+    assert refs[1]["comment"] == "mirror"
+
+
+def test_author_is_the_originator_and_a_file_contributor():
+    model = sample_model()
+    model.components[REPO].author = "Ann"
+    model.components[SOURCE_FILE].author = "Bob"
+    spdx = convert(model)
+    assert by_name(spdx)["micropython"]["originator"] == "Person: Ann"
+    main = next(item for item in spdx["files"] if item["fileName"] == "py/main.c")
+    assert main["fileContributors"] == ["Bob"]
+
+
+def test_cpe_without_an_spdx_form_is_annotated():
+    model = sample_model()
+    model.components[VENDOR].cpe = "not-a-cpe"
+    vendor = by_name(convert(model))["vendor-lib"]
+    assert not any(item["referenceCategory"] == "SECURITY" for item in vendor.get("externalRefs", []))
+    assert merged_annotations(vendor)["component:cpe"] == "not-a-cpe"
+
+
+def test_component_kinds_without_a_purpose_are_annotated():
+    model = sample_model()
+    add(model, kind="data", ref="urn:data", name="dataset")
+    package = by_name(convert(model))["dataset"]
+    assert package["primaryPackagePurpose"] == "OTHER"
+    assert merged_annotations(package)["component:kind"] == "data"
 
 
 def test_file_types_follow_names():
@@ -349,9 +377,12 @@ def test_file_types_follow_names():
     assert files["py/main.c"]["fileTypes"] == ["SOURCE"]
     assert files["/usr/lib/libffi.so.8.1.4"]["fileTypes"] == ["BINARY"]
     assert files["/usr/lib/libffi.a"]["fileTypes"] == ["BINARY"]
-    document = cyclonedx()
-    document["components"][0]["name"] = "data.unknownext"
-    assert "fileTypes" not in convert(document)["files"][0]
+    model = sample_model()
+    model.components[SOURCE_FILE].name = "data.unknownext"
+    spdx = convert(model)
+    assert "fileTypes" not in next(
+        item for item in spdx["files"] if item["fileName"] == "data.unknownext"
+    )
 
 
 def test_licences_map_without_invention():
@@ -360,6 +391,7 @@ def test_licences_map_without_invention():
     assert packages["micropython"]["licenseDeclared"] == "MIT"
     assert packages["unix"]["licenseDeclared"] == "NOASSERTION"
     assert packages["unix"]["licenseConcluded"] == "NOASSERTION"
+    assert packages["micropython"]["licenseConcluded"] == "NOASSERTION"
     assert packages["vendor-lib"]["licenseDeclared"] == "LicenseRef-vendor"
     assert spdx["hasExtractedLicensingInfos"] == [
         {"licenseId": "LicenseRef-vendor", "extractedText": LICENSE_TEXT}
@@ -369,62 +401,81 @@ def test_licences_map_without_invention():
     assert files["py/main.c"]["licenseConcluded"] == "NOASSERTION"
 
 
-def test_licence_expression_and_concluded_acknowledgement():
-    document = cyclonedx()
-    document["components"][1]["licenses"] = [{"expression": "Apache-2.0 OR GPL-2.0-or-later"}]
-    package = by_name(convert(document))["micropython"]
+def test_licence_expression_is_declared_as_given():
+    model = sample_model()
+    model.components[REPO].license = "Apache-2.0 OR GPL-2.0-or-later"
+    package = by_name(convert(model))["micropython"]
     assert package["licenseDeclared"] == "Apache-2.0 OR GPL-2.0-or-later"
     assert package["licenseConcluded"] == "NOASSERTION"
-    document["components"][1]["licenses"] = [
-        {"license": {"id": "Apache-2.0"}},
-        {"license": {"id": "GPL-2.0-only"}},
-        {"license": {"id": "MIT", "acknowledgement": "concluded"}},
-    ]
-    package = by_name(convert(document))["micropython"]
-    assert package["licenseDeclared"] == "Apache-2.0 AND GPL-2.0-only"
-    assert package["licenseConcluded"] == "MIT"
-    assert "cyclonedx:licenses" not in merged_annotations(package)
+    model.components[SOURCE_FILE].license = "MIT"
+    main = next(item for item in convert(model)["files"] if item["fileName"] == "py/main.c")
+    assert main["licenseInfoInFiles"] == ["MIT"]
+    assert main["licenseConcluded"] == "NOASSERTION"
 
 
-def test_named_licence_without_text_is_not_invented():
-    document = cyclonedx()
-    document["components"][1]["licenses"] = [{"license": {"name": "Proprietary EULA"}}]
-    spdx = convert(document)
-    package = by_name(spdx)["micropython"]
-    assert package["licenseDeclared"] == "NOASSERTION"
-    assert merged_annotations(package)["cyclonedx:licenses"] == [
-        {"license": {"name": "Proprietary EULA"}}
-    ]
-    assert [item["licenseId"] for item in spdx["hasExtractedLicensingInfos"]] == [
-        "LicenseRef-vendor"
-    ]
+def test_licence_text_alone_does_not_declare_a_licence():
+    model = sample_model()
+    component = model.components[REPO]
+    component.license = None
+    component.license_texts = {"Proprietary EULA": "Terms."}
+    spdx = convert(model)
+    assert by_name(spdx)["micropython"]["licenseDeclared"] == "NOASSERTION"
+    extracted = {item["licenseId"]: item for item in spdx["hasExtractedLicensingInfos"]}
+    identifier = next(key for key in extracted if key != "LicenseRef-vendor")
+    assert identifier.startswith("LicenseRef-Proprietary-EULA-")
+    assert extracted[identifier]["name"] == "Proprietary EULA"
+    assert extracted[identifier]["extractedText"] == "Terms."
+    sbom_spdx.validate_spdx(spdx)
+
+
+def test_conflicting_licence_texts_are_rejected():
+    model = sample_model()
+    model.components[REPO].license_texts = {"LicenseRef-vendor": "Different terms."}
+    with pytest.raises(ValueError, match="conflicting licence text"):
+        convert(model)
 
 
 def test_every_property_is_recoverable_from_annotations():
-    document = cyclonedx()
-    spdx = convert(document)
+    model = sample_model()
+    spdx = convert(model)
     elements = {
         **{item["name"]: item for item in spdx["packages"]},
         **{item["fileName"]: item for item in spdx["files"]},
     }
+    for component in model.components.values():
+        recovered = merged_annotations(elements[component.name])
+        for name, value in component.properties.items():
+            assert recovered[f"mpy:{name}"] == value
+    vendor = merged_annotations(elements["vendor-lib"])
+    assert vendor["component:publisher"] == "Vendor Publisher"
+    assert vendor["component:group"] == "org.vendor"
 
-    def check(component):
-        recovered = merged_annotations(elements[component["name"]])
-        for item in component.get("properties", []):
-            assert recovered[item["name"]] == item["value"]
-        for child in component.get("components", []):
-            check(child)
 
-    check(document["metadata"]["component"])
-    for component in document["components"]:
-        check(component)
-    assert merged_annotations(elements["vendor-lib"])["cyclonedx:evidence"] == {
-        "identity": {"field": "name", "confidence": 1}
-    }
-    assert merged_annotations(elements["vendor-lib"])["x:other"] == "kept"
-    assert merged_annotations(elements["unix"])["mpy:dynamic-needed"] == json.dumps(
-        ["libffi.so.8", "libc.so.6"]
+def test_properties_are_not_annotated_as_dynamic_needed():
+    spdx = convert()
+    assert not any(
+        key.endswith("dynamic-needed")
+        for element in [*spdx["packages"], *spdx["files"]]
+        for item in annotation_objects(element)
+        for key in item
     )
+
+
+def test_file_fields_without_an_spdx_home_are_annotated():
+    model = sample_model()
+    file_component = model.components[SOURCE_FILE]
+    file_component.version = "9"
+    file_component.group = "g"
+    file_component.supplier = Party(name="Org")
+    file_component.external_references = [ExternalReference("vcs", "https://example.invalid/r.git")]
+    main = next(item for item in convert(model)["files"] if item["fileName"] == "py/main.c")
+    extras = merged_annotations(main)
+    assert extras["component:version"] == "9"
+    assert extras["component:group"] == "g"
+    assert extras["component:supplier"] == "Org"
+    assert extras["component:external-references"] == [
+        {"type": "vcs", "url": "https://example.invalid/r.git"}
+    ]
 
 
 def test_annotation_shape():
@@ -437,21 +488,13 @@ def test_annotation_shape():
             assert isinstance(json.loads(item["comment"]), dict)
 
 
-def test_repeated_property_names_are_not_collapsed():
-    document = cyclonedx()
-    document["components"][1]["properties"] = props(**{"mpy:a": "1"}) + props(**{"mpy:a": "2"})
-    package = by_name(convert(document))["micropython"]
-    assert sorted(item["mpy:a"] for item in annotation_objects(package)) == ["1", "2"]
-
-
-def test_deterministic_bytes_and_input_derived_namespace():
+def test_deterministic_bytes_and_content_derived_namespace():
     first = sbom_spdx.serialize_spdx(convert())
-    second = sbom_spdx.serialize_spdx(convert(copy.deepcopy(cyclonedx())))
+    second = sbom_spdx.serialize_spdx(convert(copy.deepcopy(sample_model())))
     assert first == second
-    changed = cyclonedx()
-    changed["components"][1]["version"] = "9.9.9"
-    other = convert(changed)
-    assert other["documentNamespace"] != convert()["documentNamespace"]
+    changed = sample_model()
+    changed.components[REPO].version = "9.9.9"
+    assert convert(changed)["documentNamespace"] != convert()["documentNamespace"]
     assert convert()["documentNamespace"].startswith("https://spdx.org/spdxdocs/mpy-analysis-")
 
 
@@ -464,57 +507,20 @@ def test_serialisation_matches_sbom_json_style():
 
 def test_creation_info_is_never_wall_clock():
     spdx = convert()
-    assert spdx["creationInfo"]["created"] == sbom_spdx.EPOCH
-    assert spdx["creationInfo"]["creators"] == ["Tool: mpy_analysis"]
-    document = cyclonedx()
-    document["metadata"]["timestamp"] = "2026-03-04T05:06:07.890+02:00"
-    document["metadata"]["tools"] = {
-        "components": [{"type": "application", "name": "gen", "version": "2"}]
-    }
-    document["metadata"]["authors"] = [{"name": "Ann", "email": "ann@example.invalid"}]
-    info = convert(document)["creationInfo"]
-    assert info["created"] == "2026-03-04T03:06:07Z"
-    assert info["creators"] == [
-        "Tool: mpy_analysis",
-        "Tool: gen-2",
-        "Person: Ann (ann@example.invalid)",
-    ]
-    document["metadata"]["tools"] = [{"vendor": "v", "name": "legacy", "version": "1"}]
-    assert "Tool: legacy-1" in convert(document)["creationInfo"]["creators"]
-
-
-def test_invalid_timestamp_is_rejected():
-    document = cyclonedx()
-    document["metadata"]["timestamp"] = "yesterday"
-    with pytest.raises(ValueError, match="timestamp"):
-        convert(document)
-
-
-def test_document_level_extras_are_annotated():
-    document = cyclonedx()
-    document["serialNumber"] = "urn:uuid:3e671687-395b-41f5-a30f-a58921a69b79"
-    document["metadata"]["properties"] = props(**{"mpy:doc": "x"})
-    spdx = convert(document)
-    extras = annotation_objects(spdx)[0]
-    assert extras["cyclonedx:serialNumber"] == document["serialNumber"]
-    assert extras["cyclonedx:metadata.properties"] == document["metadata"]["properties"]
-    assert extras["cyclonedx:version"] == 1
+    assert spdx["creationInfo"] == {"created": sbom_spdx.EPOCH, "creators": ["Tool: mpy_analysis"]}
+    assert "comment" not in spdx["creationInfo"]
 
 
 def test_orphan_top_level_file_is_contained_by_the_document():
-    document = cyclonedx()
-    document["components"].append(
-        {
-            "type": "file",
-            "bom-ref": "urn:orphan",
-            "name": "orphan.c",
-            "hashes": [
-                {"alg": "SHA-256", "content": SHA256_C},
-                {"alg": "SHA-1", "content": SHA1_C},
-            ],
-        }
+    model = sample_model()
+    add(
+        model,
+        kind="file",
+        ref="urn:orphan",
+        name="orphan.c",
+        hashes={"sha256": SHA256_C, "sha1": SHA1_C},
     )
-    spdx = convert(document)
+    spdx = convert(model)
     orphan = next(item for item in spdx["files"] if item["fileName"] == "orphan.c")
     contains = [
         item
@@ -525,43 +531,30 @@ def test_orphan_top_level_file_is_contained_by_the_document():
     assert [item["spdxElementId"] for item in contains] == ["SPDXRef-DOCUMENT"]
 
 
-def test_document_without_root_describes_unreferenced_packages():
-    document = cyclonedx()
-    del document["metadata"]
-    document["dependencies"] = [e for e in document["dependencies"] if e["ref"] != APP]
-    spdx = convert(document)
-    assert spdx["name"] == "mpy-analysis-sbom"
-    described = {
-        item["relatedSpdxElement"]
-        for item in spdx["relationships"]
-        if item["relationshipType"] == "DESCRIBES"
-    }
-    packages = by_name(spdx)
-    assert packages["micropython"]["SPDXID"] in described
-    assert packages["libffi8"]["SPDXID"] not in described
+def test_unknown_references_are_rejected():
+    model = sample_model()
+    model.depends_on[FIRMWARE].add("urn:missing")
+    with pytest.raises(ValueError, match="unknown component"):
+        convert(model)
+    model = sample_model()
+    model.depends_on["urn:missing"] = set()
+    with pytest.raises(ValueError, match="unknown component"):
+        convert(model)
+    model = sample_model()
+    model.components[LIBFFI_A].parent = "urn:missing"
+    with pytest.raises(ValueError, match="unknown parent"):
+        convert(model)
+    model = sample_model()
+    model.dynamic_links["urn:missing"] = ["libc.so.6"]
+    with pytest.raises(ValueError, match="unknown component"):
+        convert(model)
 
 
-def test_unknown_dependency_references_are_rejected():
-    document = cyclonedx()
-    document["dependencies"].append({"ref": FIRMWARE, "dependsOn": ["urn:missing"]})
-    with pytest.raises(ValueError, match="unknown bom-ref"):
-        convert(document)
-    document = cyclonedx()
-    document["dependencies"].append({"ref": "urn:missing", "dependsOn": []})
-    with pytest.raises(ValueError, match="unknown bom-ref"):
-        convert(document)
-
-
-def test_duplicate_bom_ref_is_rejected():
-    document = cyclonedx()
-    document["components"][3]["components"][0]["bom-ref"] = REPO
-    with pytest.raises(ValueError, match="duplicate"):
-        convert(document)
-
-
-def test_non_cyclonedx_input_is_rejected():
-    with pytest.raises(ValueError):
-        sbom_spdx.cyclonedx_to_spdx({"bomFormat": "CycloneDX", "specVersion": "1.5"})
+def test_component_must_be_keyed_by_its_reference():
+    model = sample_model()
+    model.components[REPO].ref = VENDOR
+    with pytest.raises(ValueError, match="keyed by"):
+        convert(model)
 
 
 def test_validate_spdx_rejects_bad_documents():
@@ -592,8 +585,8 @@ def test_validate_spdx_rejects_bad_documents():
 
 
 def test_round_trip_through_metadata_bom_preserves_source_binding():
-    cdx = cyclonedx()
-    spdx = convert(cdx)
+    model = sample_model()
+    spdx = convert(model)
     components, schemas = metadata_bom.read_bom(json.loads(sbom_spdx.serialize_spdx(spdx)))
     assert schemas[0].name == "spdx-2.3.schema.json"
     packages = by_name(spdx)
@@ -604,7 +597,7 @@ def test_round_trip_through_metadata_bom_preserves_source_binding():
         "mpy:source:path": "py",
         "mpy:source:revision": "abc",
     }
-    original = {item["id"]: item for item in metadata_bom.read_bom(cdx)[0]}[REPO]
+    original = {item["id"]: item for item in metadata_bom.read_bom(to_cyclonedx(model))[0]}[REPO]
     assert repo["binding"] == {
         key: value for key, value in original["binding"].items() if key.startswith("mpy:source:")
     }
@@ -617,14 +610,3 @@ def test_round_trip_through_metadata_bom_preserves_source_binding():
     }
     root_dependencies = reread[packages["x86_64-linux-gnu"]["SPDXID"]]["dependencies"]
     assert sorted(root_dependencies) == ["micropython", "unix"]
-
-
-def test_repeated_source_binding_property_is_rejected_by_the_reader_as_in_cyclonedx():
-    document = cyclonedx()
-    document["components"][1]["properties"] = props(**{"mpy:source:root": "."}) + props(
-        **{"mpy:source:root": "other"}
-    )
-    with pytest.raises(ValueError, match="duplicate"):
-        metadata_bom.read_bom(document)
-    with pytest.raises(ValueError, match="duplicate"):
-        metadata_bom.read_bom(convert(document))
