@@ -1387,3 +1387,163 @@ def test_missing_custom_text_has_structural_text_causes(tmp_path):
         for issue in result["issues"]
         if issue["field"] in ("license", "license_applicability")
     )
+
+
+LIBRARY = {
+    "name": "synthetic-library",
+    "version": "4.5.6",
+    "description": "Synthetic manifest",
+    "license": "MIT",
+    "homepage": "https://example.invalid/library",
+    "repository": {"type": "git", "url": "https://example.invalid/library.git"},
+    "authors": [{"name": "Fixture Author", "email": "author@example.invalid", "maintainer": True}],
+    "frameworks": "*",
+}
+
+
+def library_json(directory, **overrides):
+    values = {**LIBRARY, **overrides}
+    write_files(directory, {"library.json": json.dumps(values), "src/item.c": "int item;\n"})
+    return [directory / "src/item.c"]
+
+
+def test_library_json_literals_are_source_bound_and_scoped_to_the_package(tmp_path):
+    files = library_json(tmp_path)
+    result = collect(tmp_path, files)
+    assert result["fields"] == {
+        "name": "synthetic-library",
+        "version": "4.5.6",
+        "description": "Synthetic manifest",
+        "license": "MIT",
+        "url": "https://example.invalid/library",
+        "author": "Fixture Author <author@example.invalid>",
+        "license_applicability": "confirmed",
+    }
+    digest = hashlib.sha256((tmp_path / "library.json").read_bytes()).hexdigest()
+    rows = [row for row in result["evidence"] if row["parser"] == "platformio-library-json-1"]
+    assert {row["field"] for row in rows} >= {"name", "version", "license", "url", "repository"}
+    assert all(row["path"] == str(tmp_path / "library.json") for row in rows)
+    assert all(row["sha256"] == digest for row in rows)
+    repository = next(row for row in rows if row["field"] == "repository")
+    assert repository["status"] == "candidate"
+    assert repository["value"] == "https://example.invalid/library.git"
+    assert "repository" not in result["fields"]
+
+
+def test_library_json_evidence_follows_the_file_bytes(tmp_path):
+    files = library_json(tmp_path)
+    before = collect(tmp_path, files)
+    library_json(tmp_path, version="4.5.7")
+    after = collect(tmp_path, files)
+    assert before["fields"]["version"] == "4.5.6"
+    assert after["fields"]["version"] == "4.5.7"
+    digests = {
+        row["sha256"]
+        for result in (before, after)
+        for row in result["evidence"]
+        if row["field"] == "version"
+    }
+    assert len(digests) == 2
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("name", 7),
+        ("name", ["synthetic"]),
+        ("version", 4.5),
+        ("version", None),
+        ("version", "${SYNTHETIC_VERSION}"),
+        ("version", "$(shell describe)"),
+        ("version", "4.5 beta"),
+        ("license", ["MIT"]),
+        ("license", "Synthetic custom terms"),
+        ("license", "${SYNTHETIC_LICENSE}"),
+        ("homepage", "not a uri"),
+        ("homepage", {"url": "https://example.invalid"}),
+        ("authors", [{"email": "author@example.invalid"}]),
+        ("authors", ["Fixture Author"]),
+    ],
+)
+def test_library_json_malformed_or_computed_values_are_unsupported_evidence(
+    tmp_path, field, value
+):
+    files = library_json(tmp_path, **{field: value})
+    result = collect(tmp_path, files)
+    target = {"homepage": "url", "authors": "author"}.get(field, field)
+    assert target not in result["fields"]
+    assert statuses(result, target) == {"unsupported"}
+    rows = [row for row in result["evidence"] if row["field"] == target]
+    assert rows and all(row["status"] == "unsupported" for row in rows)
+    assert any(row.get("value") == value for row in rows)
+    # A rejected field does not disturb independent literal fields.
+    for other in ("name", "version"):
+        if other != target:
+            assert result["fields"][other] == LIBRARY[other]
+
+
+def test_library_json_repeated_key_conflicts(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "library.json": '{"name": "first", "name": "second", "version": "1"}',
+            "src/item.c": "int item;\n",
+        },
+    )
+    result = collect(tmp_path, [tmp_path / "src/item.c"])
+    assert "name" not in result["fields"]
+    assert "conflicting" in statuses(result, "name")
+    assert result["fields"]["version"] == "1"
+
+
+@pytest.mark.parametrize("content", ["{", '["synthetic"]', '"synthetic"', ""])
+def test_library_json_that_is_not_an_object_asserts_nothing(tmp_path, content):
+    write_files(tmp_path, {"library.json": content, "src/item.c": "int item;\n"})
+    result = collect(tmp_path, [tmp_path / "src/item.c"])
+    for field in ("name", "version", "license"):
+        assert field not in result["fields"]
+        assert "unsupported" in statuses(result, field)
+
+
+def test_library_json_build_section_is_not_evaluated(tmp_path):
+    sentinel = tmp_path / "executed"
+    write_files(
+        tmp_path,
+        {
+            "extra.py": f"from pathlib import Path\nPath({str(sentinel)!r}).touch()\n",
+            "library.json": json.dumps(
+                {**LIBRARY, "build": {"extraScript": "extra.py", "flags": "-DV=${X}"}}
+            ),
+            "src/item.c": "int item;\n",
+        },
+    )
+    result = collect(tmp_path, [tmp_path / "src/item.c"])
+    assert result["fields"]["name"] == "synthetic-library"
+    assert not sentinel.exists()
+    assert str(tmp_path / "extra.py") not in result["markers"]
+
+
+def test_library_json_licence_agrees_with_matching_selected_headers(tmp_path):
+    files = library_json(tmp_path)
+    files[0].write_text("// SPDX-License-Identifier: MIT\nint item;\n")
+    result = collect(tmp_path, files)
+    assert result["fields"]["license"] == "MIT"
+    assert result["fields"]["license_applicability"] == "confirmed"
+
+
+def test_library_json_licence_conflicts_with_mixed_nested_licensing(tmp_path):
+    files = library_json(tmp_path)
+    write_files(
+        tmp_path,
+        {"vendor/inner.c": "// SPDX-License-Identifier: GPL-2.0-only\nint inner;\n"},
+    )
+    result = collect(tmp_path, [*files, tmp_path / "vendor/inner.c"])
+    assert "license" not in result["fields"]
+    assert "license_applicability" not in result["fields"]
+    assert "conflicting" in statuses(result, "license")
+    conflict = next(
+        issue
+        for issue in result["issues"]
+        if issue["field"] == "license" and issue["status"] == "conflicting"
+    )
+    assert set(conflict["values"]) == {"MIT", "GPL-2.0-only"}

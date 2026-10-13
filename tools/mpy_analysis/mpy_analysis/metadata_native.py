@@ -1,9 +1,13 @@
-"""Bounded literal CMake/Meson project declarations; no build-language evaluation."""
+"""Bounded literal CMake/Meson/PlatformIO project declarations; no build-language evaluation."""
 
 from __future__ import annotations
 
 import ast
+import json
 import re
+from typing import Any
+
+from jsonschema import Draft7Validator
 
 
 def _cmake_tokens(text: str) -> list[tuple[str, bool]]:
@@ -257,3 +261,124 @@ def parse_native(text: str, filename: str) -> tuple[dict, list[dict]]:
         return {}, [
             {"field": field, "reason": str(error)} for field in ("name", "version", "license")
         ]
+
+
+_COMPUTED = re.compile(r"\$[{(A-Za-z_]")
+_AUTHOR = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "email": {"type": "string"},
+        "url": {"type": "string"},
+        "maintainer": {"type": "boolean"},
+    },
+    "required": ["name"],
+}
+_PLATFORMIO = {
+    "name": {"type": "string"},
+    "version": {"type": "string"},
+    "description": {"type": "string"},
+    "license": {"type": "string"},
+    "homepage": {"type": "string"},
+    "repository": {
+        "type": "object",
+        "properties": {
+            "type": {"type": "string"},
+            "url": {"type": "string"},
+            "branch": {"type": "string"},
+        },
+        "required": ["url"],
+    },
+    "authors": {"anyOf": [_AUTHOR, {"type": "array", "items": _AUTHOR}]},
+}
+_PLATFORMIO_FIELDS = {
+    "name": "name",
+    "version": "version",
+    "description": "description",
+    "license": "license",
+    "homepage": "url",
+    "repository": "repository",
+    "authors": "author",
+}
+
+
+class _Object(dict):
+    """JSON object that remembers keys it repeated."""
+
+    def __init__(self, pairs: list[tuple[str, Any]]):
+        super().__init__()
+        self.duplicates: set[str] = set()
+        for key, value in pairs:
+            if key in self:
+                self.duplicates.add(key)
+            self[key] = value
+
+
+def _author(entry: dict[str, Any]) -> str:
+    name = entry["name"].strip()
+    email = entry.get("email", "").strip()
+    return f"{name} <{email}>" if email else name
+
+
+def parse_library_json(text: str) -> list[dict[str, Any]]:
+    """Return per-field rows for a PlatformIO ``library.json`` manifest.
+
+    Only literal strings of the documented manifest shape become ``known`` rows.
+    A value of the wrong type, one that uses template expansion, or a repeated key is
+    ``unsupported`` or ``conflicting`` with its reason. ``repository`` is a ``candidate``
+    row: it is retained but never asserted. Keys outside the consumed set are ignored
+    and nothing is evaluated, including the ``build`` section. A document that is not a
+    JSON object raises ``ValueError``.
+    """
+    try:
+        document = json.loads(text, object_pairs_hook=_Object)
+    except ValueError as error:
+        raise ValueError(f"library.json is not valid JSON: {error}") from error
+    if not isinstance(document, _Object):
+        raise ValueError("library.json must be a JSON object")
+    rows: list[dict[str, Any]] = []
+    for key, schema in _PLATFORMIO.items():
+        if key not in document:
+            continue
+        field = _PLATFORMIO_FIELDS[key]
+        value = document[key]
+        row: dict[str, Any] = {"field": field, "value": value, "status": "known", "key": key}
+        error = next(Draft7Validator(schema).iter_errors(value), None)
+        computed = key not in ("description", "authors") and any(
+            _COMPUTED.search(item) for item in _strings(value)
+        )
+        if key in document.duplicates:
+            row.update(status="conflicting", reason=f"library.json repeats the {key!r} key")
+        elif error is not None:
+            row.update(
+                status="unsupported",
+                reason=f"library.json {key!r} does not match the manifest schema: {error.message}",
+            )
+        elif computed:
+            row.update(
+                status="unsupported",
+                reason=f"library.json {key!r} uses template expansion, which is not evaluated",
+            )
+        elif key == "version" and re.search(r"\s", value):
+            row.update(status="unsupported", reason="library.json version is not a release string")
+        elif key == "repository":
+            row.update(value=value["url"], status="candidate")
+        elif key == "authors":
+            entries = value if isinstance(value, list) else [value]
+            names = [_author(entry) for entry in entries]
+            if not names or any(not entry["name"].strip() for entry in entries):
+                row.update(status="unsupported", reason="library.json author has no name")
+            else:
+                row["value"] = ", ".join(names)
+        rows.append(row)
+    return rows
+
+
+def _strings(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [text for item in value.values() for text in _strings(item)]
+    if isinstance(value, list):
+        return [text for item in value for text in _strings(item)]
+    return []

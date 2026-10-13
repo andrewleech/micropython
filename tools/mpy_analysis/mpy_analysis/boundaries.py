@@ -21,7 +21,7 @@ from typing import Any, Mapping, Sequence
 
 from .declarations import revision_matches_selected, selected_digest, source_binding
 from .metadata_bom import UnsupportedBomError, parse_json, read_bom
-from .metadata_native import parse_native
+from .metadata_native import parse_library_json, parse_native
 from .scope import FROZEN_GROUP, source_path
 
 
@@ -218,6 +218,33 @@ def _markers(directory: Path, root: Path, scope: dict[str, Any]) -> list[dict[st
             )
             result.append({"kind": kind, "path": str(path)})
         except (tomllib.TOMLDecodeError, UnicodeError, OSError) as exc:
+            result.append({"kind": "candidate-metadata", "path": str(path), "detail": str(exc)})
+    path = _marker(directory, "library.json", root)
+    if path is not None:
+        try:
+            rows = parse_library_json(path.read_text(encoding="utf-8-sig"))
+            named = any(
+                row["field"] == "name"
+                and row["status"] == "known"
+                and isinstance(row["value"], str)
+                and row["value"].strip()
+                for row in rows
+            )
+            item = {
+                "kind": "package-metadata" if named else "candidate-metadata",
+                "path": str(path),
+            }
+            problems = [
+                {key: row[key] for key in ("field", "status", "reason")}
+                for row in rows
+                if row["status"] not in ("known", "candidate")
+            ]
+            if not named:
+                item["detail"] = "library.json has no literal name"
+            if problems:
+                item["parser_issues"] = problems
+            result.append(item)
+        except (ValueError, UnicodeError, OSError) as exc:
             result.append({"kind": "candidate-metadata", "path": str(path), "detail": str(exc)})
     path = _marker(directory, "setup.cfg", root)
     if path is not None:

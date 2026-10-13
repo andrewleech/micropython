@@ -773,6 +773,37 @@ class _Collector:
         for field, value in assertions.items():
             self.add(field, value, path, "native-literal-1")
 
+    def parse_library_json(self, path: Path) -> None:
+        from .metadata_native import parse_library_json
+
+        parser = "platformio-library-json-1"
+        for row in parse_library_json(self.text(path)):
+            field, value, status = row["field"], row["value"], row["status"]
+            if status == "known":
+                self.add(field, value, path, parser, key=row["key"])
+            elif status == "candidate" and valid_uri(value):
+                self.evidence(
+                    field,
+                    value,
+                    path,
+                    parser,
+                    "candidate",
+                    key=row["key"],
+                    detail="retained, not asserted as the distribution URL",
+                )
+            else:
+                reason = row.get("reason", "library.json value is not a valid URI")
+                self.evidence(
+                    field,
+                    value,
+                    path,
+                    parser,
+                    "unsupported" if status == "candidate" else status,
+                    key=row["key"],
+                    detail=reason,
+                )
+                self.issue(field, "unsupported" if status == "candidate" else status, reason, path)
+
     def parse_bom(self, path: Path) -> None:
         from .metadata_bom import parse_json, read_bom, schema_paths
 
@@ -1227,6 +1258,7 @@ def collect_metadata(
         "METADATA": collector.parse_core,
         "CMakeLists.txt": collector.parse_native,
         "meson.build": collector.parse_native,
+        "library.json": collector.parse_library_json,
     }
     for name, parse in dispatch.items():
         path = collector.directory / name

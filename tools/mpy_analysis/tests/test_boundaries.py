@@ -218,6 +218,11 @@ def test_authoritative_package_does_not_silently_erase_nested_metadata(tmp_path)
         ("pyproject.toml", '[project]\nname="fixture"\n', "package-metadata"),
         ("CMakeLists.txt", 'project("fixture" VERSION 1.0)\n', "native-project"),
         ("meson.build", "project('fixture', 'c', version: '1.0')\n", "native-project"),
+        (
+            "library.json",
+            '{"name": "fixture", "version": "1.0", "license": "MIT"}',
+            "package-metadata",
+        ),
     ],
 )
 def test_format_markers_establish_selected_ancestry_boundaries(tmp_path, marker, content, kind):
@@ -246,6 +251,12 @@ def test_format_markers_establish_selected_ancestry_boundaries(tmp_path, marker,
         ("meson.build", "if option\nproject('conditional-fixture')\nendif\n"),
         ("PKG-INFO", "Metadata-Version: 2.4\nName: fixture\n"),
         ("METADATA", "Metadata-Version: 2.4\nName: fixture\n"),
+        ("library.json", '{"version": "1.0"}'),
+        ("library.json", '{"name": 7}'),
+        ("library.json", '{"name": "${LIBRARY_NAME}"}'),
+        ("library.json", '{"name": "first", "name": "second"}'),
+        ("library.json", '["fixture"]'),
+        ("library.json", '{"name": '),
     ],
 )
 def test_non_package_and_dynamic_markers_stay_candidates(tmp_path, marker, content):
@@ -910,3 +921,28 @@ def test_nested_owned_selection_shares_descendant_binding_not_licensing(tmp_path
         for issue in stale["issues"]
     )
     assert stale["fields"]["license"] == "MIT"
+
+
+def test_library_json_owns_only_selected_directories_and_the_nearest_wins(tmp_path):
+    _write(tmp_path, "outer/library.json", '{"name": "outer", "version": "1"}')
+    _write(tmp_path, "outer/src/item.py")
+    _write(tmp_path, "outer/inner/library.json", '{"name": "inner", "version": "2"}')
+    _write(tmp_path, "outer/inner/src/item.py")
+    _write(tmp_path, "unselected/library.json", '{"name": "unselected", "version": "3"}')
+    _write(tmp_path, "unselected/src/item.py")
+    result = _discover(_scope(tmp_path, "outer/src/item.py", "outer/inner/src/item.py"))
+    assert {item["path"]: item["boundary_kind"] for item in result} == {
+        "outer": "package-metadata",
+        "outer/inner": "package-metadata",
+    }
+    assert all("unselected" not in str(item["candidates"]) for item in result)
+
+
+def test_library_json_symlink_outside_the_root_is_not_a_candidate(tmp_path):
+    outside = tmp_path / "outside"
+    _write(outside, "library.json", '{"name": "outside"}')
+    _write(tmp_path / "root", "pkg/item.py")
+    (tmp_path / "root/pkg/library.json").symlink_to(outside / "library.json")
+    result = _discover(_scope(tmp_path / "root", "pkg/item.py"))
+    assert result[0]["boundary_kind"] == "unresolved-root"
+    assert result[0]["candidates"] == []

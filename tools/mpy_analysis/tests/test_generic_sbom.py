@@ -327,3 +327,175 @@ def test_bound_parent_bom_and_nested_package_share_digest_not_licence_scope(tmp_
         matrix["fields"][field]["status"] == "known"
         for field in ("name", "version", "license", "license_applicability")
     )
+
+
+def library_pair(tmp_path, first, second):
+    inventory, first_repo = direct_dependency(tmp_path, first)
+    second_repo = repository(tmp_path / "other", second)
+    inventory["roots"]["other"] = str(second_repo)
+    inventory["groups"][FROZEN_GROUP].append(
+        {
+            "root": "other",
+            "path": "source.py",
+            "target_path": "other/source.py",
+            "owner": "external",
+            "provenance": {"kind": "fixture"},
+        }
+    )
+    return inventory, first_repo, second_repo
+
+
+def boundary_matrix(receipt, root):
+    row = next(row for row in receipt["sources"] if row["root"] == root)
+    return next(
+        item for item in receipt["metadata"] if item["component"] == row["dependency_component"]
+    )
+
+
+def test_platformio_manifests_identify_independent_libraries_by_format_only(tmp_path):
+    inventory, _, _ = library_pair(
+        tmp_path,
+        {
+            "source.py": "value = 1\n",
+            "library.json": json.dumps(
+                {"name": "Alpha-Stack", "version": "1.2.3", "license": "MIT"}
+            ),
+        },
+        {
+            "source.py": "value = 2\n",
+            "library.json": json.dumps(
+                {
+                    "name": "zeta",
+                    "version": "0.3",
+                    "license": "Apache-2.0",
+                    "homepage": "https://example.invalid/zeta",
+                }
+            ),
+        },
+    )
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
+    components = {item["name"]: item for item in document["components"]}
+    assert components["Alpha-Stack"]["version"] == "1.2.3"
+    assert components["Alpha-Stack"]["licenses"] == [{"expression": "MIT"}]
+    assert components["zeta"]["version"] == "0.3"
+    assert components["zeta"]["licenses"] == [{"expression": "Apache-2.0"}]
+    for root in ("separate", "other"):
+        matrix = boundary_matrix(receipt, root)
+        assert matrix["boundary_kind"] == "package-metadata"
+        assert matrix["boundary_issues"] == []
+        assert all(
+            matrix["fields"][field]["status"] == "known"
+            for field in ("name", "version", "license", "license_applicability")
+        )
+        assert matrix["fields"]["name"]["evidence"][0]["path"].endswith("library.json")
+        assert not any(gap.get("boundary", "").startswith(root + "/") for gap in receipt["gaps"])
+
+
+def test_library_json_outside_the_selected_directories_supplies_nothing(tmp_path):
+    inventory, _ = direct_dependency(
+        tmp_path,
+        {
+            "source.py": "value = 1\n",
+            "unused/library.json": json.dumps(
+                {"name": "unselected-library", "version": "9", "license": "MIT"}
+            ),
+        },
+    )
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
+    assert all(item["name"] != "unselected-library" for item in document["components"])
+    matrix = boundary_matrix(receipt, "separate")
+    assert matrix["boundary_kind"] == "repository"
+    for field in ("name", "version", "license"):
+        assert matrix["fields"][field]["status"] != "known"
+    assert "unselected-library" not in json.dumps(matrix["evidence"])
+
+
+def test_library_json_changes_with_the_selected_checkout_content(tmp_path):
+    files = {
+        "source.py": "value = 1\n",
+        "library.json": json.dumps({"name": "fixture-lib", "version": "1", "license": "MIT"}),
+    }
+    inventory, external = direct_dependency(tmp_path, files)
+    _, before = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
+    (external / "library.json").write_text(
+        json.dumps({"name": "fixture-lib", "version": "2", "license": "MIT"})
+    )
+    document, after = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
+    old = boundary_matrix(before, "separate")["fields"]["version"]["evidence"][0]
+    new = boundary_matrix(after, "separate")["fields"]["version"]["evidence"][0]
+    assert (old["value"], new["value"]) == ("1", "2")
+    assert old["sha256"] != new["sha256"]
+    assert (
+        next(item for item in document["components"] if item["name"] == "fixture-lib")["version"]
+        == "2"
+    )
+
+
+def test_library_json_licence_is_not_blanket_over_mixed_nested_licensing(tmp_path):
+    inventory, external = direct_dependency(
+        tmp_path,
+        {
+            "source.py": "value = 1\n",
+            "vendor/inner.py": "# SPDX-License-Identifier: GPL-2.0-only\nvalue = 2\n",
+            "library.json": json.dumps({"name": "mixed-lib", "version": "1", "license": "MIT"}),
+        },
+    )
+    inventory["groups"][FROZEN_GROUP].append(
+        {
+            "root": "separate",
+            "path": "vendor/inner.py",
+            "target_path": "separate/vendor/inner.py",
+            "owner": "external",
+            "provenance": {"kind": "fixture"},
+        }
+    )
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
+    matrix = boundary_matrix(receipt, "separate")
+    assert matrix["fields"]["license"]["status"] == "conflicting"
+    assert matrix["fields"]["name"]["status"] == "known"
+    component = next(item for item in document["components"] if item["name"] == "mixed-lib")
+    assert "licenses" not in component
+    assert receipt["metadata_completeness"] == "incomplete"
+
+
+def test_library_json_conflicts_with_a_pinned_application_declaration(tmp_path):
+    inventory, external = direct_dependency(
+        tmp_path,
+        {
+            "source.py": "value = 1\n",
+            "library.json": json.dumps({"name": "declared-lib", "version": "1", "license": "MIT"}),
+        },
+    )
+    path = tmp_path / "declaration.cdx.json"
+    path.write_text(
+        json.dumps(
+            {
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.6",
+                "version": 1,
+                "components": [
+                    {
+                        "type": "library",
+                        "name": "declared-lib",
+                        "version": "2",
+                        "properties": [
+                            {"name": "mpy:source:root", "value": "separate"},
+                            {"name": "mpy:source:path", "value": "."},
+                            {
+                                "name": "mpy:source:revision",
+                                "value": git(external, "rev-parse", "HEAD"),
+                            },
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+    document, receipt = generate_cyclonedx(
+        inventory, micropython_root=MPY_ROOT, declaration_files=[path]
+    )
+    matrix = boundary_matrix(receipt, "separate")
+    assert matrix["fields"]["version"]["status"] == "conflicting"
+    assert matrix["fields"]["name"]["status"] == "known"
+    component = next(item for item in document["components"] if item["name"] == "declared-lib")
+    assert "version" not in component
