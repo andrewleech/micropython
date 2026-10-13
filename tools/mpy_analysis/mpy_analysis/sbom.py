@@ -290,12 +290,13 @@ def _runtime_components(
                     {
                         "type": "library",
                         "name": Path(path).name,
-                        "version": compiler["version"],
+                        "version": item["toolchain"]["release"],
                         "hashes": [{"alg": "SHA-256", "content": sha256}],
                         "properties": _properties(
                             {
                                 "toolchain-compiler": compiler["executable"]["path"],
                                 "toolchain-compiler-sha256": compiler["executable"]["sha256"],
+                                "toolchain-compiler-banner": compiler["version"],
                                 "contributing-members": str(len(members)) if members else None,
                             }
                         ),

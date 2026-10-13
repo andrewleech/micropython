@@ -195,6 +195,7 @@ def _runtime_identity(
                 "toolchain": {
                     "role": "cc",
                     "executable": {"path": compiler["path"], "sha256": compiler["sha256"]},
+                    "release": library["release"],
                 }
             }, ""
         if kind == "c-library":

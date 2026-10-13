@@ -234,6 +234,7 @@ def _validate_toolchain_library(operand, path, image_id, toolchain_executables):
     key = (toolchain.get("role"), executable.get("path"))
     if toolchain_executables.get(key) != executable.get("sha256"):
         raise FirmwareReceiptError(f"toolchain library is not bound to a captured toolchain tool: {path}")
+    _text(toolchain.get("release"), f"image {image_id} toolchain library release")
     members = operand.get("contributing_members")
     if not isinstance(members, list) or not members or not all(isinstance(item, str) and item for item in members):
         raise FirmwareReceiptError(f"toolchain library must list contributing members: {path}")
@@ -310,6 +311,7 @@ def _validate_implicit_inputs(link, image_id, operand_paths, verify_files, toolc
                 executable = _object(toolchain.get("executable"), f"{label}.toolchain.executable")
                 if toolchain_executables.get((toolchain.get("role"), executable.get("path"))) != executable.get("sha256"):
                     raise FirmwareReceiptError(f"{label} is not bound to a captured toolchain tool: {path}")
+                _text(toolchain.get("release"), f"{label}.toolchain.release")
             else:
                 raise FirmwareReceiptError(f"{label} contributes without a compiler runtime or C library identity")
         else:

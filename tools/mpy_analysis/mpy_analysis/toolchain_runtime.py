@@ -95,6 +95,7 @@ def layout(compiler: str, flags: tuple[str, ...]) -> dict[str, Any]:
         break
     return {
         "runtime_dir": runtime_dir,
+        "release": (_query(compiler, flags, "-dumpfullversion") or "").strip() or None,
         "library_dir": library_dir,
         "sysroot": Path(sysroot).resolve() if sysroot else None,
         "c_library": c_library,
@@ -102,11 +103,14 @@ def layout(compiler: str, flags: tuple[str, ...]) -> dict[str, Any]:
 
 
 def classify(path: str, compiler: str, flags: tuple[str, ...]) -> tuple[str | None, dict[str, Any] | None, str]:
-    """Return ("compiler-runtime" | "c-library", c-library record or None, "") or (None, None, reason)."""
+    """Return (kind, record, "") with kind "compiler-runtime" or "c-library", or (None, None, reason)."""
     found = layout(compiler, flags)
     resolved = Path(path).resolve()
     if found["runtime_dir"] is not None and resolved.parent == found["runtime_dir"]:
-        return "compiler-runtime", None, ""
+        release = found["release"]
+        if release is None:
+            return None, None, "compiler does not report its release version (-dumpfullversion)"
+        return "compiler-runtime", {"release": release}, ""
     if found["library_dir"] is not None and resolved.parent == found["library_dir"]:
         library = found["c_library"]
         if library is None:

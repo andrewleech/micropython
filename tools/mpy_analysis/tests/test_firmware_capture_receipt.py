@@ -882,6 +882,7 @@ def _fake_compiler(tmp_path, runtime_dir, library_dir, *, sysroot=""):
         'for arg in "$@"; do\n'
         '  case "$arg" in\n'
         f'    -print-libgcc-file-name) echo "{runtime_dir}/libgcc.a"; exit 0;;\n'
+        '    -dumpfullversion) echo 13.3.0; exit 0;;\n'
         f'    -print-sysroot) echo "{sysroot}"; exit 0;;\n'
         f'    -print-file-name=libc.a) echo "{library_dir}/libc.a"; exit 0;;\n'
         "    -print-file-name=*) echo \"${arg#-print-file-name=}\"; exit 0;;\n"
@@ -1073,6 +1074,8 @@ $(BUILD)/firmware.elf: $(BUILD)/main.o
     properties = {item["name"]: item["value"] for item in firmware["properties"]}
     assert json.loads(properties["mpy:dynamic-needed"]) == link["dynamic_needed"]
     assert "glibc" in names and "libc.so.6" not in names
+    release = subprocess.run(["gcc", "-dumpfullversion"], capture_output=True, text=True, check=True).stdout.strip()
+    assert any(item["type"] == "library" and item.get("version") == release for item in document["components"])
     assert not any(item.get("purl", "").startswith("pkg:deb/") for item in document["components"])
     assert summary["firmware_completeness"] == "established"
 
@@ -1091,6 +1094,7 @@ def test_runtime_directory_selected_by_compile_flags_is_found_when_the_link_has_
         "#!/bin/sh\n"
         'case "$*" in\n'
         f'  *-print-libgcc-file-name*) case "$*" in *-mmulti*) echo "{multilib_dir}/libgcc.a";; *) echo "{default_dir}/libgcc.a";; esac;;\n'
+        '  *-dumpfullversion*) echo 13.3.0;;\n'
         '  *-print-sysroot*) echo "";;\n'
         '  *-print-file-name=*) echo "libc.a";;\n'
         "esac\n"
