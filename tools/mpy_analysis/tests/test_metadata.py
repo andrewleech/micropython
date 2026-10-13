@@ -1719,3 +1719,227 @@ def test_conditional_cmake_project_establishes_a_native_boundary_and_identity(tm
     assert "name" not in result["fields"]
     assert "version" not in result["fields"]
     assert "unsupported" in statuses(result, "version")
+
+
+REPOSITORY = {
+    "pyproject.toml": """[project]
+name = "enclosing-app"
+version = "0.1.0"
+description = "Enclosing project"
+license = "Apache-2.0"
+dependencies = ["enclosing-dependency"]
+authors = [{name = "Fixture Author"}]
+[project.urls]
+Homepage = "https://example.invalid/enclosing"
+""",
+    "REUSE.toml": 'version=1\n[[annotations]]\npath="**"\nprecedence="aggregate"\nSPDX-License-Identifier="MIT"\nSPDX-FileCopyrightText="Fixture Author"\n',
+    "LICENSE": "MIT License\nEnclosing text.\n",
+    "LICENSES/MIT.txt": "MIT License text\n",
+    "src/app.py": "value = 1\n",
+}
+
+
+def context_collect(tmp_path, files=None, context=None, **kwargs):
+    src = tmp_path / "src"
+    selected = [src / "app.py"] if files is None else files
+    return metadata.collect_metadata(
+        src,
+        selected_files=selected,
+        source_context={
+            "root": "project",
+            "root_directory": str(src),
+            "context_directories": [str(tmp_path)] if context is None else context,
+        },
+        **kwargs,
+    )
+
+
+def test_enclosing_package_metadata_is_reported_but_never_asserted(tmp_path):
+    write_files(tmp_path, REPOSITORY)
+    result = context_collect(tmp_path)
+    for field in ("name", "version", "description", "author", "url"):
+        assert field not in result["fields"]
+    assert result["declared_dependencies"] == []
+    digest = hashlib.sha256((tmp_path / "pyproject.toml").read_bytes()).hexdigest()
+    rows = {
+        row["field"]: row
+        for row in result["evidence"]
+        if row.get("path") == str(tmp_path / "pyproject.toml") and row["field"] != "urls"
+    }
+    assert rows["version"]["value"] == "0.1.0"
+    for field in ("name", "version", "description", "author", "url", "license", "dependencies"):
+        row = rows[field]
+        assert row["status"] == "candidate"
+        assert row["applicability"] == "repository-context"
+        assert row["context"] == "repository-context"
+        assert row["sha256"] == digest
+    missing = {
+        issue["field"]: issue
+        for issue in result["issues"]
+        if issue["status"] == "missing" and "repository-context" in issue["reason"]
+    }
+    assert missing["version"]["values"] == ["0.1.0"]
+    assert missing["name"]["values"] == ["enclosing-app"]
+
+
+def test_enclosing_reuse_governs_selected_files_by_its_own_format(tmp_path):
+    write_files(tmp_path, REPOSITORY)
+    result = context_collect(tmp_path)
+    assert result["fields"]["license"] == "MIT"
+    assert result["fields"]["license_applicability"] == "confirmed"
+    # The enclosing pyproject says Apache-2.0, but a project file is not a file-level declaration.
+    assert not statuses(result, "license")
+    reuse = next(
+        row
+        for row in result["evidence"]
+        if row["field"] == "license" and row.get("applicability") == "selected-file"
+    )
+    assert reuse["context"] == "repository-context"
+    assert reuse["path"] == str(tmp_path / "REUSE.toml")
+    text = next(row for row in result["evidence"] if row["path"].endswith("LICENSES/MIT.txt"))
+    assert text["context"] == "repository-context"
+    notice = next(
+        row
+        for row in result["evidence"]
+        if row["field"] == "license_text" and row["path"] == str(tmp_path / "LICENSE")
+    )
+    assert notice["applicability"] == "repository-context"
+    assert notice["status"] == "candidate"
+
+
+def test_own_package_metadata_is_not_contradicted_by_enclosing_metadata(tmp_path):
+    write_files(
+        tmp_path,
+        {**REPOSITORY, "src/pyproject.toml": '[project]\nname = "own-name"\nversion = "9"\n'},
+    )
+    result = context_collect(tmp_path)
+    assert result["fields"]["name"] == "own-name"
+    assert result["fields"]["version"] == "9"
+    assert not statuses(result, "name") | statuses(result, "version")
+    assert {
+        row["value"]
+        for row in result["evidence"]
+        if row["field"] == "name" and row.get("context") == "repository-context"
+    } == {"enclosing-app"}
+
+
+def test_mixed_nested_licences_in_enclosing_reuse_stay_file_scoped(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            **REPOSITORY,
+            "REUSE.toml": REPOSITORY["REUSE.toml"]
+            + '[[annotations]]\npath="src/vendor/inner.py"\nprecedence="override"\nSPDX-License-Identifier="GPL-2.0-only"\nSPDX-FileCopyrightText="Vendor"\n',
+            "src/vendor/inner.py": "value = 2\n",
+        },
+    )
+    result = context_collect(tmp_path, [tmp_path / "src/app.py", tmp_path / "src/vendor/inner.py"])
+    assert result["fields"]["license"] == "GPL-2.0-only AND MIT"
+    expressions = {
+        row["selected_path"].rsplit("/", 1)[-1]: row["value"]
+        for row in result["evidence"]
+        if row["field"] == "license" and row.get("applicability") == "selected-file"
+    }
+    assert expressions == {"app.py": "MIT", "inner.py": "GPL-2.0-only"}
+
+
+def test_context_never_widens_the_source_selection(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            **REPOSITORY,
+            "other.py": "# SPDX-License-Identifier: GPL-3.0-only\n",
+            "sibling/lib.py": "# SPDX-License-Identifier: GPL-3.0-only\n",
+        },
+    )
+    result = context_collect(tmp_path)
+    assert result["fields"]["license"] == "MIT"
+    assert not any(
+        str(tmp_path / name) in result["markers"] for name in ("other.py", "sibling/lib.py")
+    )
+    assert "GPL-3.0-only" not in str(result["evidence"])
+
+
+def test_context_must_be_the_contiguous_parent_chain(tmp_path):
+    write_files(tmp_path, {**REPOSITORY, "src/nested/x.py": "x = 1\n"})
+    with pytest.raises(ValueError, match="contiguous parent chain"):
+        context_collect(tmp_path, context=[str(tmp_path.parent)])
+    with pytest.raises(ValueError, match="contiguous parent chain"):
+        context_collect(tmp_path, context=[str(tmp_path / "src/nested")])
+    with pytest.raises(ValueError, match="contiguous parent chain"):
+        context_collect(tmp_path, context=[str(tmp_path), str(tmp_path.parent.parent)])
+
+
+def test_malformed_or_escaping_enclosing_metadata_cannot_decide_boundary_fields(tmp_path):
+    outside = tmp_path / "outside"
+    write_files(outside, {"pyproject.toml": '[project]\nname = "escaped"\nversion = "7"\n'})
+    write_files(tmp_path / "repo", {k: v for k, v in REPOSITORY.items() if k != "pyproject.toml"})
+    (tmp_path / "repo/pyproject.toml").symlink_to(outside / "pyproject.toml")
+    result = context_collect(tmp_path / "repo", context=[str(tmp_path / "repo")])
+    assert "escaped" not in str(result["evidence"])
+    assert result["fields"]["license"] == "MIT"
+    assert {issue["field"] for issue in result["issues"] if "escapes" in issue["reason"]} == {
+        "repository-context"
+    }
+    write_files(tmp_path / "repo2", {**REPOSITORY, "pyproject.toml": "[project\n"})
+    result = context_collect(tmp_path / "repo2", context=[str(tmp_path / "repo2")])
+    assert result["fields"]["license"] == "MIT"
+    assert "name" not in result["fields"]
+    assert any(
+        issue["field"] == "repository-context" and issue["status"] == "unsupported"
+        for issue in result["issues"]
+    )
+
+
+def test_enclosing_licence_file_pattern_cannot_sweep_the_repository(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            **REPOSITORY,
+            "pyproject.toml": '[project]\nname = "x"\nlicense-files = ["**/LICENSE*"]\n',
+            "libs/vendored/LICENSE": "vendored text\n",
+        },
+    )
+    result = context_collect(tmp_path)
+    assert "vendored text" not in str(result["evidence"])
+    assert str(tmp_path / "libs/vendored/LICENSE") not in result["markers"]
+
+
+def test_enclosing_metadata_evidence_follows_the_parent_bytes(tmp_path):
+    write_files(tmp_path, REPOSITORY)
+    before = context_collect(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "enclosing-app"\nversion = "0.2.0"\n'
+    )
+    after = context_collect(tmp_path)
+
+    def version(result):
+        return next(
+            (row["value"], row["sha256"])
+            for row in result["evidence"]
+            if row["field"] == "version" and row.get("context")
+        )
+
+    assert version(before)[0] == "0.1.0"
+    assert version(after)[0] == "0.2.0"
+    assert version(before)[1] != version(after)[1]
+    assert "version" not in after["fields"]
+
+
+def test_enclosing_library_json_and_setup_cfg_are_candidates_too(tmp_path):
+    write_files(
+        tmp_path,
+        {
+            "library.json": json.dumps({"name": "enclosing-library", "version": "5"}),
+            "setup.cfg": "[metadata]\nname = enclosing-cfg\nversion = 6\n",
+            "src/app.py": "value = 1\n",
+        },
+    )
+    result = context_collect(tmp_path)
+    assert "name" not in result["fields"]
+    parsers = {
+        row["parser"]
+        for row in result["evidence"]
+        if row.get("applicability") == "repository-context" and row["field"] == "name"
+    }
+    assert parsers == {"platformio-library-json-1", "setup-cfg-1"}

@@ -543,3 +543,140 @@ def test_conditional_cmake_project_without_every_path_stays_unresolved(tmp_path)
     assert matrix["fields"]["name"]["status"] == "unsupported"
     assert "no else()" in matrix["fields"]["name"]["issues"][0]["reason"]
     assert matrix["boundary_kind"] == "repository"
+
+
+APPLICATION = {
+    "pyproject.toml": '[project]\nname = "enclosing-app"\nversion = "0.1.0"\nlicense = "Apache-2.0"\n',
+    "REUSE.toml": 'version=1\n[[annotations]]\npath="**"\nprecedence="aggregate"\nSPDX-License-Identifier="MIT"\nSPDX-FileCopyrightText="Fixture Author"\n',
+    "LICENSES/MIT.txt": "MIT text\n",
+    "src/app.py": "value = 1\n",
+}
+
+
+def project_selection(tmp_path, files=None):
+    inventory, _, _ = selection(tmp_path)
+    project = repository(tmp_path / "project", files or APPLICATION)
+    inventory["roots"]["project"] = str(project / "src")
+    inventory["groups"][FROZEN_GROUP].append(
+        {
+            "root": "project",
+            "path": "app.py",
+            "target_path": "app.py",
+            "owner": "application",
+            "provenance": {"kind": "fixture"},
+        }
+    )
+    return inventory, project
+
+
+def test_enclosing_repository_metadata_supplies_licence_but_never_the_release(tmp_path):
+    inventory, project = project_selection(tmp_path)
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
+    matrix = boundary_matrix(receipt, "project")
+    component = next(
+        item for item in document["components"] if item["bom-ref"] == matrix["component"]
+    )
+    assert component["licenses"] == [{"expression": "MIT"}]
+    assert "version" not in component
+    assert component["name"].startswith("unresolved:")
+    fields = matrix["fields"]
+    assert fields["license"]["status"] == fields["license_applicability"]["status"] == "known"
+    for field in ("name", "version"):
+        assert fields[field]["status"] == "missing"
+        context = [
+            row
+            for row in fields[field]["evidence"]
+            if row.get("applicability") == "repository-context"
+        ]
+        assert [row["value"] for row in context] == [
+            {"name": "enclosing-app", "version": "0.1.0"}[field]
+        ]
+        assert context[0]["path"] == str(project / "pyproject.toml")
+        gap = next(
+            gap
+            for gap in receipt["gaps"]
+            if gap.get("boundary") == "project/." and gap.get("field") == field
+        )
+        assert gap["status"] == "missing"
+        assert "repository-context" in gap["issues"][0]["reason"]
+    assert not any(
+        gap.get("boundary") == "project/."
+        and gap.get("field") in ("license", "license_applicability")
+        for gap in receipt["gaps"]
+    )
+    assert receipt["metadata_completeness"] == "incomplete"
+
+
+def test_pinned_declaration_supplies_the_release_beside_enclosing_context(tmp_path):
+    inventory, project = project_selection(tmp_path)
+    path = tmp_path / "application.cdx.json"
+    path.write_text(
+        json.dumps(
+            {
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.6",
+                "version": 1,
+                "components": [
+                    {
+                        "type": "application",
+                        "name": "usb-firmware",
+                        "version": "3.2",
+                        "properties": [
+                            {"name": "mpy:source:root", "value": "project"},
+                            {"name": "mpy:source:path", "value": "."},
+                            {
+                                "name": "mpy:source:revision",
+                                "value": git(project, "rev-parse", "HEAD"),
+                            },
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+    document, receipt = generate_cyclonedx(
+        inventory, micropython_root=MPY_ROOT, declaration_files=[path]
+    )
+    component = next(item for item in document["components"] if item["name"] == "usb-firmware")
+    assert component["version"] == "3.2"
+    assert component["licenses"] == [{"expression": "MIT"}]
+    matrix = boundary_matrix(receipt, "project")
+    assert all(
+        matrix["fields"][field]["status"] == "known"
+        for field in ("name", "version", "license", "license_applicability")
+    )
+    assert any(
+        row.get("context") == "repository-context" and row["value"] == "0.1.0"
+        for row in matrix["fields"]["version"]["evidence"]
+    )
+
+
+def test_enclosing_context_does_not_reach_an_independent_checkout_inside_the_root(tmp_path):
+    inventory, project = project_selection(tmp_path)
+    inner = repository(project / "src/inner", {"item.py": "value = 3\n"})
+    inventory["roots"]["inner"] = str(inner)
+    inventory["groups"][FROZEN_GROUP].append(
+        {
+            "root": "inner",
+            "path": "item.py",
+            "target_path": "inner/item.py",
+            "owner": "external",
+            "provenance": {"kind": "fixture"},
+        }
+    )
+    _, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
+    matrix = boundary_matrix(receipt, "inner")
+    assert matrix["fields"]["license"]["status"] != "known"
+    assert not any(
+        row.get("context") or row.get("applicability") == "repository-context"
+        for row in matrix["evidence"]
+    )
+    assert "enclosing-app" not in json.dumps(matrix["evidence"])
+
+
+def test_enclosing_metadata_outside_the_checkout_is_not_context(tmp_path):
+    files = {k: v for k, v in APPLICATION.items() if k != "pyproject.toml"}
+    inventory, project = project_selection(tmp_path, files)
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "outside-checkout"\n')
+    _, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT)
+    assert "outside-checkout" not in json.dumps(boundary_matrix(receipt, "project")["evidence"])

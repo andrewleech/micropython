@@ -8,7 +8,7 @@ from typing import Any
 
 from jsonschema import FormatChecker
 
-from .boundaries import discover_boundaries
+from .boundaries import discover_boundaries, metadata_context
 from .declarations import load_declarations, merge_declaration, revision_matches_selected
 from .metadata import collect_metadata
 from .metadata_bom import valid_uri
@@ -247,6 +247,7 @@ def assemble(
             source_context={
                 "root": boundary["root"],
                 "root_directory": scope["roots"][boundary["root"]],
+                "context_directories": [str(path) for path in metadata_context(scope, boundary)],
                 "revision": repository["revision"]
                 if repository and revision_matches_selected(scope, directory)
                 else None,

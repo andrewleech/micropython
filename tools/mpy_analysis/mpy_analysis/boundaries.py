@@ -599,3 +599,45 @@ def discover_boundaries(
             registry[directory], kinds[directory], package_assertions.get(directory, {})
         )
     return sorted((registry[directory] for directory in owned), key=lambda value: value["id"])
+
+
+# A boundary with its own package identity needs no enclosing metadata.
+_CONTEXT_KINDS = {"repository", "unresolved-root", "declared"}
+
+
+def metadata_context(scope: dict[str, Any], boundary: Mapping[str, Any]) -> list[Path]:
+    """Parent directories whose metadata may be reported, never asserted, for a boundary.
+
+    Only a boundary without its own package identity (a checkout, an unresolved root
+    or a declared directory) has context. The chain starts at its parent and ends at the
+    first of: the root of its enclosing Git checkout (a submodule or other checkout is
+    its own root, so the chain cannot cross it), the first directory with package or
+    native project metadata (a different package), or the edge of another declared
+    root. The chain never changes source selection or ownership. The list is nearest
+    first, with no gaps, and empty when no enclosing checkout is known.
+    """
+    if boundary.get("boundary_kind") not in _CONTEXT_KINDS:
+        return []
+    directory = Path(boundary["directory"]).resolve(strict=True)
+    checkout = _repository_root(directory)
+    if checkout is None or checkout == directory or not _contains(checkout, directory):
+        return []
+    own_root = Path(scope["roots"][boundary["root"]]).resolve(strict=True)
+    foreign = [
+        root
+        for root in (Path(value).resolve(strict=True) for value in scope["roots"].values())
+        if root != own_root
+    ]
+    chain = []
+    current = directory.parent
+    while _contains(checkout, current):
+        if any(_contains(root, current) for root in foreign):
+            break
+        chain.append(current)
+        identity = {"package-metadata", "native-project"}
+        if current == checkout or any(
+            item["kind"] in identity for item in _markers(current, current, scope)
+        ):
+            break
+        current = current.parent
+    return chain

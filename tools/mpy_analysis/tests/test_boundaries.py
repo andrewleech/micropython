@@ -946,3 +946,108 @@ def test_library_json_symlink_outside_the_root_is_not_a_candidate(tmp_path):
     result = _discover(_scope(tmp_path / "root", "pkg/item.py"))
     assert result[0]["boundary_kind"] == "unresolved-root"
     assert result[0]["candidates"] == []
+
+
+def _git_init(*directories):
+    for directory in directories:
+        subprocess.run(["git", "init", "-q", str(directory)], check=True, capture_output=True)
+
+
+def _context(data, monkeypatch, real_git=True):
+    if real_git:
+        monkeypatch.setattr(boundaries, "_repository_root", _REAL_REPOSITORY_ROOT)
+    scope = parse_scope(data)
+    return [
+        (item, boundaries.metadata_context(scope, item))
+        for item in boundaries.discover_boundaries(scope)
+    ]
+
+
+def test_context_of_a_selection_root_below_a_checkout_is_the_chain_to_the_checkout(
+    tmp_path, monkeypatch
+):
+    _git_init(tmp_path / "repo")
+    _write(tmp_path / "repo", "src/app.py")
+    _write(tmp_path / "repo", "pyproject.toml", "[tool.fixture]\nx = 1\n")
+    ((item, chain),) = _context(_scope(tmp_path / "repo/src", "app.py"), monkeypatch)
+    assert item["boundary_kind"] == "unresolved-root"
+    assert chain == [tmp_path / "repo"]
+    # Discovery itself stays inside the declared root.
+    assert item["path"] == "."
+    assert all(str(tmp_path / "repo/pyproject.toml") != c.get("path") for c in item["candidates"])
+
+
+def test_context_chain_includes_each_directory_up_to_the_checkout(tmp_path, monkeypatch):
+    _git_init(tmp_path / "repo")
+    _write(tmp_path / "repo", "a/b/src/app.py")
+    ((_, chain),) = _context(_scope(tmp_path / "repo/a/b/src", "app.py"), monkeypatch)
+    assert chain == [tmp_path / "repo/a/b", tmp_path / "repo/a", tmp_path / "repo"]
+
+
+def test_context_does_not_cross_into_the_enclosing_repository_of_a_submodule(
+    tmp_path, monkeypatch
+):
+    _git_init(tmp_path / "parent", tmp_path / "parent/libs/inner")
+    _write(tmp_path / "parent", "pyproject.toml", '[project]\nname = "parent"\n')
+    _write(tmp_path / "parent", "libs/inner/item.py")
+    _write(tmp_path / "parent", "libs/inner/deep/src/item.py")
+    ((item, chain),) = _context(_scope(tmp_path / "parent/libs/inner", "item.py"), monkeypatch)
+    assert item["boundary_kind"] == "repository"
+    assert chain == []
+    ((item, chain),) = _context(
+        _scope(tmp_path / "parent/libs/inner/deep/src", "item.py"), monkeypatch
+    )
+    assert chain == [tmp_path / "parent/libs/inner/deep", tmp_path / "parent/libs/inner"]
+
+
+def test_context_stops_at_the_first_directory_with_its_own_package_metadata(tmp_path, monkeypatch):
+    _git_init(tmp_path / "repo")
+    _write(tmp_path / "repo", "pyproject.toml", '[project]\nname = "outer"\n')
+    _write(tmp_path / "repo", "pkg/pyproject.toml", '[project]\nname = "inner"\n')
+    _write(tmp_path / "repo", "pkg/mid/src/app.py")
+    ((_, chain),) = _context(_scope(tmp_path / "repo/pkg/mid/src", "app.py"), monkeypatch)
+    assert chain == [tmp_path / "repo/pkg/mid", tmp_path / "repo/pkg"]
+
+
+def test_context_never_enters_another_declared_root(tmp_path, monkeypatch):
+    _git_init(tmp_path / "repo")
+    _write(tmp_path / "repo", "src/app.py")
+    _write(tmp_path / "repo", "tools/helper.py")
+    data = _scope(tmp_path / "repo/src", "app.py")
+    data["roots"]["whole"] = str(tmp_path / "repo")
+    ((_, chain),) = _context(data, monkeypatch)
+    assert chain == []
+    data = _scope(tmp_path / "repo/src", "app.py")
+    data["roots"]["elsewhere"] = str(tmp_path / "repo/tools")
+    ((_, chain),) = _context(data, monkeypatch)
+    assert chain == [tmp_path / "repo"]
+
+
+def test_context_requires_an_identity_free_boundary_and_a_known_checkout(tmp_path, monkeypatch):
+    _git_init(tmp_path / "repo")
+    _write(tmp_path / "repo", "src/pyproject.toml", '[project]\nname = "own"\n')
+    _write(tmp_path / "repo", "src/app.py")
+    ((item, chain),) = _context(_scope(tmp_path / "repo/src", "app.py"), monkeypatch)
+    assert item["boundary_kind"] == "package-metadata"
+    assert chain == []
+    _write(tmp_path / "plain", "src/app.py")
+    ((item, chain),) = _context(
+        _scope(tmp_path / "plain/src", "app.py"), monkeypatch, real_git=False
+    )
+    assert item["boundary_kind"] == "unresolved-root"
+    assert chain == []
+
+
+def test_context_is_available_to_declared_boundaries(tmp_path, monkeypatch):
+    _git_init(tmp_path / "repo")
+    _write(tmp_path / "repo", "src/vendor/app.py")
+    monkeypatch.setattr(boundaries, "_repository_root", _REAL_REPOSITORY_ROOT)
+    scope = parse_scope(_scope(tmp_path / "repo/src", "vendor/app.py"))
+    found = boundaries.discover_boundaries(
+        scope, declared_boundaries=[{"root": "source", "path": "vendor"}]
+    )
+    assert found[0]["boundary_kind"] == "declared"
+    assert boundaries.metadata_context(scope, found[0]) == [
+        tmp_path / "repo/src",
+        tmp_path / "repo",
+    ]

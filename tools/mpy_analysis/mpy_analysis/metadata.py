@@ -24,6 +24,7 @@ from reuse.project import Project
 from .metadata_bom import valid_uri
 
 FIELDS = ("name", "version", "description", "author", "license", "url")
+CONTEXT = "repository-context"
 LICENSING = get_spdx_licensing()
 LICENSEREF = re.compile(r"LicenseRef-[A-Za-z0-9.-]+\Z")
 CORE_KEYS = {
@@ -159,10 +160,38 @@ class _Collector:
         self.custom_text: dict[str, dict[str, Any]] = {}
         self.license_scope: str | None = None
         self.licensing_inputs: set[Path] = set()
+        self.context_dirs = self._context_chain()
+        self.context_directory: Path | None = None
         for label, files in (("selected", self.files), ("binding", self.binding_files)):
             for path in files or []:
                 if not path.is_relative_to(self.directory) or not path.is_file():
                     raise ValueError(f"{label} file is not contained by metadata boundary: {path}")
+
+    def _context_chain(self) -> list[Path]:
+        """Check the supplied metadata-only context is the boundary's contiguous parent chain."""
+        chain: list[Path] = []
+        expected = self.directory.parent
+        for value in self.context.get("context_directories") or []:
+            directory = Path(value).resolve(strict=True)
+            if directory != expected or not directory.is_dir():
+                raise ValueError(
+                    f"metadata context is not the contiguous parent chain of the boundary: {value}"
+                )
+            chain.append(directory)
+            expected = directory.parent
+        return chain
+
+    def in_context(self, path: Path) -> bool:
+        """True for a file of an enclosing context directory rather than of the boundary."""
+        return not path.is_relative_to(self.directory) and any(
+            path.is_relative_to(directory) for directory in self.context_dirs
+        )
+
+    def allow_context(self, path: Path) -> None:
+        resolved = path.resolve(strict=True)
+        if self.context_directory is None or not resolved.is_relative_to(self.context_directory):
+            raise ValueError(f"metadata context input escapes its directory: {path}")
+        self.licensing_inputs.add(resolved)
 
     def read(self, path: Path) -> bytes:
         if self.input_paths is not None:
@@ -187,6 +216,11 @@ class _Collector:
     def issue(
         self, field: str, status: str, reason: str, path: Path | None = None, **extra: Any
     ) -> None:
+        if self.context_directory is not None:
+            # Problems in enclosing metadata never decide a field of this boundary.
+            extra = {**extra, "context": CONTEXT, "context_field": field}
+            field, reason = CONTEXT, f"{field}: {reason}"
+            status = "unsupported" if status == "conflicting" else status
         row = {"field": field, "status": status, "reason": reason, **extra}
         if path is not None:
             row["path"] = str(path.resolve())
@@ -204,9 +238,10 @@ class _Collector:
     ) -> None:
         row = {"field": field, "value": value, "parser": parser, "status": status, **extra}
         if path is not None:
-            row.update(
-                path=str(path.resolve()), sha256=hashlib.sha256(self.read(path)).hexdigest()
-            )
+            resolved = path.resolve()
+            row.update(path=str(resolved), sha256=hashlib.sha256(self.read(path)).hexdigest())
+            if self.in_context(resolved):
+                row.setdefault("context", CONTEXT)
         self.result["evidence"].append(row)
 
     def add(self, field: str, value: Any, path: Path | None, parser: str, **extra: Any) -> None:
@@ -227,6 +262,19 @@ class _Collector:
             self.evidence(field, raw, path, parser, "unsupported", **extra)
             self.issue(field, "unsupported", "URL is not a valid URI", path)
             return
+        if self.context_directory is not None:
+            self.evidence(
+                field,
+                value,
+                path,
+                parser,
+                "candidate",
+                raw_value=raw,
+                applicability=CONTEXT,
+                detail="declared by an enclosing directory; not the identity of this boundary",
+                **extra,
+            )
+            return
         self.evidence(
             field, value, path, parser, raw_value=raw, applicability="distribution", **extra
         )
@@ -239,6 +287,9 @@ class _Collector:
             self.issue("dependencies", "unsupported", "dependencies must be literal strings", path)
             self.evidence("dependencies", values, path, parser, "unsupported")
             return
+        if self.context_directory is not None:
+            self.evidence("dependencies", values, path, parser, "candidate", applicability=CONTEXT)
+            return
         for value in values:
             if value.strip() and value.strip() not in self.result["declared_dependencies"]:
                 self.result["declared_dependencies"].append(value.strip())
@@ -250,6 +301,8 @@ class _Collector:
             if relative.is_absolute() or ".." in relative.parts or "\\" in name:
                 raise ValueError("reference must be a contained relative path")
             target = path.parent / relative
+            if self.context_directory is not None:
+                self.allow_context(target)
             raw = self.read(target)
             self.evidence(
                 field,
@@ -260,7 +313,11 @@ class _Collector:
                 detail="referenced text, not an SPDX assertion",
                 text=raw.decode("utf-8", errors="replace"),
             )
-            if target.parent.name == "LICENSES" and LICENSEREF.fullmatch(target.stem):
+            if (
+                self.context_directory is None
+                and target.parent.name == "LICENSES"
+                and LICENSEREF.fullmatch(target.stem)
+            ):
                 text = raw.decode("utf-8", errors="replace")
                 prior = self.custom_text.get(target.stem)
                 if prior and prior["text"] != text:
@@ -513,10 +570,11 @@ class _Collector:
                     PurePosixPath(pattern).is_absolute()
                     or ".." in PurePosixPath(pattern).parts
                     or "\\" in pattern
+                    or (self.context_directory is not None and "**" in pattern)
                 ):
                     self.issue("license", "unsupported", "unsafe licence-file pattern", path)
                     continue
-                matches = sorted(self.directory.glob(pattern))
+                matches = sorted(path.parent.glob(pattern))
                 if not matches:
                     self.issue(
                         "license",
@@ -526,7 +584,7 @@ class _Collector:
                     )
                 for match in matches:
                     if match.is_file():
-                        self.reference(match.relative_to(self.directory).as_posix(), path, parser)
+                        self.reference(match.relative_to(path.parent).as_posix(), path, parser)
         else:
             self.issue(
                 "license", "unsupported", "license-files must be literal path patterns", path
@@ -893,6 +951,32 @@ class _Collector:
             if bound and component.get("dependencies"):
                 self.dependencies(component["dependencies"], path, component["parser"])
 
+    def parse_context(self, directory: Path) -> None:
+        """Report declarative package metadata of an enclosing directory as evidence only.
+
+        Nothing read here is asserted for this boundary or reaches ``fields``: an enclosing
+        project file describes that project, and whether it also describes the selected
+        sources is not something its format states.
+        """
+        parsers = {
+            "pyproject.toml": self.parse_project,
+            "setup.cfg": self.parse_cfg,
+            "library.json": self.parse_library_json,
+        }
+        self.context_directory = directory
+        try:
+            for name, parse in parsers.items():
+                path = directory / name
+                if not path.is_file():
+                    continue
+                try:
+                    self.allow_context(path)
+                    parse(path)
+                except (OSError, UnicodeError, ValueError, configparser.Error) as error:
+                    self.issue("metadata", "unsupported", f"cannot parse {name}: {error}", path)
+        finally:
+            self.context_directory = None
+
     def parse_licensing(self) -> None:
         root = self.directory
         distribution_licenses = list(self.assertions.get("license", []))
@@ -900,6 +984,8 @@ class _Collector:
         licensing_root = Path(self.context.get("root_directory", root)).resolve(strict=True)
         if not root.is_relative_to(licensing_root):
             raise ValueError("metadata boundary is outside the declared physical source root")
+        if self.context_dirs and licensing_root.is_relative_to(self.context_dirs[-1]):
+            licensing_root = self.context_dirs[-1]
         dirs = {
             root,
             *[parent for parent in root.parents if parent.is_relative_to(licensing_root)],
@@ -1048,30 +1134,36 @@ class _Collector:
                         cause_fields=["license_text:" + identifier],
                     )
         # Arbitrary root licence texts are candidates, never component-wide declarations.
-        for path in sorted(root.iterdir()):
-            if path.is_file() and re.fullmatch(
-                r"(?:LICENSE|LICENCE|COPYING|NOTICE)(?:[._-].*)?|[A-Za-z0-9._-]*LICENSE",
-                path.name,
-                re.IGNORECASE,
-            ):
-                try:
-                    text = self.read(path).decode("utf-8", errors="replace")
-                    self.evidence(
-                        "license_text",
-                        text,
-                        path,
-                        "license-text-1",
-                        "candidate",
-                        applicability="unresolved",
-                        detail="root text alone does not establish selected-file coverage",
-                    )
-                except (OSError, ValueError) as error:
-                    self.issue(
-                        "license_applicability",
-                        "unsupported",
-                        f"unsafe/unreadable root licence text: {error}",
-                        path,
-                    )
+        for directory in (root, *self.context_dirs):
+            for path in sorted(directory.iterdir()):
+                if path.is_file() and re.fullmatch(
+                    r"(?:LICENSE|LICENCE|COPYING|NOTICE)(?:[._-].*)?|[A-Za-z0-9._-]*LICENSE",
+                    path.name,
+                    re.IGNORECASE,
+                ):
+                    try:
+                        if directory != root:
+                            self.context_directory = directory
+                            self.allow_context(path)
+                        text = self.read(path).decode("utf-8", errors="replace")
+                        self.evidence(
+                            "license_text",
+                            text,
+                            path,
+                            "license-text-1",
+                            "candidate",
+                            applicability="unresolved" if directory == root else CONTEXT,
+                            detail="root text alone does not establish selected-file coverage",
+                        )
+                    except (OSError, ValueError) as error:
+                        self.issue(
+                            "license_applicability",
+                            "unsupported",
+                            f"unsafe/unreadable root licence text: {error}",
+                            path,
+                        )
+                    finally:
+                        self.context_directory = None
         if distribution_licenses:
             self.license_scope = "package-declaration"
             declarations = [
@@ -1174,7 +1266,25 @@ class _Collector:
                         continue
                 self.result["fields"][field] = value
             elif not any(issue["field"] == field for issue in self.result["issues"]):
-                self.issue(field, "missing", "no static source-bound assertion")
+                context = [
+                    row
+                    for row in self.result["evidence"]
+                    if row["field"] == field
+                    and row["status"] == "candidate"
+                    and row.get("applicability") == CONTEXT
+                ]
+                if context:
+                    self.issue(
+                        field,
+                        "missing",
+                        "an enclosing directory declares this field, but repository-context "
+                        "metadata is not the identity of this boundary; supply package "
+                        "metadata or a source-bound declaration",
+                        context=CONTEXT,
+                        values=sorted({str(row["value"]) for row in context}),
+                    )
+                else:
+                    self.issue(field, "missing", "no static source-bound assertion")
         if "license" in self.result["fields"] and self.license_scope:
             applicability_unresolved = any(
                 issue["field"] == "license_applicability"
@@ -1239,6 +1349,15 @@ def collect_metadata(
     consumer's root namespace. Other selectors must match the supplied analysis
     root and physical boundary. Every binding additionally requires an exact
     selected-content hash or the authority's clean Git revision.
+    ``source_context['context_directories']`` optionally lists the boundary's parent
+    directories, nearest first and contiguous, chosen by the caller (see
+    ``boundaries.metadata_context``). They are a metadata-only context: their
+    ``pyproject.toml``, ``setup.cfg`` and ``library.json``, licence texts, ``REUSE.toml``
+    and dep5 are read, never their other files and never the source selection. Package
+    metadata found there is evidence marked ``applicability='repository-context'``
+    and is never asserted into ``fields``. REUSE annotations govern selected files by
+    their own format, so they may supply file-level licences; those rows carry
+    ``context='repository-context'``.
     ``input_paths`` receives physical inputs before reads, retaining attempted
     inputs even if parsing or reading fails.
     """
@@ -1309,5 +1428,7 @@ def collect_metadata(
                     )
             except (OSError, ValueError) as error:
                 collector.issue("metadata", "unsupported", str(error), path)
+    for directory in collector.context_dirs:
+        collector.parse_context(directory)
     collector.parse_licensing()
     return collector.finish()
