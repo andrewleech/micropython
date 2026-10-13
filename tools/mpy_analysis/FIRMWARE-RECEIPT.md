@@ -87,6 +87,37 @@ sast-sbom --scope scope.json --micropython-root "$MPY" \
 
 A receipt records the images a build produced and their deployment artifact hashes, not which of them reach a device or what else the device carries. An application-owned `mpy-deployment/v1` manifest, passed with `sast-sbom --deployment`, binds deployed image files to receipt images by `receipt_image` id or exact hash and adds `deployment_completeness` to the summary. A receipt image that the manifest neither lists nor excludes with a reason makes the deployment `not-established`. See the README section "Deployment manifest".
 
+## Frozen payload
+
+An image whose contributing compile consumes a `frozen_content.c` written by `tools/makemanifest.py` carries `images[].frozen_accounting`; an image without such a source carries `status: "none"` and needs nothing. The record is `{build_root, status, payloads}`, `status` being `none`, `accounted` or `unaccounted`, with one payload per generated frozen source:
+
+- `generated`: path and hash of the `frozen_content.c` the compile consumed, and `generator`, the captured makemanifest action;
+- `elements`: one per frozen module, each `bound` (with `source_bindings` under a declared root) or `unbound` (with `reason`). `mpy-compiled` elements name the `mpy-cross` action (`compile_action`), the `.mpy` it wrote, the `-s` target and the source file; `mpy-prebuilt` elements are `.mpy` files frozen without compiling, bound by their own path; `str` elements are sources frozen as text;
+- `inputs`: every file outside the build directory the generator opened for reading, with the hash taken when it was opened (top-level and nested manifests, frozen sources, the generator's own Python modules), each `bound` to a declared root or `unbound`;
+- `mpy_tool`: the `mpy-tool.py` action and the length and hash of its standard output;
+- `unresolved`: reasons that no element or input can carry, and `status` (`accounted` only with no unresolved reason and every element and input bound).
+
+What is observed while the build runs: the Python wrapper starts `makemanifest.py` with a `sitecustomize` module that installs an audit hook (`firmware_observe`). The hook logs each regular file the generator opens for reading with its SHA-256, each process it starts, and points `sys.executable` at the capture's Python wrapper so that the `mpy-tool.py` run is a captured action. The bytecode cache of that run is a fresh empty directory, so the source of every imported module is read. `mpy-cross` is wrapped through `MICROPY_MPYCROSS`; the adapter takes the real binary from the `MICROPY_MPYCROSS=` make variable, then the environment, then `mpy-cross/build/mpy-cross` of the checkout, and records it as an `mpy-cross` tool with its hash. A build that has to build `mpy-cross` itself is not wrapped, and its elements stay unbound (build `mpy-cross` first).
+
+How the chain is tied, by bytes and not by names:
+
+- the actions started by the generator are the captured actions whose parent process is the generator process and whose time lies inside the generator action. Their command lines must equal the processes the audit hook saw start, in order;
+- `makemanifest.py` compiles a temporary copy of each source with the manifest's `__version__` line appended and then deletes it. The copy is an `ephemeral-input` of the `mpy-cross` action with its hash and a `derived_from` tie: the source file the generator read, how newlines were translated, and the appended text. The tie holds only when the hash of the current source bytes (translated) plus the appended text equals the recorded hash of the copy;
+- each `.mpy` handed to `mpy-tool.py` is a captured input whose path and hash equal an `mpy-cross` output;
+- the standard output of `mpy-tool.py`, which the generator copies to the end of `frozen_content.c`, must equal the tail of the file by length and hash;
+- the text-frozen strings are parsed out of `frozen_content.c` (the escapes the generator writes) and each must equal the bytes of exactly one file the generator read.
+
+The validator runs the same derivation over the receipt's actions and the current files and rejects a record that differs, so a frozen source, `.mpy`, manifest or `frozen_content.c` changed after the build invalidates the receipt, and a record cannot claim more than its actions show. A receipt with an `unaccounted` payload cannot be `complete`. The SBOM adds bound frozen sources, manifests and generator inputs as file components under the boundary that owns them (a manifest-selected frozen source keeps its component and gains `frozen-payload: bound`), makes the firmware depend on them, and reports `frozen_payload` per image with the selected frozen sources that are not in the payload. Gaps `frozen-payload-unbound` (an element, input or unresolved tie), `frozen-source-not-in-selected-scope` (a bound path that no selected boundary contains) and `frozen-accounting-unavailable` (a receipt of a frozen build captured before this record existed) block `firmware_completeness`.
+
+Not observed, and therefore not claimed:
+
+- `mpy-cross` and `mpy-tool.py` are tools recorded by hash; their own build and behaviour are not part of the account. The relation between the `.mpy` bytes and the bytecode printed into `frozen_content.c` is established by the `mpy-tool.py` output hash, not by decoding the C text;
+- the audit hook sees opens made through Python (`open`, `os.open`, imports). A native extension that reads a file itself is invisible to it;
+- a manifest that executes code reading other files sees those reads as generator inputs, but they are not tied to a frozen element;
+- only `tools/makemanifest.py` run through the `PYTHON` make variable is observed; the CMake and `mkrules.cmake` paths are not captured. A `frozen_content.c` whose generator the adapter did not capture stays a generated-source gap, and a captured run whose observer did not start is `unaccounted`.
+
+`tests/test_firmware_frozen.py` runs real makemanifest, mpy-cross, mpy-tool and compiler invocations through `capture_make()`: sources with a version line, with CRLF newlines and with their own version line, a nested manifest, text-frozen strings with escapes, tool modules loaded from warm bytecode, a source changed after the build, a changed `.mpy`, a changed `frozen_content.c`, `frozen_content.c` rewritten by a later captured action, compiles run outside the wrapper, a frozen source outside the declared roots, records that claim more than the actions show, a build with no frozen content, and a receipt that predates the record.
+
 ## Adapter and evidence boundary
 
 A receipt is not a build-capture mechanism. A production adapter must observe the real build process rather than replay a compilation database or inspect old artifacts after the fact. It must keep application and bootloader images separate, capture actual successful link and transform actions, retain compiler / assembler outputs, archives and member selections, linker scripts, response files, generated and system inputs, and bind the final ELF / deployment artifacts to that same build ID. If the adapter cannot resolve an input class or linker format, it must emit an incomplete receipt with the exact missing evidence, not infer inclusion from source names or file presence.

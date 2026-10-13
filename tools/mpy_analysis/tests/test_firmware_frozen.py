@@ -1,7 +1,9 @@
 """Frozen payload accounting of a captured build: real makemanifest, mpy-cross and mpy-tool runs."""
 
 import hashlib
+import importlib.util
 import json
+import py_compile
 import subprocess
 from pathlib import Path
 
@@ -91,8 +93,22 @@ def mpy_cross(tmp_path_factory):
     return build / "mpy-cross"
 
 
+def _unchecked_bytecode(tmp_path, relative):
+    """Bytecode that Python loads without opening the module's source, as a warm cache would."""
+    target = tmp_path / "pyc" / Path(relative).with_suffix(".pyc").name
+    target.parent.mkdir(exist_ok=True)
+    py_compile.compile(
+        str(MPY_ROOT / relative),
+        cfile=str(target),
+        doraise=True,
+        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+    )
+    return importlib.util.cache_from_source(relative), target.read_bytes()
+
+
 def frozen_build(tmp_path, mpy_cross, *, files=None, makefile=None, name="frozen", variables=(), freeze=FREEZE, after=""):
     contents = {rel: (MPY_ROOT / rel).read_bytes() for rel in TOOL_FILES}
+    contents.update(_unchecked_bytecode(tmp_path, rel) for rel in ("tools/manifestfile.py", "mpy-cross/mpy_cross/__init__.py"))
     contents.update(FILES)
     contents.update(files or {})
     return capture(
@@ -160,7 +176,15 @@ def test_frozen_sources_are_tied_to_their_compiles_and_to_frozen_content(tmp_pat
     frozen = (built.build / "frozen_content.c").read_bytes()
     assert hashlib.sha256(frozen[-tool["stdout"]["size"] :]).hexdigest() == tool["stdout"]["sha256"]
     inputs = {Path(item["path"]).relative_to(built.root).as_posix(): item for item in payload["inputs"]}
-    assert {"manifest.py", "lib/manifest.py", "tools/manifestfile.py", "src/main.py", "lib/util.py"} <= set(inputs)
+    assert {
+        "manifest.py",
+        "lib/manifest.py",
+        "tools/makemanifest.py",
+        "tools/manifestfile.py",
+        "mpy-cross/mpy_cross/__init__.py",
+        "src/main.py",
+        "lib/util.py",
+    } <= set(inputs)
     assert all(item["disposition"] == "bound" for item in inputs.values())
     toolchain = {item["role"]: item for item in receipt["toolchain"]}
     assert toolchain["mpy-cross"]["executable"]["sha256"] == hashlib.sha256(mpy_cross.read_bytes()).hexdigest()

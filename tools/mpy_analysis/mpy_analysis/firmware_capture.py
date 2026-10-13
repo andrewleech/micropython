@@ -555,15 +555,19 @@ def run_tool(
     observed_child = LOG_VARIABLE in os.environ
     teeing = observed_child and role == "python" and kind == "generate"
     observation_log = None
+    bytecode_cache = None
     environment = None
     if observing:
         descriptor, name = tempfile.mkstemp(prefix="mpy-frozen-observe-", suffix=".jsonl")
         os.close(descriptor)
         observation_log = Path(name)
+        # An empty bytecode cache makes the generator read the source of every module it imports.
+        bytecode_cache = tempfile.mkdtemp(prefix="mpy-frozen-pycache-")
         environment = {
             **os.environ,
             LOG_VARIABLE: name,
             "PYTHONPATH": wrapper_dir + os.pathsep + os.environ.get("PYTHONPATH", ""),
+            "PYTHONPYCACHEPREFIX": bytecode_cache,
         }
     started = time.time_ns()
     stdout_record = None
@@ -631,6 +635,8 @@ def run_tool(
             assembler_file.unlink(missing_ok=True)
         if observation_log is not None:
             observation_log.unlink(missing_ok=True)
+        if bytecode_cache is not None:
+            shutil.rmtree(bytecode_cache, ignore_errors=True)
     _append_event(
         journal,
         {
