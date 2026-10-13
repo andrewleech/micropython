@@ -7,8 +7,9 @@ exits non-zero unless every requirement of the chosen profile holds.
 
 Exit status: 0 profile satisfied, 1 a requirement is not satisfied, 2 unreadable or invalid input
 (including an unknown summary schema version, an internally inconsistent summary, an unknown
-profile, or a receipt that is invalid or does not belong to the summary). A JSON result is always
-printed on standard output.
+profile, a receipt that is invalid or does not belong to the summary, or a deployment manifest
+that is invalid or no longer verifies as the summary says). A JSON result is always printed on
+standard output.
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from .deployment import NOT_DECLARED, DeploymentError, load_deployment, verify_deployment
+from .deployment import SCHEMA as DEPLOYMENT_SCHEMA
 from .firmware_receipt import SCHEMA as RECEIPT_SCHEMA
 from .firmware_receipt import FirmwareReceiptError, validate_firmware_receipt
 from .sbom import FIRMWARE_BLOCKING_GAPS
@@ -38,6 +41,7 @@ EXIT_CODES = {SATISFIED: 0, UNSATISFIED: 1, INVALID: 2}
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _LINK_STATUSES = {"complete", "incomplete", "not-established", "posthoc-incomplete"}
 _IMAGE_STATUSES = {"complete", "incomplete"}
+_DEPLOYMENT_STATUSES = {"established", "not-established", NOT_DECLARED}
 _METADATA_GAP_KINDS = {"dependency-metadata-unresolved"}
 
 
@@ -140,13 +144,30 @@ def _metadata_completeness(summary):
     }
 
 
-# Adding a dimension (for example deployment) is one entry here plus its name in the profiles.
+def _deployment(summary):
+    value = summary.get("deployment_completeness", "not-declared")
+    evidence: dict[str, Any] = {"value": value}
+    block = summary.get("deployment")
+    if block:
+        evidence.update(
+            {
+                "members_total": len(block["members"]),
+                "members_verified": sum(1 for row in block["members"] if row["digest"] == "match"),
+                "reasons_by_code": _count(reason["code"] for reason in block["reasons"]),
+                "runtime_fetch": block["runtime_fetch"]["mode"],
+            }
+        )
+    return value == "established", evidence
+
+
+# Adding a dimension is one entry here plus its name in the profiles.
 DIMENSIONS: dict[str, Dimension] = {
     "firmware_completeness": _firmware_completeness,
     "link_closure": _link_closure,
     "source_accounting": _source_accounting,
     "gaps": _gaps,
     "metadata_completeness": _metadata_completeness,
+    "deployment": _deployment,
 }
 
 PROFILES: dict[str, dict[str, Any]] = {
@@ -165,7 +186,57 @@ PROFILES: dict[str, dict[str, Any]] = {
         "description": "link closure established; metadata and other gaps are reported but do not fail",
         "require": ("firmware_completeness", "link_closure"),
     },
+    "deployable": {
+        "description": "firmware closure established and every deployment member verified, with "
+        "runtime fetch declared none or restricted",
+        "require": ("firmware_completeness", "deployment"),
+    },
 }
+
+
+def _check_deployment(summary: dict[str, Any], errors: list[str]) -> None:
+    value = summary.get("deployment_completeness", "not-declared")
+    block = summary.get("deployment")
+    if value not in _DEPLOYMENT_STATUSES:
+        errors.append(
+            f"deployment_completeness must be one of {sorted(_DEPLOYMENT_STATUSES)}, not {value!r}"
+        )
+        return
+    if value == "not-declared":
+        if block is not None:
+            errors.append("deployment_completeness is not-declared but a deployment block exists")
+        return
+    if (
+        not isinstance(block, dict)
+        or block.get("schema") != DEPLOYMENT_SCHEMA
+        or block.get("status") != value
+        or not isinstance(block.get("members"), list)
+        or not all(isinstance(row, dict) and "digest" in row for row in block["members"])
+        or not isinstance(block.get("reasons"), list)
+        or not all(isinstance(row, dict) and isinstance(row.get("code"), str) for row in block["reasons"])
+        or not isinstance(block.get("runtime_fetch"), dict)
+        or not isinstance(block["runtime_fetch"].get("mode"), str)
+    ):
+        errors.append(f"deployment block is missing or does not carry status {value!r}")
+        return
+    if value == "not-established":
+        if not block["reasons"]:
+            errors.append("deployment_completeness is not-established but the deployment block has no reason")
+        return
+    if block["reasons"]:
+        errors.append("deployment_completeness is established but the deployment block lists reasons")
+    if any(row["digest"] != "match" for row in block["members"]):
+        errors.append("deployment_completeness is established but a member digest does not match")
+    if block["runtime_fetch"]["mode"] not in ("none", "restricted"):
+        errors.append("deployment_completeness is established but runtime fetch is not none or restricted")
+    closure = summary.get("link_closure")
+    receipt = block.get("receipt")
+    if (
+        not isinstance(receipt, dict)
+        or not isinstance(closure, dict)
+        or any(receipt.get(key) != closure.get(key) for key in ("receipt_id", "build_id"))
+    ):
+        errors.append("deployment_completeness is established but is not bound to the summary's firmware receipt")
 
 
 def _is_count(value: Any) -> bool:
@@ -266,6 +337,7 @@ def validate_summary(summary: Any) -> dict[str, Any]:
         errors.append("metadata must be a list of objects with a fields object")
         metadata = []
     _check_link_closure(summary.get("link_closure"), gaps, errors)
+    _check_deployment(summary, errors)
     if errors:
         raise PolicyInputError(errors)
 
@@ -297,6 +369,29 @@ def validate_summary(summary: Any) -> dict[str, Any]:
     if errors:
         raise PolicyInputError(errors)
     return summary
+
+
+def verify_deployment_file(
+    summary: dict[str, Any], deployment_path: Path, receipt: dict[str, Any] | None
+) -> None:
+    """Check that the manifest still verifies the way the summary recorded it."""
+    block = summary.get("deployment")
+    if block is None:
+        raise PolicyInputError(["summary was generated without a deployment manifest"])
+    try:
+        current = verify_deployment(
+            load_deployment(deployment_path), target=summary["target"], receipt=receipt
+        )
+    except DeploymentError as exc:
+        raise PolicyInputError([f"deployment manifest is not valid: {exc}"]) from exc
+    errors = []
+    for key in ("manifest_sha256", "status"):
+        if current[key] != block[key]:
+            errors.append(f"summary deployment.{key} {block[key]!r} does not match the manifest now: {current[key]!r}")
+    if not errors and current["members"] != block["members"]:
+        errors.append("summary deployment members differ from the files on disk now")
+    if errors:
+        raise PolicyInputError(errors)
 
 
 def verify_receipt(summary: dict[str, Any], receipt_path: Path) -> dict[str, Any]:
@@ -383,7 +478,12 @@ def _invalid(profile: str | None, errors: Sequence[str]) -> dict[str, Any]:
     }
 
 
-def run(summary_path: Path, profile: str, receipt_path: Path | None = None) -> dict[str, Any]:
+def run(
+    summary_path: Path,
+    profile: str,
+    receipt_path: Path | None = None,
+    deployment_path: Path | None = None,
+) -> dict[str, Any]:
     """Return the policy result for a summary file; `result` is satisfied, unsatisfied or invalid."""
     if profile not in PROFILES:
         return _invalid(profile, [f"unknown profile {profile!r}; known: {sorted(PROFILES)}"])
@@ -394,6 +494,8 @@ def run(summary_path: Path, profile: str, receipt_path: Path | None = None) -> d
             raise PolicyInputError([f"cannot read summary {summary_path}: {exc}"]) from exc
         validate_summary(summary)
         receipt = verify_receipt(summary, receipt_path) if receipt_path else None
+        if deployment_path:
+            verify_deployment_file(summary, deployment_path, receipt)
     except PolicyInputError as exc:
         return _invalid(profile, exc.errors)
     return evaluate(summary, profile, receipt)
@@ -407,9 +509,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="mpy-firmware-build/v1 receipt; verified and matched to the summary when given",
     )
+    parser.add_argument(
+        "--deployment",
+        type=Path,
+        help="mpy-deployment/v1 manifest; re-verified against the files on disk and the summary when given",
+    )
     parser.add_argument("--profile", required=True, help="profile name: " + ", ".join(sorted(PROFILES)))
     args = parser.parse_args(argv)
-    result = run(args.summary, args.profile, args.receipt)
+    result = run(args.summary, args.profile, args.receipt, args.deployment)
     print(json.dumps(result, indent=2, sort_keys=True))
     return EXIT_CODES[result["result"]]
 
