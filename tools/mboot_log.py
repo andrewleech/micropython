@@ -100,7 +100,7 @@ SOURCES = {0: "boot", 1: "dfu", 2: "fsload", 3: "app"}
 
 
 def name_of(table, value):
-    return table.get(value, "UNKNOWN(%d)" % value)
+    return table.get(value, f"UNKNOWN({value})")
 
 
 def decode_slot(raw):
@@ -124,10 +124,10 @@ def decode_slot(raw):
         crc,
     ) = fields
     if magic != REC_MAGIC:
-        return {"state": "consumed", "reason": "bad magic 0x%08x" % magic}
+        return {"state": "consumed", "reason": f"bad magic 0x{magic:08x}"}
     calc = zlib.crc32(raw[:28]) & 0xFFFFFFFF
     if calc != crc:
-        return {"state": "consumed", "reason": "bad crc 0x%08x (expected 0x%08x)" % (crc, calc)}
+        return {"state": "consumed", "reason": f"bad crc 0x{crc:08x} (expected 0x{calc:08x})"}
     return {
         "state": "valid",
         "seq": seq,
@@ -140,7 +140,7 @@ def decode_slot(raw):
         "primary_valid": bool(flags & 1),
         "secondary_header": bool(flags & 2),
         "flags": flags,
-        "version": "%d.%d.%d+%d" % (vmaj, vmin, vrev, vbuild),
+        "version": f"{vmaj}.{vmin}.{vrev}+{vbuild}",
         "detail": detail,
         "hash_prefix": hash_prefix,
     }
@@ -157,7 +157,7 @@ def seq_cmp(a, b):
 def decode_dump(data, unit=0):
     """Returns (records in sequence order, consumed slots, number of free slots, notes)."""
     if len(data) % REC_SIZE:
-        raise ValueError("dump size %d is not a multiple of %d" % (len(data), REC_SIZE))
+        raise ValueError(f"dump size {len(data)} is not a multiple of {REC_SIZE}")
     records = []
     consumed = []
     free = 0
@@ -178,12 +178,11 @@ def decode_dump(data, unit=0):
     for prev, cur in zip(records, records[1:]):
         if cur["seq"] == prev["seq"]:
             notes.append(
-                "duplicate seq %d at offsets 0x%x and 0x%x"
-                % (cur["seq"], prev["offset"], cur["offset"])
+                f"duplicate seq {cur['seq']} at offsets 0x{prev['offset']:x} and 0x{cur['offset']:x}"
             )
         elif (cur["seq"] - prev["seq"]) & 0xFFFFFFFF != 1:
             notes.append(
-                "gap between seq %d and %d (older history was erased)" % (prev["seq"], cur["seq"])
+                f"gap between seq {prev['seq']} and {cur['seq']} (older history was erased)"
             )
     return records, consumed, free, notes
 
@@ -191,7 +190,7 @@ def decode_dump(data, unit=0):
 def decode_result(data):
     """The 16-byte mboot_dfu_recovery_result_t returned by vendor request 0x81."""
     if len(data) != 16:
-        raise ValueError("a DFU result is 16 bytes, got %d" % len(data))
+        raise ValueError(f"a DFU result is 16 bytes, got {len(data)}")
     seq, code, source, phase, detail, reserved = struct.unpack(DFU_RESULT_FMT, data)
     return {
         "seq": seq,
@@ -207,41 +206,25 @@ def decode_result(data):
 
 def format_table(records, consumed, free, notes, unit=0):
     lines = []
-    head = "%10s %-6s %-23s %-14s %-6s %-5s %-14s %10s %10s" % (
-        "seq",
-        "unit@off" if unit else "off",
-        "type",
-        "result",
-        "source",
-        "flags",
-        "version",
-        "detail",
-        "hash",
+    head = (
+        f"{'seq':>10} {'unit@off' if unit else 'off':<6} {'type':<23} {'result':<14} "
+        f"{'source':<6} {'flags':<5} {'version':<14} {'detail':>10} {'hash':>10}"
     )
     lines.append(head)
 
     def where(r):
-        return "%d@%x" % (r["unit"], r["offset"] % unit) if unit else "0x%x" % r["offset"]
+        return f"{r['unit']}@{r['offset'] % unit:x}" if unit else f"0x{r['offset']:x}"
 
     for r in records:
         flags = ("P" if r["primary_valid"] else "-") + ("S" if r["secondary_header"] else "-")
         lines.append(
-            "%10d %-6s %-23s %-14s %-6s %-5s %-14s 0x%08x 0x%08x"
-            % (
-                r["seq"],
-                where(r),
-                r["type_name"],
-                r["result_name"],
-                r["source_name"],
-                flags,
-                r["version"],
-                r["detail"],
-                r["hash_prefix"],
-            )
+            f"{r['seq']:>10d} {where(r):<6} {r['type_name']:<23} {r['result_name']:<14} "
+            f"{r['source_name']:<6} {flags:<5} {r['version']:<14} "
+            f"0x{r['detail']:08x} 0x{r['hash_prefix']:08x}"
         )
     for r in consumed:
-        lines.append("%10s %-6s consumed slot: %s" % ("-", where(r), r["reason"]))
-    lines.append("%d records, %d consumed, %d free slots" % (len(records), len(consumed), free))
+        lines.append(f"{'-':>10} {where(r):<6} consumed slot: {r['reason']}")
+    lines.append(f"{len(records)} records, {len(consumed)} consumed, {free} free slots")
     for n in notes:
         lines.append("note: " + n)
     return "\n".join(lines)
@@ -265,25 +248,22 @@ def main():
             print(json.dumps(res))
         else:
             print(
-                "seq %d code %d (%s) source %s phase %d detail 0x%08x"
-                % (
-                    res["seq"],
-                    res["code"],
-                    res["code_name"],
-                    res["source_name"],
-                    res["phase"],
-                    res["detail"],
-                )
+                f"seq {res['seq']} code {res['code']} ({res['code_name']}) "
+                f"source {res['source_name']} phase {res['phase']} detail 0x{res['detail']:08x}"
             )
         return 0
     if not args.dump:
         ap.print_help()
         return 2
-    data = sys.stdin.buffer.read() if args.dump == "-" else open(args.dump, "rb").read()
+    if args.dump == "-":
+        data = sys.stdin.buffer.read()
+    else:
+        with open(args.dump, "rb") as f:
+            data = f.read()
     try:
         records, consumed, free, notes = decode_dump(data, args.unit)
     except ValueError as e:
-        print("error: %s" % e, file=sys.stderr)
+        print(f"error: {e}", file=sys.stderr)
         return 1
     if args.json:
         print(json.dumps({"records": records, "consumed": consumed, "free": free, "notes": notes}))
