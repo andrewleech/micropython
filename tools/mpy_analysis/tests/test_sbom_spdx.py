@@ -163,8 +163,8 @@ def test_every_component_is_a_package_or_file():
     assert len(spdx["packages"]) + len(spdx["files"]) == 10
     assert {item["fileName"] for item in spdx["files"]} == {
         "py/main.c",
-        "/usr/lib/libffi.so.8.1.4",
-        "/usr/lib/libffi.a",
+        "./usr/lib/libffi.so.8.1.4",
+        "./usr/lib/libffi.a",
     }
     purposes = {item["name"]: item["primaryPackagePurpose"] for item in spdx["packages"]}
     assert purposes["unix"] == "FIRMWARE"
@@ -204,7 +204,7 @@ def test_relationship_types_and_counts():
     assert (ids["micropython"], "CONTAINS", main) in relationships
     assert (ids["unix"], "CONTAINS", main) not in relationships
     # Nested components are contained by their parent.
-    for name in ("/usr/lib/libffi.so.8.1.4", "/usr/lib/libffi.a"):
+    for name in ("./usr/lib/libffi.so.8.1.4", "./usr/lib/libffi.a"):
         assert (ids["libffi8"], "CONTAINS", files[name]["SPDXID"]) in relationships
 
 
@@ -248,7 +248,7 @@ def test_checksums_are_preserved():
         {"algorithm": "SHA1", "checksumValue": SHA1_A},
         {"algorithm": "SHA256", "checksumValue": SHA256_A},
     ]
-    assert files["/usr/lib/libffi.so.8.1.4"]["checksums"] == [
+    assert files["./usr/lib/libffi.so.8.1.4"]["checksums"] == [
         {"algorithm": "SHA1", "checksumValue": SHA1_B},
         {"algorithm": "SHA256", "checksumValue": SHA256_B},
     ]
@@ -324,7 +324,7 @@ def test_purl_supplier_version_description_copyright_cpe():
     } in vendor["externalRefs"]
     files = {item["fileName"]: item for item in spdx["files"]}
     assert files["py/main.c"]["copyrightText"] == "Copyright Example"
-    assert files["/usr/lib/libffi.a"]["copyrightText"] == "NOASSERTION"
+    assert files["./usr/lib/libffi.a"]["copyrightText"] == "NOASSERTION"
     assert "versionInfo" not in packages["unix"]
 
 
@@ -375,8 +375,8 @@ def test_file_types_follow_names():
     spdx = convert()
     files = {item["fileName"]: item for item in spdx["files"]}
     assert files["py/main.c"]["fileTypes"] == ["SOURCE"]
-    assert files["/usr/lib/libffi.so.8.1.4"]["fileTypes"] == ["BINARY"]
-    assert files["/usr/lib/libffi.a"]["fileTypes"] == ["BINARY"]
+    assert files["./usr/lib/libffi.so.8.1.4"]["fileTypes"] == ["BINARY"]
+    assert files["./usr/lib/libffi.a"]["fileTypes"] == ["BINARY"]
     model = sample_model()
     model.components[SOURCE_FILE].name = "data.unknownext"
     spdx = convert(model)
@@ -443,7 +443,7 @@ def test_every_property_is_recoverable_from_annotations():
         **{item["fileName"]: item for item in spdx["files"]},
     }
     for component in model.components.values():
-        recovered = merged_annotations(elements[component.name])
+        recovered = merged_annotations(elements[sbom_spdx._file_name(component.name)])
         for name, value in component.properties.items():
             assert recovered[f"mpy:{name}"] == value
     vendor = merged_annotations(elements["vendor-lib"])
@@ -529,6 +529,69 @@ def test_orphan_top_level_file_is_contained_by_the_document():
         and item["relatedSpdxElement"] == orphan["SPDXID"]
     ]
     assert [item["spdxElementId"] for item in contains] == ["SPDXRef-DOCUMENT"]
+
+
+def test_package_containing_files_is_analysed_with_a_matching_verification_code():
+    spdx = convert(sample_model())
+    files = {item["SPDXID"]: item for item in spdx["files"]}
+    containers = {
+        item["spdxElementId"]
+        for item in spdx["relationships"]
+        if item["relationshipType"] == "CONTAINS" and item["relatedSpdxElement"] in files
+    }
+    assert containers
+    for package in spdx["packages"]:
+        analysed = package["SPDXID"] in containers
+        assert package["filesAnalyzed"] is analysed
+        if analysed:
+            members = [
+                next(c["checksumValue"] for c in files[item["relatedSpdxElement"]]["checksums"] if c["algorithm"] == "SHA1")
+                for item in spdx["relationships"]
+                if item["spdxElementId"] == package["SPDXID"]
+                and item["relationshipType"] == "CONTAINS"
+                and item["relatedSpdxElement"] in files
+            ]
+            assert package["packageVerificationCode"]["packageVerificationCodeValue"] == (
+                sbom_spdx._verification_code(members)
+            )
+            assert package["licenseInfoFromFiles"]
+        else:
+            assert "packageVerificationCode" not in package
+
+
+def test_validator_rejects_a_wrong_verification_code_and_unanalysed_container():
+    spdx = convert(sample_model())
+    analysed = next(item for item in spdx["packages"] if item["filesAnalyzed"])
+    bad = copy.deepcopy(spdx)
+    target = next(item for item in bad["packages"] if item["SPDXID"] == analysed["SPDXID"])
+    target["packageVerificationCode"]["packageVerificationCodeValue"] = "0" * 40
+    with pytest.raises(ValueError, match="verification code"):
+        sbom_spdx.validate_spdx(bad)
+    bad = copy.deepcopy(spdx)
+    target = next(item for item in bad["packages"] if item["SPDXID"] == analysed["SPDXID"])
+    target["filesAnalyzed"] = False
+    del target["packageVerificationCode"]
+    del target["licenseInfoFromFiles"]
+    with pytest.raises(ValueError, match="filesAnalyzed is false"):
+        sbom_spdx.validate_spdx(bad)
+
+
+def test_absolute_host_path_is_written_relative_and_validated():
+    model = sample_model()
+    add(
+        model,
+        kind="file",
+        ref="urn:system-header",
+        name="/usr/include/alloca.h",
+        hashes={"sha256": SHA256_C, "sha1": SHA1_C},
+    )
+    spdx = convert(model)
+    entry = next(item for item in spdx["files"] if item["fileName"].endswith("usr/include/alloca.h"))
+    assert entry["fileName"] == "./usr/include/alloca.h"
+    assert "/usr/include/alloca.h" in entry["comment"]
+    entry["fileName"] = "/usr/include/alloca.h"
+    with pytest.raises(ValueError, match="relative"):
+        sbom_spdx.validate_spdx(spdx)
 
 
 def test_unknown_references_are_rejected():

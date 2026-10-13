@@ -197,7 +197,13 @@ def test_both_writers_carry_the_same_components_hashes_and_edges():
         *spdx["files"],
     ]
     cdx_names = sorted(item["name"] for item in cdx_components)
-    spdx_names = sorted(item.get("name", item.get("fileName")) for item in spdx_elements)
+    def spdx_name(item):
+        """Model name of an SPDX element; an absolute host path is written as ./ plus the path."""
+        if "name" in item:
+            return item["name"]
+        return "/" + item["fileName"][2:] if item["fileName"].startswith("./") else item["fileName"]
+
+    spdx_names = sorted(spdx_name(item) for item in spdx_elements)
     assert cdx_names == spdx_names == sorted(item.name for item in model.components.values())
 
     cdx_hashes = {
@@ -208,7 +214,7 @@ def test_both_writers_carry_the_same_components_hashes_and_edges():
         for item in cdx_components
     }
     spdx_hashes = {
-        item.get("name", item.get("fileName")): {
+        spdx_name(item): {
             entry["algorithm"].lower(): entry["checksumValue"] for entry in item.get("checksums", [])
         }
         for item in spdx_elements
@@ -223,7 +229,7 @@ def test_both_writers_carry_the_same_components_hashes_and_edges():
         for target in edge["dependsOn"]
     }
     spdx_names_by_id = {
-        item["SPDXID"]: item.get("name", item.get("fileName")) for item in spdx_elements
+        item["SPDXID"]: spdx_name(item) for item in spdx_elements
     }
     spdx_edges = {
         (spdx_names_by_id[item["spdxElementId"]], spdx_names_by_id[item["relatedSpdxElement"]])

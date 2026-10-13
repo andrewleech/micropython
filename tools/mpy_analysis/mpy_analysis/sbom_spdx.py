@@ -5,8 +5,12 @@ Mapping:
 * Every component becomes an SPDX package, except components of kind ``file`` that carry a
   SHA-1 hash: those become SPDX files, because SPDX 2.3 requires a SHA-1 checksum on every file.
   A ``file`` component without SHA-1 is a package with purpose FILE and whatever checksums it
-  has. Every package has ``downloadLocation`` and ``filesAnalyzed`` false; licence fields are
-  NOASSERTION unless the model carries a licence.
+  has. Every package has ``downloadLocation``; licence fields are NOASSERTION unless the model
+  carries a licence. A package that CONTAINS files has ``filesAnalyzed`` true, a
+  ``packageVerificationCode`` over the SHA-1 of those files and ``licenseInfoFromFiles``; every
+  other package has ``filesAnalyzed`` false. An SPDX file name is relative, so an absolute host
+  path (a toolchain or system file) is written as ``./`` plus the path without its leading slash,
+  with a file comment that records the original absolute path.
 * A component with a parent is related by CONTAINS from that parent. A top-level file is
   contained by every package, other than firmware, application or file, that depends on it; a
   top-level file with no such package is contained by the document.
@@ -297,14 +301,24 @@ class _Writer:
         }
         entry: dict[str, Any] = {
             "SPDXID": self.ids[component.ref],
-            "fileName": component.name,
+            "fileName": _file_name(component.name),
             "checksums": _checksums(component.hashes),
             "copyrightText": component.copyright or "NOASSERTION",
         }
         kinds = _file_types(component.name)
         if kinds:
             entry["fileTypes"] = kinds
-        comment = "\n".join(item for item in (component.description, component.comment) if item)
+        comment = "\n".join(
+            item
+            for item in (
+                component.description,
+                component.comment,
+                f"Absolute path on the build host: {component.name}"
+                if component.name.startswith("/")
+                else None,
+            )
+            if item
+        )
         if comment:
             entry["comment"] = comment
         if component.author:
@@ -320,6 +334,38 @@ class _Writer:
         if soname not in self.placeholders:
             self.placeholders[soname] = _spdx_id("Package", soname, f"dynamic-needed:{soname}")
         return self.placeholders[soname]
+
+    def _analyse_contained_files(
+        self, packages: list[dict[str, Any]], files: list[dict[str, Any]]
+    ) -> None:
+        """Mark each package that CONTAINS files as analysed, with its verification code."""
+        by_id = {item["SPDXID"]: item for item in files}
+        contained: dict[str, set[str]] = {}
+        for left, kind, right in self.relationships:
+            if kind == "CONTAINS" and right in by_id:
+                contained.setdefault(left, set()).add(right)
+        for package in packages:
+            members = contained.get(package["SPDXID"])
+            if not members:
+                continue
+            sha1s = [
+                checksum["checksumValue"]
+                for identifier in members
+                for checksum in by_id[identifier]["checksums"]
+                if checksum["algorithm"] == "SHA1"
+            ]
+            licenses = sorted(
+                {
+                    expression
+                    for identifier in members
+                    for expression in by_id[identifier]["licenseInfoInFiles"]
+                }
+            )
+            package["filesAnalyzed"] = True
+            package["packageVerificationCode"] = {
+                "packageVerificationCodeValue": _verification_code(sha1s)
+            }
+            package["licenseInfoFromFiles"] = licenses
 
     # Document
 
@@ -361,6 +407,7 @@ class _Writer:
                     "file component not owned by any package",
                 )
         self.relate("SPDXRef-DOCUMENT", "DESCRIBES", self.ids[root.ref])
+        self._analyse_contained_files(packages, files)
         for ref in sorted(model.dynamic_links):
             for soname in model.dynamic_links[ref]:
                 self.relate(self.ids[ref], "DYNAMIC_LINK", self.placeholder(soname))
@@ -429,9 +476,16 @@ def validate_spdx(document: dict[str, Any]) -> None:
             raise ValueError(f"invalid SPDX identifier: {identifier}")
     if len(set(identifiers)) != len(identifiers):
         raise ValueError("duplicate SPDX element identifier")
+    file_sha1: dict[str, str] = {}
     for item in document.get("files", []):
-        if not any(checksum["algorithm"] == "SHA1" for checksum in item.get("checksums", [])):
+        sha1 = next(
+            (c["checksumValue"] for c in item.get("checksums", []) if c["algorithm"] == "SHA1"), None
+        )
+        if sha1 is None:
             raise ValueError(f"SPDX file lacks the required SHA1 checksum: {item['fileName']}")
+        if item["fileName"].startswith("/"):
+            raise ValueError(f"SPDX file name must be relative: {item['fileName']}")
+        file_sha1[item["SPDXID"]] = sha1
     known = set(identifiers)
     for relationship in document.get("relationships", []):
         for field in ("spdxElementId", "relatedSpdxElement"):
@@ -439,6 +493,22 @@ def validate_spdx(document: dict[str, Any]) -> None:
                 raise ValueError(
                     f"SPDX relationship references unknown element: {relationship[field]}"
                 )
+    contained: dict[str, set[str]] = {}
+    for relationship in document.get("relationships", []):
+        if relationship["relationshipType"] == "CONTAINS" and (
+            relationship["relatedSpdxElement"] in file_sha1
+        ):
+            contained.setdefault(relationship["spdxElementId"], set()).add(
+                relationship["relatedSpdxElement"]
+            )
+    for item in document.get("packages", []):
+        members = contained.get(item["SPDXID"], set())
+        if members and not item.get("filesAnalyzed"):
+            raise ValueError(f"SPDX package contains files but filesAnalyzed is false: {item['name']}")
+        if item.get("filesAnalyzed"):
+            code = item.get("packageVerificationCode", {}).get("packageVerificationCodeValue")
+            if code != _verification_code([file_sha1[identifier] for identifier in members]):
+                raise ValueError(f"SPDX package verification code does not match: {item['name']}")
     licenses = [item["licenseId"] for item in document.get("hasExtractedLicensingInfos", [])]
     if len(set(licenses)) != len(licenses):
         raise ValueError("duplicate SPDX extracted licence identifier")
@@ -450,3 +520,11 @@ def validate_spdx(document: dict[str, Any]) -> None:
 def serialize_spdx(document: dict[str, Any]) -> bytes:
     """Serialise as sbom.spdx.json is written: sorted keys, indent 2, trailing newline."""
     return (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _file_name(name: str) -> str:
+    return "./" + name.lstrip("/") if name.startswith("/") else name
+
+
+def _verification_code(file_checksums: list[str]) -> str:
+    return hashlib.sha1("".join(sorted(file_checksums)).encode("ascii")).hexdigest()
