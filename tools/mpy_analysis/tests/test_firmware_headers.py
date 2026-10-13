@@ -151,7 +151,7 @@ def test_generated_header_is_attributed_through_its_generator_input(tmp_path):
 def test_generated_header_without_a_captured_producer_is_a_gap(tmp_path):
     rules = (
         "$(BUILD)/gen.h: | $(BUILD)\n"
-        "\tprintf '#define VALUE 3\\n' > $@\n"
+        "\tcd $(BUILD) && printf '#define VALUE 3\\n' > gen.h\n"
         "$(BUILD)/main.o: $(BUILD)/gen.h\n"
     )
     built = capture(

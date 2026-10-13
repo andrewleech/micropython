@@ -60,12 +60,15 @@ def header_accounting(
     bindings_for: Callable[[str], list[dict[str, str]]],
     producers: dict[str, tuple[str, list[dict[str, str]]]],
     roles: dict[str, str],
+    command_only: frozenset[str] = frozenset(),
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     """Return the per-header entries and the unresolved rows for headers that are unattributed.
 
     ``contributed`` pairs each contributing object with its compile action. ``producers`` maps a
     generated path to the captured action that wrote it and that action's source bindings;
-    ``roles`` maps a compiler executable path to its toolchain role.
+    ``roles`` maps a compiler executable path to its toolchain role. ``command_only`` names the
+    producing actions that are shell recipe lines with no file input: their output is derived from
+    the recorded command alone, which is an attribution without a source binding.
     """
     consumers: dict[str, set[str]] = {}
     records: dict[str, dict[str, Any]] = {}
@@ -116,12 +119,14 @@ def header_accounting(
             producer = producers.get(path)
             if producer is None:
                 reason = "generated header has no captured producing action"
-            elif not producer[1]:
+            elif not producer[1] and producer[0] not in command_only:
                 reason = "the producing action has no input under a declared source root"
             else:
                 entry["disposition"] = "generated"
                 entry["producer"] = producer[0]
                 entry["source_bindings"] = producer[1]
+                if not producer[1]:
+                    entry["derivation"] = "shell-command"
         else:
             bindings = bindings_for(path)
             if bindings:

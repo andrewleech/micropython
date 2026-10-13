@@ -172,11 +172,52 @@ def _objcopy_reads_binary(argv: list[str]) -> bool:
             return True
     return False
 
+def _shell_command(argv: list[str]) -> str | None:
+    """The recipe text of a ``sh -c`` invocation, or None for another shell command line."""
+    if len(argv) >= 2 and re.fullmatch(r"-[a-z]*c", argv[-2]):
+        return argv[-1]
+    return None
+
+
+def _shell_paths(argv: list[str], cwd: Path) -> list[Path]:
+    """The words of a recipe line, resolved against the working directory.
+
+    The line is split with POSIX shell quoting and redirection operators are dropped; a word is
+    kept as a path candidate whatever it names, since the caller tests it against the file system.
+    """
+    command = _shell_command(argv)
+    if command is None:
+        return []
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        words = [word for word in lexer if word and not set(word) <= set("();<>|&")]
+    except ValueError:
+        return []
+    paths: list[Path] = []
+    for word in words:
+        if word.startswith("-") or "\0" in word:
+            continue
+        path = Path(os.path.normpath(word if os.path.isabs(word) else cwd / word))
+        if path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _file_state(path: Path) -> tuple[int, int, int] | None:
+    try:
+        info = path.lstat()
+    except OSError:
+        return None
+    return (info.st_size, info.st_mtime_ns, info.st_ino) if stat.S_ISREG(info.st_mode) else None
 
 
 def _kind(role: str, argv: list[str]) -> str | None:
     if any(arg in _PROBES or arg.startswith("-print-file-name=") for arg in argv):
         return None
+    if role == "shell":
+        return "generate" if _shell_command(argv) is not None else None
     if role == "mpy-cross":
         return None if "--version" in argv else "generate"
     if role in ("cc", "cxx"):
@@ -252,6 +293,12 @@ def _mpy_cross_inputs(argv: list[str], cwd: Path) -> list[dict]:
 
 
 def _action_inputs(role: str, kind: str, argv: list[str], cwd: Path) -> list[dict[str, str]]:
+    if role == "shell":
+        return [
+            record
+            for path in _shell_paths(argv, cwd)
+            if path.is_file() and (record := _file_record(path, "tool-input")) is not None
+        ]
     if role == "mpy-cross":
         return _mpy_cross_inputs(argv, cwd)
     candidates: dict[str, tuple[Path, str]] = {}
@@ -538,6 +585,11 @@ def run_tool(
     before = {item["path"]: item["sha256"] for item in inputs}
     watched = build_dir if role == "python" and kind == "generate" else None
     tree_before = _tree_state(watched)
+    build_root = build_dir.resolve() if build_dir is not None else None
+    shell_paths = [
+        path for path in _shell_paths(argv, cwd) if build_root is not None and path.is_relative_to(build_root)
+    ] if role == "shell" else []
+    shell_before = {path: _file_state(path) for path in shell_paths}
     plan = _assembler_plan(role, kind, executable, argv)
     run_argv = list(argv)
     assembler_file = None
@@ -597,6 +649,18 @@ def run_tool(
                     if record is not None and record["path"] not in known_outputs:
                         outputs.append(record)
                         written.add(record["path"])
+        if result.returncode == 0 and role == "shell":
+            # A recipe line such as ``echo text > file`` runs no wrapped tool: the files it names
+            # that were created or rewritten under the build directory are its outputs.
+            known_outputs = {item["path"] for item in outputs}
+            for path in shell_paths:
+                if _file_state(path) != shell_before[path]:
+                    record = _file_record(path, "output")
+                    if record is not None and record["path"] not in known_outputs:
+                        outputs.append(record)
+                        written.add(record["path"])
+        if role == "shell" and not outputs:
+            return result.returncode
         in_place = {item["path"] for item in outputs} if kind == "transform" else set()
         in_place |= written & set(before)
         changed_inputs = sorted(
@@ -645,6 +709,7 @@ def run_tool(
             "image_id": image_id,
             "kind": kind,
             "role": role,
+            **({"derivation": "shell-command"} if role == "shell" else {}),
             "argv": [str(executable), *argv],
             "cwd": str(cwd),
             "started_ns": started,
@@ -690,7 +755,15 @@ def _make_tool_wrapper(
         "--",
         '"$@"',
     ]
-    path.write_text("#!/bin/sh\nexec " + shlex.join(command[:-1]) + " \"$@\"\n", encoding="utf-8")
+    script = "#!/bin/sh\nexec " + shlex.join(command[:-1]) + " \"$@\"\n"
+    if role == "shell":
+        # A recipe line that starts one of the capture's tool wrappers is recorded by that
+        # wrapper; only the other lines are handed to the recording shell.
+        script = (
+            f'#!/bin/sh\ncase "$2" in\n{shlex.quote(str(path.parent))}/*) exec {shlex.quote(str(executable))} "$@" ;;\nesac\n'
+            + script.split("\n", 1)[1]
+        )
+    path.write_text(script, encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -755,6 +828,7 @@ def capture_make(
         "OBJCOPY": ("objcopy", shutil.which(cross + "objcopy")),
         "STRIP": ("strip", shutil.which(cross + "strip")),
         "PYTHON": ("python", shutil.which("python3")),
+        "SHELL": ("shell", shutil.which("sh")),
     }
     mpy_cross = _mpy_cross_binary(root, variables)
     if mpy_cross is not None:

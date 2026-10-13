@@ -150,6 +150,14 @@ def _validate_generator_fields(action, action_id):
         process = _object(process, f"action {action_id}.process")
         if not all(isinstance(process.get(key), int) and not isinstance(process.get(key), bool) for key in ("pid", "ppid")):
             raise FirmwareReceiptError(f"action {action_id}.process must give integer pid and ppid")
+    derivation = action.get("derivation")
+    if derivation is not None and (
+        derivation != "shell-command"
+        or action["kind"] != "generate"
+        or len(action["argv"]) < 3
+        or not re.fullmatch(r"-[a-z]*c", action["argv"][-2])
+    ):
+        raise FirmwareReceiptError(f"action {action_id}.derivation must mark a shell command line")
     stdout = action.get("stdout")
     if stdout is not None:
         stdout = _object(stdout, f"action {action_id}.stdout")
@@ -779,8 +787,17 @@ def _validate_header_accounting(
         if disposition == "source":
             _source_bindings(entry.get("source_bindings"), f"{label}.source_bindings", repo_names)
         elif disposition == "generated":
-            _source_bindings(entry.get("source_bindings"), f"{label}.source_bindings", repo_names)
             producer = by_id.get(entry.get("producer"))
+            if (
+                entry.get("source_bindings") == []
+                and entry.get("derivation") == "shell-command"
+                and producer is not None
+                and producer.get("derivation") == "shell-command"
+                and not producer["inputs"]
+            ):
+                pass
+            else:
+                _source_bindings(entry.get("source_bindings"), f"{label}.source_bindings", repo_names)
             if producer is None or not any(
                 item["path"] == path and item["sha256"] == record["sha256"] for item in producer["outputs"]
             ):

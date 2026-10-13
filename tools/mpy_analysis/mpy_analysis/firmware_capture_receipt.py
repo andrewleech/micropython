@@ -472,7 +472,7 @@ def receipt_from_journal(
             **({"dependency_capture": event["dependency_capture"]} if "dependency_capture" in event else {}),
             **({"assembler_dependencies": event["assembler_dependencies"]} if "assembler_dependencies" in event else {}),
             **(
-                {key: event[key] for key in ("process", "frozen_observation", "stdout") if key in event}
+                {key: event[key] for key in ("process", "frozen_observation", "stdout", "derivation") if key in event}
                 if kind == "generate"
                 else {}
             ),
@@ -808,6 +808,11 @@ def receipt_from_journal(
         bindings_for=lambda header: _bindings(header, source_roots),
         producers=generated_producers,
         roles={path: role for role, path in toolchain},
+        command_only=frozenset(
+            action["id"]
+            for action in actions
+            if action.get("derivation") == "shell-command" and not action["inputs"]
+        ),
     )
     unresolved.extend(header_unresolved)
     assembler_rows, assembler_unresolved = assembler_embedded_inputs(
