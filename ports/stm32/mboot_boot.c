@@ -331,6 +331,35 @@ void mboot_port_early_init(void) {
     s_started = true;
 }
 
+#if defined(STM32F7)
+// Waits for (*reg & mask) == value; false if it does not happen within a bounded number of reads.
+static bool rcc_wait(const volatile uint32_t *reg, uint32_t mask, uint32_t value) {
+    for (uint32_t n = 0; n < 200000; n++) {
+        if ((*reg & mask) == value) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The clock tree back to the reset state. The F7 HAL_RCC_DeInit() only writes registers: it clears
+// PLLON and rewrites PLLCFGR right after the write that selects HSI as the system clock, while the
+// PLL may still be the system clock. The PLL is only stopped once HSI is the system clock, and
+// PLLCFGR is only written once the PLL is stopped.
+static void rcc_deinit(void) {
+    RCC->CR |= RCC_CR_HSION;
+    rcc_wait(&RCC->CR, RCC_CR_HSIRDY, RCC_CR_HSIRDY);
+    RCC->CFGR &= ~RCC_CFGR_SW;
+    rcc_wait(&RCC->CFGR, RCC_CFGR_SWS, RCC_CFGR_SWS_HSI);
+    RCC->CR &= ~(RCC_CR_CSSON | RCC_CR_PLLON | RCC_CR_PLLI2SON | RCC_CR_PLLSAION);
+    rcc_wait(&RCC->CR, RCC_CR_PLLRDY | RCC_CR_PLLI2SRDY | RCC_CR_PLLSAIRDY, 0);
+    HAL_RCC_DeInit();
+    // SystemClock_Config() switched the overdrive on. The HAL sequence waits for the regulator to
+    // leave it, so the application can switch it on again.
+    HAL_PWREx_DisableOverDrive();
+}
+#endif
+
 void mboot_port_deinit(void) {
     if (!s_started) {
         return;
@@ -340,9 +369,6 @@ void mboot_port_deinit(void) {
     #if MBOOT_DFU_ENABLE
     mboot_port_usb_deinit();
     #endif
-
-    // Reaching the end of the bootloader run means the recovery path was not needed.
-    mboot_fault_count_clear();
 
     // The flash controller is locked by the flash driver after every operation; wait for an
     // erase that may still run.
@@ -362,11 +388,10 @@ void mboot_port_deinit(void) {
 
     // The clock tree back to the reset state. The HAL uses the tick, so this comes before the tick
     // and the interrupts are stopped.
-    HAL_RCC_DeInit();
     #if defined(STM32F7)
-    // SystemClock_Config() switched the overdrive on. The HAL sequence waits for the regulator to
-    // leave it, so the application can switch it on again.
-    HAL_PWREx_DisableOverDrive();
+    rcc_deinit();
+    #else
+    HAL_RCC_DeInit();
     #endif
 
     __disable_irq();
@@ -394,6 +419,12 @@ void mboot_port_deinit(void) {
     RCC->AHB3RSTR = RCC_AHB3RSTR_QSPIRST;
     RCC->AHB3RSTR = 0;
     #endif
+
+    // Reaching this point means the teardown that can fault is done; what follows is plain register
+    // writes and the jump. A fault before it is counted, and after repeated ones the bootloader
+    // enters recovery instead of starting the application again. The count is backup domain state,
+    // so it is cleared before the register restore below, which can switch the access off.
+    mboot_fault_count_clear();
 
     FLASH->ACR = s_entry.flash_acr;
     #if defined(STM32H5)
