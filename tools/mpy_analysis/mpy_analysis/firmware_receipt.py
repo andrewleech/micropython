@@ -16,7 +16,8 @@ from typing import Any
 
 from .argv_tokens import enables_lto
 from .elf_evidence import dynamic_needed, section_table
-from .firmware_inputs import consumed_headers
+from .firmware_frozen import frozen_accounting
+from .firmware_inputs import bindings_for_path, consumed_headers
 from .gnu_map import parse_gnu_map
 
 SCHEMA = "mpy-firmware-build/v1"
@@ -129,6 +130,62 @@ def _source_bindings(value: Any, label: str, repository_names: set[str]) -> list
 
 
 
+def _validate_ephemeral_input(item, label):
+    """An input that no longer exists is bound to the source file it was made from, by hash."""
+    tie = item.get("derived_from")
+    if tie is None:
+        return
+    tie = _object(tie, f"{label}.derived_from")
+    if not Path(_text(tie.get("path"), f"{label}.derived_from.path")).is_absolute():
+        raise FirmwareReceiptError(f"{label}.derived_from.path must be absolute")
+    _digest(tie.get("sha256"), f"{label}.derived_from.sha256")
+    if tie.get("newlines") not in ("preserved", "universal") or not isinstance(tie.get("appended"), str):
+        raise FirmwareReceiptError(f"{label}.derived_from must state its newline handling and appended text")
+
+
+def _validate_generator_fields(action, action_id):
+    """Process identity, standard output and observation records of a generator action."""
+    process = action.get("process")
+    if process is not None:
+        process = _object(process, f"action {action_id}.process")
+        if not all(isinstance(process.get(key), int) and not isinstance(process.get(key), bool) for key in ("pid", "ppid")):
+            raise FirmwareReceiptError(f"action {action_id}.process must give integer pid and ppid")
+    stdout = action.get("stdout")
+    if stdout is not None:
+        stdout = _object(stdout, f"action {action_id}.stdout")
+        _digest(stdout.get("sha256"), f"action {action_id}.stdout.sha256")
+        if not isinstance(stdout.get("size"), int) or isinstance(stdout.get("size"), bool) or stdout["size"] < 0:
+            raise FirmwareReceiptError(f"action {action_id}.stdout.size must be a non-negative integer")
+    observation = action.get("frozen_observation")
+    if observation is None:
+        return
+    observation = _object(observation, f"action {action_id}.frozen_observation")
+    if observation.get("status") == "unavailable":
+        _text(observation.get("reason"), f"action {action_id}.frozen_observation.reason")
+        return
+    label = f"action {action_id}.frozen_observation"
+    if observation.get("status") != "observed" or observation.get("mode") not in ("freeze", "list-c-modules"):
+        raise FirmwareReceiptError(f"{label} must be observed or unavailable with a known mode")
+    if not isinstance(observation.get("pid"), int) or isinstance(observation.get("pid"), bool):
+        raise FirmwareReceiptError(f"{label}.pid must be an integer")
+    argv = observation.get("argv")
+    if not isinstance(argv, list) or not argv or not all(isinstance(arg, str) for arg in argv):
+        raise FirmwareReceiptError(f"{label}.argv must be a string array")
+    reads = observation.get("reads")
+    if not isinstance(reads, list):
+        raise FirmwareReceiptError(f"{label}.reads must be an array")
+    for index, raw in enumerate(reads):
+        read = _object(raw, f"{label}.reads[{index}]")
+        if not Path(_text(read.get("path"), f"{label}.reads[{index}].path")).is_absolute():
+            raise FirmwareReceiptError(f"{label}.reads[{index}].path must be absolute")
+        _digest(read.get("sha256"), f"{label}.reads[{index}].sha256")
+    spawns = observation.get("spawns")
+    if not isinstance(spawns, list) or not all(
+        isinstance(item, list) and item and all(isinstance(arg, str) for arg in item) for item in spawns
+    ):
+        raise FirmwareReceiptError(f"{label}.spawns must be an array of string arrays")
+
+
 def _validate_actions(actions, build_id, verify_files):
     if not isinstance(actions, list) or not actions:
         raise FirmwareReceiptError("actions must record compiler, assembler, archive, link and transform invocations")
@@ -164,6 +221,9 @@ def _validate_actions(actions, build_id, verify_files):
         inputs = _records(action.get("inputs"), f"action {action_id}.inputs", verify_files=False)
         for item in inputs:
             _text(item.get("role"), f"action {action_id} input role")
+            if item["role"] == "ephemeral-input":
+                _validate_ephemeral_input(item, f"action {action_id} ephemeral input")
+                continue
             previous = outputs.get(item["path"])
             if previous is not None:
                 if previous[0] != item["sha256"]:
@@ -172,6 +232,7 @@ def _validate_actions(actions, build_id, verify_files):
                     )
             elif verify_files:
                 _path_record(item, f"action {action_id} input", verify_files=True)
+        _validate_generator_fields(action, action_id)
         action_inputs[action_id] = {item["path"]: item for item in inputs}
         if len(action_inputs[action_id]) != len(inputs):
             raise FirmwareReceiptError(f"action {action_id} repeats an input path")
@@ -584,6 +645,92 @@ def _validate_embedded_inputs(image, image_id, repo_names, actions, action_input
     return rows
 
 
+def _validate_frozen_accounting(image, image_id, receipt, actions, object_actions, verify_files):
+    """The frozen payload account is consistent, and equals the account the captured actions give.
+
+    With files available the account is derived again from the receipt's own actions and the
+    current bytes of the sources and ``frozen_content.c``, so a changed source or a record that
+    claims more than the actions show is rejected.
+    """
+    value = image.get("frozen_accounting")
+    if value is None:
+        return None
+    label = f"image {image_id}.frozen_accounting"
+    value = _object(value, label)
+    build_root = Path(_text(value.get("build_root"), f"{label}.build_root"))
+    if not build_root.is_absolute():
+        raise FirmwareReceiptError(f"{label}.build_root must be absolute")
+    payloads = value.get("payloads")
+    if not isinstance(payloads, list):
+        raise FirmwareReceiptError(f"{label}.payloads must be an array")
+    repo_names = {repo["name"] for repo in receipt["source_repositories"]}
+    action_ids = {action["id"] for action in actions}
+    for index, raw in enumerate(payloads):
+        item = f"{label}.payloads[{index}]"
+        payload = _object(raw, item)
+        _path_record(payload.get("generated"), f"{item}.generated", verify_files=verify_files)
+        if payload.get("generator") not in action_ids:
+            raise FirmwareReceiptError(f"{item}.generator names an unknown action")
+        tool = payload.get("mpy_tool")
+        if tool is not None and _object(tool, f"{item}.mpy_tool").get("action") not in action_ids:
+            raise FirmwareReceiptError(f"{item}.mpy_tool names an unknown action")
+        unresolved = payload.get("unresolved")
+        if not isinstance(unresolved, list) or not all(
+            isinstance(row, dict) and isinstance(row.get("reason"), str) for row in unresolved
+        ):
+            raise FirmwareReceiptError(f"{item}.unresolved must be an array of reasons")
+        rows = []
+        for group in ("elements", "inputs"):
+            if not isinstance(payload.get(group), list):
+                raise FirmwareReceiptError(f"{item}.{group} must be an array")
+            for number, raw_row in enumerate(payload[group]):
+                row_label = f"{item}.{group}[{number}]"
+                row = _object(raw_row, row_label)
+                if row.get("disposition") == "bound":
+                    _source_bindings(row.get("source_bindings"), f"{row_label}.source_bindings", repo_names)
+                elif row.get("disposition") == "unbound":
+                    _text(row.get("reason"), f"{row_label}.reason")
+                else:
+                    raise FirmwareReceiptError(f"{row_label}.disposition must be bound or unbound")
+                rows.append(row)
+        accounted = not unresolved and all(row["disposition"] == "bound" for row in rows)
+        if payload.get("status") != ("accounted" if accounted else "unaccounted"):
+            raise FirmwareReceiptError(f"{item}.status disagrees with its elements and inputs")
+    expected = "none" if not payloads else "accounted" if all(
+        payload["status"] == "accounted" for payload in payloads
+    ) else "unaccounted"
+    if value.get("status") != expected:
+        raise FirmwareReceiptError(f"{label}.status disagrees with its payloads")
+    if verify_files:
+        roots = {repo["name"]: Path(repo["path"]) for repo in receipt["source_repositories"]}
+
+        def read_bytes(path):
+            try:
+                return Path(path).read_bytes()
+            except OSError:
+                return None
+
+        try:
+            derived = frozen_accounting(
+                actions,
+                generated_sources={
+                    source["path"]: source["sha256"]
+                    for row in image["object_accounting"]
+                    if row["disposition"] == "contributed"
+                    for source in object_actions[(image_id, row["object"]["path"])]["inputs"]
+                    if source["role"] == "source"
+                },
+                build_root=build_root,
+                bindings_for=lambda path: bindings_for_path(path, roots),
+                read_bytes=read_bytes,
+            )
+        except (OSError, ValueError) as error:
+            raise FirmwareReceiptError(f"{label} cannot be derived from the captured actions: {error}") from error
+        if {key: item for key, item in value.items() if key != "build_root"} != derived:
+            raise FirmwareReceiptError(f"{label} does not match the captured actions and current files")
+    return value
+
+
 def _validate_header_accounting(
     image, image_id, repo_names, actions, object_actions, toolchain_executables, verify_files
 ):
@@ -764,6 +911,7 @@ def validate_firmware_receipt(
             image, image_id, repo_names, actions, object_actions, toolchain_executables, verify_files
         )
         _validate_embedded_inputs(image, image_id, repo_names, actions, action_inputs, verify_files)
+        _validate_frozen_accounting(image, image_id, receipt, actions, object_actions, verify_files)
         if not isinstance(link.get("unresolved"), list):
             raise FirmwareReceiptError(f"image {image_id}.link.unresolved must be an array")
         discarded_sections = link.get("discarded_sections")
@@ -803,6 +951,8 @@ def validate_firmware_receipt(
                 raise FirmwareReceiptError(f"complete receipt contains unattributed headers: {image['id']}")
             if any(row["disposition"] == "unsupported" for row in image.get("embedded_inputs", [])):
                 raise FirmwareReceiptError(f"complete receipt contains unattributed embedded content: {image['id']}")
+            if (image.get("frozen_accounting") or {}).get("status") == "unaccounted":
+                raise FirmwareReceiptError(f"complete receipt contains unbound frozen payload elements: {image['id']}")
             for row in image["object_accounting"]:
                 capture = object_actions[(image["id"], row["object"]["path"])].get("dependency_capture")
                 if row["disposition"] == "contributed" and capture is not None and capture["status"] != "collected":

@@ -290,3 +290,26 @@ def assembler_embedded_inputs(
             if failure is not None:
                 unresolved.append(failure)
     return rows, unresolved
+
+
+def bindings_for_path(path: str, source_roots: dict[str, Path]) -> list[dict[str, str]]:
+    """The declared source root and canonical relative path that contain a file, or none.
+
+    The deepest containing root wins; two roots at that depth are ambiguous and raise ValueError.
+    """
+    source = Path(path).resolve(strict=False)
+    matches = []
+    for name, raw_root in source_roots.items():
+        root = raw_root.resolve(strict=True)
+        if source.is_relative_to(root):
+            relative = source.relative_to(root).as_posix()
+            if relative and relative != ".":
+                matches.append((len(root.parts), name, relative))
+    if not matches:
+        return []
+    depth = max(item[0] for item in matches)
+    winners = [(name, relative) for match_depth, name, relative in matches if match_depth == depth]
+    if len(winners) != 1:
+        raise ValueError(f"source path has ambiguous declared source roots: {path}")
+    name, relative = winners[0]
+    return [{"root": name, "path": relative}]

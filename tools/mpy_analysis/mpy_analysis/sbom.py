@@ -53,6 +53,9 @@ FIRMWARE_BLOCKING_GAPS = frozenset(
         "checkout-gitlink-mismatch",
         "dirty-selected-repository",
         "embedded-input-accounting-unavailable",
+        "frozen-accounting-unavailable",
+        "frozen-payload-unbound",
+        "frozen-source-not-in-selected-scope",
         "header-accounting-unavailable",
         "linked-embedded-input-not-in-selected-scope",
         "linked-header-not-in-selected-scope",
@@ -651,6 +654,103 @@ def _embedded_components(
     return references, {"status": "attributed" if not counts["unattributed"] else "incomplete", **counts}
 
 
+def _frozen_components(
+    builder: _Builder,
+    scope: dict[str, Any],
+    boundaries: list[dict[str, Any]],
+    source_refs: dict[tuple[str, str], set[str]],
+    image: dict[str, Any],
+    receipt: dict[str, Any],
+) -> tuple[set[str], dict[str, Any]]:
+    """Attribute the frozen Python payload of one image to the files its generator consumed.
+
+    The frozen sources, the manifests and the other files the captured generator read become
+    file components under the boundary that owns them (a manifest-selected frozen source keeps
+    its component). An element or input the receipt could not bind, and any bound file no
+    selected boundary contains, is a blocking gap. An image without frozen content needs nothing.
+    """
+    accounting = image.get("frozen_accounting")
+    if accounting is None:
+        if any(
+            action["kind"] == "generate"
+            and (action.get("frozen_observation") or {}).get("mode") != "list-c-modules"
+            and any(Path(arg).name == "makemanifest.py" for arg in action["argv"][1:2])
+            for action in receipt["actions"]
+        ):
+            builder.gaps.append(
+                {
+                    "kind": "frozen-accounting-unavailable",
+                    "image": image["id"],
+                    "detail": "The receipt predates frozen payload accounting; recapture the build.",
+                }
+            )
+            return set(), {"status": "unavailable"}
+        return set(), {"status": "none"}
+    if accounting["status"] == "none":
+        return set(), {"status": "none"}
+    counts = {"elements": 0, "bound": 0, "unbound": 0, "inputs": 0}
+    references: set[str] = set()
+    bound_sources: set[tuple[str, str]] = set()
+    failed = False
+
+    def gap(kind: str, path: str, reason: str, binding: tuple[str, str] | None = None) -> None:
+        nonlocal failed
+        failed = True
+        builder.gaps.append(
+            {
+                "kind": kind,
+                "path": path,
+                **({"root": binding[0], "binding-path": binding[1]} if binding else {}),
+                "image": image["id"],
+                "reason": reason,
+            }
+        )
+
+    for payload in accounting["payloads"]:
+        for row in payload["unresolved"]:
+            gap("frozen-payload-unbound", row.get("path", payload["generated"]["path"]), row["reason"])
+        for rows, group, provenance in (
+            (payload["elements"], "frozen-source", "captured-frozen-source"),
+            (payload["inputs"], "generator-input", "captured-generator-input"),
+        ):
+            for row in rows:
+                is_element = group == "frozen-source"
+                counts["elements" if is_element else "inputs"] += 1
+                path = (row.get("source") or row.get("mpy") or {}).get("path") or row.get("path") or row["target"]
+                if row["disposition"] == "unbound":
+                    counts["unbound"] += is_element
+                    gap("frozen-payload-unbound", path, row["reason"])
+                    continue
+                placed = True
+                for item in row["source_bindings"]:
+                    binding = (item["root"], item["path"])
+                    files, reason = _owned_file(builder, scope, boundaries, source_refs, binding, group, provenance)
+                    if files is None:
+                        placed = False
+                        gap("frozen-source-not-in-selected-scope", path, reason, binding)
+                        continue
+                    references.update(files)
+                    if is_element:
+                        bound_sources.add(binding)
+                        for reference in files:
+                            builder.components[reference].properties.update(property_values({"frozen-payload": "bound"}))
+                counts["bound"] += is_element and placed
+                counts["unbound"] += is_element and not placed
+    selected = sorted(
+        {
+            (source["root"], source["path"])
+            for source in builder.sources
+            if source["group"] == FROZEN_GROUP
+        }
+        - bound_sources
+    )
+    return references, {
+        "status": "incomplete" if failed else "attributed",
+        **counts,
+        "selected_not_in_payload": [{"root": root, "path": path} for root, path in selected],
+    }
+
+
 def _attach_firmware_images(
     receipt: dict[str, Any],
     scope: dict[str, Any],
@@ -727,6 +827,7 @@ def _attach_firmware_images(
                 )
         header_refs, headers = _header_components(builder, scope, boundaries, source_refs, image, validated)
         embedded_refs, embedded = _embedded_components(builder, scope, boundaries, source_refs, image)
+        frozen_refs, frozen = _frozen_components(builder, scope, boundaries, source_refs, image, validated)
         link_status = (
             "complete"
             if validated["status"] == "complete"
@@ -734,6 +835,7 @@ def _attach_firmware_images(
             and not missing
             and headers["status"] == "attributed"
             and embedded["status"] == "attributed"
+            and frozen["status"] in ("attributed", "none")
             else "incomplete"
         )
         component = Component(
@@ -749,6 +851,7 @@ def _attach_firmware_images(
                     "target": configuration["target"],
                     "variant": configuration["variant"],
                     "link-closure": link_status,
+                    "frozen-payload": frozen["status"],
                     "linker-format": link["linker_format"],
                     "linker-map-sha256": link["map"]["sha256"],
                     "lto": link["lto"],
@@ -763,6 +866,7 @@ def _attach_firmware_images(
         mapped.update(_runtime_components(builder, link, validated["toolchain"], validated["build_id"]))
         mapped.update(header_refs)
         mapped.update(embedded_refs)
+        mapped.update(frozen_refs)
         builder.depends_on[reference] = mapped
         root_dependencies.add(reference)
         images.append(
@@ -774,6 +878,7 @@ def _attach_firmware_images(
                 "linked_components": sorted(mapped),
                 "headers": headers,
                 "embedded_inputs": embedded,
+                "frozen_payload": frozen,
                 "unmapped_source_bindings": [
                     {"root": root, "path": path} for root, path in missing
                 ],

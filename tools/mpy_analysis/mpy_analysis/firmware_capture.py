@@ -22,12 +22,14 @@ from .argv_tokens import flatten as _flatten
 from .argv_tokens import resolve_arg as _resolve_arg
 from .compdb import DepfileError, depfile_prerequisites
 from .firmware_capture_receipt import receipt_from_journal
+from .firmware_frozen import find_tagged_source
+from .firmware_observe import LOG_VARIABLE, WRAPPER_DIR_VARIABLE, is_generator
 
 _PROBES = {"-dumpmachine", "-print-file-name=libgcc.a", "-print-prog-name=ld"}
 _OUTPUT_OPTIONS = {"-o", "-MF", "-MT", "-MQ", "-Map"}
 _PATH_OPTIONS = {"-include", "-imacros", "-T", "-L", "-I", "-isystem", "-iquote"}
 _SOURCE_SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".s", ".sx")
-_WRAPPER_DIR = "MPY_CAPTURE_WRAPPER_DIR"
+_WRAPPER_DIR = WRAPPER_DIR_VARIABLE
 
 
 def _sha256(path: Path) -> str:
@@ -175,6 +177,8 @@ def _objcopy_reads_binary(argv: list[str]) -> bool:
 def _kind(role: str, argv: list[str]) -> str | None:
     if any(arg in _PROBES or arg.startswith("-print-file-name=") for arg in argv):
         return None
+    if role == "mpy-cross":
+        return None if "--version" in argv else "generate"
     if role in ("cc", "cxx"):
         if "-E" in argv:
             return "generate"
@@ -192,7 +196,64 @@ def _kind(role: str, argv: list[str]) -> str | None:
     return None
 
 
+def _observed_reads() -> list[dict]:
+    """The read events the observed frozen-content generator has logged so far, oldest first."""
+    log = os.environ.get(LOG_VARIABLE)
+    events = []
+    try:
+        lines = Path(log).read_text(encoding="utf-8").splitlines() if log else []
+    except OSError:
+        return []
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("event") == "read":
+            events.append(event)
+    return events
+
+
+def _is_temporary(path: Path) -> bool:
+    return path.resolve().is_relative_to(Path(tempfile.gettempdir()).resolve())
+
+
+def _mpy_cross_inputs(argv: list[str], cwd: Path) -> list[dict]:
+    """The source files of an mpy-cross command line.
+
+    The frozen-content generator compiles a temporary copy of each source. That copy is recorded
+    as an ephemeral input, with the hash that ties it to the file the generator read when the
+    bytes show the copy was made from it.
+    """
+    inputs = []
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        index += 1
+        if arg in ("-o", "-s", "-X"):
+            index += 1
+        elif not arg.startswith("-") and (path := _resolve_arg(arg, cwd)) is not None:
+            ephemeral = _is_temporary(path) and LOG_VARIABLE in os.environ
+            record = _file_record(path, "ephemeral-input" if ephemeral else "tool-input")
+            if record is None:
+                continue
+            if ephemeral:
+                reads = reversed(_observed_reads()[-64:])
+                candidates = (
+                    (event["path"], event["sha256"], Path(event["path"]).read_bytes())
+                    for event in reads
+                    if Path(event["path"]).is_file()
+                )
+                tie = find_tagged_source(path.read_bytes(), candidates)
+                if tie is not None:
+                    record["derived_from"] = tie
+            inputs.append(record)
+    return inputs
+
+
 def _action_inputs(role: str, kind: str, argv: list[str], cwd: Path) -> list[dict[str, str]]:
+    if role == "mpy-cross":
+        return _mpy_cross_inputs(argv, cwd)
     candidates: dict[str, tuple[Path, str]] = {}
     output_values: set[str] = set()
     option = None
@@ -426,6 +487,36 @@ def _assembler_evidence(depfile: Path, known: set[str], cwd: Path) -> dict:
     return {"status": "collected", "dependencies": [dependencies[path] for path in sorted(dependencies)]}
 
 
+def _frozen_observation(log: Path) -> dict:
+    """What the frozen-content generator logged about itself: its pid, argv, reads and spawns."""
+    start = None
+    reads: list[dict] = []
+    spawns: list[list[str]] = []
+    seen: set[tuple[str, str]] = set()
+    for line in log.read_text(encoding="utf-8").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("event") == "start" and start is None:
+            start = event
+        elif event.get("event") == "read" and (event["path"], event["sha256"]) not in seen:
+            seen.add((event["path"], event["sha256"]))
+            reads.append({"path": event["path"], "sha256": event["sha256"]})
+        elif event.get("event") == "spawn":
+            spawns.append(event["argv"])
+    if start is None:
+        return {"status": "unavailable", "reason": "the generator process did not start the observer"}
+    return {
+        "status": "observed",
+        "mode": "list-c-modules" if "--list-c-modules" in start["argv"] else "freeze",
+        "pid": start["pid"],
+        "argv": start["argv"],
+        "reads": reads,
+        "spawns": spawns,
+    }
+
+
 def run_tool(
     role: str,
     executable: Path,
@@ -459,9 +550,34 @@ def run_tool(
             os.close(descriptor)
             assembler_file = Path(name)
             run_argv += [f"-Wa,--MD,{name}"] if role in ("cc", "cxx") else ["--MD", name]
+    wrapper_dir = os.environ.get(_WRAPPER_DIR)
+    observing = role == "python" and kind == "generate" and bool(wrapper_dir) and is_generator(argv)
+    observed_child = LOG_VARIABLE in os.environ
+    teeing = observed_child and role == "python" and kind == "generate"
+    observation_log = None
+    environment = None
+    if observing:
+        descriptor, name = tempfile.mkstemp(prefix="mpy-frozen-observe-", suffix=".jsonl")
+        os.close(descriptor)
+        observation_log = Path(name)
+        environment = {
+            **os.environ,
+            LOG_VARIABLE: name,
+            "PYTHONPATH": wrapper_dir + os.pathsep + os.environ.get("PYTHONPATH", ""),
+        }
     started = time.time_ns()
+    stdout_record = None
+    frozen_observation = None
     try:
-        result = subprocess.run([str(executable), *run_argv])
+        if teeing:
+            result = subprocess.run([str(executable), *run_argv], stdout=subprocess.PIPE)
+            sys.stdout.buffer.write(result.stdout)
+            sys.stdout.buffer.flush()
+            stdout_record = {"sha256": hashlib.sha256(result.stdout).hexdigest(), "size": len(result.stdout)}
+        else:
+            result = subprocess.run([str(executable), *run_argv], env=environment)
+        if observation_log is not None:
+            frozen_observation = _frozen_observation(observation_log)
         after_inputs = _outside_wrappers(_action_inputs(role, kind, argv, cwd))
         after = {item["path"]: item["sha256"] for item in after_inputs}
         outputs = _action_outputs(role, kind, argv, cwd) if result.returncode == 0 else []
@@ -513,6 +629,8 @@ def run_tool(
     finally:
         if assembler_file is not None and plan["requested"] is None:
             assembler_file.unlink(missing_ok=True)
+        if observation_log is not None:
+            observation_log.unlink(missing_ok=True)
     _append_event(
         journal,
         {
@@ -534,6 +652,10 @@ def run_tool(
             "dependency_evidence": dependency_evidence,
             **({"dependency_capture": dependency_capture} if dependency_capture else {}),
             **({"assembler_dependencies": assembler_dependencies} if assembler_dependencies else {}),
+            "process": {"pid": os.getpid(), "ppid": os.getppid()},
+            **({"in_observed_generator": True} if observed_child else {}),
+            **({"frozen_observation": frozen_observation} if frozen_observation is not None else {}),
+            **({"stdout": stdout_record} if stdout_record is not None else {}),
         },
     )
     return result.returncode
@@ -564,6 +686,21 @@ def _make_tool_wrapper(
     ]
     path.write_text("#!/bin/sh\nexec " + shlex.join(command[:-1]) + " \"$@\"\n", encoding="utf-8")
     path.chmod(0o755)
+
+
+def _mpy_cross_binary(root: Path, variables: list[str]) -> Path | None:
+    """The mpy-cross executable the build runs, when it can be located before the build starts.
+
+    The build takes it from ``MICROPY_MPYCROSS`` (a make variable or the environment) and
+    otherwise from ``mpy-cross/build/mpy-cross`` in the checkout. A build that has to build
+    mpy-cross itself first is not wrapped; its frozen payload then stays unbound.
+    """
+    explicit = [item.split("=", 1)[1] for item in variables if item.startswith("MICROPY_MPYCROSS=")]
+    candidate = Path(
+        (explicit[-1] if explicit else "") or os.environ.get("MICROPY_MPYCROSS") or root / "mpy-cross" / "build" / "mpy-cross"
+    )
+    candidate = candidate if candidate.is_absolute() else Path.cwd() / candidate
+    return candidate.resolve() if candidate.is_file() and os.access(candidate, os.X_OK) else None
 
 
 def capture_make(
@@ -613,6 +750,10 @@ def capture_make(
         "STRIP": ("strip", shutil.which(cross + "strip")),
         "PYTHON": ("python", shutil.which("python3")),
     }
+    mpy_cross = _mpy_cross_binary(root, variables)
+    if mpy_cross is not None:
+        tools["MICROPY_MPYCROSS"] = ("mpy-cross", str(mpy_cross))
+    make_variables = [item for item in variables if not item.startswith("MICROPY_MPYCROSS=")]
     missing = [name for name, (_, executable) in tools.items() if not executable]
     if missing:
         raise ValueError(f"missing toolchain executables for make variables: {', '.join(missing)}")
@@ -624,12 +765,15 @@ def capture_make(
             wrapper = wrappers / name.lower()
             _make_tool_wrapper(wrapper, role, Path(executable), journal, image_id, build_id, build)
             make_vars.append(f"{name}={wrapper}")
+        (wrappers / "sitecustomize.py").write_text(
+            "from mpy_analysis.firmware_observe import install\ninstall()\n", encoding="utf-8"
+        )
         environment = os.environ.copy()
         environment[_WRAPPER_DIR] = str(wrappers)
         package_root = str(Path(__file__).resolve().parents[1])
         environment["PYTHONPATH"] = package_root + os.pathsep + environment.get("PYTHONPATH", "")
         result = subprocess.run(
-            ["make", "-j1", "-C", str(make_directory), *make_vars, *variables, *(targets or ["all"])],
+            ["make", "-j1", "-C", str(make_directory), *make_vars, *make_variables, *(targets or ["all"])],
             env=environment,
         )
     if result.returncode:

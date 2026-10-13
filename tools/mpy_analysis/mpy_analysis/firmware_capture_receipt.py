@@ -12,10 +12,18 @@ from typing import Any
 
 from .argv_tokens import enables_lto, flatten
 from .elf_evidence import dynamic_needed
-from .firmware_inputs import assembler_embedded_inputs, header_accounting, linked_embedded_inputs
+from .firmware_frozen import frozen_accounting
+from .firmware_inputs import assembler_embedded_inputs, bindings_for_path, header_accounting, linked_embedded_inputs
 from .firmware_receipt import receipt_id, validate_firmware_receipt
 from .gnu_map import parse_gnu_map
 from .toolchain_runtime import classify, machine_flags
+
+
+def _read_bytes(path: str) -> bytes | None:
+    try:
+        return Path(path).read_bytes()
+    except OSError:
+        return None
 
 
 def _digest(path: Path) -> str:
@@ -143,22 +151,7 @@ def _repositories(source_roots: dict[str, Path]) -> list[dict[str, Any]]:
 
 
 def _bindings(path: str, source_roots: dict[str, Path]) -> list[dict[str, str]]:
-    source = Path(path).resolve(strict=False)
-    matches = []
-    for name, raw_root in source_roots.items():
-        root = raw_root.resolve(strict=True)
-        if source.is_relative_to(root):
-            relative = source.relative_to(root).as_posix()
-            if relative and relative != ".":
-                matches.append((len(root.parts), name, relative))
-    if not matches:
-        return []
-    depth = max(item[0] for item in matches)
-    winners = [(name, relative) for match_depth, name, relative in matches if match_depth == depth]
-    if len(winners) != 1:
-        raise ValueError(f"source path has ambiguous declared source roots: {path}")
-    name, relative = winners[0]
-    return [{"root": name, "path": relative}]
+    return bindings_for_path(path, source_roots)
 
 
 def _compiler(toolchain: dict[tuple[str, str], dict[str, Any]]) -> dict[str, Any] | None:
@@ -428,8 +421,8 @@ def receipt_from_journal(
             and Path(item["path"]).suffix.lower() in (".bin", ".hex", ".dfu", ".pack")
             for item in outputs
         )
-        relevant = relevant or event["kind"] in ("transform", "generate") and any(
-            in_build(item["path"]) for item in outputs
+        relevant = relevant or event["kind"] in ("transform", "generate") and (
+            event.get("in_observed_generator") or any(in_build(item["path"]) for item in outputs)
         )
         relevant = relevant or event["kind"] == "link" and any(
             in_build(item["path"]) and item["path"].endswith((".o", ".obj")) for item in outputs
@@ -478,6 +471,11 @@ def receipt_from_journal(
             "dependency_evidence": event.get("dependency_evidence", []),
             **({"dependency_capture": event["dependency_capture"]} if "dependency_capture" in event else {}),
             **({"assembler_dependencies": event["assembler_dependencies"]} if "assembler_dependencies" in event else {}),
+            **(
+                {key: event[key] for key in ("process", "frozen_observation", "stdout") if key in event}
+                if kind == "generate"
+                else {}
+            ),
         }
         actions.append(action)
         tool = event["executable"]
@@ -818,6 +816,18 @@ def receipt_from_journal(
         producers=generated_producers,
     )
     unresolved.extend(assembler_unresolved)
+    frozen = frozen_accounting(
+        actions,
+        generated_sources={
+            item["path"]: item["sha256"]
+            for _, action in contributed_objects
+            for item in action["inputs"]
+            if item["role"] == "source"
+        },
+        build_root=build_root,
+        bindings_for=lambda path: _bindings(path, source_roots),
+        read_bytes=_read_bytes,
+    )
     if map_error:
         unresolved.append({"path": str(Path(map_file).resolve()), "reason": f"unsupported map evidence: {map_error}"})
     if parsed is not None:
@@ -880,6 +890,7 @@ def receipt_from_journal(
         "object_accounting": object_accounting,
         "header_accounting": headers,
         "embedded_inputs": embedded_rows + assembler_rows,
+        "frozen_accounting": {"build_root": str(build_root), **frozen},
         "artifacts": list(image_artifacts.values()),
     }
     receipt = {
@@ -902,7 +913,7 @@ def receipt_from_journal(
         ],
         "actions": actions,
         "images": [image],
-        "status": "complete" if link_complete else "incomplete",
+        "status": "complete" if link_complete and frozen["status"] != "unaccounted" else "incomplete",
     }
     receipt["receipt_id"] = receipt_id(receipt)
     return validate_firmware_receipt(receipt)
@@ -956,6 +967,13 @@ def merge_receipts(receipts: list[dict[str, Any]]) -> dict[str, Any]:
                 entry["producer"] = action_ids[(receipt_index, entry["producer"])]
         for row in image.get("embedded_inputs", []):
             row["action"] = action_ids[(receipt_index, row["action"])]
+        for payload in image.get("frozen_accounting", {}).get("payloads", []):
+            payload["generator"] = action_ids[(receipt_index, payload["generator"])]
+            if payload["mpy_tool"] is not None:
+                payload["mpy_tool"]["action"] = action_ids[(receipt_index, payload["mpy_tool"]["action"])]
+            for element in payload["elements"]:
+                if "compile_action" in element:
+                    element["compile_action"] = action_ids[(receipt_index, element["compile_action"])]
         image["configuration"] = receipt["configuration"]
         images.append(image)
 
