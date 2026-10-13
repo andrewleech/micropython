@@ -1,5 +1,6 @@
 """Replay selected compiler records without replacing their build arguments."""
 from pathlib import Path
+import os
 import hashlib
 import importlib.util
 import json
@@ -11,6 +12,46 @@ import subprocess
 from .frontend import canonical
 
 
+# Symlinks and directory layout under dependency and probe paths are treated as fixed for the
+# duration of one run, so ``resolve_path`` resolves each (directory, name) once per process.
+# Input snapshots do not rely on that assumption: read_input caches the resolution only for a
+# path none of whose components is a symlink, and resolves any other path before and after
+# reading it. File replacement or modification is detected by the
+# (device, inode, size, mtime, ctime) stamp and the content hash.
+_RESOLVED = {}
+_LINK_FREE = {}
+_LINKED = set()
+_MARKER = re.compile(r'\s*#\s+(\d+)\s+"([^"]+)"')
+_INCLUDE_MARKER = re.compile(r'\s*#\s+\d+\s+"([^"]+)"(?:\s+([\d ]+))?\s*')
+_CONTRACT_PROBE = re.compile(r'\bmpy_api_contract_(\w+)\s*=\s*([^;]+);')
+_CONTRACT_UNRESOLVED = re.compile(r'\b(?:MP_ROM_(?:NONE|TRUE|FALSE|QSTR|INT|PTR)|MP_OBJ_(?:FROM_PTR|NULL|SENTINEL)|mp_const_(?:none|true|false))\b')
+
+
+def resolve_path(directory, name):
+    """Resolve ``name`` relative to ``directory`` through symlinks, memoized per process."""
+    key = (str(directory), name)
+    result = _RESOLVED.get(key)
+    if result is None:
+        result = _RESOLVED[key] = str((Path(directory) / name).resolve())
+    return result
+
+
+def clear_resolution_cache():
+    _RESOLVED.clear()
+    _LINK_FREE.clear()
+    _LINKED.clear()
+
+
+def _has_symlink(absolute):
+    """True when any named component of the absolute path ``absolute`` is a symlink."""
+    prefix = ''
+    for part in absolute.split('/')[1:]:
+        prefix += '/' + part
+        if part not in ('', '.', '..') and os.path.islink(prefix):
+            return True
+    return False
+
+
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -18,15 +59,25 @@ def digest(path):
 def read_input(path):
     """Capture the bytes and physical identity of one consumed input."""
     path = Path(path).absolute()
-    resolved = path.resolve(strict=True)
+    key = str(path)
+    resolved = _LINK_FREE.get(key)
+    linked = resolved is None
+    if linked:
+        resolved = str(path.resolve(strict=True))
+        if key not in _LINKED:
+            if _has_symlink(key):
+                _LINKED.add(key)
+            else:
+                _LINK_FREE[key] = resolved
+                linked = False
     before = path.stat()
     content = path.read_bytes()
     after = path.stat()
     def stamp(stat):
         return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
-    if stamp(before) != stamp(after) or path.resolve(strict=True) != resolved:
+    if stamp(before) != stamp(after) or (linked and str(path.resolve(strict=True)) != resolved):
         raise RuntimeError(f'input changed while being read: {path}')
-    return content, {'path': str(path), 'resolved': str(resolved),
+    return content, {'path': key, 'resolved': resolved,
                      'sha256': hashlib.sha256(content).hexdigest(), '_stat': stamp(after)}
 
 
@@ -123,7 +174,7 @@ def clean_flags(record):
         if argument in dropped or any(argument.startswith(flag) and argument != flag for flag in paired):
             index += 1
             continue
-        if not argument.startswith('-') and (Path(record['directory']) / argument).resolve() == physical:
+        if not argument.startswith('-') and resolve_path(record['directory'], argument) == str(physical):
             index += 1
             continue
         result.append(argument)
@@ -132,15 +183,36 @@ def clean_flags(record):
 
 
 def executable(name, directory):
-    candidate = str((Path(directory) / name).resolve()) if '/' in name else shutil.which(name)
+    candidate = resolve_path(directory, name) if '/' in name else shutil.which(name)
     if not candidate or not Path(candidate).is_file():
         raise ValueError(f'selected compiler/tool executable is unavailable: {name}')
     return candidate
 
 
-def invoke(record, extras, source=None):
+# Recorded results of compiler identity queries (-dumpmachine, --version), keyed by the flags and
+# working directory they ran with. These queries do not read the source operand, so one run
+# serves every translation unit with the same flags. Dependency selection and expansion are
+# never replayed: they are the repeated checks that detect inputs changing during collection.
+_REPLAYS = {}
+
+
+def clear_replay_cache():
+    _REPLAYS.clear()
+
+
+def invoke(record, extras, source=None, *, reuse=False):
+    """Run the selected compiler; ``reuse`` returns the recorded result of an identical earlier run.
+
+    Only for queries that do not read the source operand (the reuse key then omits it)."""
     argv = [record.get('compiler') or record.get('expanded_arguments', record['arguments'])[0], *clean_flags(record), *extras,
             record['file'] if source is None else '-']
+    key = None
+    if reuse and source is None:
+        key = (tuple(argv[:-1] if extras in (['-dumpmachine'], ['--version']) else argv), record['directory'])
+        replay = _REPLAYS.get(key)
+        if replay is not None:
+            stdout, receipt = replay
+            return stdout, {**receipt, 'argv': argv}
     result = subprocess.run(argv, input=source, cwd=record['directory'], capture_output=True, text=True)
     receipt = {'argv': argv, 'directory': record['directory'], 'exit': result.returncode,
                'stderr': result.stderr, 'stdout_sha256': hashlib.sha256(result.stdout.encode()).hexdigest()}
@@ -148,17 +220,24 @@ def invoke(record, extras, source=None):
         receipt['stdin'] = source
     if result.returncode:
         raise RuntimeError(f'compiler replay failed for {record["physical"]}: {shlex.join(argv)}\n{result.stderr}')
+    if key is not None:
+        _REPLAYS[key] = (result.stdout, receipt)
     return result.stdout, receipt
 
 
 def unmark(text, directory):
     rows, origins, source, line = [], [], '<unknown>', 0
     for row in text.splitlines():
-        marker = re.match(r'\s*#\s+(\d+)\s+"([^"]+)"', row)
+        if '#' not in row:
+            rows.append(row)
+            origins.append((source, line))
+            line += 1
+            continue
+        marker = _MARKER.match(row)
         if marker:
             line = int(marker[1])
             name = marker[2]
-            source = name if name.startswith('<') else str((Path(directory) / name).resolve())
+            source = name if name.startswith('<') else resolve_path(directory, name)
             continue
         rows.append(row if not row.lstrip().startswith('#') else '')
         origins.append((source, line))
@@ -205,11 +284,13 @@ def compiler_contracts(record):
     raw, receipt = invoke(probe_record, ['-E', '-x', 'c'], source)
     validate_include_markers(raw, record)
     values = {}
+    found = {}
+    for matched in _CONTRACT_PROBE.finditer(raw):
+        found.setdefault(matched[1], matched[2])
     for name in samples:
-        matched = re.search(r'\bmpy_api_contract_' + name + r'\s*=\s*([^;]+);', raw)
-        if matched:
-            value = canonical(matched[1])
-            if not re.search(r'\b(?:MP_ROM_(?:NONE|TRUE|FALSE|QSTR|INT|PTR)|MP_OBJ_(?:FROM_PTR|NULL|SENTINEL)|mp_const_(?:none|true|false))\b', value):
+        if name in found:
+            value = canonical(found[name])
+            if not _CONTRACT_UNRESOLVED.search(value):
                 values[name] = value
     return values, receipt
 
@@ -248,10 +329,10 @@ def prepare(record, compdb):
     selected['dependencies'] = {snapshot['resolved']: snapshot['sha256'] for snapshot in dependency_snapshots.values()}
     source_snapshot = next(iter(source_snapshots.values()))
     selected['dependencies'][source_snapshot['resolved']] = source_snapshot['sha256']
-    selected['project_dependencies'] = sorted({str((Path(record['directory']) / path).resolve()) for path in project_paths})
+    selected['project_dependencies'] = sorted({resolve_path(record['directory'], path) for path in project_paths})
     selected['receipts'] = [all_receipt, project_receipt, stable_all_receipt, stable_project_receipt]
-    target, target_receipt = invoke(selected, ['-dumpmachine'])
-    version, version_receipt = invoke(selected, ['--version'])
+    target, target_receipt = invoke(selected, ['-dumpmachine'], reuse=True)
+    version, version_receipt = invoke(selected, ['--version'], reuse=True)
     selected['compiler_target'] = target.strip()
     selected['compiler_version'] = version.strip()
     selected['receipts'].extend([target_receipt, version_receipt])
@@ -260,10 +341,12 @@ def prepare(record, compdb):
 
 def validate_include_markers(text, record):
     for line in text.splitlines():
-        marker = re.fullmatch(r'\s*#\s+\d+\s+"([^"]+)"(?:\s+([\d ]+))?\s*', line)
+        if '#' not in line:
+            continue
+        marker = _INCLUDE_MARKER.fullmatch(line)
         if not marker or marker[1].startswith('<') or '1' not in (marker[2] or '').split():
             continue
-        path = str((Path(record['directory']) / marker[1]).resolve())
+        path = resolve_path(record['directory'], marker[1])
         if path not in record['dependencies']:
             raise RuntimeError(f'compiler expansion consumes an uncaptured include dependency: {path}')
 
@@ -272,7 +355,7 @@ def validate_dependencies(record, compdb):
     for option, expected in (('-M', set(record['dependencies'])), ('-MM', set(record['project_dependencies']))):
         text, receipt = invoke(record, [option])
         paths = compdb.first_rule(text)
-        if paths is None or {str((Path(record['directory']) / path).resolve()) for path in paths} != expected:
+        if paths is None or {resolve_path(record['directory'], path) for path in paths} != expected:
             raise RuntimeError(f'compiler dependency selection changed after expansion: {record["physical"]}')
         record['receipts'].append(receipt)
     verify_inputs(record['input_snapshots'])

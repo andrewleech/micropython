@@ -67,9 +67,13 @@ LEXEME = re.compile(
     rb'|(?P<punctuation>->|.)',
     re.S,
 )
+_IDENTIFIER = re.compile(rb'[A-Za-z_][A-Za-z_0-9]*')
 ORIGINAL = b'__builtin_offsetof'
 KEYWORD = b'offsetof'
 REPLACEMENT = KEYWORD + b' ' * (len(ORIGINAL) - len(KEYWORD))
+# Every token on which the projection loop in adapt_source can act; all other tokens are skipped.
+_PROJECTION_TOKENS = frozenset((b'_Thread_local', b'__builtin_va_arg', b'__attribute__', b'__attribute',
+                                b'asm', b'__asm__', b'__asm', b'goto', b':', ORIGINAL))
 
 
 def _tokens(data):
@@ -182,19 +186,18 @@ def _legacy_headers(data, tokens, line_starts, origins):
     """
     replacements = []
     depth, index = 0, 0
-    identifier = rb'[A-Za-z_][A-Za-z_0-9]*'
     while index < len(tokens):
         token, start, end = tokens[index]
         if token == b'{':
             depth += 1
         elif token == b'}':
             depth -= 1
-        if depth or not re.fullmatch(identifier, token) or index + 1 == len(tokens) or tokens[index + 1][0] != b'(':
+        if depth or index + 1 == len(tokens) or tokens[index + 1][0] != b'(' or not _IDENTIFIER.fullmatch(token):
             index += 1
             continue
         close = _balanced_end(tokens, index + 1)
         names = tokens[index + 2:close]
-        if not names or any(not re.fullmatch(identifier, t[0]) if n % 2 == 0 else t[0] != b',' for n, t in enumerate(names)) or len(names) % 2 == 0:
+        if not names or any(not _IDENTIFIER.fullmatch(t[0]) if n % 2 == 0 else t[0] != b',' for n, t in enumerate(names)) or len(names) % 2 == 0:
             index = close + 1
             continue
         parameter_names = [t[0].decode('utf-8') for t in names[::2]]
@@ -286,12 +289,12 @@ def adapt_source(code: str, origins: list) -> tuple[str, dict]:
         if token not in (b'struct', b'union'):
             continue
         opening = index + 1
-        if opening < len(tokens) and re.fullmatch(rb'[A-Za-z_][A-Za-z_0-9]*', tokens[opening][0]):
+        if opening < len(tokens) and _IDENTIFIER.fullmatch(tokens[opening][0]):
             opening += 1
         if opening < len(tokens) and tokens[opening][0] == b'{':
             aggregate_ranges.append((opening, _balanced_end(tokens, opening)))
     for index, (token, start, end) in enumerate(tokens):
-        if start < hidden_until:
+        if token not in _PROJECTION_TOKENS or start < hidden_until:
             continue
         if token == b'_Thread_local' and (not index or tokens[index - 1][0] not in (b'.', b'->')):
             keyword = b'__thread'
@@ -334,9 +337,9 @@ def adapt_source(code: str, origins: list) -> tuple[str, dict]:
             if [entry[0] for entry in tokens[index + 1:index + 3]] == [b'(', b'(']:
                 close = _balanced_end(tokens, index + 1)
                 tail = tokens[close + 1:close + 8]
-                if (len(tail) >= 7 and re.fullmatch(rb'[A-Za-z_][A-Za-z_0-9]*', tail[0][0])
+                if (len(tail) >= 7 and _IDENTIFIER.fullmatch(tail[0][0])
                         and [entry[0] for entry in tail[1:3]] == [b'(', b'*']
-                        and re.fullmatch(rb'[A-Za-z_][A-Za-z_0-9]*', tail[3][0])
+                        and _IDENTIFIER.fullmatch(tail[3][0])
                         and [entry[0] for entry in tail[4:6]] == [b')', b'(']):
                     parameters_end = _balanced_end(tokens, close + 6)
                     if parameters_end + 1 < len(tokens) and tokens[parameters_end + 1][0] == b';':
@@ -381,7 +384,7 @@ def adapt_source(code: str, origins: list) -> tuple[str, dict]:
             attribute_ends.add(close)
             hidden_until = attribute_end
             continue
-        if token in (b'asm', b'__asm__', b'__asm') and index and re.fullmatch(rb'[A-Za-z_][A-Za-z_0-9]*', tokens[index - 1][0]) and index + 1 < len(tokens) and tokens[index + 1][0] == b'(':
+        if token in (b'asm', b'__asm__', b'__asm') and index and _IDENTIFIER.fullmatch(tokens[index - 1][0]) and index + 1 < len(tokens) and tokens[index + 1][0] == b'(':
             close = _balanced_end(tokens, index + 1)
             previous = index - 1
             while previous and tokens[previous - 1][0] not in (b';', b'{', b'}'):
@@ -486,7 +489,7 @@ def adapt_source(code: str, origins: list) -> tuple[str, dict]:
         close, comma = _invocation(tokens, index)
         type_tokens = tokens[index + 2:comma]
         member_tokens = tokens[comma + 1:close]
-        if not type_tokens or len(member_tokens) != 1 or not re.fullmatch(rb'[A-Za-z_][A-Za-z_0-9]*', member_tokens[0][0]):
+        if not type_tokens or len(member_tokens) != 1 or not _IDENTIFIER.fullmatch(member_tokens[0][0]):
             unassessed.append({
                 'kind': 'gnu_offsetof', 'original_text': data[start:tokens[close][2]].decode('utf-8'),
                 'source_span': _location(line_starts, origins, start, tokens[close][2]),

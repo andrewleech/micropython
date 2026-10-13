@@ -1,20 +1,44 @@
 """Bounded C syntax facts from the selected build compiler expansion."""
 import re
 from collections import namedtuple
+from bisect import bisect_left
+from itertools import chain
 from .gnu import adapt_source, restore_text
 
 TOKEN = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[A-Za-z_]\w*|0[xX][0-9a-fA-F]+(?:[uUlL]+)?|\d+(?:[uUlL]+)?|==|!=|<=|>=|->|&&|\|\||<<|>>|\+=|-=|\+\+|--|[^\s]')
 CANONICAL_TOKEN = re.compile(r'/\*.*?\*/|//[^\n]*|' + TOKEN.pattern, flags=re.S)
+_TOKEN_DOTALL = re.compile(TOKEN.pattern, flags=re.S)
+_IDENTIFIER_TOKEN = re.compile(r'[A-Za-z_]\w*')
+_UNSIGNED_LITERAL = re.compile(r'(?:0[xX][0-9a-fA-F]+|\d+)[uUlL]*[uU][uUlL]*')
+_INTEGER_LITERAL = re.compile(r'(?:0[xX][0-9a-fA-F]+|[0-9]+)[lL]*')
+_LONG_SUFFIX = re.compile(r'[lL]+$')
+_SIGNATURE_ATTRIBUTES = re.compile(r'\b(?:__attribute(?:__)?|__declspec|__cdecl|__stdcall|__fastcall|__vectorcall|__thiscall|__regcall|__syscall|__pascal|asm|__asm(?:__)?)\b')
+_DECLARATION_MODIFIERS = re.compile(r'\b(?:static|extern|inline|__inline__|__inline)\b')
+_BINDING_TYPES = ('type_definition', 'declaration', 'parameter_declaration', 'function_definition', 'enumerator')
+_DECLARATOR_SHAPES = ('array_declarator', 'function_declarator')
+_NAME_CALLS = {}
+
+
+def _name_call(name):
+    """Compiled pattern for ``name`` used as a call, memoized per process."""
+    pattern = _NAME_CALLS.get(name)
+    if pattern is None:
+        pattern = _NAME_CALLS[name] = re.compile(r'\b' + re.escape(name) + r' \(')
+    return pattern
 
 
 def canonical(text):
-    return ' '.join(match[0] for match in CANONICAL_TOKEN.finditer(text)
-                    if not match[0].startswith(('/*', '//')))
+    if '/' not in text:
+        # Comments need a slash, so without one only the token alternatives apply. DOTALL
+        # matches CANONICAL_TOKEN, where a backslash-newline can continue a literal.
+        return ' '.join(_TOKEN_DOTALL.findall(text))
+    return ' '.join([token for token in CANONICAL_TOKEN.findall(text)
+                     if not token.startswith(('/*', '//'))])
 
 def constant_rejection(expression, environment):
     tokens = TOKEN.findall(expression)
     comparisons = {'==', '!=', '<', '<=', '>', '>='}
-    if any(re.fullmatch(r'(?:0[xX][0-9a-fA-F]+|\d+)[uUlL]*[uU][uUlL]*', token) for token in tokens):
+    if any(_UNSIGNED_LITERAL.fullmatch(token) for token in tokens):
         return 'unsigned literal conversion/width unassessed'
     if comparisons.intersection(tokens) and {'&', '|', '^'}.intersection(tokens):
         return 'mixed C bitwise/comparison precedence unassessed'
@@ -51,8 +75,8 @@ def constant(expression, environment):
         if token in ('+', '!'):
             value = atom()
             return value if token == '+' else int(not value)
-        if re.fullmatch(r'(?:0[xX][0-9a-fA-F]+|[0-9]+)[lL]*', token):
-            literal = re.sub(r'[lL]+$', '', token)
+        if _INTEGER_LITERAL.fullmatch(token):
+            literal = _LONG_SUFFIX.sub('', token)
             value = int(literal, 16 if literal.lower().startswith('0x') else 8 if len(literal) > 1 and literal.startswith('0') else 10)
         else:
             value = environment.get(token)
@@ -115,41 +139,125 @@ def function_id(physical, name, location):
 _NodeContext = namedtuple('_NodeContext', 'scope function_definition function_declarator loops conditionals')
 
 
-def _context_index(tree, text):
-    """Index strict ancestors for one tree, sharing immutable loop and byte-predicate chains."""
-    contexts = {}
+class _TreeIndex:
+    """Preorder node list of one tree with per-type positions and subtree extents.
+
+    ``select`` and ``has`` answer the questions a recursive preorder walk of a subtree answers
+    (which nodes of these types lie at or below this node, in preorder) without visiting every node.
+    """
+    __slots__ = ('nodes', 'position', 'extent', 'by_type', 'missing', 'contexts')
+
+    def __init__(self):
+        self.nodes, self.position, self.extent = [], {}, []
+        self.by_type, self.missing, self.contexts = {}, [], {}
+
+    def _bounds(self, root):
+        low = self.position[root.id]
+        return low, self.extent[low]
+
+    def _runs(self, types, low, high):
+        runs = []
+        for name in types:
+            positions = self.by_type.get(name)
+            if positions:
+                first = bisect_left(positions, low)
+                last = bisect_left(positions, high, first)
+                if first < last:
+                    runs.append((first, last, positions))
+        return runs
+
+    def select(self, types, root):
+        """Nodes whose type is in ``types`` at or below ``root``, in preorder."""
+        runs = self._runs(types, *self._bounds(root))
+        if not runs:
+            return []
+        nodes = self.nodes
+        if len(runs) == 1:
+            first, last, positions = runs[0]
+            return [nodes[i] for i in positions[first:last]]
+        return [nodes[i] for i in sorted(chain.from_iterable(positions[first:last] for first, last, positions in runs))]
+
+    def select_all(self, types):
+        """Nodes whose type is in ``types`` anywhere in the tree, in preorder."""
+        nodes = self.nodes
+        return [nodes[i] for i in sorted(chain.from_iterable(self.by_type.get(name, ()) for name in types))]
+
+    def has(self, types, root):
+        return bool(self._runs(types, *self._bounds(root)))
+
+    def errors(self):
+        """Syntax error and missing nodes in preorder."""
+        nodes = self.nodes
+        return [nodes[i] for i in sorted(set(self.by_type.get('ERROR', ())).union(self.missing))]
+
+
+_CONTEXT_TYPES = frozenset(('compound_statement', 'function_definition', 'for_statement', 'function_declarator',
+                            'while_statement', 'do_statement', 'conditional_expression', 'binary_expression'))
+
+
+def _tree_index(tree, text):
+    """Index one tree: preorder positions plus strict ancestors, sharing immutable loop and byte-predicate chains."""
+    index = _TreeIndex()
+    nodes, position, extent, by_type, contexts = index.nodes, index.position, index.extent, index.by_type, index.contexts
     stack = [_NodeContext(None, None, None, None, None)]
+    open_positions = []
     cursor = tree.walk()
+    goto_first_child, goto_next_sibling, goto_parent = cursor.goto_first_child, cursor.goto_next_sibling, cursor.goto_parent
     while True:
         node = cursor.node
+        node_type = node.type
+        node_id = node.id
+        current = len(nodes)
+        nodes.append(node)
+        position[node_id] = current
+        extent.append(current + 1)
+        run = by_type.get(node_type)
+        if run is None:
+            by_type[node_type] = [current]
+        else:
+            run.append(current)
         context = stack[-1]
-        contexts[node.id] = context
-        scope, definition, declarator, loops, conditionals = context
-        if node.type in ('compound_statement', 'function_definition', 'for_statement'):
-            scope = node
-        if node.type == 'function_definition':
-            definition = node
-        if node.type == 'function_declarator':
-            declarator = node
-        if node.type in ('for_statement', 'while_statement', 'do_statement'):
-            loops = (node.start_byte, loops)
-        consequence = (node.child_by_field_name('consequence')
-                       or node.child_by_field_name('alternative')) if node.type == 'conditional_expression' else None
-        if consequence:
-            conditionals = (node.start_byte, consequence.start_byte, conditionals)
-        elif (node.type == 'binary_expression'
-              and text(node.child_by_field_name('operator')) in ('&&', '||')):
-            conditionals = (node.start_byte, node.child_by_field_name('right').start_byte, conditionals)
-        if cursor.goto_first_child():
-            unchanged = (scope is context.scope and definition is context.function_definition
-                         and declarator is context.function_declarator
-                         and loops is context.loops and conditionals is context.conditionals)
-            stack.append(context if unchanged else _NodeContext(scope, definition, declarator, loops, conditionals))
+        contexts[node_id] = context
+        changes_context = node_type in _CONTEXT_TYPES
+        if changes_context:
+            scope, definition, declarator, loops, conditionals = context
+            if node_type in ('compound_statement', 'function_definition', 'for_statement'):
+                scope = node
+            if node_type == 'function_definition':
+                definition = node
+            if node_type == 'function_declarator':
+                declarator = node
+            if node_type in ('for_statement', 'while_statement', 'do_statement'):
+                loops = (node.start_byte, loops)
+            consequence = (node.child_by_field_name('consequence')
+                           or node.child_by_field_name('alternative')) if node_type == 'conditional_expression' else None
+            if consequence:
+                conditionals = (node.start_byte, consequence.start_byte, conditionals)
+            elif (node_type == 'binary_expression'
+                  and text(node.child_by_field_name('operator')) in ('&&', '||')):
+                conditionals = (node.start_byte, node.child_by_field_name('right').start_byte, conditionals)
+        if goto_first_child():
+            if changes_context:
+                unchanged = (scope is context.scope and definition is context.function_definition
+                             and declarator is context.function_declarator
+                             and loops is context.loops and conditionals is context.conditionals)
+                stack.append(context if unchanged else _NodeContext(scope, definition, declarator, loops, conditionals))
+            else:
+                stack.append(context)
+            open_positions.append(current)
             continue
-        while not cursor.goto_next_sibling():
-            if not cursor.goto_parent():
-                return contexts
+        while not goto_next_sibling():
+            if not goto_parent():
+                if tree.root_node.has_error:
+                    index.missing = [position_ for position_, candidate in enumerate(nodes) if candidate.is_missing]
+                return index
             stack.pop()
+            extent[open_positions.pop()] = len(nodes)
+
+
+def _context_index(tree, text):
+    """Strict ancestor contexts keyed by node id."""
+    return _tree_index(tree, text).contexts
 
 
 def syntax_adapter(code, origins, physical, record):
@@ -159,13 +267,17 @@ def syntax_adapter(code, origins, physical, record):
     parse_code, syntax_evidence = adapt_source(code, origins)
     data = parse_code.encode()
     tree = Parser(Language(tree_sitter_c.language())).parse(data)
-    def walk(n):
-        yield n
-        for child in n.children: yield from walk(child)
+    text_cache = {}
     def raw(n): return restore_text(original_data, syntax_evidence, n.start_byte, n.end_byte) if n else ''
-    def text(n): return canonical(raw(n))
+    def text(n):
+        if not n: return ''
+        key = (n.start_byte, n.end_byte)
+        value = text_cache.get(key)
+        if value is None:
+            value = text_cache[key] = canonical(restore_text(original_data, syntax_evidence, key[0], key[1]))
+        return value
     def selected_constants(expression, environment):
-        names = {token for token in TOKEN.findall(expression) if re.fullmatch(r'[A-Za-z_]\w*', token)}
+        names = {token for token in TOKEN.findall(expression) if _IDENTIFIER_TOKEN.fullmatch(token)}
         return {name: environment[name] for name in sorted(names) if name in environment}
     def loc(n): return span(origins, n.start_point.row + 1, n.end_point.row + 1)
     def adapted_expressions(node, *, kind=None, barriers=False):
@@ -213,11 +325,14 @@ def syntax_adapter(code, origins, physical, record):
                 result.append(text(param))
         return result
     def point_for_name(node, name):
-        identifier = next((n for n in walk(node) if n.type == 'identifier' and text(n) == name), node)
+        identifier = next((n for n in tree_index.select(('identifier',), node) if text(n) == name), node)
         location = loc(identifier)
         return {**location, 'end_line': location['start_line']}
 
-    contexts = _context_index(tree, text)
+    tree_index = _tree_index(tree, text)
+    contexts = tree_index.contexts
+    signature_attribute_types = tuple(name for name in tree_index.by_type if 'attribute' in name or name in (
+        'ms_call_modifier', 'ms_declspec_modifier', 'gnu_asm_expression'))
 
     def scope_node(node):
         return contexts[node.id].scope or node
@@ -250,7 +365,7 @@ def syntax_adapter(code, origins, physical, record):
         return (scope.start_byte, scope.end_byte) if scope else (0, len(data))
 
     ordinary_bindings = {}
-    for declaration in walk(tree.root_node):
+    for declaration in tree_index.select_all(_BINDING_TYPES):
         if declaration.type in ('type_definition', 'declaration'):
             names = declaration.children_by_field_name('declarator')
         elif declaration.type in ('parameter_declaration', 'function_definition'):
@@ -349,7 +464,7 @@ def syntax_adapter(code, origins, physical, record):
     def variable_initializer(declaration, declarator):
         actual = declarator.child_by_field_name('declarator') if declarator.type == 'init_declarator' else declarator
         initializer = declarator.child_by_field_name('value') if declarator.type == 'init_declarator' else None
-        arrays = [node for node in walk(actual) if node.type == 'array_declarator']
+        arrays = tree_index.select(('array_declarator',), actual)
         rows = [dict(initializer_fact(child), initializer_ordinal=index) for index, child in enumerate(
             child for child in initializer.named_children if child.type != 'comment')] if initializer and initializer.type == 'initializer_list' else []
         return {'type_expression': text(declaration.child_by_field_name('type')),
@@ -360,13 +475,11 @@ def syntax_adapter(code, origins, physical, record):
                 'initializer_rows': rows, 'initializer_row_count': len(rows),
                 'initializer_constants': selected_constants(text(actual) + ' ' + text(initializer), constants)}
 
-    def enum_constants(node, base):
-        values = dict(base)
-        for enum in walk(node):
-            if enum.type != 'enum_specifier': continue
+    def enum_constants(node, base, *, inplace=False):
+        values = base if inplace else dict(base)
+        for enum in tree_index.select(('enum_specifier',), node):
             previous = -1
-            for child in walk(enum):
-                if child.type != 'enumerator': continue
+            for child in tree_index.select(('enumerator',), enum):
                 expression = child.child_by_field_name('value')
                 value = constant(text(expression), values) if expression else previous + 1 if previous is not None else None
                 name = text(child.child_by_field_name('name'))
@@ -382,9 +495,9 @@ def syntax_adapter(code, origins, physical, record):
                   'mp_obj_fun_builtin_var_t'}
         globals_ = [node for node in tree.root_node.named_children
                     if node.type != 'function_definition' and owned(loc(node)['source'], physical, record)]
-        aggregates = [candidate for node in globals_ for candidate in walk(node)
-                      if candidate.type in ('struct_specifier', 'union_specifier')
-                      and candidate.child_by_field_name('body')]
+        aggregates = [candidate for node in globals_
+                      for candidate in tree_index.select(('struct_specifier', 'union_specifier'), node)
+                      if candidate.child_by_field_name('body')]
         result = []
         for node in globals_:
             if node.type != 'type_definition':
@@ -429,10 +542,8 @@ def syntax_adapter(code, origins, physical, record):
         end = node.end_byte if end is None else end
         original = restore_text(original_data, syntax_evidence, node.start_byte, end)
         reasons = []
-        if (re.search(r'\b(?:__attribute(?:__)?|__declspec|__cdecl|__stdcall|__fastcall|__vectorcall|__thiscall|__regcall|__syscall|__pascal|asm|__asm(?:__)?)\b', original)
-                or any(child.end_byte <= end and ('attribute' in child.type or child.type in
-                                                 ('ms_call_modifier', 'ms_declspec_modifier', 'gnu_asm_expression'))
-                       for child in walk(node))):
+        if (_SIGNATURE_ATTRIBUTES.search(original)
+                or any(child.end_byte <= end for child in tree_index.select(signature_attribute_types, node))):
             reasons.append('signature attributes or calling convention are outside the bounded ABI witness')
         if any(expression.get('source_span', {}).get('expanded_span', {}).get('start_byte', end) < end
                for _, expression in adapted_expressions(node)):
@@ -445,7 +556,7 @@ def syntax_adapter(code, origins, physical, record):
             if node.type != 'type_definition' or not owned(loc(node)['source'], physical, record):
                 continue
             for alias in node.children_by_field_name('declarator'):
-                if not any(child.type == 'function_declarator' for child in walk(alias)):
+                if not tree_index.has(('function_declarator',), alias):
                     continue
                 start, end = binding_scope(node)
                 fact = {'name': name_of(alias), 'status': 'unresolved', 'source_span': loc(node),
@@ -474,8 +585,7 @@ def syntax_adapter(code, origins, physical, record):
                 for parameter in parameters:
                     declarator = parameter.child_by_field_name('declarator')
                     if (parameter.type != 'parameter_declaration' or
-                            declarator and any(child.type in ('array_declarator', 'function_declarator')
-                                               for child in walk(declarator))):
+                            declarator and tree_index.has(_DECLARATOR_SHAPES, declarator)):
                         fact['reasons'].append('function-pointer parameter declarator is outside the bounded prototype')
                         continue
                     fact['parameters'].append({'name': name_of(declarator),
@@ -495,12 +605,9 @@ def syntax_adapter(code, origins, physical, record):
     def function_constants(node, body):
         environment = enum_constants(body, constants)
         declarations = {}
-        for enum in walk(body):
-            if enum.type != 'enum_specifier':
-                continue
-            for child in walk(enum):
-                if child.type == 'enumerator':
-                    declarations.setdefault(text(child.child_by_field_name('name')), []).append(loc(child))
+        for enum in tree_index.select(('enum_specifier',), body):
+            for child in tree_index.select(('enumerator',), enum):
+                declarations.setdefault(text(child.child_by_field_name('name')), []).append(loc(child))
         for name, locations in declarations.items():
             if len(locations) > 1:
                 environment[name] = {'value': None, 'source_span': locations[-1],
@@ -516,10 +623,10 @@ def syntax_adapter(code, origins, physical, record):
         elif node.type == 'declaration' and '=' not in text(node):
             for decl in declarators(node):
                 name = name_of(decl.child_by_field_name('declarator') if decl.type == 'init_declarator' else decl)
-                if name and re.search(r'\b' + re.escape(name) + r' \(', text(decl)):
+                if name and _name_call(name).search(text(decl)):
                     global_functions.setdefault(name, []).append({'name': name, 'kind': 'FUNCTION_DECL', 'source_span': point_for_name(decl, name)})
         if node.type != 'function_definition' and owned(loc(node)['source'], physical, record):
-            constants = enum_constants(node, constants)
+            constants = enum_constants(node, constants, inplace=True)
     declarations, functions = [], []
     for node in tree.root_node.named_children:
         if not owned(loc(node)['source'], physical, record): continue
@@ -528,7 +635,7 @@ def syntax_adapter(code, origins, physical, record):
             prefix = canonical(restore_text(original_data, syntax_evidence, node.start_byte, children[0].start_byte)) if children else ''
             for child in children:
                 declared_name = name_of(child)
-                if child.type != 'init_declarator' and declared_name and re.search(r'\b' + re.escape(declared_name) + r' \(', text(child)): continue
+                if child.type != 'init_declarator' and declared_name and _name_call(declared_name).search(text(child)): continue
                 if child.type != 'init_declarator' and 'extern' in prefix.split(): continue
                 initializer = child.child_by_field_name('value') if child.type == 'init_declarator' else None
                 entries = [{'expression': text(c), 'source_span': loc(c)} for c in initializer.named_children if c.type == 'initializer_list'] if initializer and initializer.type == 'initializer_list' else []
@@ -562,7 +669,7 @@ def syntax_adapter(code, origins, physical, record):
             signature_unresolved = signature_reasons(node, body_start)
             original_prefix = canonical(restore_text(original_data, syntax_evidence, node.start_byte,
                                                     node.child_by_field_name('declarator').start_byte))
-            declaration_modifiers = re.findall(r'\b(?:static|extern|inline|__inline__|__inline)\b', original_prefix)
+            declaration_modifiers = _DECLARATION_MODIFIERS.findall(original_prefix)
             parsed_modifiers = [text(child) for child in node.named_children
                                 if child.end_byte <= node.child_by_field_name('declarator').start_byte
                                 and child.type in ('storage_class_specifier', 'function_specifier')]
@@ -583,7 +690,7 @@ def syntax_adapter(code, origins, physical, record):
                     declarator = parameter.child_by_field_name('declarator')
                     if (parameter.type != 'parameter_declaration' or not name_of(declarator)
                             or not parameter.child_by_field_name('type')
-                            or any(child.type in ('array_declarator', 'function_declarator') for child in walk(declarator))):
+                            or tree_index.has(_DECLARATOR_SHAPES, declarator)):
                         prototype_unresolved.append('variadic, unnamed, or complex function parameter is outside the bounded fixed prototype')
                 for parameter in listing.named_children if listing else []:
                     if parameter.type != 'parameter_declaration' or text(parameter) == 'void':
@@ -607,7 +714,7 @@ def syntax_adapter(code, origins, physical, record):
                  'original_expression': expression.get('original_text', '')}
                 for replacement, expression in adapted_expressions(body, barriers=True)]
             variables = []
-            for child in walk(body):
+            for child in tree_index.select(('type_definition', 'declaration', 'assignment_expression'), body):
                 if child.start_byte < body_start:
                     continue
                 if child.type == 'type_definition':
@@ -629,17 +736,16 @@ def syntax_adapter(code, origins, physical, record):
                 elif child.type == 'assignment_expression':
                     left = child.child_by_field_name('left')
                     if left and left.type == 'call_expression':
-                        for pointer in walk(left):
-                            if pointer.type != 'pointer_expression': continue
-                            for identifier in walk(pointer):
-                                possible_name = text(identifier) if identifier.type == 'identifier' else None
+                        for pointer in tree_index.select(('pointer_expression',), left):
+                            for identifier in tree_index.select(('identifier',), pointer):
+                                possible_name = text(identifier)
                                 if possible_name in global_functions:
                                     variables.append({'name': possible_name, 'expression': text(child), 'source_span': loc(child), 'declaration_point': point_for_name(pointer, possible_name), 'unresolved': 'typedef-dependent declaration/expression ambiguity; possible local binding'})
             shadows = {v['name'] for v in variables} | set(params)
             events = {'calls': [], 'returns': [], 'variables': variables, 'conditions': [], 'control_expressions': [], 'writes': [], 'expressions': []}
             if body_barriers:
                 events['semantic_unassessed'] = body_barriers
-            if any(child.type in ('goto_statement', 'labeled_statement', 'switch_statement') for child in walk(body)):
+            if tree_index.has(('goto_statement', 'labeled_statement', 'switch_statement'), body):
                 events['control_flow_unresolved'] = ['jump/label/switch flow unassessed']
             def terminates(child):
                 if child.type == 'return_statement': return True
@@ -775,7 +881,7 @@ def syntax_adapter(code, origins, physical, record):
                                   'declaration_binding_resolution': 'resolved' if parameter_declarations_resolved else 'unresolved',
                                   'unresolved': [] if parameter_declarations_resolved else ['original identifier list and parsed declaration-list declarators do not form a complete unique binding'],
                                   'abi_resolution': 'unassessed'}})
-    errors = [{'source_span': loc(n), 'reason': 'tree-sitter ' + n.type, 'operational': True} for n in walk(tree.root_node) if n.type == 'ERROR' or n.is_missing]
+    errors = [{'source_span': loc(n), 'reason': 'tree-sitter ' + n.type, 'operational': True} for n in tree_index.errors()]
     unassessed_origins = [
         {'source_span': loc(node), 'syntax_kind': node.type,
          'declaration_expression': text(node), 'reason': 'compiler line-remapped/unqualified source origin is not a captured physical dependency'}

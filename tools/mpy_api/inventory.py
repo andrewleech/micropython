@@ -1,12 +1,16 @@
 """Build-selected MicroPython API inventory, with explicit bounded coverage."""
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 import copy
+import functools
+import gc
 import hashlib
 import importlib.metadata
 import json
+import multiprocessing
 import re
 import subprocess
+import traceback
 
 from . import compiler
 from .frontend import syntax_adapter, constant
@@ -1165,9 +1169,14 @@ def _normal_surface(raw, inputs, resolve, present, root):
                                           authority='selected attribute-handler condition and destination write'),
                 'value_contract': value or {'kind': 'unresolved', 'reason': 'attribute result/assignment contract unassessed'}}
 
+    functions_by_name = {}
+    for f in inputs:
+        for fn in f['functions']:
+            functions_by_name.setdefault(fn['name'], []).append((f, fn))
+
     def selected_function(name, *, source=None, translation_unit=None):
-        candidates = [(f, fn) for f in inputs for fn in f['functions']
-                      if fn['name'] == name and present(f, {'name': name})
+        candidates = [(f, fn) for f, fn in functions_by_name.get(name, ())
+                      if present(f, {'name': name})
                       and (source is None or fn['source_span']['source'] == str(root / source))
                       and not fn['events'].get('semantic_unassessed')]
         if translation_unit is not None:
@@ -1569,6 +1578,90 @@ def _public_translation_unit(facts):
     return {**facts, 'functions': functions}
 
 
+class _WorkerTraceback(Exception):
+    """Carries the formatted traceback of an exception raised in an extraction worker process."""
+
+
+_EXTRACTION = None
+
+
+def _extract_worker(index):
+    gc.disable()
+    gc.collect()
+    records, compdb, root = _EXTRACTION
+    try:
+        return True, _extract(records[index], compdb, root), None
+    except Exception as exc:
+        return False, exc, traceback.format_exc()
+
+
+def _extract_parallel(records, compdb, root, jobs, concurrent=None):
+    """Extract translation units in forked worker processes, returning results in record order.
+
+    Workers inherit the records and the compiler authority module through fork. The first failing
+    record in order raises its own exception, as in serial extraction; later records are cancelled.
+    ``concurrent`` is an independent callable run in this process while the workers extract; its
+    result is returned alongside, and its failure is raised only after every record has extracted.
+    """
+    global _EXTRACTION
+    _EXTRACTION = (records, compdb, root)
+    try:
+        with ProcessPoolExecutor(max_workers=min(jobs, len(records)),
+                                 mp_context=multiprocessing.get_context('fork')) as pool:
+            futures = [pool.submit(_extract_worker, index) for index in range(len(records))]
+            side, side_error = None, None
+            if concurrent is not None:
+                try:
+                    side = concurrent()
+                except Exception as exc:
+                    side_error = exc
+            results = []
+            for future in futures:
+                succeeded, value, formatted = future.result()
+                if not succeeded:
+                    for pending in futures:
+                        pending.cancel()
+                    raise value from _WorkerTraceback('\n' + formatted)
+                results.append(value)
+            if side_error is not None:
+                raise side_error
+            return results, side
+    finally:
+        _EXTRACTION = None
+
+
+def _extract_serial(records, compdb, root):
+    """Extract translation units in record order, reclaiming each record's cyclic garbage once.
+
+    Surviving results are frozen so later collections only scan the newest record's objects."""
+    results = []
+    for record in records:
+        results.append(_extract(record, compdb, root))
+        gc.collect()
+        gc.freeze()
+    return results
+
+
+def _gc_paused(function):
+    """Run ``function`` without automatic cyclic collection.
+
+    Extraction allocates millions of long-lived containers, which automatic collection rescans
+    repeatedly; the extraction paths collect explicitly per record instead."""
+    @functools.wraps(function)
+    def paused(*args, **kwargs):
+        enabled, frozen = gc.isenabled(), gc.get_freeze_count()
+        gc.disable()
+        try:
+            return function(*args, **kwargs)
+        finally:
+            if not frozen and gc.get_freeze_count():
+                gc.unfreeze()
+            if enabled:
+                gc.enable()
+    return paused
+
+
+@_gc_paused
 def collect_inventory(*, database: Path, root: Path, build_dir: Path, port: str,
                       target: str, variant: str, link: dict, jobs: int = 1) -> dict:
     """Collect all selected compiler records and join only qualified allocated owners."""
@@ -1580,6 +1673,8 @@ def collect_inventory(*, database: Path, root: Path, build_dir: Path, port: str,
         raise ValueError('inventory jobs must be a positive integer')
     for key, value in (('port', port), ('target', target), ('variant', variant)):
         if not isinstance(value, str) or not value.strip(): raise ValueError(f'{key} must be a nonempty build identity')
+    compiler.clear_resolution_cache()
+    compiler.clear_replay_cache()
     compdb = compiler.authority(root)
     entries = json.loads(database_content)
     if not isinstance(entries, list) or not entries:
@@ -1618,14 +1713,14 @@ def collect_inventory(*, database: Path, root: Path, build_dir: Path, port: str,
         try: importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError as exc:
             raise ValueError(f'API syntax frontend prerequisite is missing: {package}') from exc
-    if jobs == 1:
-        inputs = [_extract(record, compdb, root) for record in records]
-    else:
-        with ThreadPoolExecutor(max_workers=jobs) as workers:
-            inputs = list(workers.map(lambda record: _extract(record, compdb, root), records))
     # Ownership uses record identities, including the object for repeated physical sources.
     ownership_records = [{**r, 'physical': r['identity']} for r in records]
-    ownership = collect_ownership(ownership_records, link)
+    if jobs == 1:
+        inputs = _extract_serial(records, compdb, root)
+        ownership = collect_ownership(ownership_records, link)
+    else:
+        inputs, ownership = _extract_parallel(records, compdb, root, jobs,
+                                              lambda: collect_ownership(ownership_records, link))
     consumed_inputs = compiler.reconcile_inputs([
         ('selected compiler records', selection_inputs),
         *[(facts['translation_unit'], facts['input']['input_snapshots']) for facts in inputs],
