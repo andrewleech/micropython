@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import stat
@@ -158,6 +160,17 @@ def _depfile_evidence(role: str, kind: str, argv: list[str], cwd: Path) -> tuple
     return evidence, capture if needed else None
 
 
+def _objcopy_reads_binary(argv: list[str]) -> bool:
+    """Whether objcopy is told to read its input as a raw binary (``-I binary``)."""
+    for index, arg in enumerate(argv):
+        following = argv[index + 1] if index + 1 < len(argv) else None
+        if arg in ("-I", "--input-target") and following == "binary":
+            return True
+        if arg in ("-Ibinary", "--input-target=binary"):
+            return True
+    return False
+
+
 
 def _kind(role: str, argv: list[str]) -> str | None:
     if any(arg in _PROBES or arg.startswith("-print-file-name=") for arg in argv):
@@ -183,7 +196,19 @@ def _action_inputs(role: str, kind: str, argv: list[str], cwd: Path) -> list[dic
     candidates: dict[str, tuple[Path, str]] = {}
     output_values: set[str] = set()
     option = None
+    binary = role == "objcopy" and _objcopy_reads_binary(argv)
+    format_option = False
     for arg in _flatten(argv, cwd):
+        if format_option:
+            binary = arg == "binary"
+            format_option = False
+            continue
+        if kind == "link" and arg in ("-b", "--format", "-format"):
+            format_option = True
+            continue
+        if kind == "link" and arg.startswith(("--format=", "-format=")):
+            binary = arg.split("=", 1)[1] == "binary"
+            continue
         if option in _OUTPUT_OPTIONS:
             output_values.add(arg)
             option = None
@@ -216,7 +241,9 @@ def _action_inputs(role: str, kind: str, argv: list[str], cwd: Path) -> list[dic
         candidate = _resolve_arg(arg, cwd)
         if candidate is not None:
             suffix = candidate.suffix.lower()
-            if kind in ("compile", "assemble") and suffix in (".c", ".cc", ".cpp", ".cxx", ".s", ".sx"):
+            if binary:
+                input_role = "embedded-input"
+            elif kind in ("compile", "assemble") and suffix in _SOURCE_SUFFIXES:
                 input_role = "source"
             elif kind == "link" and suffix in (".o", ".obj", ".a", ".lib", ".so", ".dylib", ".elf"):
                 input_role = "link-operand"
@@ -314,6 +341,91 @@ def _outside_wrappers(items: list[dict[str, str]]) -> list[dict[str, str]]:
     return [item for item in items if not Path(item["path"]).is_relative_to(root)]
 
 
+@functools.lru_cache(maxsize=None)
+def _banner(executable: str) -> str:
+    """The lower-case first line of the tool's ``--version`` output, empty when it has none."""
+    try:
+        result = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    lines = (result.stdout or result.stderr).splitlines()
+    return lines[0].lower() if lines else ""
+
+
+def _assembler_depfile_option(role: str, argv: list[str]) -> str | None:
+    """The file a command already asks GNU as to write its dependencies to (``--MD``), if any."""
+    for index, arg in enumerate(argv):
+        if role == "as":
+            if arg in ("--MD", "-MD") and index + 1 < len(argv):
+                return argv[index + 1]
+        elif arg.startswith("-Wa,"):
+            parts = arg[4:].split(",")
+            for position, part in enumerate(parts[:-1]):
+                if part in ("--MD", "-MD"):
+                    return parts[position + 1]
+    return None
+
+
+def _assembler_plan(role: str, kind: str, executable: Path, argv: list[str]) -> dict | None:
+    """How the files GNU as reads are observed for a compile or assemble, None for other actions.
+
+    GNU as writes every file it opened (``.incbin`` data, ``.include`` files) to the file named
+    by ``--MD``; gcc forwards it as ``-Wa,--MD,file``. The capture adds that option to the command
+    it runs, unless the command already has one, and records the original command. A tool that is
+    not GNU cannot report this, which is recorded instead of assumed empty.
+    """
+    if not ((role in ("cc", "cxx") and kind == "compile") or (role == "as" and kind == "assemble")):
+        return None
+    banner = _banner(str(executable))
+    if role == "as":
+        gnu = "gnu assembler" in banner
+    else:
+        gnu = "clang" not in banner and ("gcc" in banner or "g++" in banner)
+    if not gnu:
+        return {"unavailable": f"{Path(executable).name} is not a GNU tool and reports no assembler dependencies"}
+    return {"requested": _assembler_depfile_option(role, argv)}
+
+
+def _is_compiler_temporary(path: Path) -> bool:
+    """gcc's own assembly temporary, which the assembler lists as its input and gcc then removes."""
+    return path.parent == Path(tempfile.gettempdir()).resolve() and re.fullmatch(r"cc\w{6}\.[sS]", path.name) is not None
+
+
+def _names_known_file(word: str, known: set[str]) -> bool:
+    """A relative file name the assembler lists from a ``.file`` directive for a file already recorded."""
+    name = os.path.normpath(word)
+    return not os.path.isabs(name) and any(path.endswith(os.sep + name) for path in known)
+
+
+def _assembler_evidence(depfile: Path, known: set[str], cwd: Path) -> dict:
+    """Files the assembler read besides the action's sources and compiler dependencies."""
+    try:
+        text = depfile.read_text(encoding="utf-8", errors="strict")
+    except (OSError, UnicodeError) as error:
+        return {"status": "failed", "reason": f"assembler dependency file is unreadable: {error}"}
+    if not text.strip():
+        return {"status": "failed", "reason": "the assembler wrote no dependency output (it did not run)"}
+    try:
+        words = depfile_prerequisites(text)
+    except DepfileError as error:
+        return {"status": "failed", "reason": f"assembler dependency file is not a make rule: {error}"}
+    dependencies: dict[str, dict[str, str]] = {}
+    for word in words:
+        written = Path(os.path.normpath(word if os.path.isabs(word) else cwd / word))
+        record = _file_record(written, "assembler-dependency")
+        if record is None:
+            if _is_compiler_temporary(written) or _names_known_file(word, known):
+                continue
+            return {"status": "failed", "reason": f"assembler dependency is not a readable file: {word}"}
+        if record["path"] in known:
+            continue
+        entry = {"path": record["path"], "sha256": record["sha256"]}
+        if str(written) != record["path"]:
+            entry["written_path"] = str(written)
+        dependencies.setdefault(record["path"], entry)
+    return {"status": "collected", "dependencies": [dependencies[path] for path in sorted(dependencies)]}
+
+
 def run_tool(
     role: str,
     executable: Path,
@@ -335,44 +447,72 @@ def run_tool(
     before = {item["path"]: item["sha256"] for item in inputs}
     watched = build_dir if role == "python" and kind == "generate" else None
     tree_before = _tree_state(watched)
+    plan = _assembler_plan(role, kind, executable, argv)
+    run_argv = list(argv)
+    assembler_file = None
+    if plan is not None and "unavailable" not in plan:
+        if plan["requested"] is not None:
+            assembler_file = Path(plan["requested"])
+            assembler_file = assembler_file if assembler_file.is_absolute() else cwd / assembler_file
+        else:
+            descriptor, name = tempfile.mkstemp(prefix="mpy-asm-deps-", suffix=".d")
+            os.close(descriptor)
+            assembler_file = Path(name)
+            run_argv += [f"-Wa,--MD,{name}"] if role in ("cc", "cxx") else ["--MD", name]
     started = time.time_ns()
-    result = subprocess.run([str(executable), *argv])
-    after_inputs = _outside_wrappers(_action_inputs(role, kind, argv, cwd))
-    after = {item["path"]: item["sha256"] for item in after_inputs}
-    outputs = _action_outputs(role, kind, argv, cwd) if result.returncode == 0 else []
-    written: set[str] = set()
-    if result.returncode == 0 and watched is not None:
-        # A generator may write its result to standard output redirected by the shell, so the
-        # files it created or rewrote under the build directory are its outputs.
-        journal_path = str(Path(journal).resolve())
-        known = {item["path"] for item in outputs}
-        for path, state in sorted(_tree_state(watched).items()):
-            if tree_before.get(path) != state and path != journal_path:
-                record = _file_record(Path(path), "output")
-                if record is not None and record["path"] not in known:
-                    outputs.append(record)
-                    written.add(record["path"])
-    in_place = {item["path"] for item in outputs} if kind == "transform" else set()
-    in_place |= written & set(before)
-    changed_inputs = sorted(
-        path for path, digest in before.items() if after.get(path) != digest and path not in in_place
-    )
-    captured_paths = set(before)
-    post_action_dependencies = []
-    for item in after_inputs:
-        if item["path"] not in captured_paths and item["path"] not in written:
-            inputs.append(item)
-            post_action_dependencies.append(item["path"])
-            captured_paths.add(item["path"])
-    dependency_evidence, dependency_capture = (
-        _depfile_evidence(role, kind, argv, cwd) if result.returncode == 0 else ([], None)
-    )
-    for evidence in dependency_evidence:
-        for dependency in evidence["dependencies"]:
-            if dependency["path"] not in captured_paths:
-                inputs.append({**{key: dependency[key] for key in ("path", "sha256")}, "role": "compiler-dependency"})
+    try:
+        result = subprocess.run([str(executable), *run_argv])
+        after_inputs = _outside_wrappers(_action_inputs(role, kind, argv, cwd))
+        after = {item["path"]: item["sha256"] for item in after_inputs}
+        outputs = _action_outputs(role, kind, argv, cwd) if result.returncode == 0 else []
+        written: set[str] = set()
+        if result.returncode == 0 and watched is not None:
+            # A generator may write its result to standard output redirected by the shell, so the
+            # files it created or rewrote under the build directory are its outputs.
+            journal_path = str(Path(journal).resolve())
+            known_outputs = {item["path"] for item in outputs}
+            for path, state in sorted(_tree_state(watched).items()):
+                if tree_before.get(path) != state and path != journal_path:
+                    record = _file_record(Path(path), "output")
+                    if record is not None and record["path"] not in known_outputs:
+                        outputs.append(record)
+                        written.add(record["path"])
+        in_place = {item["path"] for item in outputs} if kind == "transform" else set()
+        in_place |= written & set(before)
+        changed_inputs = sorted(
+            path for path, digest in before.items() if after.get(path) != digest and path not in in_place
+        )
+        created = {item["path"] for item in outputs} - set(before)
+        captured_paths = set(before)
+        post_action_dependencies = []
+        for item in after_inputs:
+            if item["path"] not in captured_paths and item["path"] not in created:
+                inputs.append(item)
+                post_action_dependencies.append(item["path"])
+                captured_paths.add(item["path"])
+        dependency_evidence, dependency_capture = (
+            _depfile_evidence(role, kind, argv, cwd) if result.returncode == 0 else ([], None)
+        )
+        for evidence in dependency_evidence:
+            for dependency in evidence["dependencies"]:
+                if dependency["path"] not in captured_paths:
+                    inputs.append({**{key: dependency[key] for key in ("path", "sha256")}, "role": "compiler-dependency"})
+                    post_action_dependencies.append(dependency["path"])
+                    captured_paths.add(dependency["path"])
+        assembler_dependencies = None
+        if plan is not None and result.returncode == 0:
+            assembler_dependencies = (
+                {"status": "unavailable", "reason": plan["unavailable"]}
+                if "unavailable" in plan
+                else _assembler_evidence(assembler_file, captured_paths, cwd)
+            )
+            for dependency in (assembler_dependencies or {}).get("dependencies", []):
+                inputs.append({**{key: dependency[key] for key in ("path", "sha256")}, "role": "assembler-dependency"})
                 post_action_dependencies.append(dependency["path"])
                 captured_paths.add(dependency["path"])
+    finally:
+        if assembler_file is not None and plan["requested"] is None:
+            assembler_file.unlink(missing_ok=True)
     _append_event(
         journal,
         {
@@ -393,6 +533,7 @@ def run_tool(
             "dependencies_discovered_after_action": post_action_dependencies,
             "dependency_evidence": dependency_evidence,
             **({"dependency_capture": dependency_capture} if dependency_capture else {}),
+            **({"assembler_dependencies": assembler_dependencies} if assembler_dependencies else {}),
         },
     )
     return result.returncode

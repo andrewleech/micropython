@@ -12,7 +12,7 @@ from typing import Any
 
 from .argv_tokens import enables_lto, flatten
 from .elf_evidence import dynamic_needed
-from .firmware_inputs import header_accounting
+from .firmware_inputs import assembler_embedded_inputs, header_accounting, linked_embedded_inputs
 from .firmware_receipt import receipt_id, validate_firmware_receipt
 from .gnu_map import parse_gnu_map
 from .toolchain_runtime import classify, machine_flags
@@ -431,6 +431,9 @@ def receipt_from_journal(
         relevant = relevant or event["kind"] in ("transform", "generate") and any(
             in_build(item["path"]) for item in outputs
         )
+        relevant = relevant or event["kind"] == "link" and any(
+            in_build(item["path"]) and item["path"].endswith((".o", ".obj")) for item in outputs
+        )
         if relevant:
             selected_events.append(event)
 
@@ -474,6 +477,7 @@ def receipt_from_journal(
             "capture_finished_ns": event["finished_ns"],
             "dependency_evidence": event.get("dependency_evidence", []),
             **({"dependency_capture": event["dependency_capture"]} if "dependency_capture" in event else {}),
+            **({"assembler_dependencies": event["assembler_dependencies"]} if "assembler_dependencies" in event else {}),
         }
         actions.append(action)
         tool = event["executable"]
@@ -569,7 +573,9 @@ def receipt_from_journal(
                     }
                 )
 
-    link_inputs = {item["path"]: item for item in link_action["inputs"] if item["role"] == "link-operand"}
+    link_inputs = {
+        item["path"]: item for item in link_action["inputs"] if item["role"] in ("link-operand", "embedded-input")
+    }
     map_only_loads = set()
     if parsed is not None:
         for load in parsed["loads"]:
@@ -583,6 +589,18 @@ def receipt_from_journal(
     implicit_inputs = []
     compiler = _compiler(toolchain)
     flag_sets = _flag_sets(actions)
+    embedded_rows, embedded_unresolved = linked_embedded_inputs(
+        actions,
+        link_action,
+        link_inputs=link_inputs,
+        allocated=allocated,
+        bindings_for=lambda blob: _bindings(blob, source_roots),
+        producers=generated_producers,
+    )
+    unresolved.extend(embedded_unresolved)
+    embedded_by_object: dict[str, list[dict[str, Any]]] = {}
+    for row in embedded_rows:
+        embedded_by_object.setdefault(row["object"]["path"], []).append(row)
     for path in sorted(map_only_loads):
         entry, failure = _implicit_input(
             path,
@@ -618,7 +636,32 @@ def receipt_from_journal(
     for path, input_record in sorted(link_inputs.items()):
         suffix = Path(path).suffix.lower()
         bindings = source_for_object.get(path, [])
-        if suffix in (".o", ".obj"):
+        if path in embedded_by_object:
+            rows = embedded_by_object[path]
+            contributing = [row for row in rows if row["disposition"] == "contributed"]
+            operand = {
+                "kind": "embedded-binary",
+                "input": input_record,
+                "evidence": "captured action that read raw binary content and the GNU ld map",
+            }
+            if any(row["disposition"] == "unsupported" for row in rows):
+                operand["disposition"] = "unsupported"
+                operand["reason"] = "embedded content is not attributed to a declared source root"
+                unresolved.append({"path": path, "reason": operand["reason"]})
+            elif contributing:
+                operand["disposition"] = "contributed"
+                operand["source_bindings"] = [
+                    binding
+                    for binding in {
+                        (item["root"], item["path"], item.get("via")): item
+                        for row in contributing
+                        for item in row["source_bindings"]
+                    }.values()
+                ]
+            else:
+                operand["disposition"] = "no-contribution"
+                operand["reason"] = "GNU ld records no allocated sections from this input"
+        elif suffix in (".o", ".obj"):
             if path in allocated and bindings:
                 disposition, kind = "contributed", "object"
                 reason = None
@@ -769,6 +812,12 @@ def receipt_from_journal(
         roles={path: role for role, path in toolchain},
     )
     unresolved.extend(header_unresolved)
+    assembler_rows, assembler_unresolved = assembler_embedded_inputs(
+        contributed_objects,
+        bindings_for=lambda blob: _bindings(blob, source_roots),
+        producers=generated_producers,
+    )
+    unresolved.extend(assembler_unresolved)
     if map_error:
         unresolved.append({"path": str(Path(map_file).resolve()), "reason": f"unsupported map evidence: {map_error}"})
     if parsed is not None:
@@ -830,6 +879,7 @@ def receipt_from_journal(
         },
         "object_accounting": object_accounting,
         "header_accounting": headers,
+        "embedded_inputs": embedded_rows + assembler_rows,
         "artifacts": list(image_artifacts.values()),
     }
     receipt = {
@@ -904,6 +954,8 @@ def merge_receipts(receipts: list[dict[str, Any]]) -> dict[str, Any]:
             entry["consumed_by"] = sorted(action_ids[(receipt_index, item)] for item in entry["consumed_by"])
             if "producer" in entry:
                 entry["producer"] = action_ids[(receipt_index, entry["producer"])]
+        for row in image.get("embedded_inputs", []):
+            row["action"] = action_ids[(receipt_index, row["action"])]
         image["configuration"] = receipt["configuration"]
         images.append(image)
 

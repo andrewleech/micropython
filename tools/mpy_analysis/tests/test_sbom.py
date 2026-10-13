@@ -242,6 +242,7 @@ def firmware_receipt(inventory, app, build_dir, source_path="selected.c"):
                     }
                 ],
                 "header_accounting": [],
+                "embedded_inputs": [],
                 "artifacts": [record(elf, "elf")],
             }
         ],

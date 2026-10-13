@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -10,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from conftest import fake_elf
+from firmware_build import fake_toolchain
 from mpy_analysis.firmware_capture import capture_make
 from mpy_analysis.firmware_capture_receipt import merge_receipts, receipt_from_journal, receipt_id
 from mpy_analysis.firmware_receipt import FirmwareReceiptError, validate_firmware_receipt
@@ -303,6 +303,7 @@ def _synthetic_receipt(
                 }
             ],
             "dependency_capture": {"status": "collected", "system_headers": "included"},
+            "assembler_dependencies": {"status": "collected", "dependencies": []},
         },
         {
             **base,
@@ -450,20 +451,6 @@ def test_object_from_an_uncaptured_compiler_blocks_completeness(tmp_path):
     )
 
 
-def _fake_toolchain(tmp_path, monkeypatch, gcc_tail=""):
-    """A toolchain prefix `fake-` whose gcc runs the real gcc and then the given shell lines."""
-    directory = tmp_path / "fake-bin"
-    directory.mkdir()
-    real_gcc = shutil.which("gcc")
-    gcc = directory / "fake-gcc"
-    gcc.write_text(f'#!/bin/sh\n{real_gcc} "$@" || exit $?\n{gcc_tail}\n')
-    gcc.chmod(0o755)
-    for tool in ("g++", "as", "ld", "ar", "objcopy", "strip"):
-        (directory / f"fake-{tool}").symlink_to(shutil.which(tool))
-    monkeypatch.setenv("PATH", f"{directory}:{os.environ['PATH']}")
-    return "fake-"
-
-
 def test_compile_without_a_dependency_file_request_blocks_the_complete_claim(tmp_path):
     code, paths = _capture(
         tmp_path,
@@ -480,10 +467,10 @@ def test_compile_without_a_dependency_file_request_blocks_the_complete_claim(tmp
 
 
 def test_unparsable_dependency_file_blocks_the_complete_claim(tmp_path, monkeypatch):
-    prefix = _fake_toolchain(
+    prefix = fake_toolchain(
         tmp_path,
         monkeypatch,
-        'for arg in "$@"; do case "$arg" in *.d) printf "broken" > "$arg";; esac; done',
+        'for arg in "$@"; do case "$arg" in -*) ;; *.d) printf "broken" > "$arg";; esac; done',
     )
     code, paths = _capture(
         tmp_path, LINK.format(map="-Wl,-Map=$(BUILD)/firmware.map"), cross_compile=prefix

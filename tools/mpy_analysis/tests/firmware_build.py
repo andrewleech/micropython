@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -61,7 +62,7 @@ class Build:
 def capture(
     tmp_path: Path,
     *,
-    files: dict[str, str],
+    files: dict[str, str | bytes],
     makefile: str,
     roots: dict[str, str] | None = None,
     name: str = "fixture",
@@ -82,7 +83,10 @@ def capture(
     contents = {"src/manifest.py": 'module("main.py")\n', "src/main.py": "main = True\n", **files}
     for relative, content in contents.items():
         (root / relative).parent.mkdir(parents=True, exist_ok=True)
-        (root / relative).write_text(content)
+        if isinstance(content, bytes):
+            (root / relative).write_bytes(content)
+        else:
+            (root / relative).write_text(content)
     for relative, target in (symlinks or {}).items():
         (root / relative).parent.mkdir(parents=True, exist_ok=True)
         (root / relative).symlink_to(target)
@@ -166,6 +170,19 @@ def components(model, **properties):
         for item in model.components.values()
         if all(item.properties.get(key) == value for key, value in properties.items())
     ]
+
+
+def fake_toolchain(tmp_path, monkeypatch, gcc_tail="", gcc_head=""):
+    """A toolchain prefix `fake-` whose gcc runs the head lines, the real gcc, then the tail lines."""
+    directory = tmp_path / "fake-bin"
+    directory.mkdir()
+    gcc = directory / "fake-gcc"
+    gcc.write_text(f'#!/bin/sh\n{gcc_head}\n{shutil.which("gcc")} "$@" || exit $?\n{gcc_tail}\n')
+    gcc.chmod(0o755)
+    for tool in ("g++", "as", "ld", "ar", "objcopy", "strip"):
+        (directory / f"fake-{tool}").symlink_to(shutil.which(tool))
+    monkeypatch.setenv("PATH", f"{directory}:{os.environ['PATH']}")
+    return "fake-"
 
 
 def spdx(model):

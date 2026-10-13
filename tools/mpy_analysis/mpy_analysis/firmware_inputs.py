@@ -140,3 +140,153 @@ def header_accounting(
             unresolved.append({"path": path, "reason": f"header is not attributed: {reason}"})
         entries.append(entry)
     return entries, unresolved
+
+
+def _embedded_row(
+    blob: dict[str, str],
+    origin: str,
+    action: str,
+    obj: dict[str, str],
+    *,
+    contributes: bool,
+    bindings_for: Callable[[str], list[dict[str, str]]],
+    producers: dict[str, tuple[str, list[dict[str, str]]]],
+) -> tuple[dict[str, Any], dict[str, str] | None]:
+    """One embedded blob: its hash bound to the action that read it, and the boundary owning it."""
+    row: dict[str, Any] = {
+        "blob": {"path": blob["path"], "sha256": blob["sha256"]},
+        "origin": origin,
+        "action": action,
+        "object": {"path": obj["path"], "sha256": obj["sha256"]},
+        "evidence": "bytes read by a captured action that produced or loaded the object",
+    }
+    if not contributes:
+        row["disposition"] = "no-contribution"
+        row["reason"] = "GNU map records no allocated sections from the object holding the blob"
+        return row, None
+    bindings = bindings_for(blob["path"])
+    if not bindings and blob["path"] in producers:
+        bindings = producers[blob["path"]][1]
+    if bindings:
+        row["disposition"] = "contributed"
+        row["source_bindings"] = bindings
+        return row, None
+    row["disposition"] = "unsupported"
+    row["reason"] = (
+        "embedded content lies outside the declared source roots and has no captured "
+        "producer with inputs under them"
+    )
+    return row, {"path": blob["path"], "reason": f"embedded content is not attributed: {row['reason']}"}
+
+
+def linked_embedded_inputs(
+    actions: list[dict[str, Any]],
+    link_action: dict[str, Any],
+    *,
+    link_inputs: dict[str, dict[str, Any]],
+    allocated: set[str],
+    bindings_for: Callable[[str], list[dict[str, str]]],
+    producers: dict[str, tuple[str, list[dict[str, str]]]],
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Raw binary content that reaches the image as a link operand.
+
+    Two routes are observable: a captured transform or relocatable link that read a raw binary
+    (``objcopy -I binary``, ``ld -r -b binary``) and wrote an object the final link takes, and the
+    final link reading the binary itself (``-b binary``, ``--format=binary``).
+    """
+    archived = {
+        item["path"]
+        for action in actions
+        if action["kind"] == "archive"
+        for item in action["inputs"]
+        if item["role"] == "archive-member"
+    }
+    rows: list[dict[str, Any]] = []
+    unresolved: list[dict[str, str]] = []
+
+    def add(row: dict[str, Any], failure: dict[str, str] | None) -> None:
+        rows.append(row)
+        if failure is not None:
+            unresolved.append(failure)
+
+    for action in actions:
+        blobs = [item for item in action["inputs"] if item["role"] == "embedded-input"]
+        if not blobs:
+            continue
+        if action is link_action:
+            for blob in blobs:
+                add(
+                    *_embedded_row(
+                        blob,
+                        "ld-format-binary",
+                        action["id"],
+                        blob,
+                        contributes=blob["path"] in allocated,
+                        bindings_for=bindings_for,
+                        producers=producers,
+                    )
+                )
+            continue
+        origin = "objcopy-input-binary" if action["kind"] == "transform" else "ld-format-binary"
+        for obj in (item for item in action["outputs"] if item["role"] == "output"):
+            if obj["path"] in archived:
+                for blob in blobs:
+                    row, _ = _embedded_row(
+                        blob, origin, action["id"], obj, contributes=False, bindings_for=bindings_for, producers=producers
+                    )
+                    row["disposition"] = "unsupported"
+                    row["reason"] = "the object holding the blob enters the image through an archive"
+                    add(row, {"path": blob["path"], "reason": f"embedded content is not attributed: {row['reason']}"})
+            elif obj["path"] in link_inputs:
+                for blob in blobs:
+                    add(
+                        *_embedded_row(
+                            blob,
+                            origin,
+                            action["id"],
+                            obj,
+                            contributes=obj["path"] in allocated,
+                            bindings_for=bindings_for,
+                            producers=producers,
+                        )
+                    )
+    return rows, unresolved
+
+
+def assembler_embedded_inputs(
+    contributed: list[tuple[str, dict[str, Any]]],
+    *,
+    bindings_for: Callable[[str], list[dict[str, str]]],
+    producers: dict[str, tuple[str, list[dict[str, str]]]],
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Files GNU as read for contributing objects (``.incbin`` data, ``.include`` files).
+
+    A contributing compile or assemble whose assembler inputs were not captured is unresolved.
+    """
+    rows: list[dict[str, Any]] = []
+    unresolved: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for path, action in contributed:
+        evidence = action.get("assembler_dependencies")
+        if evidence is None or evidence["status"] != "collected":
+            reason = evidence["reason"] if evidence else "the action recorded no assembler dependency capture"
+            unresolved.append({"path": path, "reason": f"files read by the assembler for this object are not captured: {reason}"})
+            continue
+        obj = next(item for item in action["outputs"] if item["path"] == path)
+        for blob in evidence["dependencies"]:
+            if (blob["path"], action["id"]) in seen:
+                continue
+            seen.add((blob["path"], action["id"]))
+            row, failure = _embedded_row(
+                blob,
+                "assembler-dependency",
+                action["id"],
+                obj,
+                contributes=True,
+                bindings_for=bindings_for,
+                producers=producers,
+            )
+            rows.append(row)
+            if failure is not None:
+                unresolved.append(failure)
+    return rows, unresolved

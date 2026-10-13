@@ -50,7 +50,9 @@ FIRMWARE_BLOCKING_GAPS = frozenset(
     {
         "checkout-gitlink-mismatch",
         "dirty-selected-repository",
+        "embedded-input-accounting-unavailable",
         "header-accounting-unavailable",
+        "linked-embedded-input-not-in-selected-scope",
         "linked-header-not-in-selected-scope",
         "linked-source-not-in-selected-scope",
         "posthoc-linked-source-not-in-selected-scope",
@@ -559,6 +561,65 @@ def _header_components(
     return references, {"status": "attributed" if not counts["unattributed"] else "incomplete", **counts}
 
 
+def _embedded_components(
+    builder: _Builder,
+    scope: dict[str, Any],
+    boundaries: list[dict[str, Any]],
+    source_refs: dict[tuple[str, str], set[str]],
+    image: dict[str, Any],
+) -> tuple[set[str], dict[str, Any]]:
+    """Attribute the raw binary content a contributing object holds, one file per owning boundary.
+
+    The firmware image depends on each attributed file, since its bytes are part of the image.
+    """
+    rows = image.get("embedded_inputs")
+    if rows is None:
+        builder.gaps.append(
+            {
+                "kind": "embedded-input-accounting-unavailable",
+                "image": image["id"],
+                "detail": "The receipt predates embedded content accounting; recapture the build.",
+            }
+        )
+        return set(), {"status": "unavailable"}
+    counts = {"contributed": 0, "attributed": 0, "unattributed": 0}
+    references: set[str] = set()
+    for row in rows:
+        if row["disposition"] == "no-contribution":
+            continue
+        counts["contributed"] += 1
+        failures = []
+        if row["disposition"] == "unsupported":
+            failures.append((None, row["reason"]))
+        else:
+            for item in row["source_bindings"]:
+                binding = (item["root"], item["path"])
+                if item.get("via") == "generator":
+                    group, provenance = "generator-input", "captured-generator-input"
+                elif row["origin"] == "assembler-dependency":
+                    group, provenance = "assembler-input", "captured-assembler-dependency"
+                else:
+                    group, provenance = "embedded-resource", "captured-embedded-input"
+                refs, reason = _owned_file(builder, scope, boundaries, source_refs, binding, group, provenance)
+                if refs is None:
+                    failures.append((binding, reason))
+                else:
+                    references.update(refs)
+        counts["attributed" if not failures else "unattributed"] += 1
+        for binding, reason in failures:
+            builder.gaps.append(
+                {
+                    "kind": "linked-embedded-input-not-in-selected-scope",
+                    "path": row["blob"]["path"],
+                    **({"root": binding[0], "binding-path": binding[1]} if binding else {}),
+                    "origin": row["origin"],
+                    "image": image["id"],
+                    "reason": reason,
+                }
+            )
+    return references, {"status": "attributed" if not counts["unattributed"] else "incomplete", **counts}
+
+
 def _attach_firmware_images(
     receipt: dict[str, Any],
     scope: dict[str, Any],
@@ -605,7 +666,7 @@ def _attach_firmware_images(
             if row["disposition"] == "contributed":
                 collect(row["source_bindings"])
         for operand in link["operands"]:
-            if operand["disposition"] != "contributed":
+            if operand["disposition"] != "contributed" or operand["kind"] == "embedded-binary":
                 continue
             if operand["kind"] == "archive":
                 members = (item for item in operand["members"] if item["disposition"] == "contributed")
@@ -634,12 +695,14 @@ def _attach_firmware_images(
                     }
                 )
         header_refs, headers = _header_components(builder, scope, boundaries, source_refs, image, validated)
+        embedded_refs, embedded = _embedded_components(builder, scope, boundaries, source_refs, image)
         link_status = (
             "complete"
             if validated["status"] == "complete"
             and link["status"] == "complete"
             and not missing
             and headers["status"] == "attributed"
+            and embedded["status"] == "attributed"
             else "incomplete"
         )
         component = Component(
@@ -668,6 +731,7 @@ def _attach_firmware_images(
             builder.dynamic_links[reference] = list(link["dynamic_needed"])
         mapped.update(_runtime_components(builder, link, validated["toolchain"], validated["build_id"]))
         mapped.update(header_refs)
+        mapped.update(embedded_refs)
         builder.depends_on[reference] = mapped
         root_dependencies.add(reference)
         images.append(
@@ -678,6 +742,7 @@ def _attach_firmware_images(
                 "link_closure": link_status,
                 "linked_components": sorted(mapped),
                 "headers": headers,
+                "embedded_inputs": embedded,
                 "unmapped_source_bindings": [
                     {"root": root, "path": path} for root, path in missing
                 ],

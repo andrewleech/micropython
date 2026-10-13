@@ -221,6 +221,25 @@ def _validate_actions(actions, build_id, verify_files):
                     raise FirmwareReceiptError(f"action {action_id} claims collected dependencies without one depfile")
             else:
                 _text(capture.get("reason"), f"action {action_id}.dependency_capture.reason")
+        assembler = action.get("assembler_dependencies")
+        if assembler is not None:
+            assembler = _object(assembler, f"action {action_id}.assembler_dependencies")
+            if assembler.get("status") not in ("collected", "unavailable", "failed"):
+                raise FirmwareReceiptError(f"action {action_id}.assembler_dependencies.status is unknown")
+            if assembler["status"] != "collected":
+                _text(assembler.get("reason"), f"action {action_id}.assembler_dependencies.reason")
+            else:
+                listed = assembler.get("dependencies")
+                if not isinstance(listed, list):
+                    raise FirmwareReceiptError(f"action {action_id}.assembler_dependencies.dependencies must be an array")
+                for dependency in listed:
+                    dependency = _object(dependency, f"action {action_id} assembler dependency")
+                    captured_input = action_inputs[action_id].get(dependency.get("path"))
+                    digest = _digest(dependency.get("sha256"), f"action {action_id} assembler dependency sha256")
+                    if captured_input is None or captured_input["sha256"] != digest:
+                        raise FirmwareReceiptError(
+                            f"action {action_id} assembler dependency is not bound to a captured input"
+                        )
         for output in action_outputs:
             role = _text(output.get("role"), f"action {action_id} output role")
             path = output["path"]
@@ -409,7 +428,7 @@ def _validate_link_operands(link, image_id, link_id, action_inputs, repo_names, 
         if action_input is None or action_input["sha256"] != record["sha256"]:
             raise FirmwareReceiptError(f"link operand is not bound to captured action input: {path}")
         kind = _text(operand.get("kind"), f"image {image_id}.link.operands[{row_index}].kind")
-        if kind not in ("object", "archive", "prebuilt", "script", "response", "library", "other"):
+        if kind not in ("object", "archive", "prebuilt", "script", "response", "library", "embedded-binary", "other"):
             raise FirmwareReceiptError(f"image {image_id} has unsupported link operand kind: {kind}")
         disposition = operand.get("disposition")
         if disposition not in ("contributed", "discarded", "no-contribution", "unsupported"):
@@ -423,7 +442,7 @@ def _validate_link_operands(link, image_id, link_id, action_inputs, repo_names, 
             _validate_library_members(operand, path, image_id)
         elif disposition == "contributed" and kind == "library" and "toolchain" in operand:
             _validate_toolchain_library(operand, path, image_id, toolchain_executables)
-        elif disposition == "contributed" and kind in ("object", "archive", "prebuilt", "library"):
+        elif disposition == "contributed" and kind in ("object", "archive", "prebuilt", "library", "embedded-binary"):
             _source_bindings(
                 operand.get("source_bindings"),
                 f"image {image_id} operand source_bindings",
@@ -435,7 +454,7 @@ def _validate_link_operands(link, image_id, link_id, action_inputs, repo_names, 
             raise FirmwareReceiptError(f"non-archive link operand carries archive members: {path}")
         by_operand[path] = operand
     for path, input_record in action_inputs[link_id].items():
-        if input_record.get("role") == "link-operand" and path not in by_operand:
+        if input_record.get("role") in ("link-operand", "embedded-input") and path not in by_operand:
             raise FirmwareReceiptError(f"captured link operand has no contribution decision: {path}")
     return by_operand
 
@@ -509,6 +528,60 @@ def _validate_object_accounting(image, image_id, repo_names, compiled_objects, b
             raise FirmwareReceiptError(
                 f"linked object disposition disagrees with object accounting: {path}"
             )
+
+
+def _validate_embedded_inputs(image, image_id, repo_names, actions, action_inputs, verify_files):
+    """Each raw binary the image embeds is bound by hash to the captured action that read it."""
+    rows = image.get("embedded_inputs")
+    if rows is None:
+        return []
+    if not isinstance(rows, list):
+        raise FirmwareReceiptError(f"image {image_id}.embedded_inputs must be an array")
+    by_id = {action["id"]: action for action in actions}
+    seen = set()
+    for index, raw in enumerate(rows):
+        label = f"image {image_id}.embedded_inputs[{index}]"
+        row = _object(raw, label)
+        blob = _path_record(row.get("blob"), f"{label}.blob", verify_files=verify_files)
+        obj = _path_record(row.get("object"), f"{label}.object", verify_files=False)
+        origin = row.get("origin")
+        action = by_id.get(row.get("action"))
+        if action is None or origin not in ("objcopy-input-binary", "ld-format-binary", "assembler-dependency"):
+            raise FirmwareReceiptError(f"{label} names an unknown origin or action")
+        identity = (blob["path"], action["id"], obj["path"])
+        if identity in seen:
+            raise FirmwareReceiptError(f"{label} repeats an embedded input")
+        seen.add(identity)
+        if origin == "assembler-dependency":
+            collected = (action.get("assembler_dependencies") or {}).get("dependencies", [])
+            if action["kind"] not in ("compile", "assemble") or not any(
+                item["path"] == blob["path"] and item["sha256"] == blob["sha256"] for item in collected
+            ):
+                raise FirmwareReceiptError(f"{label} is not among the assembler dependencies of its action")
+        else:
+            recorded = action_inputs[action["id"]].get(blob["path"])
+            expected_kind = "transform" if origin == "objcopy-input-binary" else "link"
+            if (
+                recorded is None
+                or recorded["sha256"] != blob["sha256"]
+                or recorded.get("role") != "embedded-input"
+                or action["kind"] != expected_kind
+            ):
+                raise FirmwareReceiptError(f"{label} is not a raw binary input of its captured action")
+        produced = any(
+            item["path"] == obj["path"] and item["sha256"] == obj["sha256"] for item in action["outputs"]
+        )
+        if not produced and not (origin == "ld-format-binary" and obj == blob):
+            raise FirmwareReceiptError(f"{label} object is not an output of its captured action")
+        _text(row.get("evidence"), f"{label}.evidence")
+        disposition = row.get("disposition")
+        if disposition == "contributed":
+            _source_bindings(row.get("source_bindings"), f"{label}.source_bindings", repo_names)
+        elif disposition in ("no-contribution", "unsupported"):
+            _text(row.get("reason"), f"{label}.reason")
+        else:
+            raise FirmwareReceiptError(f"{label}.disposition must be explicit")
+    return rows
 
 
 def _validate_header_accounting(
@@ -690,6 +763,7 @@ def validate_firmware_receipt(
         _validate_header_accounting(
             image, image_id, repo_names, actions, object_actions, toolchain_executables, verify_files
         )
+        _validate_embedded_inputs(image, image_id, repo_names, actions, action_inputs, verify_files)
         if not isinstance(link.get("unresolved"), list):
             raise FirmwareReceiptError(f"image {image_id}.link.unresolved must be an array")
         discarded_sections = link.get("discarded_sections")
@@ -727,11 +801,18 @@ def validate_firmware_receipt(
                 raise FirmwareReceiptError(f"complete receipt contains unsupported object accounting: {image['id']}")
             if any(entry["disposition"] == "unowned" for entry in image.get("header_accounting", [])):
                 raise FirmwareReceiptError(f"complete receipt contains unattributed headers: {image['id']}")
+            if any(row["disposition"] == "unsupported" for row in image.get("embedded_inputs", [])):
+                raise FirmwareReceiptError(f"complete receipt contains unattributed embedded content: {image['id']}")
             for row in image["object_accounting"]:
                 capture = object_actions[(image["id"], row["object"]["path"])].get("dependency_capture")
                 if row["disposition"] == "contributed" and capture is not None and capture["status"] != "collected":
                     raise FirmwareReceiptError(
                         f"complete receipt contains a compile without captured headers: {row['object']['path']}"
+                    )
+                assembler = object_actions[(image["id"], row["object"]["path"])].get("assembler_dependencies")
+                if row["disposition"] == "contributed" and assembler is not None and assembler["status"] != "collected":
+                    raise FirmwareReceiptError(
+                        f"complete receipt contains an object without captured assembler inputs: {row['object']['path']}"
                     )
             lto_enabled = str(configuration["variables"].get("LTO", "")).lower() in (
                 "1",
