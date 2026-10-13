@@ -53,6 +53,13 @@ A monotonic security counter prevents installation of images below the accepted 
 
 Recovery from a missing or invalid image runs the USB DFU front end, so it needs ``MICROPY_MBOOT_DFU`` (enabled by default); without it the bootloader shows its error LED and waits for a reset or a programmer. A replacement signed application can then be installed through DFU. It cannot recover an overwritten previous application in a layout without revert support. Power-loss handling also depends on the selected layout and the storage remaining available for the update.
 
+Update audit log
+~~~~~~~~~~~~~~~~
+
+The bootloader and the application append records to a persistent update audit log in two erase units of flash, used as a ring so that only the most recent records are kept. The area is placed directly after the primary slot by default; set ``MICROPY_HW_MBOOT_LOG_ADDR`` to move it, and keep it blank (erased) when first programming a device. It records DFU and filesystem update outcomes, swap and revert decisions, application requests and confirmation, rejected images and security-counter initialisation failures. Failing to write a record never fails the operation it describes.
+
+The log is read-only over DFU as alternate setting 1, named ``Update audit log``, so a DFU tool that does not select an alternate setting has to be told to use ``-a 0`` for image downloads. Decode a raw dump of it with ``python3 tools/mboot_log.py DUMP.bin``; ``--unit`` shows the erase unit of each record and ``--json`` selects JSON output. The same tool decodes the 16-byte result of the DFU vendor request 0x81 with ``--result``.
+
 Port integration
 ----------------
 
@@ -84,7 +91,7 @@ Set ``MICROPY_HW_MBOOT_PRIMARY_SIZE`` and, for two-slot layouts, ``MICROPY_HW_MB
 
 A board with a second flash device defines ``MICROPY_HW_MBOOT_SPIFLASH_ADDR``, ``MICROPY_HW_MBOOT_SPIFLASH_BYTE_SIZE``, ``MICROPY_HW_MBOOT_SPIFLASH_ERASE_BLOCKS_PER_PAGE`` and ``MICROPY_HW_MBOOT_SPIFLASH_SPIFLASH`` (the spiflash object), which ``mboot_dev.h`` turns into the ``MICROPY_HW_MBOOT_DEV1_*`` settings. If the chip is detected at run time the board must also define ``MICROPY_HW_MBOOT_DEV1_SIZE``. A single-slot board that supports filesystem loading needs an intent area (``MICROPY_HW_MBOOT_INTENT_ADDR``, one erase unit), and the security counter is stored in flash (``MICROPY_HW_MBOOT_SECCNT_ADDR``) unless ``MICROPY_MBOOT_SECCNT_PORT`` is set.
 
-Reserve enough flash for the image header, validation metadata and update state, as well as any security-counter, scratch or recovery areas required by the configuration. Each area must start on an erase boundary, contain whole erase units and not overlap another area. An external update slot must satisfy the selected algorithm's erase/program geometry. ``shared/mboot/include/mboot_layout.h`` documents the exact constraints and defaults; the layout generator checks them before building or signing.
+Reserve enough flash for the image header, validation metadata and update state, as well as any security-counter, update log, scratch or recovery areas required by the configuration. Each area must start on an erase boundary, contain whole erase units and not overlap another area. An external update slot must satisfy the selected algorithm's erase/program geometry. ``shared/mboot/include/mboot_layout.h`` documents the exact constraints and defaults; the layout generator checks them before building or signing.
 
 Optional features
 ~~~~~~~~~~~~~~~~~
