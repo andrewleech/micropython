@@ -8,7 +8,9 @@ from mpy_analysis import metadata_bom, sbom_spdx
 SHA256_A = "a" * 64
 SHA256_B = "b" * 64
 SHA256_C = "c" * 64
+SHA1_A = "2" * 40
 SHA1_B = "1" * 40
+SHA1_C = "3" * 40
 LICENSE_TEXT = "Synthetic vendor licence terms."
 
 APP = "urn:mpy:build:app"
@@ -35,7 +37,10 @@ def cyclonedx():
             "type": "file",
             "bom-ref": SOURCE_FILE,
             "name": "py/main.c",
-            "hashes": [{"alg": "SHA-256", "content": SHA256_A}],
+            "hashes": [
+                {"alg": "SHA-256", "content": SHA256_A},
+                {"alg": "SHA-1", "content": SHA1_A},
+            ],
             "copyright": "Copyright Example",
             "properties": props(
                 **{"mpy:owner": "core", "mpy:path": "py/main.c", "mpy:selection": "native"}
@@ -91,7 +96,10 @@ def cyclonedx():
                 {
                     "type": "file",
                     "name": "/usr/lib/libffi.a",
-                    "hashes": [{"alg": "SHA-256", "content": SHA256_C}],
+                    "hashes": [
+                        {"alg": "SHA-256", "content": SHA256_C},
+                        {"alg": "SHA-1", "content": SHA1_C},
+                    ],
                 },
             ],
             "properties": props(**{"mpy:package-manager": "dpkg"}),
@@ -257,7 +265,10 @@ def test_malformed_dynamic_needed_is_rejected(value):
 def test_checksums_are_preserved():
     spdx = convert()
     files = {item["fileName"]: item for item in spdx["files"]}
-    assert files["py/main.c"]["checksums"] == [{"algorithm": "SHA256", "checksumValue": SHA256_A}]
+    assert files["py/main.c"]["checksums"] == [
+        {"algorithm": "SHA256", "checksumValue": SHA256_A},
+        {"algorithm": "SHA1", "checksumValue": SHA1_A},
+    ]
     assert files["/usr/lib/libffi.so.8.1.4"]["checksums"] == [
         {"algorithm": "SHA256", "checksumValue": SHA256_B},
         {"algorithm": "SHA1", "checksumValue": SHA1_B},
@@ -276,6 +287,21 @@ def test_file_without_any_hash_becomes_file_purpose_package():
     assert package["primaryPackagePurpose"] == "FILE"
     assert merged_annotations(package)["cyclonedx:type"] == "file"
     assert "unhashed.bin" not in {item["fileName"] for item in spdx["files"]}
+
+
+def test_file_with_only_sha256_is_a_package_and_a_sha1_less_file_is_rejected():
+    document = cyclonedx()
+    document["components"].append(
+        {"type": "file", "bom-ref": "urn:y", "name": "sha256only.bin", "hashes": [{"alg": "SHA-256", "content": SHA256_C}]}
+    )
+    spdx = convert(document)
+    package = by_name(spdx)["sha256only.bin"]
+    assert package["checksums"] == [{"algorithm": "SHA256", "checksumValue": SHA256_C}]
+    assert "sha256only.bin" not in {item["fileName"] for item in spdx["files"]}
+    for item in spdx["files"]:
+        item["checksums"] = [c for c in item["checksums"] if c["algorithm"] != "SHA1"]
+    with pytest.raises(ValueError, match="SHA1"):
+        sbom_spdx.validate_spdx(spdx)
 
 
 def test_uppercase_hash_content_is_lowercased():
@@ -482,7 +508,10 @@ def test_orphan_top_level_file_is_contained_by_the_document():
             "type": "file",
             "bom-ref": "urn:orphan",
             "name": "orphan.c",
-            "hashes": [{"alg": "SHA-256", "content": SHA256_C}],
+            "hashes": [
+                {"alg": "SHA-256", "content": SHA256_C},
+                {"alg": "SHA-1", "content": SHA1_C},
+            ],
         }
     )
     spdx = convert(document)

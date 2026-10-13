@@ -206,7 +206,9 @@ class _Node:
         self.component = component
         self.key = key
         self.parent = parent
-        self.is_file = component["type"] == "file" and bool(component.get("hashes"))
+        self.is_file = component["type"] == "file" and any(
+            item["alg"] == "SHA-1" for item in component.get("hashes", [])
+        )
         self.id = _spdx_id("File" if self.is_file else "Package", component["name"], key)
 
 
@@ -643,6 +645,9 @@ def validate_spdx(document: dict[str, Any]) -> None:
             raise ValueError(f"invalid SPDX identifier: {identifier}")
     if len(set(identifiers)) != len(identifiers):
         raise ValueError("duplicate SPDX element identifier")
+    for item in document.get("files", []):
+        if not any(checksum["algorithm"] == "SHA1" for checksum in item.get("checksums", [])):
+            raise ValueError(f"SPDX file lacks the required SHA1 checksum: {item['fileName']}")
     known = set(identifiers)
     for relationship in document.get("relationships", []):
         for field in ("spdxElementId", "relatedSpdxElement"):

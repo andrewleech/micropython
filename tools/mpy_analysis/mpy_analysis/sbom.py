@@ -177,12 +177,16 @@ class _Builder:
 
     def file(self, group: str, record: dict[str, Any]) -> str:
         path = source_path(self.scope, record)
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        content = path.read_bytes()
+        digest = hashlib.sha256(content).hexdigest()
         identity = [record["root"], record["path"], record.get("target_path"), digest]
         component = {
             "type": "file",
             "name": record.get("target_path", record["path"]),
-            "hashes": [{"alg": "SHA-256", "content": digest}],
+            "hashes": [
+                {"alg": "SHA-1", "content": hashlib.sha1(content, usedforsecurity=False).hexdigest()},
+                {"alg": "SHA-256", "content": digest},
+            ],
             "properties": _properties(
                 {
                     "root": record["root"],
@@ -254,6 +258,22 @@ def _generator_input(builder: _Builder, binding: tuple[str, str]) -> str | None:
     )
 
 
+def _runtime_file_hashes(path: str, sha256: str) -> list[dict[str, str]]:
+    """Return the receipt SHA-256 plus a SHA-1 of the file, which SPDX 2.3 requires for files.
+
+    The SHA-1 is only taken from bytes whose SHA-256 equals the receipt's. A file that is no
+    longer readable keeps its SHA-256 only and is then emitted as an SPDX package, not a file.
+    """
+    hashes = [{"alg": "SHA-256", "content": sha256}]
+    try:
+        content = Path(path).read_bytes()
+    except OSError:
+        return hashes
+    if hashlib.sha256(content).hexdigest() != sha256:
+        raise ValueError(f"linked runtime file changed since the receipt: {path}")
+    return [{"alg": "SHA-1", "content": hashlib.sha1(content, usedforsecurity=False).hexdigest()}, *hashes]
+
+
 def _runtime_components(
     builder: _Builder, link: dict[str, Any], toolchain: list[dict[str, Any]], build_id: str
 ) -> set[str]:
@@ -272,7 +292,7 @@ def _runtime_components(
                 {
                     "type": "file",
                     "name": path,
-                    "hashes": [{"alg": "SHA-256", "content": sha256}],
+                    "hashes": _runtime_file_hashes(path, sha256),
                     "properties": _properties({"linkage": "static", "contributing-members": members or None}),
                 }
             )

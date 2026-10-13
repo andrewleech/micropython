@@ -441,7 +441,10 @@ def test_dirty_source_hash_and_repository_revision_remain_distinct(tmp_path):
     alpha = next(item for item in document["components"] if item["name"] == "alpha")
     source = next(item for item in document["components"] if item["name"] == "alpha.py")
     assert properties(alpha)["mpy:source-revision"] == revision
-    assert source["hashes"] == [{"alg": "SHA-256", "content": hashlib.sha256(content).hexdigest()}]
+    assert source["hashes"] == [
+        {"alg": "SHA-1", "content": hashlib.sha1(content).hexdigest()},
+        {"alg": "SHA-256", "content": hashlib.sha256(content).hexdigest()},
+    ]
     assert any(
         gap["kind"] == "dirty-selected-repository" and gap["path"] == str(library)
         for gap in receipt["gaps"]
@@ -518,8 +521,10 @@ def test_generated_source_does_not_inherit_committed_content_provenance(tmp_path
     component = next(
         item for item in document["components"] if item["bom-ref"] == source["component"]
     )
+    payload = generated.read_bytes()
     assert component["hashes"] == [
-        {"alg": "SHA-256", "content": hashlib.sha256(generated.read_bytes()).hexdigest()}
+        {"alg": "SHA-1", "content": hashlib.sha1(payload).hexdigest()},
+        {"alg": "SHA-256", "content": hashlib.sha256(payload).hexdigest()},
     ]
 
 
