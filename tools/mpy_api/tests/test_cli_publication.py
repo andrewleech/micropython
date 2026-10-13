@@ -52,8 +52,10 @@ def test_reference_changed_while_staging_is_not_published(tmp_path, monkeypatch,
     def staging_write(path, data):
         nonlocal changed
         result = write_bytes(path, data)
-        if path.name == "inventory.json" and not changed:
+        staged = [index for index, part in enumerate(path.parts) if part.startswith(".mpy-api-")]
+        if staged and not changed:
             changed = True
+            assert Path(*path.parts[:staged[0] + 1], "generation", "inventory.json").is_file()
             if mutation == "declaration":
                 write_bytes(declaration, b"def value() -> str: ...\n")
             elif mutation == "notice":
@@ -72,6 +74,43 @@ def test_reference_changed_while_staging_is_not_published(tmp_path, monkeypatch,
     assert changed
     assert not output.exists()
     assert not list(tmp_path.glob(".mpy-api-*"))
+
+
+def test_streamed_inventory_is_identified_by_the_receipt(tmp_path):
+    inventory = {"build": {"fixture": "controlled"}, "coverage": {"n": 1}, "modules": [{"name": "m", "text": "\u00e9\n"}],
+                 "schema_version": 1}
+    declarations = {"typeshed/stdlib/builtins.pyi": "x: int\n", "modules/m.pyi": "y: int\n"}
+    output = tmp_path / "out" / "published"
+    receipt = write_generation(output, inventory, declarations, {"tool": "t"},
+                               notices={"enrichment-notices/a/n.txt": b"notice\n"}, verify=lambda: None)
+    inventory_bytes = (output / "inventory.json").read_bytes()
+    assert inventory_bytes == b'{"build":{"fixture":"controlled"},"coverage":{"n":1},"modules":[{"name":"m","text":"\\u00e9\\n"}],"schema_version":1}\n'
+    assert json.loads(inventory_bytes) == inventory
+    on_disk = json.loads((output / "generation.json").read_bytes())
+    assert on_disk == receipt
+    assert [record["path"] for record in receipt["artifacts"]] == [
+        "enrichment-notices/a/n.txt", "inventory.json", "modules/m.pyi", "typeshed/stdlib/builtins.pyi"]
+    for record in receipt["artifacts"]:
+        data = (output / record["path"]).read_bytes()
+        assert (record["bytes"], record["sha256"]) == (len(data), hashlib.sha256(data).hexdigest())
+    assert {record["path"]: record["role"] for record in receipt["artifacts"]} == {
+        "enrichment-notices/a/n.txt": "enrichment-license-notice", "inventory.json": "inventory",
+        "modules/m.pyi": "runtime-module", "typeshed/stdlib/builtins.pyi": "runtime-builtins"}
+    body = {key: value for key, value in receipt.items() if key != "generation_id"}
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False) + "\n"
+    assert receipt["generation_id"] == hashlib.sha256(canonical.encode()).hexdigest()
+    assert (output / "generation.json").read_bytes() == (
+        json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False) + "\n").encode()
+    assert not list((tmp_path / "out").glob(".mpy-api-*"))
+
+
+def test_encoding_failure_leaves_no_staging_or_output(tmp_path):
+    output = tmp_path / "published"
+    with pytest.raises(ValueError, match="not JSON compliant"):
+        write_generation(output, {"build": {}, "coverage": {}, "bad": [float("nan")]}, {}, {}, notices={}, verify=lambda: None)
+    assert not output.exists()
+    assert not list(tmp_path.glob(".mpy-api-*"))
+
 
 
 @pytest.mark.parametrize("field", ["port", "target", "variant"])
