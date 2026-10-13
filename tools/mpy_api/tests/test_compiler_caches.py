@@ -96,17 +96,59 @@ def test_resolve_path_keys_on_directory_and_name(tmp_path):
     assert compiler.resolve_path(build, '/abs/x.h') == '/abs/x.h'
 
 
-def test_validate_include_markers_uses_resolved_dependencies(tmp_path):
-    build = layout(tmp_path)
-    header = str(tmp_path / 'real' / 'sub' / 'a.h')
-    record = {'directory': str(build), 'dependencies': {header: 'digest'}}
-    compiler.validate_include_markers('# 1 "../link/sub/a.h" 1\nint a;\n# 2 "<built-in>" 1 3\n', record)
-    compiler.validate_include_markers('# 1 "../link/sub/a.h"\n# 4 "unlisted.h" 2\nint a;\n', record)
-    with pytest.raises(RuntimeError, match='uncaptured include dependency'):
-        compiler.validate_include_markers('# 1 "unlisted.h" 1\n', record)
-    # Repeated validation of the same text keeps the same verdicts after memoization.
-    with pytest.raises(RuntimeError, match='uncaptured include dependency'):
-        compiler.validate_include_markers('# 1 "unlisted.h" 1\n', record)
+PASS_ONE = '\n'.join([
+    '# 0 "a.c"',
+    '# 0 "<built-in>"',
+    '# 0 "<command-line>"',
+    '# 1 "/usr/include/stdc-predef.h" 1 3 4',
+    '# 0 "<command-line>" 2',
+    '# 1 "a.c"',
+    '#include <s.h>',
+    '# 1 "a.c"',
+    '# 1 "sys/s.h" 1 3',
+    '#include "p.h"',
+    '# 1 "sys/s.h" 3',
+    '# 1 "sys/p.h" 1 3',
+    '# 2 "sys/s.h" 2 3',
+    '# 2 "a.c" 2',
+    '/* comment */ #include "h.h"',
+    '# 2 "a.c"',
+    '# 1 "h.h" 1',
+    'int h;',
+    '# 4 "a.c" 2',
+    '  #include "h.h"',
+    '/* a comment row',
+    '#include "nothing.h"',
+    '*/ #define AFTER 1',
+    'int a;',
+    ''])
+
+
+def test_scan_of_pass_one_reads_lookups_entries_and_system_flags(tmp_path):
+    scan = compiler.scan_dependency_pass(PASS_ONE, 'a.c')
+    assert scan['unmodelled'] == []
+    assert scan['lookups'] == [
+        ['<command-line>', None, 'include', True, 'stdc-predef.h', '/usr/include/stdc-predef.h'],
+        ['a.c', None, 'include', True, 's.h', 'sys/s.h'],
+        ['sys/s.h', 1, 'include', False, 'p.h', 'sys/p.h'],
+        ['a.c', None, 'include', False, 'h.h', 'h.h'],
+        ['a.c', None, 'include', False, 'h.h', None],
+        # A comment row of the -dI form is read as an include that entered nothing.
+        ['a.c', None, 'include', False, 'nothing.h', None]]
+    assert scan['entered'] == {'/usr/include/stdc-predef.h': True, 'sys/s.h': True, 'sys/p.h': True, 'h.h': False}
+    assert scan['order'] == ['/usr/include/stdc-predef.h', 'sys/s.h', 'sys/p.h', 'h.h']
+    rows = scan['source'].split('\n')
+    assert '#include' not in scan['source'] and rows[14] == '/* comment */ ' and rows[19] == '  '
+    assert len(rows) == len(PASS_ONE.split('\n'))
+    (tmp_path / 'h.h').write_text('int h;\n')
+    assert compiler.project_dependencies(tmp_path, 'a.c', scan) == ([str(tmp_path / 'a.c'), str(tmp_path / 'h.h')], [])
+
+
+def test_scan_of_pass_one_reports_what_the_stat_replay_cannot_model():
+    renamed = compiler.scan_dependency_pass('# 0 "a.c"\n# 1 "a.c"\n# 7 "other.c"\nint a;\n', 'a.c')
+    assert renamed['unmodelled'] == ['presumed file name changed to other.c']
+    unpaired = compiler.scan_dependency_pass('# 0 "a.c"\n# 1 "a.c"\n# 1 "x.h" 1\n# 2 "a.c" 2\n', 'a.c')
+    assert unpaired['unmodelled'] == ['file entered without an include directive: x.h']
 
 
 def test_read_input_reports_current_content_despite_cached_resolution(tmp_path):
@@ -129,6 +171,40 @@ def test_read_input_missing_file_is_not_cached(tmp_path):
         compiler.read_input(path)
     path.write_text('x\n')
     assert compiler.read_input(path)[0] == b'x\n'
+
+
+def test_input_table_captures_each_path_once_and_rejects_later_content(tmp_path, monkeypatch):
+    compiler.clear_input_table()
+    path = tmp_path / 'input.h'
+    path.write_text('first\n')
+    reads = []
+    original = compiler.read_input
+    monkeypatch.setattr(compiler, 'read_input', lambda target: reads.append(str(target)) or original(target))
+    first = compiler.recorded(path)
+    assert compiler.recorded(path) is first and compiler.recorded_inputs([path, path]) == {str(path): first}
+    assert reads == [str(path)]
+    assert compiler.read_recorded(path) == (b'first\n', first)
+    path.write_text('second contents\n')
+    with pytest.raises(RuntimeError, match='consumed input changed during collection'):
+        compiler.read_recorded(path)
+    assert compiler.recorded(path) is first
+    compiler.clear_input_table()
+
+
+def test_final_verification_hashes_each_physical_file_once_for_every_spelling(tmp_path, monkeypatch):
+    (tmp_path / 'sub').mkdir()
+    (tmp_path / 'h.h').write_text('int h;\n')
+    spellings = [str(tmp_path / 'h.h'), str(tmp_path / 'sub' / '..' / 'h.h')]
+    records = {spelling: compiler.read_input(spelling)[1] for spelling in spellings}
+    reads = []
+    original = compiler.read_input
+    monkeypatch.setattr(compiler, 'read_input', lambda target: reads.append(str(target)) or original(target))
+    compiler.verify_inputs(records)
+    assert reads == [str(tmp_path / 'h.h')]
+    (tmp_path / 'h.h').write_text('int changed;\n')
+    for spelling in spellings:
+        with pytest.raises(RuntimeError, match='consumed input changed during collection'):
+            compiler.verify_inputs({spelling: records[spelling]})
 
 
 def counting_compiler(tmp_path):

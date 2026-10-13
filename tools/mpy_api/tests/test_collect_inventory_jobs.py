@@ -36,8 +36,8 @@ def build(tmp_path, sources):
 def failure(project, jobs):
     database, build_dir = project
     with pytest.raises(RuntimeError) as raised:
-        inventory.collect_inventory(database=database, root=ROOT, build_dir=build_dir, port='test', target='test',
-                                    variant='test', link={}, jobs=jobs)
+        selection = inventory.select_records(database=database, root=ROOT, build_dir=build_dir)
+        inventory.collect_inventory(selection, port='test', target='test', variant='test', link={}, jobs=jobs)
     return str(raised.value)
 
 

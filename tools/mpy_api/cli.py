@@ -323,28 +323,21 @@ def generate(args):
               "map": file_identity(args.map_path), "link_command": file_identity(args.link_command)}
     parser = parser_identity()
     revision = source_revision(root)
-    compdb, scope = authority_modules(root)
-    entries = json.loads(args.compdb.read_text(encoding="utf-8"))
-    if not isinstance(entries, list) or not entries:
-        raise ValueError("compilation database must be a nonempty list")
-    for index, entry in enumerate(entries):
-        compdb.validate_entry(entry, f"compiler entry {index}")
-    completeness = compdb.completeness(entries, build_dir)
-    if not completeness["complete"]:
-        raise ValueError("compilation database does not cover the selected build: " + json.dumps(completeness, sort_keys=True))
-    has_frozen = any(Path(compdb.entry_file(entry)).name == "frozen_content.c" for entry in entries)
+    _, scope = authority_modules(root)
+    from .inventory import collect_inventory, select_records
+    selection = select_records(database=args.compdb.resolve(strict=True), root=root, build_dir=build_dir)
+    entries, completeness = selection["entries"], selection["completeness"]
+    has_frozen = any(Path(selection["compdb"].entry_file(entry)).name == "frozen_content.c" for entry in entries)
     if has_frozen and not args.manifest:
         raise ValueError("selected frozen_content.c requires explicit selected --manifest inputs")
     if args.manifest and not has_frozen:
         raise ValueError("manifest inputs require frozen_content.c in the selected build")
     link = link_inputs(args.link_command, args.elf.resolve(strict=True), args.map_path.resolve(strict=True), args.nm)
     frozen, frozen_inputs = collect_frozen(args, root, scope)
-    from .inventory import collect_inventory
     from .declarations import render_declarations
     from . import __version__
-    inventory = collect_inventory(database=args.compdb.resolve(strict=True), root=root,
-                                  build_dir=build_dir, port=args.port, target=args.target,
-                                  variant=args.variant, link=link, jobs=args.jobs)
+    inventory, verification = collect_inventory(selection, port=args.port, target=args.target,
+                                                variant=args.variant, link=link, jobs=args.jobs)
     if args.manifest:
         qualify_frozen_payload(inventory, frozen)
     names = {module["name"] for module in inventory["modules"]}
@@ -371,9 +364,7 @@ def generate(args):
         verify_identities([*inputs.values(), *frozen_inputs["manifests"],
                            *frozen_inputs["sources"]])
         from . import compiler
-        consumed = inventory["build"]["consumed_inputs"]
-        if compiler.public_inputs(compiler.capture_inputs(consumed)) != consumed:
-            raise RuntimeError("selected compiler/link inputs changed during generation")
+        compiler.verify_collection(verification)
         if producer_tools(root) != tools:
             raise RuntimeError("producer code graph changed during generation")
         if parser_identity() != parser:

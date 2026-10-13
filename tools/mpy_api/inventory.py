@@ -36,15 +36,17 @@ def _extract_impl(record, compdb, root):
     physical = record['physical']
     if Path(physical).suffix != '.c':
         arguments = compdb.arguments_of(record)
-        response_snapshots = {}
-        expanded, response_inputs = compiler.expand_arguments(arguments, record['directory'], snapshots=response_snapshots)
+        response_snapshots = record['_response_snapshots']
+        if '_expanded_arguments' in record:
+            expanded, response_inputs = record['_expanded_arguments'], record['_response_inputs']
+        else:
+            response_snapshots = dict(response_snapshots)
+            expanded, response_inputs = compiler.expand_arguments(arguments, record['directory'], snapshots=response_snapshots)
         executable = compiler.executable(expanded[0], record['directory'])
         snapshots = compiler.reconcile_inputs([
             ('selected source', {record['_source_snapshot']['path']: record['_source_snapshot']}),
-            ('selected response operands', record['_response_snapshots']),
-            ('current non-C inputs', compiler.capture_inputs([compdb.entry_file(record), executable])),
-            ('current response operands', response_snapshots)])
-        compiler.verify_inputs(snapshots)
+            ('selected response operands', response_snapshots),
+            ('current non-C inputs', compiler.recorded_inputs([compdb.entry_file(record), executable]))])
         return {'translation_unit': record['identity'], 'source': physical, 'definitions': [], 'functions': [],
                 'registrations': [], 'errors': [], 'coverage': {'status': 'unassessed', 'reason': 'non-C compiler record; syntax and dependency extraction unassessed'},
                 'input': {'arguments': arguments, 'directory': record['directory'],
@@ -53,15 +55,11 @@ def _extract_impl(record, compdb, root):
                           'object': record['object'], 'response_inputs': response_inputs, 'receipts': [],
                           'input_snapshots': snapshots}}
     prepared = compiler.prepare(record, compdb)
-    expanded, expansion_receipt = compiler.invoke(prepared, ['-E'])
-    directives, directive_receipt = compiler.invoke(prepared, ['-E', '-fdirectives-only'])
-    compiler.validate_include_markers(expanded, prepared)
-    compiler.validate_include_markers(directives, prepared)
-    contracts, contract_receipt = compiler.compiler_contracts(prepared)
+    expanded, code, origins, contracts, expansion_receipts, expansion = compiler.expand(prepared, compdb)
+    prepared['receipts'].extend(expansion_receipts)
     prepared['contracts'] = contracts
-    compiler.validate_dependencies(prepared, compdb)
-    code, origins = compiler.unmark(expanded, prepared['directory'])
-    directive_code, directive_origins = compiler.unmark(directives, prepared['directory'])
+    compiler.validate_selection(prepared, compdb)
+    directive_code, directive_origins = compiler.unmark(prepared['_scan']['source'], prepared['directory'])
     try:
         declarations, functions, errors, frontend = syntax_adapter(code, origins, physical, prepared)
     except Exception as exc:
@@ -92,7 +90,6 @@ def _extract_impl(record, compdb, root):
     prepared['frontend'] = frontend
     object_definitions = definitions(declarations, functions, errors, record['identity'], directive_code, directive_origins, prepared)
     registrations = registration_records(directive_code, directive_origins, physical, prepared)
-    compiler.verify_inputs(prepared['input_snapshots'])
     empty_program = not code.strip()
     return {'translation_unit': record['identity'], 'source': physical,
             'definitions': object_definitions,
@@ -106,7 +103,7 @@ def _extract_impl(record, compdb, root):
                              for definition in object_definitions),
                          'project_header_definitions': 'all compiler non-system dependencies traversed',
                          'project_headers': [p for p in prepared['project_dependencies'] if p != physical],
-                         'system_header_definitions': 'unassessed; excluded by compiler -MM authority',
+                         'system_header_definitions': 'unassessed; excluded by the compiler system-header classification (-MM set)',
                          'unsupported_definitions': [{'identity': d['name'], 'source': d['source_span'],
                                                       'reason': 'no supported initialized object template'}
                                                      for d in declarations if '=' not in d['expression']]},
@@ -117,8 +114,10 @@ def _extract_impl(record, compdb, root):
                       'input_snapshots': prepared['input_snapshots'],
                       'compiler_target': prepared['compiler_target'], 'compiler_version': prepared['compiler_version'],
                       'compiler_expanded_sha256': hashlib.sha256(expanded.encode()).hexdigest(),
-                      'compiler_directives_sha256': hashlib.sha256(directives.encode()).hexdigest(),
-                      'receipts': [*prepared['receipts'], expansion_receipt, directive_receipt, contract_receipt]}}
+                      'compiler_directives_sha256': hashlib.sha256(prepared['_scan']['source'].encode()).hexdigest(),
+                      'expansion': expansion, 'selection_check': prepared['selection_check'],
+                      'receipts': prepared['receipts']},
+            '_selection': prepared['_selection']}
 
 
 def _parameter_declaration(function, index):
@@ -1723,20 +1722,28 @@ def _gc_paused(function):
     return paused
 
 
-@_gc_paused
-def collect_inventory(*, database: Path, root: Path, build_dir: Path, port: str,
-                      target: str, variant: str, link: dict, jobs: int = 1) -> dict:
-    """Collect all selected compiler records and join only qualified allocated owners."""
-    database_content, database_snapshot = compiler.read_input(database)
+def _predicted_inputs(directory, obj, compdb):
+    """The prerequisites the build's dependency file for ``obj`` (.d, else .P, beside it) names."""
+    for suffix in ('.d', '.P'):
+        try:
+            text = Path(obj).with_suffix(suffix).read_text(errors='surrogateescape')
+        except OSError:
+            continue
+        return [Path(directory) / path for path in compdb.first_rule(text) or ()]
+    return []
+
+
+def select_records(*, database: Path, root: Path, build_dir: Path) -> dict:
+    """Read and validate the selected compiler database once: one record per entry, with every
+    source, response operand and object output captured, and the database's completeness for the
+    selected build. Captures start a new input table for the run."""
+    compiler.clear_resolution_cache()
+    compiler.clear_replay_cache()
+    compiler.clear_input_table()
+    database_content, database_snapshot = compiler.read_recorded(database)
     root, build_dir, database = Path(root).resolve(), Path(build_dir).resolve(), Path(database).resolve()
     if not root.is_dir() or not build_dir.is_dir():
         raise ValueError('MicroPython root and selected build directory must exist')
-    if not isinstance(jobs, int) or isinstance(jobs, bool) or jobs < 1:
-        raise ValueError('inventory jobs must be a positive integer')
-    for key, value in (('port', port), ('target', target), ('variant', variant)):
-        if not isinstance(value, str) or not value.strip(): raise ValueError(f'{key} must be a nonempty build identity')
-    compiler.clear_resolution_cache()
-    compiler.clear_replay_cache()
     compdb = compiler.authority(root)
     entries = json.loads(database_content)
     if not isinstance(entries, list) or not entries:
@@ -1749,7 +1756,17 @@ def collect_inventory(*, database: Path, root: Path, build_dir: Path, port: str,
         obj = str(Path(obj).resolve())
         if obj in outputs: raise ValueError(f'ambiguous repeated selected object output: {obj}')
         outputs.add(obj)
-        _, source_snapshot = compiler.read_input(compdb.entry_file(entry))
+        source_snapshot = compiler.recorded(compdb.entry_file(entry))
+        # The source as the compiler opens it, so it is captured before any compiler run reads it.
+        compiler.recorded(Path(entry['directory']) / entry['file'])
+        # The build's own dependency record for the object predicts what pass 1 will read; capturing
+        # it now lets pass 1 start after the capture of what it reads. It is a prediction only: an
+        # input it omits is captured after pass 1, which then runs again.
+        for path in _predicted_inputs(entry['directory'], obj, compdb):
+            try:
+                compiler.recorded(path)
+            except OSError:
+                pass
         physical = source_snapshot['resolved']
         arguments = compdb.arguments_of(entry)
         response_snapshots = {}
@@ -1759,18 +1776,37 @@ def collect_inventory(*, database: Path, root: Path, build_dir: Path, port: str,
         records.append({**entry, 'object': obj, 'physical': physical, 'arguments_sha256': argv_identity,
                         'identity': physical + '::object:' + obj + '::argv:' + argv_identity,
                         '_source_snapshot': source_snapshot, '_response_snapshots': response_snapshots,
-                        '_expanded_arguments': expanded_arguments})
+                        '_expanded_arguments': expanded_arguments, '_response_inputs': response_inputs})
     completeness = compdb.completeness(entries, build_dir)
     if not completeness['complete']:
         raise ValueError('selected compiler database is incomplete: ' + json.dumps(completeness, sort_keys=True))
     records.sort(key=lambda record: record['identity'])
-    selection_inputs = compiler.reconcile_inputs([
+    inputs = compiler.reconcile_inputs([
         ('selected compiler database', {database_snapshot['path']: database_snapshot}),
         ('compiler database authority', {compdb.__mpy_api_input__['path']: compdb.__mpy_api_input__}),
-        ('selected object outputs', compiler.capture_inputs(record['object'] for record in records)),
+        ('selected object outputs', compiler.recorded_inputs(record['object'] for record in records)),
         *[(record['identity'] + ' source', {record['_source_snapshot']['path']: record['_source_snapshot']})
           for record in records],
         *[(record['identity'] + ' response operands', record['_response_snapshots']) for record in records]])
+    return {'database': database, 'database_sha256': database_snapshot['sha256'], 'root': root,
+            'build_dir': build_dir, 'compdb': compdb, 'entries': entries, 'records': records,
+            'completeness': completeness, 'inputs': inputs}
+
+
+@_gc_paused
+def collect_inventory(selection: dict, *, port: str, target: str, variant: str, link: dict, jobs: int = 1):
+    """Collect the selected compiler records and join only qualified allocated owners.
+
+    Returns the inventory and what the final verification before publication checks
+    (``compiler.verify_collection``): every consumed input snapshot and the include selection
+    constraints of every translation unit."""
+    if not isinstance(jobs, int) or isinstance(jobs, bool) or jobs < 1:
+        raise ValueError('inventory jobs must be a positive integer')
+    for key, value in (('port', port), ('target', target), ('variant', variant)):
+        if not isinstance(value, str) or not value.strip(): raise ValueError(f'{key} must be a nonempty build identity')
+    root, build_dir, database = selection['root'], selection['build_dir'], selection['database']
+    compdb, records, completeness = selection['compdb'], selection['records'], selection['completeness']
+    selection_inputs = selection['inputs']
     for package in ('tree-sitter', 'tree-sitter-c'):
         try: importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError as exc:
@@ -1783,6 +1819,7 @@ def collect_inventory(*, database: Path, root: Path, build_dir: Path, port: str,
     else:
         inputs, ownership = _extract_parallel(records, compdb, root, jobs,
                                               lambda: collect_ownership(ownership_records, link))
+    selection_constraints = compiler.merge_selection(facts.pop('_selection', ()) for facts in inputs)
     consumed_inputs = compiler.reconcile_inputs([
         ('selected compiler records', selection_inputs),
         *[(facts['translation_unit'], facts['input']['input_snapshots']) for facts in inputs],
@@ -1832,14 +1869,13 @@ def collect_inventory(*, database: Path, root: Path, build_dir: Path, port: str,
     revision = subprocess.run(['git', '-C', str(root), 'rev-parse', '--verify', 'HEAD'],
                               capture_output=True, text=True)
     source_revision = revision.stdout.strip() if revision.returncode == 0 else None
-    compiler.verify_inputs(consumed_inputs)
     for facts in inputs:
         facts['input']['input_snapshots'] = compiler.public_inputs(facts['input']['input_snapshots'])
     ownership['input_snapshots'] = compiler.public_inputs(ownership['input_snapshots'])
     inventory = {'schema_version': 1,
             'build': {'port': port, 'target': target, 'variant': variant, 'root': str(root), 'build_dir': str(build_dir),
                       'source_revision': source_revision,
-                      'compiler_database': {'path': str(database), 'sha256': database_snapshot['sha256']},
+                      'compiler_database': {'path': str(database), 'sha256': selection['database_sha256']},
                       'compdb_authority': {'path': str(Path(compdb.__file__).resolve()), 'sha256': compdb.__mpy_api_input__['sha256']},
                       'compilers': sorted({(f['input']['compiler'], f['input']['compiler_sha256']) for f in inputs}),
                       'source_inputs': dependencies, 'qstr_strings': qstrs,
@@ -1869,4 +1905,4 @@ def collect_inventory(*, database: Path, root: Path, build_dir: Path, port: str,
                            'ownership': ownership, 'binding_ownership_resolutions': raw['ownership_resolutions'],
                            'raw_bindings': raw['bindings'], 'selected_import_rows': raw['import_rows']}}
     _publish_initializers(inventory)
-    return inventory
+    return inventory, {'inputs': consumed_inputs, 'selection': selection_constraints}

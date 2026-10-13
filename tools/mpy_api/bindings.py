@@ -2,7 +2,7 @@
 from pathlib import Path
 import re
 from .frontend import canonical, constant
-from .compiler import read_input, reconcile_inputs
+from .compiler import read_recorded, reconcile_inputs
 
 
 def split_args(text):
@@ -237,7 +237,7 @@ def definitions(declarations, functions, errors, physical, directives, origins, 
         source = Path(d['source_span']['source'])
         if (str(source), d['source_span']['start_line']) in active and source.is_file():
             if source not in sources:
-                content, snapshot = read_input(source)
+                content, snapshot = read_recorded(source)
                 expected = record['dependencies'].get(str(source))
                 if expected is None or snapshot['sha256'] != expected:
                     raise RuntimeError(f'definition source differs from compiler dependency snapshot: {source}')

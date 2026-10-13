@@ -4,7 +4,7 @@ import re
 import shlex
 import subprocess
 
-from .compiler import executable, expand_arguments, read_input, capture_inputs, reconcile_inputs, verify_inputs
+from .compiler import executable, expand_arguments, read_recorded, recorded_inputs, reconcile_inputs
 from .bindings import materialize, split_args, strip_outer, row_pair, coalesce_definitions
 
 
@@ -151,11 +151,11 @@ def collect_ownership(records, link):
     nm = executable(nm_name, directory)
     objdump_name = str(Path(nm).with_name(Path(nm).name.replace('nm', 'objdump')))
     objdump = executable(objdump_name, directory)
-    map_content, map_snapshot = read_input(link['map'])
+    map_content, map_snapshot = read_recorded(link['map'])
     input_snapshots = reconcile_inputs([
         ('selected link response operands', response_snapshots),
         ('selected map', {map_snapshot['path']: map_snapshot}),
-        ('selected ELF and tools', capture_inputs([link['elf'], linker, nm, objdump]))])
+        ('selected ELF and tools', recorded_inputs([link['elf'], linker, nm, objdump]))])
     map_text = map_content.decode()
     if 'Linker script and memory map' not in map_text:
         raise ValueError(f'selected linker map lacks allocated memory map: {map_path}')
@@ -182,8 +182,8 @@ def collect_ownership(records, link):
     selected_objects = [record['object'] for record in records
                         if record['object'] in operands or record['object'] in loaded
                         or any(block['object'] == record['object'] for block in allocations)]
-    linked_inputs = capture_inputs([*(Path(directory) / path for path in [*loaded_paths, *object_operands, *script_paths]),
-                                    *selected_objects])
+    linked_inputs = recorded_inputs([*(Path(directory) / path for path in [*loaded_paths, *object_operands, *script_paths]),
+                                     *selected_objects])
     input_snapshots = reconcile_inputs([
         ('selected link artifacts/tools/response operands', input_snapshots), ('selected linked operands', linked_inputs)])
     link_inputs = {snapshot['resolved']: snapshot['sha256'] for snapshot in linked_inputs.values()}
@@ -214,7 +214,6 @@ def collect_ownership(records, link):
         objects.append({'object': {'path': obj, 'sha256': by_physical[obj]['sha256']}, 'translation_unit': record['physical'],
                         'symbols': rows, 'allocated_symbols': allocated_symbols, 'allocations': blocks})
     known = {o['object']['path'] for o in objects}
-    verify_inputs(input_snapshots)
     return {'objects': objects, 'elf_symbols': elf_symbols, 'allocations': allocations,
             'unassessed_objects': sorted({a['object'] for a in allocations} - known),
             'generated_contributions': generated_contributions,
