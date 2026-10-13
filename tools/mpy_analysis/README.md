@@ -15,7 +15,7 @@ This package supplies compiler-analysis checks, explicit MicroPython source inve
 - `sast-scope` collects manifest-selected frozen sources and optional compilation-database inputs using explicit roots and build variables.
 - `sast-run` invokes a selected external scanner with consumer-owned policy, records findings separately from operational and coverage failures, and rebases staged source locations.
 - `sast-check-fixtures` checks external positive/negative expectations using the same runner and coverage receipts.
-- `sast-sbom` generates a CycloneDX selected-source inventory and provenance/coverage receipt from the same manifest/compiler scope as SAST.
+- `sast-sbom` generates an SPDX 2.3 (default) or CycloneDX 1.6 (`--format cyclonedx`) selected-source inventory and provenance/coverage receipt from the same manifest/compiler scope as SAST.
 
 A project installs it from its MicroPython checkout, like mpremote:
 
@@ -84,7 +84,7 @@ sast-sbom --scope scope.json --micropython-root "$MPY" --output-dir build/sbom
 
 `$MPY` must match the inventory's actual manifest authority, including its version. The library root selected by `MPY_LIB_DIR` need not be the MicroPython checkout's gitlinked library; its actual repository revision is recorded. Explicit roots can also name separately versioned locally frozen libraries. Only `runtime_frozen_python` and compiler-evidenced `native` records enter this SBOM; other groups are reported as unassessed.
 
-The Python API is `generate_sbom(scope, *, micropython_root, declaration_files=(), build_receipt=None, posthoc_link_inventory=None, link_generation=None)` in `mpy_analysis.sbom`, returning `(document, receipt)`. The CLI writes schema-validated CycloneDX 1.6 `sbom.json` and `sbom-summary.json`, deterministically and without network access. Selected source files retain SHA-256 hashes and dependency ownership. Actual Git roots/submodules retain their origin, revision, tracked state and gitlink evidence. Git revisions identify checkout state, not release versions. Multiple compiler actions remain distinct receipt rows without duplicating their source file; frozen import aliases remain distinct identities.
+The Python API is `generate_sbom(scope, *, micropython_root, declaration_files=(), build_receipt=None, posthoc_link_inventory=None, link_generation=None)` in `mpy_analysis.sbom`, returning `(document, receipt)` where `document` is the CycloneDX 1.6 graph. The CLI writes a schema-validated SPDX 2.3 `sbom.spdx.json` by default, or CycloneDX 1.6 `sbom.json` with `--format cyclonedx`, plus `sbom-summary.json` (which records `document_format` and `document_file`), deterministically and without network access; a previous document of either format is removed before a run. Selected source files retain SHA-256 hashes and dependency ownership. Actual Git roots/submodules retain their origin, revision, tracked state and gitlink evidence. Git revisions identify checkout state, not release versions. Multiple compiler actions remain distinct receipt rows without duplicating their source file; frozen import aliases remain distinct identities.
 
 ### Firmware build receipts
 
