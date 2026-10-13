@@ -68,6 +68,10 @@ The SBOM contains each final ELF as a `firmware` component (SPDX package with pu
 
 SPDX 2.3 requires a SHA-1 checksum on every file element. Source files and linked C library files are hashed with SHA-1 as well as SHA-256 from the bytes on disk (a C library file must still match the receipt SHA-256, otherwise generation fails). Any component that has no SHA-1, such as a runtime file that is no longer readable, is written as an SPDX package, never as a file without SHA-1, and `validate_spdx` rejects a file element lacking one.
 
+## Policy gate
+
+`sast-sbom` exits 0 for a valid partial result. `sast-sbom-policy --summary sbom-summary.json --receipt receipt.json --profile firmware-linked|firmware-complete` is the separate CI check over the summary. With `--receipt` it validates the receipt with `validate_firmware_receipt` (identity, schema and current artifact hashes) and requires the summary's `link_closure` `schema`, `receipt_id`, `build_id`, images and ELF hashes, and the summary's target, variant and port, to match it; any mismatch is invalid input (exit 2). `firmware-linked` requires `firmware_completeness: established` and a complete link closure; `firmware-complete` additionally requires accounted sources, no gap of any kind and complete required metadata. See the README section "Completeness policy".
+
 ## Posthoc published linker inventories
 
 The consumer can also read a qualified schema-v1 mpy-api inventory with `--link-inventory`; it verifies the generation artifact hash and current ELF, map, linker, link operands, compiler objects and contributing sources against `build.consumed_inputs`. Ownership records are used only to create source edges when the exact source path and hash match a selected SBOM source. The image is labelled `posthoc-incomplete`, and the summary retains unresolved inputs, unassessed objects, unmapped sources and explicit limits.

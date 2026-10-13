@@ -16,6 +16,7 @@ This package supplies compiler-analysis checks, explicit MicroPython source inve
 - `sast-run` invokes a selected external scanner with consumer-owned policy, records findings separately from operational and coverage failures, and rebases staged source locations.
 - `sast-check-fixtures` checks external positive/negative expectations using the same runner and coverage receipts.
 - `sast-sbom` generates an SPDX 2.3 (default) or CycloneDX 1.6 (`--format cyclonedx`) selected-source inventory and provenance/coverage receipt from the same manifest/compiler scope as SAST.
+- `sast-sbom-policy` judges an `sbom-summary.json` (and optionally its firmware receipt) against a named completeness profile and exits non-zero unless the profile is satisfied.
 
 A project installs it from its MicroPython checkout, like mpremote:
 
@@ -152,6 +153,24 @@ The typing object can explicitly opt into `common_models` families `input`, `eva
 Declarations combine across all discovered configs. Each selected provided source/sink kind must be declared on its matching side and occur on that side in at least one ordinary `rules` entry. App-owned kinds, model extensions, filters and unrelated engine settings remain engine-owned. `string_combine_rules` and `combined_source_rules` are preserved when ordinary participation suffices; if selected-kind validation needs these forms, the resolver fails naming the unsupported form. This check does not establish effective rule pairings, filter effects, source reachability, model signature validity or target completeness. Execution-only composition can use an explicit application source; its useful flows require actual engine qualification. Pysa runner composition occurs only after the unchanged typing compatibility gate and Pyrefly export; the production branch is not accepted without supported real-runner and missing-import admission evidence.
 
 Interfile and typing runs stage only selected sources. Frozen Python uses its import identity; other interfile inputs use `_roots/<root>/<path>`. Traversal, file/directory collisions and different physical files claiming the same destination fail rather than overwrite. SARIF source locations become actual source `file:` URIs, including external roots; Pysa JSON path fields become actual source paths. Rebasing matches exact source locations only, never message text, snippets or arbitrary string suffixes. Partial valid JSON reports are rebased even when the tool exits operationally unsuccessfully.
+
+### Completeness policy
+
+`sast-sbom` exits 0 for any valid partial result and records what it could not account for in `sbom-summary.json`. `sast-sbom-policy` (`python -m mpy_analysis.sbom_policy`) is the separate gate for CI. It reads only that summary, never the SBOM document, and does not regenerate anything:
+
+```sh
+sast-sbom-policy --summary build/sbom/sbom-summary.json \
+    --receipt firmware-build-receipt.json --profile firmware-complete
+```
+
+A JSON result is always printed on standard output. Each dimension carries `required`, `status` (`satisfied`, `unsatisfied`, or `not-applicable` when the profile does not require it), `observed` (what the summary shows regardless of the profile) and numeric `evidence`: gaps by kind and field, per-image link closure with unmapped bindings and unresolved inputs, selected sources accounted against the total, and required metadata fields known against the total.
+
+| Profile | Requires |
+|---|---|
+| `firmware-complete` | `firmware_completeness` established, link closure complete, `source_accounting` accounted, no gap of any kind, `metadata_completeness` complete |
+| `firmware-linked` | `firmware_completeness` established and link closure complete; metadata and other gaps are reported but do not fail |
+
+Exit status is 0 when the profile is satisfied, 1 when a requirement is not, and 2 for input that cannot be judged: an unreadable file, a `schema_version` the tool does not know, an unknown profile, a summary that contradicts itself (for example `established` with an incomplete link closure or a blocking gap), or a receipt that fails `mpy-firmware-build/v1` validation, is stale on disk, or does not match the summary's receipt id, build id, target, variant, port and image hashes. With `--receipt`, the receipt is validated with the same checks `sast-sbom` applies, including current artifact hashes, so the gate must run where the build outputs still exist. Profiles and dimensions are data in `mpy_analysis/sbom_policy.py`.
 
 ### Results and failure contract
 
