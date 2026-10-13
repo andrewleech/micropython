@@ -25,11 +25,12 @@
  */
 
 // The bootloader side of the mboot_port.h implementation for the stm32 port (mboot_port.c has the
-// part both roles use). The bootloader runs on the clock, SysTick, pin, USB and flash services
-// of the port: SystemClock_Config() with the board's MICROPY_HW_CLK_* values, the HAL tick,
-// mp_hal_pin_config() (ports/stm32/mboot/gpio.c) and mp_usbd_ll_init() (usbd_conf.c), so a board
-// needs only the settings its application already has. mboot_port_deinit() puts back what the
-// bootloader changed, so the application starts from the state a reset leaves.
+// part both roles use). The bootloader runs on the clock, SysTick, pin, UART, USB and flash
+// services of the port: SystemClock_Config() with the board's MICROPY_HW_CLK_* values, the HAL
+// tick, the pin objects of the board and mp_hal_pin_config() (mphalport_hw.c), uart_init_tx() and
+// uart_tx_strn() (uart.c, without its runtime parts) and mp_usbd_ll_init() (usbd_conf.c), so a
+// board needs only the settings its application already has. mboot_port_deinit() puts back what
+// the bootloader changed, so the application starts from the state a reset leaves.
 //
 // The STM32H5 bootloader runs with TZEN=0 on the non-secure register aliases.
 
@@ -39,7 +40,7 @@
 #include "py/mphal.h"
 #include "boardctrl.h"
 #include "powerctrl.h"
-#include "pin_static_af.h"
+#include "uart.h"
 
 #include "mcuboot_config/mcuboot_config.h"
 #include "mcuboot_config/mcuboot_logging.h"
@@ -55,18 +56,22 @@
 #define MICROPY_HW_MBOOT_CACHE (1)
 #endif
 
+// The pin objects of the board (pins_<BOARD>.c) refer to the types of the pin classes of the
+// application. The bootloader has no classes; the objects only need an address to point to.
+const mp_obj_type_t pin_type;
+const mp_obj_type_t pin_af_type;
+const mp_obj_type_t pin_analog_type;
+
 // The LEDs, USER button and log UART come from the board file (mpconfigboard.h), the same ones
-// the application uses, with pins named pin_<port><number> (mboot/mphalport.h):
+// the application uses, with pins named pin_<port><number> (genhdr/pins.h):
 //   MICROPY_HW_LED1, _LED2, _LED3   alive, USB active and error (bits 0 to 2 of
 //                                   mboot_port_led()); MICROPY_HW_LED_ON(pin) and
 //                                   MICROPY_HW_LED_OFF(pin) give the polarity
 //   MICROPY_HW_USRSW_PIN            forced entry while the input reads MICROPY_HW_USRSW_PRESSED
 //                                   (0 or 1), with the pull MICROPY_HW_USRSW_PULL
-//   MICROPY_HW_UART_REPL            the log UART (when MICROPY_MBOOT_LOG_LEVEL > 0). It must be
-//                                   USART3 (PYB_UART_3), at MICROPY_HW_UART_REPL_BAUD on the pin
-//                                   MICROPY_HW_UART3_TX; a board without a log UART sets
+//   MICROPY_HW_UART_REPL            the log UART (when MICROPY_MBOOT_LOG_LEVEL > 0), at
+//                                   MICROPY_HW_UART_REPL_BAUD; a board without a log UART sets
 //                                   MICROPY_MBOOT_LOG_LEVEL 0
-#define PYB_UART_3 (3)
 
 #ifndef MICROPY_HW_LED1
 #error "the board file does not define MICROPY_HW_LED1 (the bootloader shows alive on it)"
@@ -99,12 +104,6 @@
 #ifndef MICROPY_HW_UART_REPL_BAUD
 #error "the board file does not define MICROPY_HW_UART_REPL_BAUD"
 #endif
-#if MICROPY_HW_UART_REPL != PYB_UART_3
-#error "the bootloader's log UART driver is USART3: MICROPY_HW_UART_REPL has to be PYB_UART_3"
-#endif
-#ifndef MICROPY_HW_UART3_TX
-#error "the board file does not define MICROPY_HW_UART3_TX"
-#endif
 #endif
 
 // The GPIO ports are the first bits of the AHB enable and reset registers: AHB2 on STM32H5, AHB1
@@ -112,11 +111,9 @@
 #if defined(STM32H5)
 #define GPIO_CLK_ENR (RCC->AHB2ENR)
 #define GPIO_RSTR (RCC->AHB2RSTR)
-#define UART_TXE_FLAG (USART_ISR_TXE_TXFNF)
 #else
 #define GPIO_CLK_ENR (RCC->AHB1ENR)
 #define GPIO_RSTR (RCC->AHB1RSTR)
-#define UART_TXE_FLAG (USART_ISR_TXE)
 #endif
 #if defined(GPIOK)
 #define GPIO_PORTS (11)
@@ -129,22 +126,12 @@
 #endif
 #define GPIO_PORTS_MASK ((1u << GPIO_PORTS) - 1)
 
-// Bounded busy-wait loop count of the log UART, in iterations.
-#define UART_WAIT_LOOPS (200000)
-
 // ---- state ----
 
 extern const uint32_t g_pfnVectors[];
 
-#if defined(STM32H5)
-// The unique ID of the STM32H5 cannot be read while the instruction cache is enabled. It is copied
-// before the cache is enabled, to the buffer that MP_HAL_UNIQUE_ID_ADDRESS names.
-uint8_t mp_hal_unique_id_address[12];
-#endif
-
 static uint32_t s_rsr;
 static bool s_started;
-static bool s_uart_ready;
 
 // Register values at entry, which mboot_port_deinit() writes back.
 static struct {
@@ -238,23 +225,16 @@ void mboot_port_led(uint32_t mask) {
 
 #if MICROPY_MBOOT_LOG_LEVEL > 0
 
-static void uart_init(void) {
-    mp_hal_pin_config_alt_static(MICROPY_HW_UART3_TX, MP_HAL_PIN_MODE_ALT, MP_HAL_PIN_PULL_NONE, STATIC_AF_USART3_TX);
-    __HAL_RCC_USART3_CLK_ENABLE();
-    USART3->CR1 = 0;
-    // The USART3 kernel clock is PCLK1 (reset selection).
-    USART3->BRR = (HAL_RCC_GetPCLK1Freq() + MICROPY_HW_UART_REPL_BAUD / 2) / MICROPY_HW_UART_REPL_BAUD;
-    USART3->CR1 = USART_CR1_TE | USART_CR1_UE;
-    s_uart_ready = true;
-}
+// The UART of the console of the application (MICROPY_HW_UART_REPL), from uart.c without its
+// runtime parts (MICROPY_HW_UART_NO_RUNTIME). timeout_char bounds the wait for each character.
+static machine_uart_obj_t s_uart = {
+    .uart_id = MICROPY_HW_UART_REPL,
+    .timeout_char = 10,
+};
+static bool s_uart_ready;
 
-static void uart_putc(char c) {
-    for (uint32_t n = UART_WAIT_LOOPS; n != 0; n--) {
-        if (USART3->ISR & UART_TXE_FLAG) {
-            USART3->TDR = (uint8_t)c;
-            return;
-        }
-    }
+static void uart_start(void) {
+    s_uart_ready = uart_init_tx(&s_uart, MICROPY_HW_UART_REPL_BAUD);
 }
 
 #endif
@@ -264,11 +244,18 @@ void mboot_port_log_write(const char *s, size_t n) {
     if (!s_uart_ready) {
         return;
     }
-    for (size_t i = 0; i < n; i++) {
-        if (s[i] == '\n') {
-            uart_putc('\r');
+    while (n > 0) {
+        size_t len = 0;
+        while (len < n && s[len] != '\n') {
+            len++;
         }
-        uart_putc(s[i]);
+        uart_tx_strn(&s_uart, s, len);
+        if (len < n) {
+            uart_tx_strn(&s_uart, "\r\n", 2);
+            len++;
+        }
+        s += len;
+        n -= len;
     }
     #else
     (void)s;
@@ -338,7 +325,7 @@ void mboot_port_early_init(void) {
     mboot_port_led(0);
 
     #if MICROPY_MBOOT_LOG_LEVEL > 0
-    uart_init();
+    uart_start();
     #endif
 
     s_started = true;
@@ -396,9 +383,12 @@ void mboot_port_deinit(void) {
     GPIO_RSTR = 0;
     // The board hook sets state that is meant to outlive the bootloader (see mboot_board_hook()).
     mboot_board_hook();
-    __HAL_RCC_USART3_FORCE_RESET();
-    __HAL_RCC_USART3_RELEASE_RESET();
-    s_uart_ready = false;
+    #if MICROPY_MBOOT_LOG_LEVEL > 0
+    if (s_uart_ready) {
+        uart_deinit(&s_uart);
+        s_uart_ready = false;
+    }
+    #endif
     #if !defined(STM32H5) && defined(MICROPY_HW_MBOOT_SPIFLASH_ADDR) && defined(RCC_AHB3RSTR_QSPIRST)
     // The early init of the board may have set up the QUADSPI of a second SPI flash.
     RCC->AHB3RSTR = RCC_AHB3RSTR_QSPIRST;

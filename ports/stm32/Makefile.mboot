@@ -48,9 +48,6 @@ MBOOT_DEV_DIR = $(CURDIR)
 MBOOT_CPP_FLAGS = $(CFLAGS_MCU_$(MCU_SERIES)) -D$(CMSIS_MCU) -I$(TOP)/lib/CMSIS_6/CMSIS/Core/Include -I$(STM32LIB_CMSIS_ABS)/Include -I$(TOP)/ports/stm32
 include $(TOP)/shared/mboot/mboot_common.mk
 
-# mboot/ comes first: py/mphal.h includes the mphalport.h of mboot, which also names the pins of
-# the board file.
-INC += -Imboot
 INC += -I.
 INC += -I$(TOP)
 INC += -I$(BUILD)
@@ -65,20 +62,23 @@ CFLAGS += -D$(CMSIS_MCU) -DUSE_FULL_LL_DRIVER
 CFLAGS += $(CFLAGS_MCU_$(MCU_SERIES))
 CFLAGS += -DBOARD_$(BOARD) -DBUILDING_MBOOT=1 -DMICROPY_HW_STM32WB_FLASH_SYNCRONISATION=0 -DSTM32_HAL_H='<stm32$(MCU_SERIES)xx_hal.h>'
 CFLAGS += $(MBOOT_CFLAGS)
+CFLAGS += -DMICROPY_HW_UART_NO_RUNTIME=1
 
 # SRAM linker symbols, from the CMSIS header.
 MBOOT_SRAM_LD = $(BUILD)/mboot_sram.ld
 MBOOT_CMSIS_H = stm32$(MCU_SERIES)xx.h
 
 # The services of the port that the application also uses: the clock configuration, the flash
-# driver, the USB hardware setup and serial number.
+# driver, the pin and UART drivers, the USB hardware setup and serial number. uart.c has no
+# runtime parts here (MICROPY_HW_UART_NO_RUNTIME).
 SRC_C = \
 	mboot_boot.c \
 	mboot_port.c \
 	system_stm32.c \
 	powerctrlboot.c \
 	flash.c \
-	mboot/gpio.c \
+	mphalport_hw.c \
+	uart.c \
 	shared/libc/string0.c \
 	$(MBOOT_SRC_C)
 
@@ -93,6 +93,7 @@ endif
 SRC_HAL = $(STM32LIB_HAL_BASE)/Src/stm32$(MCU_SERIES)xx_hal.c
 SRC_HAL += $(addprefix $(STM32LIB_HAL_BASE)/Src/stm32$(MCU_SERIES)xx_hal_, \
 	cortex.c rcc.c rcc_ex.c pwr.c pwr_ex.c flash.c flash_ex.c)
+SRC_HAL += $(STM32LIB_HAL_BASE)/Src/stm32$(MCU_SERIES)xx_ll_rcc.c
 ifeq ($(MCU_SERIES),h5)
 SRC_HAL += $(STM32LIB_HAL_BASE)/Src/stm32h5xx_hal_icache.c
 endif
@@ -126,12 +127,15 @@ endif
 SRC_O = \
 	$(STARTUP_FILE) \
 	$(SYSTEM_FILE) \
-	resethandler.o
+	resethandler.o \
+	pins_$(BOARD).o
 
 include $(TOP)/shared/mboot/mboot_bootloader.mk
 
 #########################################
-# The pin names of the board file (pin_B0 and the aliases of its pins.csv), as in mboot
+# The pin objects of the board, as in the application. The bootloader has no runtime, so the
+# qstr header only numbers the names that the pin tables use, and the source of the pin tables
+# is built like any other.
 
 MAKE_PINS = boards/make-pins.py
 PREFIX_FILE = boards/stm32f4xx_prefix.c
@@ -141,25 +145,29 @@ GEN_PINS_SRC = $(BUILD)/pins_$(BOARD).c
 GEN_PINS_HDR = $(HEADER_BUILD)/pins.h
 GEN_PINS_AF_CONST = $(HEADER_BUILD)/pins_af_const.h
 GEN_PINS_AF_DEFS = $(HEADER_BUILD)/pins_af_defs.h
+GEN_QSTRDEFS_GENERATED = $(HEADER_BUILD)/qstrdefs.generated.h
+GEN_ROOT_POINTERS = $(HEADER_BUILD)/root_pointers.h
 
-$(OBJ): $(GEN_PINS_AF_DEFS)
+$(OBJ): $(GEN_PINS_AF_DEFS) $(GEN_QSTRDEFS_GENERATED) $(GEN_ROOT_POINTERS)
 
 $(HEADER_BUILD):
 	$(MKDIR) -p $@
-
-# The sources of the port and the SPI flash drivers include py/mperrno.h, py/obj.h and the like,
-# which include the runtime headers that need the generated qstr and root pointer headers. The
-# bootloader has no runtime, so they are empty.
-GEN_QSTRDEFS_GENERATED = $(HEADER_BUILD)/qstrdefs.generated.h
-GEN_ROOT_POINTERS = $(HEADER_BUILD)/root_pointers.h
-$(OBJ): $(GEN_QSTRDEFS_GENERATED) $(GEN_ROOT_POINTERS)
-
-$(GEN_QSTRDEFS_GENERATED) $(GEN_ROOT_POINTERS): | $(HEADER_BUILD)
-	$(Q)echo "// empty" > $@
 
 $(GEN_PINS_AF_DEFS): $(BOARD_PINS) $(MAKE_PINS) $(AF_FILE) $(PREFIX_FILE) | $(HEADER_BUILD)
 	$(ECHO) "GEN $@"
 	$(Q)$(PYTHON) $(MAKE_PINS) --board-csv $(BOARD_PINS) --af-csv $(AF_FILE) --prefix $(PREFIX_FILE) \
 		--output-source $(GEN_PINS_SRC) --output-header $(GEN_PINS_HDR) \
-		--output-af-const $(GEN_PINS_AF_CONST) --output-af-defs $(GEN_PINS_AF_DEFS) \
-		--mboot-mode
+		--output-af-const $(GEN_PINS_AF_CONST) --output-af-defs $(GEN_PINS_AF_DEFS)
+
+$(GEN_QSTRDEFS_GENERATED): $(GEN_PINS_AF_DEFS) $(GEN_ROOT_POINTERS)
+	$(ECHO) "GEN $@"
+	$(Q)$(CC) -E -DNO_QSTR $(CFLAGS) $(GEN_PINS_SRC) | grep -o 'MP_QSTR_[A-Za-z0-9_]*' | sort -u | \
+		$(SED) -e 's/\(MP_QSTR_\(.*\)\)/QDEF0(\1, 0, 0, "\2")/' > $@
+
+$(GEN_ROOT_POINTERS): | $(HEADER_BUILD)
+	$(Q)echo "// empty" > $@
+
+$(GEN_PINS_SRC): $(GEN_PINS_AF_DEFS)
+
+$(BUILD)/pins_$(BOARD).o: $(GEN_PINS_SRC)
+	$(call compile_c)
