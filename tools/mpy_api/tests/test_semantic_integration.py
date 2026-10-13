@@ -1030,7 +1030,7 @@ def test_verbose_parser_terminal_literal_payload_preserves_public_contracts(tmp_
     diagnostic_path.write_text(json.dumps({
         "mutation": mutation, "raw_semantics": function["semantics"], "public_symbol": symbol,
         "source_returns": function["events"]["returns"], "emitted": text,
-    }, indent=2, sort_keys=True) + "\n")
+    }, indent=2, sort_keys=True, default=list) + "\n")
     if qualified:
         assert symbol["callshape"]["parameters_resolution"] == "resolved"
         public_parameter = symbol["semantics"]["public_parameters"][0]

@@ -1,25 +1,32 @@
-"""Extraction pauses automatic cyclic collection and reclaims each record's garbage explicitly."""
+"""Extraction runs without automatic cyclic collection and leaves no cyclic garbage to collect."""
 import gc
-import weakref
 
 import pytest
 
 from mpy_api import inventory
+from mpy_api.frontend import syntax_adapter
+from mpy_api.semantics import semantics
 
 
-class Cycle:
-    """An object that is only reclaimable by the cyclic collector."""
-    def __init__(self):
-        self.me = self
+SOURCE = """typedef struct { int qst; int flags; int defval; } mp_arg_t;
+int helper(int value);
+int table[2][2] = { { 1, 2 }, { 3, 4 } };
+static int probe(int value, int mode) {
+    static const mp_arg_t allowed[] = { { .qst = 1, .flags = 2, .defval = 3 } };
+    int total = value;
+    for (int i = 0; i < mode; i++) { total = total + helper(i); }
+    if (mode == 1) { return helper(total); } else if (mode == 2) { total = (total + 1) * 2; } else { return 0; }
+    while (total > 3) { if (total & 1) { break; } total--; }
+    return total;
+}
+"""
 
 
 @pytest.fixture(autouse=True)
 def restore_gc():
-    enabled, frozen = gc.isenabled(), gc.get_freeze_count()
+    enabled = gc.isenabled()
     yield
-    gc.unfreeze()
     gc.enable() if enabled else gc.disable()
-    assert gc.isenabled() == enabled and frozen == 0
 
 
 def test_gc_paused_disables_inside_and_restores_enabled_state():
@@ -49,19 +56,6 @@ def test_gc_paused_returns_result_and_passes_arguments():
     assert inventory._gc_paused(lambda *args, **kwargs: (args, kwargs))(1, key=2) == ((1,), {'key': 2})
 
 
-def test_gc_paused_unfreezes_what_the_function_froze_but_not_earlier_freezes():
-    kept = [object()]
-    inventory._gc_paused(lambda: gc.freeze())()
-    assert gc.get_freeze_count() == 0
-    gc.freeze()
-    before = gc.get_freeze_count()
-    assert before > 0
-    inventory._gc_paused(lambda: gc.freeze())()
-    assert gc.get_freeze_count() >= before
-    gc.unfreeze()
-    assert kept
-
-
 def test_serial_extraction_preserves_order_and_results(monkeypatch):
     calls = []
 
@@ -73,52 +67,34 @@ def test_serial_extraction_preserves_order_and_results(monkeypatch):
     results = inventory._gc_paused(lambda: inventory._extract_serial(records, None, '/root'))()
     assert calls == list(range(7))
     assert results == [{'index': index, 'nested': [index] * 3, 'root': '/root'} for index in range(7)]
-    assert gc.get_freeze_count() == 0
 
 
-def test_serial_extraction_reclaims_cyclic_garbage_without_automatic_collection(monkeypatch):
-    references = []
-
-    def fake(record, compdb, root):
-        garbage = Cycle()
-        references.append(weakref.ref(garbage))
-        return {'index': record['index']}
-    monkeypatch.setattr(inventory, '_extract', fake)
-
-    def run():
-        records = [{'index': index} for index in range(5)]
-        results = inventory._extract_serial(records, None, None)
-        assert not gc.isenabled()
-        return results
-    inventory._gc_paused(run)()
-    assert len(references) == 5 and all(reference() is None for reference in references)
-
-
-def test_serial_extraction_keeps_live_results_reachable_after_freezing(monkeypatch):
-    monkeypatch.setattr(inventory, '_extract', lambda record, compdb, root: {'items': [Cycle(), Cycle()], 'index': record['index']})
-
-    def run():
-        results = inventory._extract_serial([{'index': 0}, {'index': 1}], None, None)
-        gc.collect()
-        return results
-    results = inventory._gc_paused(run)()
-    gc.collect()
-    assert [result['index'] for result in results] == [0, 1]
-    assert all(item.me is item for result in results for item in result['items'])
-
-
-def test_worker_disables_collection_and_collects_before_each_record(monkeypatch):
-    references = []
-
-    def fake(record, compdb, root):
-        garbage = Cycle()
-        references.append(weakref.ref(garbage))
-        return gc.isenabled()
-    monkeypatch.setattr(inventory, '_extract', fake)
+def test_worker_runs_extraction_with_collection_disabled(monkeypatch):
+    monkeypatch.setattr(inventory, '_extract', lambda record, compdb, root: (record['index'], gc.isenabled()))
     monkeypatch.setattr(inventory, '_EXTRACTION', ([{'index': 0}, {'index': 1}], None, None))
     gc.enable()
-    first = inventory._extract_worker(0)
-    assert first == (True, False, None) and not gc.isenabled()
-    assert references[0]() is not None
-    inventory._extract_worker(1)
-    assert references[0]() is None
+    assert inventory._extract_worker(1) == (True, (1, False), None)
+    assert not gc.isenabled()
+
+
+def analyse():
+    physical = '/fixture/gc.c'
+    origins = [(physical, line) for line in range(1, len(SOURCE.splitlines()) + 1)]
+    declarations, functions, errors, frontend = syntax_adapter(
+        SOURCE, origins, physical, {'dependencies': {physical: 'fixture'}, 'project_dependencies': [physical]})
+    assert not errors
+    by_name = {}
+    for function in functions:
+        by_name.setdefault(function['name'], []).append(function)
+    summaries = [semantics(function, by_name, errors, {}) for function in functions]
+    return declarations, functions, frontend, summaries
+
+
+def test_frontend_and_semantics_leave_no_cyclic_garbage():
+    gc.disable()
+    analyse()  # warm module-level caches (compiled patterns, parser language)
+    gc.collect()
+    declarations, functions, frontend, summaries = analyse()
+    assert functions and summaries
+    del declarations, functions, frontend, summaries
+    assert gc.collect() == 0

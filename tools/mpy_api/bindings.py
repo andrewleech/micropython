@@ -34,17 +34,24 @@ def errors_at(facts, location):
 
 
 def strip_outer(expression, left='(', right=')'):
+    """Remove ``left``/``right`` token pairs that enclose the whole remaining expression.
+
+    A leading ``left`` encloses the rest when the nesting level it opens first closes at the final
+    token, or never closes in unbalanced text."""
     tokens = expression.split()
-    while len(tokens) >= 2 and tokens[0] == left and tokens[-1] == right:
-        depth = 0
-        enclosing = True
-        for index, token in enumerate(tokens):
-            if token == left: depth += 1
-            elif token == right: depth -= 1
-            if depth == 0 and index != len(tokens) - 1: enclosing = False; break
-        if not enclosing: break
-        tokens = tokens[1:-1]
-    return ' '.join(tokens)
+    count = len(tokens)
+    # First token at which the nesting level opened by each ``left`` closes again.
+    closer, open_positions = {}, []
+    for index, token in enumerate(tokens):
+        if token == left:
+            open_positions.append(index)
+        elif token == right and open_positions:
+            closer[open_positions.pop()] = index
+    stripped = 0
+    while (count - 2 * stripped >= 2 and tokens[stripped] == left and tokens[count - 1 - stripped] == right
+           and closer.get(stripped, count) >= count - 1 - stripped):
+        stripped += 1
+    return ' '.join(tokens[stripped:count - stripped])
 
 
 def address_reference(expression):
@@ -62,15 +69,16 @@ def address_reference(expression):
     return None
 
 
-def initializer_members(initializer):
+def initializer_members(nodes, initializer):
+    """Designated members of an initializer list, resolved through the owner's ``initializer_nodes``."""
     members = {}
     if not initializer or initializer.get('syntax_kind') != 'initializer_list':
         return members
-    for field in initializer.get('fields', []):
-        designators = field.get('designators', [])
+    for field in (nodes[position] for position in initializer.get('fields', [])):
+        designators = [nodes[position] for position in field.get('designators', [])]
         match = re.fullmatch(r'\. (\w+)', designators[0]['expression']) if len(designators) == 1 else None
         if field.get('syntax_kind') == 'initializer_pair' and match:
-            members.setdefault(match[1], []).append(field.get('value'))
+            members.setdefault(match[1], []).append(nodes[field['value']] if field.get('value') is not None else None)
     return {name: values[0] for name, values in members.items() if len(values) == 1 and values[0] is not None}
 
 
@@ -104,15 +112,16 @@ def wrapper(declaration, interfaces=(), contracts=None):
     contracts = contracts or {}
     type_name = declaration.get('type_expression')
     initializer = declaration.get('initializer')
-    members = initializer_members(initializer)
-    positional = initializer.get('fields', []) if initializer else []
+    nodes = declaration.get('initializer_nodes', [])
+    members = initializer_members(nodes, initializer)
+    positional = [nodes[position] for position in initializer.get('fields', [])] if initializer else []
     base = members.get('base') or (positional[0] if positional and positional[0].get('syntax_kind') == 'initializer_list' else None)
-    base_members = initializer_members(base)
-    base_fields = base.get('fields', []) if base else []
+    base_members = initializer_members(nodes, base)
+    base_fields = [nodes[position] for position in base.get('fields', [])] if base else []
     base_type = base_members.get('type') or (base_fields[0] if len(base_fields) == 1 else None)
     reference = address_reference(base_type['expression']) if base_type else None
     function = members.get('fun')
-    functions = initializer_members(function)
+    functions = initializer_members(nodes, function)
     if type_name == 'mp_obj_fun_builtin_fixed_t':
         fixed = re.fullmatch(r'mp_type_fun_builtin_([0123])', reference or '')
         if not fixed:
@@ -244,6 +253,7 @@ def definitions(declarations, functions, errors, physical, directives, origins, 
         value['declarator_expression'] = d.get('declarator_expression')
         value['initialization_status'] = 'initialized' if d.get('initializer') is not None else 'tentative'
         value['initializer_rows'] = d.get('initializer_rows', [])
+        value['initializer_nodes'] = d.get('initializer_nodes', [])
         value['array_dimensions'] = d.get('array_dimensions', [])
         value['constant_environment'] = d.get('initializer_constants', {})
         value['translation_unit'] = physical
@@ -280,18 +290,19 @@ def definitions(declarations, functions, errors, physical, directives, origins, 
             interfaces = record.get('frontend', {}).get('aggregate_interfaces', [])
             type_name = d.get('type_expression')
             members = {}
-            for field in d.get('initializer', {}).get('fields', []):
-                designators = field.get('designators', [])
+            nodes = d.get('initializer_nodes', [])
+            for field in (nodes[position] for position in d.get('initializer', {}).get('fields', [])):
+                designators = [nodes[position] for position in field.get('designators', [])]
                 match = re.fullmatch(r'\. (\w+)', designators[0]['expression']) if len(designators) == 1 else None
                 if field.get('syntax_kind') != 'initializer_pair' or not match:
                     value['unresolved'].append('type initializer member designator unassessed')
                     continue
-                members.setdefault(match[1], []).append(field.get('value'))
+                members.setdefault(match[1], []).append(nodes[field['value']] if field.get('value') is not None else None)
             fields = {name: rows[0] for name, rows in members.items() if len(rows) == 1 and rows[0] is not None}
             if any(len(rows) != 1 for rows in members.values()):
                 value['unresolved'].append('repeated type initializer member assignments unassessed')
             vector = fields.get('slots')
-            operands = vector.get('fields', []) if vector and vector.get('syntax_kind') == 'initializer_list' else []
+            operands = [nodes[position] for position in vector.get('fields', [])] if vector and vector.get('syntax_kind') == 'initializer_list' else []
             ordinary = vector is None or (vector.get('syntax_kind') == 'initializer_list' and all(
                 operand.get('syntax_kind') != 'initializer_pair' for operand in operands))
             slots = []
@@ -332,7 +343,7 @@ def definitions(declarations, functions, errors, physical, directives, origins, 
             if value['type_flags_value'] is None:
                 value['unresolved'].append('selected type flags storage/constant interpretation unassessed')
         elif 'mp_obj_module_t' in prefix and '. globals =' in d['expression']:
-            members = initializer_members(d.get('initializer'))
+            members = initializer_members(d.get('initializer_nodes', []), d.get('initializer'))
             globals_expression = members.get('globals', {}).get('expression', '')
             globals_reference = address_reference(globals_expression)
             value.update({'kind': 'module', 'dictionary_refs': [globals_reference] if globals_reference else []})

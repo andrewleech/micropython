@@ -15,6 +15,8 @@ import subprocess
 import sys
 import tempfile
 
+from .structure import json_pieces
+
 
 # Canonical JSON is compact, key-sorted and ASCII-only (valid UTF-8 for any str, lone surrogates
 # included). With no ``indent`` the encoder runs its C implementation.
@@ -23,30 +25,14 @@ _SPLIT_DEPTH = 4
 _BLOCK_CHARS = 1 << 20
 
 
-def canonical_chunks(value, depth=0):
-    """Yield the canonical JSON text of ``value`` in pieces whose concatenation is ``_ENCODER.encode(value)``.
+def canonical_chunks(value):
+    """An iterator over the canonical JSON text of ``value`` in pieces whose concatenation is
+    ``_ENCODER.encode(value)``.
 
-    Non-empty containers down to ``_SPLIT_DEPTH`` are walked here, in sorted key order for
-    dicts whose keys are all ``str``; every other value is encoded whole by the C encoder, so
-    the text held at once is bounded by the largest value at that depth."""
-    if depth < _SPLIT_DEPTH and value:
-        if isinstance(value, dict) and all(isinstance(key, str) for key in value):
-            separator = "{"
-            for key in sorted(value):
-                yield separator + _ENCODER.encode(key) + ":"
-                separator = ","
-                yield from canonical_chunks(value[key], depth + 1)
-            yield "}"
-            return
-        if isinstance(value, (list, tuple)):
-            separator = "["
-            for item in value:
-                yield separator
-                separator = ","
-                yield from canonical_chunks(item, depth + 1)
-            yield "]"
-            return
-    yield _ENCODER.encode(value)
+    Containers above ``_SPLIT_DEPTH`` are walked with an explicit stack (``json_pieces``), so pieces
+    are bounded by the containers from ``_SPLIT_DEPTH`` down; those are encoded whole by the C encoder
+    unless they are too high for its recursion, in which case they are walked as well."""
+    return json_pieces(value, _ENCODER, _SPLIT_DEPTH)
 
 
 def _blocks(pieces):
@@ -77,7 +63,7 @@ def write_canonical(value, stream):
 
 def canonical_bytes(value):
     """Canonical JSON bytes of a value small enough to hold whole."""
-    return (_ENCODER.encode(value) + "\n").encode("ascii")
+    return ("".join(canonical_chunks(value)) + "\n").encode("ascii")
 
 
 def file_identity(path):

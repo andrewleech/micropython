@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import copy
 import hashlib
 import json
 import keyword
@@ -11,7 +10,9 @@ import re
 from collections import Counter
 from pathlib import Path, PurePosixPath
 
-from .vocabulary import ATOM_KINDS, canonical_contract, canonical_default, union_descriptor
+from .pyunparse import unparse
+from .structure import deep_copy, deep_equal
+from .vocabulary import ATOM_KINDS, canonical_contract, canonical_default, canonical_json, union_descriptor
 
 
 _RESOLVED = {"resolved", "bounded-resolved", "source-resolved", "selected-source"}
@@ -21,8 +22,7 @@ _REVISION = re.compile(r"[0-9a-fA-F]{40,64}\Z")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 
 
-def _stable(value):
-    return json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+_END = object()
 
 
 def _status(value):
@@ -150,13 +150,13 @@ def _references(values, defined, label):
 
 
 def _lineage(row, sources, licenses):
-    source_rows = [copy.deepcopy(sources[key]) for key in sorted(row["source_ids"])]
+    source_rows = [deep_copy(sources[key]) for key in sorted(row["source_ids"])]
     if any(source["role"] == "doc-enriched" for source in source_rows):
         roles = {source["role"] for source in source_rows}
         if not {"runtime-observation", "documentation"} <= roles:
             _fail("doc-enriched lineage must include runtime-observation and documentation parents")
     return {"sources": source_rows,
-            "licenses": [copy.deepcopy(licenses[key]) for key in sorted(row["license_ids"])]}
+            "licenses": [deep_copy(licenses[key]) for key in sorted(row["license_ids"])]}
 
 
 def _declaration_binding(node, module):
@@ -185,34 +185,32 @@ def _definition_expressions(node):
 
 def _binding_effects(node):
     """Find possible bindings in this scope without entering deferred/local bodies."""
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-        yield node.name
-        for expression in _definition_expressions(node):
-            yield from _binding_effects(expression)
-        return
-    if isinstance(node, ast.Lambda):
-        for expression in [*node.args.defaults, *(default for default in node.args.kw_defaults if default is not None)]:
-            yield from _binding_effects(expression)
-        return
-    if isinstance(node, ast.comprehension):
-        # Comprehension iteration targets are local; walrus targets in expressions
-        # still bind the surrounding scope.
-        yield from _binding_effects(node.iter)
-        for condition in node.ifs:
-            yield from _binding_effects(condition)
-        return
-    if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
-        yield node.id
-    elif isinstance(node, ast.alias):
-        yield node.asname or node.name.split(".")[0]
-    elif isinstance(node, ast.ExceptHandler) and node.name:
-        yield node.name
-    elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
-        yield node.name
-    elif isinstance(node, ast.MatchMapping) and node.rest:
-        yield node.rest
-    for child in ast.iter_child_nodes(node):
-        yield from _binding_effects(child)
+    # Nodes are visited depth first in source child order through an explicit stack.
+    pending = [node]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            yield node.name
+            children = list(_definition_expressions(node))
+        elif isinstance(node, ast.Lambda):
+            children = [*node.args.defaults, *(default for default in node.args.kw_defaults if default is not None)]
+        elif isinstance(node, ast.comprehension):
+            # Comprehension iteration targets are local; walrus targets in expressions
+            # still bind the surrounding scope.
+            children = [node.iter, *node.ifs]
+        else:
+            if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                yield node.id
+            elif isinstance(node, ast.alias):
+                yield node.asname or node.name.split(".")[0]
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                yield node.name
+            elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+                yield node.name
+            elif isinstance(node, ast.MatchMapping) and node.rest:
+                yield node.rest
+            children = list(ast.iter_child_nodes(node))
+        pending.extend(reversed(children))
 
 
 def _scope_bindings(body, module):
@@ -258,29 +256,33 @@ def _scope_bindings(body, module):
     return {name: values[0] if len(values) == 1 else ("shadowed", name) for name, values in bindings.items()}
 
 
+def _name_binding(name, scopes):
+    for scope in reversed(scopes):
+        if name in scope:
+            return scope[name]
+        if "*" in scope:
+            return "shadowed", f"{name} (star import)"
+    if name in ATOM_KINDS:
+        return "atom", name
+    if name in ("staticmethod", "classmethod"):
+        return "decorator", name
+    return "unknown", name
+
+
 def _binding(node, scopes):
     if isinstance(node, ast.Name):
-        for scope in reversed(scopes):
-            if node.id in scope:
-                return scope[node.id]
-            if "*" in scope:
-                return "shadowed", f"{node.id} (star import)"
-        if node.id in ATOM_KINDS:
-            return "atom", node.id
-        if node.id in ("staticmethod", "classmethod"):
-            return "decorator", node.id
-        return "unknown", node.id
+        return _name_binding(node.id, scopes)
     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-        base = _binding(node.value, scopes)
+        base = _name_binding(node.value.id, scopes)
         if base[0] == "module" and base[1] in ("typing", "typing_extensions", "builtins"):
             if base[1] == "builtins" and node.attr in ATOM_KINDS:
                 return "atom", node.attr
             return "import", f"{base[1]}.{node.attr}"
-    return "unsupported", ast.unparse(node)
+    return "unsupported", unparse(node)
 
 
 def _annotation(node, scopes):
-    raw = ast.unparse(node) if node is not None else None
+    raw = unparse(node) if node is not None else None
     descriptor, reason = _annotation_value(node, scopes)
     return {"raw": raw, "normalized": descriptor, "reason": reason,
             "span": {"line": getattr(node, "lineno", None), "column": getattr(node, "col_offset", None),
@@ -288,15 +290,44 @@ def _annotation(node, scopes):
 
 
 def _annotation_value(node, scopes):
+    # Union members are evaluated depth first, left to right, through an explicit
+    # stack of (pending parts, descriptors) frames; the first member without a
+    # descriptor decides the result.
+    descriptor, reason, parts = _annotation_step(node, scopes)
+    if parts is None:
+        return descriptor, reason
+    stack = [(iter(parts), [])]
+    while True:
+        pending, descriptors = stack[-1]
+        part = next(pending, _END)
+        if part is _END:
+            stack.pop()
+            descriptor = union_descriptor(descriptors)
+            if not stack:
+                return descriptor, None
+            stack[-1][1].append(descriptor)
+            continue
+        descriptor, reason, parts = _annotation_step(part, scopes)
+        if parts is not None:
+            stack.append((iter(parts), []))
+        elif descriptor is None:
+            return None, reason
+        else:
+            descriptors.append(descriptor)
+
+
+def _annotation_step(node, scopes):
+    """Return (descriptor, reason, None) for a leaf annotation, or
+    (None, None, parts) for a union whose parts still need evaluation."""
     if node is None:
-        return None, "annotation omitted"
+        return None, "annotation omitted", None
     if isinstance(node, ast.Constant) and node.value is None:
-        return {"kind": "None"}, None
+        return {"kind": "None"}, None, None
     if isinstance(node, (ast.Name, ast.Attribute)):
         binding = _binding(node, scopes)
         if binding[0] == "atom":
-            return {"kind": binding[1]}, None
-        return None, f"annotation binding unassessed: {binding[0]} {binding[1]}"
+            return {"kind": binding[1]}, None, None
+        return None, f"annotation binding unassessed: {binding[0]} {binding[1]}", None
     parts = None
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
         parts = [node.left, node.right]
@@ -307,14 +338,8 @@ def _annotation_value(node, scopes):
         elif binding in (("import", "typing.Optional"), ("import", "typing_extensions.Optional")):
             parts = [node.slice, ast.Constant(value=None)]
     if parts is not None:
-        descriptors = []
-        for part in parts:
-            descriptor, reason = _annotation_value(part, scopes)
-            if descriptor is None:
-                return None, reason
-            descriptors.append(descriptor)
-        return union_descriptor(descriptors), None
-    return None, "annotation expression/checker representation unassessed"
+        return None, None, parts
+    return None, "annotation expression/checker representation unassessed", None
 
 
 def _default(node):
@@ -336,7 +361,7 @@ def _default(node):
             descriptor["hex"] = value.hex()
         elif value is not None:
             descriptor["value"] = value
-    return {"raw": ast.unparse(node), "normalized": descriptor}
+    return {"raw": unparse(node), "normalized": descriptor}
 
 
 def _candidate_parameters(node, scopes):
@@ -380,55 +405,63 @@ def _candidates(raw, row, sources, licenses):
                                 "end_line": node.end_lineno, "end_column": node.end_col_offset},
                        "lineage": lineage, **fields})
 
-    def visit(body, prefix, scopes, owner_barrier=None):
+    def frame(body, prefix, scopes, owner_barrier):
         module = row["module"] if not prefix else ""
         local = _scope_bindings(body, module)
-        scopes = [*scopes, local]
         counts = Counter(node.name for node in body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))
-        for node in body:
-            if isinstance(node, ast.ClassDef):
-                qualname = prefix + node.name
-                reason = (owner_barrier or
-                          ("ambiguous document declaration" if counts[node.name] > 1 else
-                           "document declaration binding overwritten or conditional" if local.get(node.name) != _declaration_binding(node, module) else
-                           "document class creation/decorators unassessed" if node.decorator_list or node.keywords else None))
-                append(node, qualname, "class", bases=[ast.unparse(base) for base in node.bases], reason=reason)
-                visit(node.body, qualname + ".", scopes, reason)
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                decorators = [_binding(decorator, scopes) for decorator in node.decorator_list]
-                overload = any(binding in (("import", "typing.overload"), ("import", "typing_extensions.overload")) for binding in decorators)
-                known_decorators = {("decorator", "staticmethod"), ("decorator", "classmethod"),
-                                    ("import", "typing.overload"), ("import", "typing_extensions.overload")}
-                descriptor = "staticmethod" if ("decorator", "staticmethod") in decorators else "classmethod" if ("decorator", "classmethod") in decorators else "function"
-                stub_body = all(isinstance(statement, ast.Pass) or
-                                isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant)
-                                and (statement.value.value is Ellipsis or isinstance(statement.value.value, str))
-                                for statement in node.body)
-                reason = (owner_barrier or
-                          ("document overload has no qualified public overload identity" if overload else
-                           "ambiguous document declaration" if counts[node.name] > 1 else
-                           "document declaration binding overwritten or conditional" if local.get(node.name) != _declaration_binding(node, module) else
-                           "unsupported declaration decorator" if any(binding not in known_decorators for binding in decorators) else
-                           "asynchronous declaration semantics unassessed" if isinstance(node, ast.AsyncFunctionDef) else
-                           "nonstub declaration body unassessed" if not stub_body else None))
-                append(node, prefix + node.name, "function", parameters=_candidate_parameters(node, scopes),
-                       returns=_annotation(node.returns, scopes), descriptor=descriptor,
-                       decorators=[ast.unparse(decorator) for decorator in node.decorator_list], reason=reason)
-            elif isinstance(node, (ast.Import, ast.ImportFrom)):
-                if isinstance(node, ast.ImportFrom) and node.module == "__future__":
-                    continue
-                for alias in node.names:
-                    name = alias.asname or alias.name.split(".")[0]
-                    append(node, prefix + name, "import", raw=ast.unparse(node), reason="imports/reexports cannot add runtime declarations")
-            elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                for target in targets:
-                    name = target.id if isinstance(target, ast.Name) else ast.unparse(target)
-                    append(node, prefix + name, "assignment", raw=ast.unparse(node), reason="document value/helper declarations are not runtime authority")
-            elif not (isinstance(node, ast.Pass) or isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)):
-                append(node, prefix + f"<statement@{node.lineno}>", "unsupported", raw=ast.unparse(node), reason="declaration control flow/construct unassessed")
+        return iter(body), prefix, [*scopes, local], owner_barrier, module, local, counts
 
-    visit(tree.body, "", [])
+    # Class bodies are visited depth first through an explicit stack of body
+    # frames, so candidates keep source order.
+    frames = [frame(tree.body, "", [], None)]
+    while frames:
+        nodes, prefix, scopes, owner_barrier, module, local, counts = frames[-1]
+        node = next(nodes, None)
+        if node is None:
+            frames.pop()
+            continue
+        if isinstance(node, ast.ClassDef):
+            qualname = prefix + node.name
+            reason = (owner_barrier or
+                      ("ambiguous document declaration" if counts[node.name] > 1 else
+                       "document declaration binding overwritten or conditional" if local.get(node.name) != _declaration_binding(node, module) else
+                       "document class creation/decorators unassessed" if node.decorator_list or node.keywords else None))
+            append(node, qualname, "class", bases=[unparse(base) for base in node.bases], reason=reason)
+            frames.append(frame(node.body, qualname + ".", scopes, reason))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            decorators = [_binding(decorator, scopes) for decorator in node.decorator_list]
+            overload = any(binding in (("import", "typing.overload"), ("import", "typing_extensions.overload")) for binding in decorators)
+            known_decorators = {("decorator", "staticmethod"), ("decorator", "classmethod"),
+                                ("import", "typing.overload"), ("import", "typing_extensions.overload")}
+            descriptor = "staticmethod" if ("decorator", "staticmethod") in decorators else "classmethod" if ("decorator", "classmethod") in decorators else "function"
+            stub_body = all(isinstance(statement, ast.Pass) or
+                            isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant)
+                            and (statement.value.value is Ellipsis or isinstance(statement.value.value, str))
+                            for statement in node.body)
+            reason = (owner_barrier or
+                      ("document overload has no qualified public overload identity" if overload else
+                       "ambiguous document declaration" if counts[node.name] > 1 else
+                       "document declaration binding overwritten or conditional" if local.get(node.name) != _declaration_binding(node, module) else
+                       "unsupported declaration decorator" if any(binding not in known_decorators for binding in decorators) else
+                       "asynchronous declaration semantics unassessed" if isinstance(node, ast.AsyncFunctionDef) else
+                       "nonstub declaration body unassessed" if not stub_body else None))
+            append(node, prefix + node.name, "function", parameters=_candidate_parameters(node, scopes),
+                   returns=_annotation(node.returns, scopes), descriptor=descriptor,
+                   decorators=[unparse(decorator) for decorator in node.decorator_list], reason=reason)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+                continue
+            for alias in node.names:
+                name = alias.asname or alias.name.split(".")[0]
+                append(node, prefix + name, "import", raw=unparse(node), reason="imports/reexports cannot add runtime declarations")
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                name = target.id if isinstance(target, ast.Name) else unparse(target)
+                append(node, prefix + name, "assignment", raw=unparse(node), reason="document value/helper declarations are not runtime authority")
+        elif not (isinstance(node, ast.Pass) or isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)):
+            append(node, prefix + f"<statement@{node.lineno}>", "unsupported", raw=unparse(node), reason="declaration control flow/construct unassessed")
+
     if set(overrides) - seen:
         _fail(f"symbol lineage names absent from {row['path']}: {sorted(set(overrides) - seen)}")
     return result
@@ -549,18 +582,18 @@ def load_enrichment(manifest_path):
                 _fail("target input must have unique absolute physical path")
             target_paths.add(pin["path"])
             _capture(path, snapshots, pin)
-    tree_records = sorted(copy.deepcopy(files), key=lambda row: row["path"])
+    tree_records = sorted(deep_copy(files), key=lambda row: row["path"])
     for row in tree_records:
         row["lineage"] = _lineage(row, sources, licenses)
         for symbol in row.get("symbol_lineage", []):
             symbol["lineage"] = _lineage(symbol, sources, licenses)
-    tree_identity = {"path": str(tree), "sha256": hashlib.sha256(_stable(tree_records).encode()).hexdigest(), "files": tree_records}
-    inputs = sorted((copy.deepcopy(snapshot["identity"]) for snapshot in snapshots.values()), key=lambda row: row["path"])
+    tree_identity = {"path": str(tree), "sha256": hashlib.sha256(canonical_json(tree_records).encode()).hexdigest(), "files": tree_records}
+    inputs = sorted((deep_copy(snapshot["identity"]) for snapshot in snapshots.values()), key=lambda row: row["path"])
     provenance = {"schema_version": 1, "manifest": manifest_identity, "tree": tree_identity,
-                  "producer": copy.deepcopy(producer), "sources": copy.deepcopy(manifest["sources"]),
-                  "licenses": copy.deepcopy(manifest["licenses"]), "target": copy.deepcopy(target)}
+                  "producer": deep_copy(producer), "sources": deep_copy(manifest["sources"]),
+                  "licenses": deep_copy(manifest["licenses"]), "target": deep_copy(target)}
     bundle = {"provenance": provenance, "inputs": inputs, "candidates": candidates,
-              "manifest": copy.deepcopy(manifest),
+              "manifest": deep_copy(manifest),
               "notice_artifacts": notice_artifacts, "_snapshots": snapshots,
               "_tree": str(tree), "_members": members}
     verify_enrichment(bundle)
@@ -585,18 +618,22 @@ def verify_enrichment(bundle):
 
 
 def _input_identities(value):
-    if isinstance(value, dict):
-        if all(key in value for key in ("path", "sha256")):
-            identity = {"path": value.get("resolved", value["path"]), "sha256": value["sha256"]}
-            if "bytes" in value:
-                identity["bytes"] = value["bytes"]
-            yield identity
-        else:
-            for child in value.values():
-                yield from _input_identities(child)
-    elif isinstance(value, list):
-        for child in value:
-            yield from _input_identities(child)
+    # Containers are walked depth first in order through an explicit stack of child iterators.
+    pending = [iter((value,))]
+    while pending:
+        value = next(pending[-1], _END)
+        if value is _END:
+            pending.pop()
+        elif isinstance(value, dict):
+            if all(key in value for key in ("path", "sha256")):
+                identity = {"path": value.get("resolved", value["path"]), "sha256": value["sha256"]}
+                if "bytes" in value:
+                    identity["bytes"] = value["bytes"]
+                yield identity
+            else:
+                pending.append(iter(value.values()))
+        elif isinstance(value, list):
+            pending.append(iter(value))
 
 
 def validate_enrichment_target(bundle, build):
@@ -654,9 +691,9 @@ def _join(inventory, candidate):
         if index < len(parts) - 1:
             if current.get("kind") != "class":
                 return None, None, "document owner kind differs from selected class occurrence"
-            owners.append({"identity": copy.deepcopy(current.get("identity")), "type_identity": current.get("type_identity"),
-                           "source": copy.deepcopy(current.get("source")), "provenance": copy.deepcopy(current.get("provenance")),
-                           "availability": copy.deepcopy(current.get("resolution", {}).get("availability"))})
+            owners.append({"identity": deep_copy(current.get("identity")), "type_identity": current.get("type_identity"),
+                           "source": deep_copy(current.get("source")), "provenance": deep_copy(current.get("provenance")),
+                           "availability": deep_copy(current.get("resolution", {}).get("availability"))})
     if current.get("kind") != candidate["kind"]:
         return None, None, "document declaration kind differs from selected source"
     alias = current.get("alias_binding")
@@ -672,21 +709,21 @@ def _join(inventory, candidate):
                        native_id.get("object_id") is not None and
                        native_id.get("object_id") == target_id.get("object_id"))
         if not same_object and (not alias or _status(alias) not in _RESOLVED or
-                                current.get("alias_target_identity") != target.get("identity")):
+                                not deep_equal(current.get("alias_target_identity"), target.get("identity"))):
             return None, None, "alias target binding unresolved"
-    identity = {"module": candidate["module"], "module_identity": copy.deepcopy(module.get("identity")),
-                "owners": owners, "export_identity": copy.deepcopy(current.get("identity")),
-                "module_provenance": copy.deepcopy(module.get("provenance")),
-                "export_provenance": copy.deepcopy(current.get("provenance")),
-                "availability": copy.deepcopy(current.get("resolution", {}).get("availability")),
+    identity = {"module": candidate["module"], "module_identity": deep_copy(module.get("identity")),
+                "owners": owners, "export_identity": deep_copy(current.get("identity")),
+                "module_provenance": deep_copy(module.get("provenance")),
+                "export_provenance": deep_copy(current.get("provenance")),
+                "availability": deep_copy(current.get("resolution", {}).get("availability")),
                 "type_identity": current.get("type_identity"),
-                "binding": copy.deepcopy(current.get("callshape", {}).get("descriptor")),
+                "binding": deep_copy(current.get("callshape", {}).get("descriptor")),
                 "receiver_offset": current.get("callshape", {}).get("implicit_argument_offset"),
-                "alias_of": current.get("alias_of"), "alias_binding": copy.deepcopy(alias),
-                "alias_target_identity": copy.deepcopy(current.get("alias_target_identity")),
-                "inherited_from": copy.deepcopy(current.get("inherited_from")),
-                "function_identity": copy.deepcopy((current.get("semantics") or {}).get("function_id")),
-                "function_source": copy.deepcopy(current.get("source"))}
+                "alias_of": current.get("alias_of"), "alias_binding": deep_copy(alias),
+                "alias_target_identity": deep_copy(current.get("alias_target_identity")),
+                "inherited_from": deep_copy(current.get("inherited_from")),
+                "function_identity": deep_copy((current.get("semantics") or {}).get("function_id")),
+                "function_source": deep_copy(current.get("source"))}
     return current, identity, None
 
 
@@ -700,25 +737,52 @@ def _owner_symbols(module, owners):
 
 def _semantic_descriptor(contract):
     """Strip source evidence/literal values without approximating unknown capabilities."""
+    # Tuple elements and union alternatives are evaluated depth first through an
+    # explicit stack of (composite kind, pending children, descriptors) frames.
+    descriptor, children = _semantic_step(contract)
+    if children is None:
+        return descriptor
+    stack = [(descriptor, children, [])]
+    while True:
+        kind, pending, descriptors = stack[-1]
+        child = next(pending, _END)
+        if child is not _END:
+            descriptor, children = _semantic_step(child)
+            if children is None:
+                descriptors.append(descriptor)
+            else:
+                stack.append((descriptor, children, []))
+            continue
+        stack.pop()
+        if kind == "tuple":
+            descriptor = {"kind": "tuple", "elements": descriptors} if all(element is not None for element in descriptors) else None
+        else:
+            descriptor = union_descriptor(descriptors) if descriptors and all(child is not None for child in descriptors) else None
+        if not stack:
+            return descriptor
+        stack[-1][2].append(descriptor)
+
+
+def _semantic_step(contract):
+    """Return (descriptor, None) for a leaf contract, or ("tuple" or "union", an
+    iterator over the children) for a composite whose children still need evaluation."""
     if not isinstance(contract, dict) or "resolution" in contract and _status(contract["resolution"]) not in _RESOLVED:
-        return None
+        return None, None
     contract = canonical_contract(contract)
     kind = contract.get("kind")
     if kind in ATOM_KINDS:
         if kind == "tuple" and "elements" in contract:
-            elements = [_semantic_descriptor(element) for element in contract["elements"]]
-            return {"kind": "tuple", "elements": elements} if all(element is not None for element in elements) else None
-        return {"kind": kind}
+            return "tuple", iter(contract["elements"])
+        return {"kind": kind}, None
     if kind == "union":
-        alternatives = [_semantic_descriptor(child) for child in contract.get("alternatives", [])]
-        return union_descriptor(alternatives) if alternatives and all(child is not None for child in alternatives) else None
+        return "union", iter(contract.get("alternatives", []))
     if kind in ("argument", "argument-table"):
         return {"kind": kind, "exported_argument": contract.get("exported_argument"),
-                "storage_field": contract.get("storage_field")}
+                "storage_field": contract.get("storage_field")}, None
     if kind not in (None, "unresolved", "void-C-return"):
         # A qualified capability is known even when it deliberately renders as Any.
-        return {"kind": kind}
-    return None
+        return {"kind": kind}, None
+    return None, None
 
 
 def _source_return(symbol):
@@ -727,10 +791,10 @@ def _source_return(symbol):
     resolved = _status(semantic.get("return_resolution")) in _RESOLVED
     values = [_semantic_descriptor(contract) for contract in contracts]
     descriptor = union_descriptor(values) if resolved and values and all(value is not None for value in values) else None
-    return {"resolution": semantic.get("return_resolution", "unresolved"), "value": copy.deepcopy(contracts),
-            "normalized": descriptor, "evidence": {"source": copy.deepcopy(symbol.get("source")),
-            "return_unresolved": copy.deepcopy(semantic.get("return_unresolved", [])),
-            "resolution": copy.deepcopy(symbol.get("resolution", {}).get("types", {}))}}
+    return {"resolution": semantic.get("return_resolution", "unresolved"), "value": deep_copy(contracts),
+            "normalized": descriptor, "evidence": {"source": deep_copy(symbol.get("source")),
+            "return_unresolved": deep_copy(semantic.get("return_unresolved", [])),
+            "resolution": deep_copy(symbol.get("resolution", {}).get("types", {}))}}
 
 
 def _compare(source, annotation):
@@ -741,7 +805,7 @@ def _compare(source, annotation):
         return "documentation-unverified", reason
     if annotation.get("normalized") is None:
         return "unsupported", annotation.get("reason") or "candidate annotation unassessed"
-    if source["normalized"] == annotation["normalized"]:
+    if deep_equal(source["normalized"], annotation["normalized"]):
         return "confirmed", "candidate agrees with independently qualified source field"
     return "conflict", "candidate differs from independently qualified source field"
 
@@ -749,7 +813,7 @@ def _compare(source, annotation):
 def _shape_comparison(symbol, candidate, in_class):
     shape = symbol.get("callshape") or {}
     source_resolution = symbol.get("resolution", {}).get("callshape", "unresolved")
-    doc = copy.deepcopy(candidate["parameters"])
+    doc = deep_copy(candidate["parameters"])
     reasons = []
     descriptor = shape.get("descriptor")
     offset = shape.get("implicit_argument_offset")
@@ -826,9 +890,9 @@ def merge_enrichment(inventory, bundle):
                       "producer_inputs_ref": "provenance.producer_inputs"}
 
     def record(candidate, field, source, value, outcome, reason, identity=None):
-        records.append({"document": {key: copy.deepcopy(candidate[key]) for key in ("file", "sha256", "module", "qualname", "kind", "span", "lineage")},
+        records.append({"document": {key: deep_copy(candidate[key]) for key in ("file", "sha256", "module", "qualname", "kind", "span", "lineage")},
                         "target_identity": identity, "field": field, "source": source,
-                        "source_lineage_ref": "source_lineage", "candidate": copy.deepcopy(value),
+                        "source_lineage_ref": "source_lineage", "candidate": deep_copy(value),
                         "outcome": outcome, "reason": reason})
 
     for candidate in bundle["candidates"]:
@@ -840,19 +904,19 @@ def merge_enrichment(inventory, bundle):
             record(candidate, "declaration", None, {"kind": candidate["kind"]}, "unjoined", reason)
             continue
         if candidate.get("reason"):
-            record(candidate, "declaration", {"resolution": copy.deepcopy(symbol.get("resolution"))},
+            record(candidate, "declaration", {"resolution": deep_copy(symbol.get("resolution"))},
                    {"kind": candidate["kind"], "decorators": candidate.get("decorators")}, "unsupported", candidate["reason"], identity)
             continue
         if candidate["kind"] == "class":
-            record(candidate, "declaration", {"resolution": copy.deepcopy(symbol.get("resolution"))}, {"kind": "class"},
+            record(candidate, "declaration", {"resolution": deep_copy(symbol.get("resolution"))}, {"kind": "class"},
                    "confirmed", "class occurrence exists in source-selected available surface", identity)
             if candidate["bases"]:
-                record(candidate, "bases", {"value": copy.deepcopy(symbol.get("bases", []))}, candidate["bases"],
+                record(candidate, "bases", {"value": deep_copy(symbol.get("bases", []))}, candidate["bases"],
                        "unsupported", "document bases cannot change source-selected inheritance", identity)
             continue
         outcome, shape_reasons, doc_parameters, correspondence = _shape_comparison(symbol, candidate, bool(identity["owners"]))
-        record(candidate, "callshape", {"resolution": copy.deepcopy(symbol.get("resolution", {}).get("callshape")),
-                                      "value": copy.deepcopy(symbol.get("callshape"))},
+        record(candidate, "callshape", {"resolution": deep_copy(symbol.get("resolution", {}).get("callshape")),
+                                      "value": deep_copy(symbol.get("callshape"))},
                {"descriptor": candidate["descriptor"], "parameters": candidate["parameters"]}, outcome, "; ".join(shape_reasons), identity)
         parameters = symbol.get("callshape", {}).get("parameters") or []
         for index, documented in enumerate(doc_parameters):
@@ -860,9 +924,9 @@ def merge_enrichment(inventory, bundle):
             if correspondence and index < len(parameters):
                 parameter = parameters[index]
                 source = {"resolution": parameter.get("type_resolution", "unresolved"),
-                          "value": copy.deepcopy(parameter.get("type_contract")),
+                          "value": deep_copy(parameter.get("type_contract")),
                           "normalized": _semantic_descriptor(parameter.get("type_contract")),
-                          "evidence": {key: copy.deepcopy(parameter[key]) for key in ("source", "resolution", "accepted_domain", "constraints", "result_storage") if key in parameter}}
+                          "evidence": {key: deep_copy(parameter[key]) for key in ("source", "resolution", "accepted_domain", "constraints", "result_storage") if key in parameter}}
                 field_outcome, field_reason = _compare(source, annotation)
             else:
                 source = {"resolution": "unresolved", "normalized": None,
@@ -881,5 +945,5 @@ def merge_enrichment(inventory, bundle):
               "summary": dict(sorted(Counter(row["outcome"] for row in records).items())), "records": records}
     inventory["enrichment"] = report
     inventory.setdefault("provenance", {}).setdefault("producer_inputs", {})["enrichment"] = {
-        "provenance": copy.deepcopy(bundle["provenance"]), "inputs": copy.deepcopy(bundle["inputs"])}
+        "provenance": deep_copy(bundle["provenance"]), "inputs": deep_copy(bundle["inputs"])}
     return report

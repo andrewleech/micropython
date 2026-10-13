@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ast
-import copy
+from collections.abc import Generator
 import hashlib
 import io
 import keyword
@@ -12,6 +12,9 @@ from pathlib import PurePosixPath
 import tokenize
 import unicodedata
 from typing import Any
+
+from .pyunparse import unparse
+from .structure import deep_copy, deep_equal
 
 
 _UNSUPPORTED = {"kind": "unresolved", "reason": "source value contract is not resolved"}
@@ -22,16 +25,20 @@ def _identifier(name: str) -> bool:
 
 
 def _expression_name(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Name):
+    attributes = []
+    while isinstance(node, ast.Attribute):
+        attributes.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    if not attributes:
         return node.id
-    if isinstance(node, ast.Attribute):
-        parent = _expression_name(node.value)
-        if parent:
-            return parent + "." + node.attr
-    return None
+    if not node.id:
+        return None
+    return ".".join([node.id, *reversed(attributes)])
 
 
-def _literal(node: ast.AST | None) -> dict:
+def _leaf_literal(node: ast.AST | None) -> dict:
     if isinstance(node, ast.Constant):
         value = node.value
         if value is None:
@@ -43,22 +50,48 @@ def _literal(node: ast.AST | None) -> dict:
                 if cls in (bytes, complex):
                     return {"kind": kind, "literal": repr(value)}
                 if cls is float and not math.isfinite(value):
-                    return {"kind": kind, "literal": ast.unparse(node),
+                    return {"kind": kind, "literal": unparse(node),
                             "value_resolution": {"status": "unresolved", "reason": "nonfinite number retained as a source expression, not a JSON number"}}
                 return {"kind": kind, "value": value}
-    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
-        value = _literal(node.operand)
-        if value.get("kind") in ("int", "float"):
-            if "value" not in value:
-                return {**value, "literal": ast.unparse(node)}
-            return {"kind": value["kind"], "value": (-1 if isinstance(node.op, ast.USub) else 1) * value["value"]}
-    if isinstance(node, ast.Tuple):
-        return {"kind": "tuple", "elements": [_literal(item) for item in node.elts]}
     if isinstance(node, (ast.List, ast.Set)):
         return {"kind": "list" if isinstance(node, ast.List) else "set"}
     if isinstance(node, ast.Dict):
         return {"kind": "dict"}
     return dict(_UNSUPPORTED)
+
+
+def _signed_literal(node: ast.UnaryOp, value: dict) -> dict:
+    if value.get("kind") in ("int", "float"):
+        if "value" not in value:
+            return {**value, "literal": unparse(node)}
+        return {"kind": value["kind"], "value": (-1 if isinstance(node.op, ast.USub) else 1) * value["value"]}
+    return dict(_UNSUPPORTED)
+
+
+def _literal(node: ast.AST | None) -> dict:
+    # Post-order over signed numbers and tuples: a node is pushed once to expand
+    # its operands and once more (expanded=True) to combine their results.
+    results: list[dict] = []
+    stack: list[tuple[ast.AST | None, bool]] = [(node, False)]
+    while stack:
+        current, expanded = stack.pop()
+        if expanded:
+            if isinstance(current, ast.Tuple):
+                start = len(results) - len(current.elts)
+                elements = results[start:]
+                del results[start:]
+                results.append({"kind": "tuple", "elements": elements})
+            else:
+                results.append(_signed_literal(current, results.pop()))
+        elif isinstance(current, ast.UnaryOp) and isinstance(current.op, (ast.USub, ast.UAdd)):
+            stack.append((current, True))
+            stack.append((current.operand, False))
+        elif isinstance(current, ast.Tuple):
+            stack.append((current, True))
+            stack.extend((item, False) for item in reversed(current.elts))
+        else:
+            results.append(_leaf_literal(current))
+    return results[0]
 
 
 def _scope_nodes(body: list[ast.stmt]):
@@ -71,53 +104,102 @@ def _scope_nodes(body: list[ast.stmt]):
             stack.extend(reversed(list(ast.iter_child_nodes(node))))
 
 
+def _eager_expressions(node: ast.AST) -> list[ast.AST]:
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return list(node.decorator_list) + list(node.args.defaults) + [value for value in node.args.kw_defaults if value is not None]
+    if isinstance(node, ast.ClassDef):
+        return list(node.decorator_list) + list(node.bases) + [item.value for item in node.keywords]
+    if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+        return ([node.value] if node.value is not None else []) + (list(node.targets) if isinstance(node, ast.Assign) else [node.target])
+    if isinstance(node, (ast.If, ast.While)):
+        return [node.test]
+    if isinstance(node, ast.Assert):
+        return [node.test] + ([node.msg] if node.msg is not None else [])
+    if isinstance(node, (ast.For, ast.AsyncFor)):
+        return [node.iter, node.target]
+    if isinstance(node, (ast.With, ast.AsyncWith)):
+        return [part for item in node.items for part in (item.context_expr, item.optional_vars) if part is not None]
+    if isinstance(node, ast.Try):
+        return [handler.type for handler in node.handlers if handler.type is not None]
+    if isinstance(node, ast.Delete):
+        return list(node.targets)
+    if isinstance(node, ast.Expr):
+        return [node.value]
+    return []
+
+
 def _execution_expressions(node: ast.AST, depth: int = 0):
     """Yield potentially eager expressions, excluding deferred function bodies.
 
-    Depth separates a class body's locals from its containing namespace.
+    Depth separates a class body's locals from its containing namespace. A
+    class's own expressions precede those of its executed body statements.
     """
-    expressions = []
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        expressions = list(node.decorator_list) + list(node.args.defaults) + [value for value in node.args.kw_defaults if value is not None]
-    elif isinstance(node, ast.ClassDef):
-        expressions = list(node.decorator_list) + list(node.bases) + [item.value for item in node.keywords]
-    elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-        expressions = ([node.value] if node.value is not None else []) + (list(node.targets) if isinstance(node, ast.Assign) else [node.target])
-    elif isinstance(node, (ast.If, ast.While)):
-        expressions = [node.test]
-    elif isinstance(node, ast.Assert):
-        expressions = [node.test] + ([node.msg] if node.msg is not None else [])
-    elif isinstance(node, (ast.For, ast.AsyncFor)):
-        expressions = [node.iter, node.target]
-    elif isinstance(node, (ast.With, ast.AsyncWith)):
-        expressions = [part for item in node.items for part in (item.context_expr, item.optional_vars) if part is not None]
-    elif isinstance(node, ast.Try):
-        expressions = [handler.type for handler in node.handlers if handler.type is not None]
-    elif isinstance(node, ast.Delete):
-        expressions = list(node.targets)
-    elif isinstance(node, ast.Expr):
-        expressions = [node.value]
-    for expression in expressions:
-        yield expression, depth
-    if isinstance(node, ast.ClassDef):
-        for statement in _class_execution_statements(node.body):
-            yield from _execution_expressions(statement, depth + 1)
+    stack = [(iter((node,)), depth)]
+    while stack:
+        statements, level = stack[-1]
+        statement = next(statements, None)
+        if statement is None:
+            stack.pop()
+            continue
+        for expression in _eager_expressions(statement):
+            yield expression, level
+        if isinstance(statement, ast.ClassDef):
+            stack.append((_class_execution_statements(statement.body), level + 1))
 
 
 def _class_execution_statements(body: list[ast.stmt]):
-    for node in body:
+    """Yield executed statements in source pre-order, excluding definition bodies."""
+    stack = [iter(body)]
+    while stack:
+        node = next(stack[-1], None)
+        if node is None:
+            stack.pop()
+            continue
         yield node
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             continue
         if isinstance(node, ast.If) and isinstance(node.test, ast.Constant) and type(node.test.value) in (bool, int, str, type(None)):
-            yield from _class_execution_statements(node.body if node.test.value else node.orelse)
+            nested = [node.body if node.test.value else node.orelse]
         else:
-            for field in ("body", "orelse", "finalbody"):
-                nested = getattr(node, field, None)
-                if isinstance(nested, list):
-                    yield from _class_execution_statements(nested)
-            for handler in getattr(node, "handlers", []):
-                yield from _class_execution_statements(handler.body)
+            nested = [block for block in (getattr(node, field, None) for field in ("body", "orelse", "finalbody"))
+                      if isinstance(block, list)]
+            nested.extend(handler.body for handler in getattr(node, "handlers", []))
+        stack.extend(iter(block) for block in reversed(nested))
+
+
+# A frame is a generator that yields a nested frame wherever it needs that
+# frame's result and receives the result (or its exception) at the yield.
+_Frame = Generator["_Frame", Any, Any]
+
+
+def _run_frames(root: _Frame) -> Any:
+    """Run nested frames on an explicit stack and return the root frame's result."""
+    stack = [root]
+    result: Any = None
+    error: BaseException | None = None
+    while True:
+        frame = stack[-1]
+        try:
+            if error is not None:
+                pending, error = error, None
+                nested = frame.throw(pending)
+            else:
+                nested = frame.send(result)
+        except StopIteration as stop:
+            stack.pop()
+            if not stack:
+                return stop.value
+            result = stop.value
+            continue
+        except BaseException as exc:
+            stack.pop()
+            if not stack:
+                raise
+            error = exc
+            continue
+        stack.append(nested)
+        result = None
+
 
 
 class _Collector:
@@ -233,10 +315,10 @@ class _Collector:
                                                             "; ".join(symbol["semantics"].get("return_unresolved", [])) or None)
         symbol["resolution"]["inputs"] = self.resolution("unresolved", node, "accepted input domains are not established by Python annotations")
         if node.returns:
-            symbol["annotation_candidate"] = ast.unparse(node.returns)
+            symbol["annotation_candidate"] = unparse(node.returns)
         if unsupported:
             symbol["kind"] = "unknown"
-            symbol["source_callshape_candidate"] = copy.deepcopy(symbol["callshape"])
+            symbol["source_callshape_candidate"] = deep_copy(symbol["callshape"])
             symbol["callshape"] = {"descriptor": "decorated-unassessed", "parameters_resolution": "unresolved"}
             symbol["resolution"]["callshape"] = self.resolution("unresolved", node, "decorator/native wrapper callshape is unassessed")
             symbol["semantics"]["return_resolution"] = "unresolved"
@@ -257,7 +339,7 @@ class _Collector:
             result["default_contract"]["resolution"] = self.resolution(
                 "source-resolved" if result["default_contract"]["kind"] != "unresolved" else "unresolved", default)
         if argument.annotation:
-            result["annotation_candidate"] = ast.unparse(argument.annotation)
+            result["annotation_candidate"] = unparse(argument.annotation)
         return result
 
     def returns(self, node: ast.FunctionDef | ast.AsyncFunctionDef, parameters: list[dict]) -> dict:
@@ -306,7 +388,8 @@ class _Collector:
                 "returns": contracts, "return_resolution": "unresolved" if reasons else "source-resolved",
                 "return_unresolved": sorted(set(reasons))}
 
-    def class_definition(self, node: ast.ClassDef, prefix: str) -> dict:
+    def class_frame(self, node: ast.ClassDef, prefix: str) -> _Frame:
+        """Frame for one class symbol; see `_run_frames`."""
         symbol = self.symbol(node.name, "class", node, prefix)
         bases = [_expression_name(base) for base in node.bases]
         symbol["bases"] = [base for base in bases if base]
@@ -315,7 +398,7 @@ class _Collector:
         gap_start = len(self.gaps)
         dynamic_start = len(self.dynamic_providers)
         class_shadowed = self.bound_names(node.body)
-        members = self.statements(node.body, prefix + node.name + ".", in_class=True, class_shadowed=class_shadowed)
+        members = yield self.statements_frame(node.body, prefix + node.name + ".", in_class=True, class_shadowed=class_shadowed)
         # Explicit instance writes are source names, but their execution and types
         # need not follow from the static class dictionary.
         known = {member["name"] for member in members}
@@ -370,7 +453,7 @@ class _Collector:
                 symbol["resolution"]["value"] = self.resolution(
                     "source-resolved" if symbol["value_contract"]["kind"] != "unresolved" else "unresolved", node)
                 if isinstance(node, ast.AnnAssign):
-                    symbol["annotation_candidate"] = ast.unparse(node.annotation)
+                    symbol["annotation_candidate"] = unparse(node.annotation)
                     if value is None:
                         symbol["resolution"]["availability"] = self.resolution("conditional-unassessed", node, "annotation-only assignment need not bind a runtime value")
                 if isinstance(value, ast.Name) and not isinstance(node, ast.AugAssign):
@@ -394,8 +477,8 @@ class _Collector:
         result = {}
         for name in sorted(set().union(*(namespace.keys() for namespace in namespaces))):
             variants = [namespace[name] for namespace in namespaces if name in namespace]
-            if len(variants) == len(namespaces) and all(variant == variants[0] for variant in variants[1:]):
-                result[name] = copy.deepcopy(variants[0])
+            if len(variants) == len(namespaces) and all(deep_equal(variant, variants[0]) for variant in variants[1:]):
+                result[name] = deep_copy(variants[0])
                 continue
             symbol = self.symbol(name, "unknown", node, prefix)
             present = len(variants) == len(namespaces) and all(self.available(variant) for variant in variants)
@@ -404,12 +487,12 @@ class _Collector:
                 "name is bound on every assessed branch" if present else "name may be absent on an execution branch")
             symbol["resolution"]["value"] = self.resolution("unresolved", node, "branch-dependent value identity is unassessed")
             symbol["value_contract"] = dict(_UNSUPPORTED)
-            symbol["binding_alternatives"] = copy.deepcopy(variants)
+            symbol["binding_alternatives"] = deep_copy(variants)
             result[name] = symbol
         return result
 
     def uncertain_effects(self, body: list[ast.stmt], initial: dict[str, dict], node: ast.AST, prefix: str, *, in_class: bool = False) -> dict[str, dict]:
-        symbols = copy.deepcopy(initial)
+        symbols = deep_copy(initial)
         nodes = list(_scope_nodes(body))
         bound = self.bound_names(body)
         deleted = {item.id for item in nodes if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Del)}
@@ -440,7 +523,7 @@ class _Collector:
             symbol["resolution"]["value"] = self.resolution("unresolved", node, "execution-dependent value is unassessed")
             symbol["value_contract"] = dict(_UNSUPPORTED)
             if previous:
-                symbol["binding_alternatives"] = [copy.deepcopy(previous)]
+                symbol["binding_alternatives"] = [deep_copy(previous)]
             symbols[name] = symbol
         return symbols
 
@@ -520,7 +603,12 @@ class _Collector:
 
     def statements(self, body: list[ast.stmt], prefix: str = "", *, in_class: bool = False,
                    class_shadowed: set[str] | None = None, initial: dict[str, dict] | None = None) -> list[dict]:
-        symbols = copy.deepcopy(initial or {})
+        return _run_frames(self.statements_frame(body, prefix, in_class=in_class, class_shadowed=class_shadowed, initial=initial))
+
+    def statements_frame(self, body: list[ast.stmt], prefix: str = "", *, in_class: bool = False,
+                         class_shadowed: set[str] | None = None, initial: dict[str, dict] | None = None) -> _Frame:
+        """Frame for one statement list's namespace; see `_run_frames`."""
+        symbols = deep_copy(initial or {})
         class_shadowed = class_shadowed or set()
         scoped_globals = {name for item in _scope_nodes(body) if isinstance(item, ast.Global) for name in item.names} if in_class else set()
         for node in body:
@@ -529,17 +617,17 @@ class _Collector:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 found.append(self.function(node, prefix, in_class=in_class, class_shadowed=class_shadowed))
             elif isinstance(node, ast.ClassDef):
-                found.append(self.class_definition(node, prefix))
+                found.append((yield self.class_frame(node, prefix)))
             elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
                 found.extend(self.assignments(node, prefix))
                 if isinstance(node, ast.AnnAssign) and node.value is None and isinstance(node.target, ast.Name) and node.target.id in symbols:
-                    existing = copy.deepcopy(symbols[node.target.id])
-                    existing["annotation_candidate"] = ast.unparse(node.annotation)
+                    existing = deep_copy(symbols[node.target.id])
+                    existing["annotation_candidate"] = unparse(node.annotation)
                     found = [existing]
                 if not isinstance(node, ast.AugAssign) and isinstance(node.value, ast.Name) and node.value.id in symbols:
                     target = symbols[node.value.id]
                     for index, alias in enumerate(found):
-                        aliased = copy.deepcopy(target)
+                        aliased = deep_copy(target)
                         aliased.update({key: alias[key] for key in ("name", "identity", "source")})
                         aliased["alias_of"] = node.value.id
                         aliased["alias_target_identity"] = target["identity"]
@@ -556,7 +644,7 @@ class _Collector:
                         self.gap(node, "star import contributes unresolved runtime names", dynamic=True)
                         for name, previous in list(symbols.items()):
                             replacement = self.symbol(name, "unknown", node, prefix)
-                            replacement["resolution"]["availability"] = copy.deepcopy(previous["resolution"]["availability"])
+                            replacement["resolution"]["availability"] = deep_copy(previous["resolution"]["availability"])
                             replacement["resolution"]["value"] = self.resolution("unresolved", node, "star import may replace an existing value")
                             replacement["binding_alternatives"] = [previous]
                             symbols[name] = replacement
@@ -571,32 +659,33 @@ class _Collector:
                     found.append(symbol)
             elif isinstance(node, ast.If):
                 if isinstance(node.test, ast.Constant) and type(node.test.value) in (bool, int, str, type(None)):
-                    branch = self.statements(node.body if node.test.value else node.orelse, prefix,
-                                             in_class=in_class, class_shadowed=class_shadowed, initial=symbols)
+                    branch = yield self.statements_frame(node.body if node.test.value else node.orelse, prefix,
+                                                         in_class=in_class, class_shadowed=class_shadowed, initial=symbols)
                     symbols = {symbol["name"]: symbol for symbol in branch}
                 else:
                     self.gap(node, "conditional module/class execution is unassessed")
-                    branches = [self.statements(branch, prefix, in_class=in_class,
-                                                class_shadowed=class_shadowed, initial=symbols)
-                                for branch in (node.body, node.orelse)]
+                    branches = []
+                    for branch in (node.body, node.orelse):
+                        branches.append((yield self.statements_frame(branch, prefix, in_class=in_class,
+                                                                     class_shadowed=class_shadowed, initial=symbols)))
                     symbols = self.join_namespaces(branches, node, prefix)
                 continue
             elif isinstance(node, ast.Try):
                 self.gap(node, "try execution and exception selection are unassessed; source-name branches are joined")
-                successful = self.statements(node.body, prefix, in_class=in_class, class_shadowed=class_shadowed, initial=symbols)
-                successful = self.statements(node.orelse, prefix, in_class=in_class, class_shadowed=class_shadowed,
-                                             initial={symbol["name"]: symbol for symbol in successful})
+                successful = yield self.statements_frame(node.body, prefix, in_class=in_class, class_shadowed=class_shadowed, initial=symbols)
+                successful = yield self.statements_frame(node.orelse, prefix, in_class=in_class, class_shadowed=class_shadowed,
+                                                         initial={symbol["name"]: symbol for symbol in successful})
                 branches = [successful]
                 exception_initial = self.uncertain_effects(node.body, symbols, node, prefix, in_class=in_class)
                 for handler in node.handlers:
-                    handler_initial = copy.deepcopy(exception_initial)
+                    handler_initial = deep_copy(exception_initial)
                     if handler.name:
                         handler_initial[handler.name] = self.symbol(handler.name, "unknown", handler, prefix)
-                    handled = self.statements(handler.body, prefix, in_class=in_class,
-                                              class_shadowed=class_shadowed, initial=handler_initial)
+                    handled = yield self.statements_frame(handler.body, prefix, in_class=in_class,
+                                                          class_shadowed=class_shadowed, initial=handler_initial)
                     branches.append([symbol for symbol in handled if symbol["name"] != handler.name])
                 symbols = self.join_namespaces(branches, node, prefix)
-                final = self.statements(node.finalbody, prefix, in_class=in_class, class_shadowed=class_shadowed, initial=symbols)
+                final = yield self.statements_frame(node.finalbody, prefix, in_class=in_class, class_shadowed=class_shadowed, initial=symbols)
                 symbols = {symbol["name"]: symbol for symbol in final}
                 continue
             elif isinstance(node, ast.Delete):

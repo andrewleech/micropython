@@ -3,6 +3,7 @@ import re
 from collections import namedtuple
 from bisect import bisect_left
 from itertools import chain
+from .chains import chain_root
 from .gnu import adapt_source, restore_text
 
 TOKEN = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[A-Za-z_]\w*|0[xX][0-9a-fA-F]+(?:[uUlL]+)?|\d+(?:[uUlL]+)?|==|!=|<=|>=|->|&&|\|\||<<|>>|\+=|-=|\+\+|--|[^\s]')
@@ -55,62 +56,84 @@ def constant_rejection(expression, environment):
 
 
 def constant(expression, environment):
-    """Evaluate bounded nonnegative C integers using C operator precedence."""
+    """Evaluate bounded nonnegative C integers using C operator precedence.
+
+    Precedence climbing runs on an explicit task stack: ``tasks`` holds pending parse steps and
+    ``values`` the operands already evaluated, so nesting depth in the expression costs no frames."""
     if constant_rejection(expression, environment):
         return None
     tokens = TOKEN.findall(expression)
+    count = len(tokens)
     position = 0
     precedence = {'||': 1, '&&': 2, '|': 3, '^': 4, '&': 5,
                   '==': 6, '!=': 6, '<': 7, '<=': 7, '>': 7, '>=': 7,
                   '<<': 8, '>>': 8, '+': 9, '-': 9, '*': 10, '/': 10, '%': 10}
-    def atom():
-        nonlocal position
-        if position >= len(tokens): raise ValueError('missing operand')
-        token = tokens[position]; position += 1
-        if token == '(':
-            value = expression_at(1)
-            if position >= len(tokens) or tokens[position] != ')': raise ValueError('missing closer')
-            position += 1
-            return value
-        if token in ('+', '!'):
-            value = atom()
-            return value if token == '+' else int(not value)
-        if _INTEGER_LITERAL.fullmatch(token):
-            literal = _LONG_SUFFIX.sub('', token)
-            value = int(literal, 16 if literal.lower().startswith('0x') else 8 if len(literal) > 1 and literal.startswith('0') else 10)
-        else:
-            value = environment.get(token)
-            if isinstance(value, dict): value = value.get('value')
-        if not isinstance(value, (int, bool)) or not 0 <= value <= 0x7fffffff: raise ValueError('unbounded operand')
-        return int(value)
-    def expression_at(level):
-        nonlocal position
-        left = atom()
-        while position < len(tokens) and precedence.get(tokens[position], 0) >= level:
-            operator = tokens[position]; position += 1
-            right = expression_at(precedence[operator] + 1)
-            if operator == '+': value = left + right
-            elif operator == '-': value = left - right
-            elif operator == '*': value = left * right
-            elif operator == '/':
-                if not right or left % right: raise ValueError('division domain')
-                value = left // right
-            elif operator == '%': value = left % right
-            elif operator in ('<<', '>>'):
-                if not 0 <= right <= 30: raise ValueError('shift domain')
-                value = left << right if operator == '<<' else left >> right
-            elif operator == '|': value = left | right
-            elif operator == '&': value = left & right
-            elif operator == '^': value = left ^ right
-            elif operator == '&&': value = int(bool(left) and bool(right))
-            elif operator == '||': value = int(bool(left) or bool(right))
-            else: value = int({'==': left == right, '!=': left != right, '<': left < right, '<=': left <= right, '>': left > right, '>=': left >= right}[operator])
-            if not 0 <= value <= 0x7fffffff: raise ValueError('unbounded result')
-            left = value
-        return left
+    # Tasks: ('expression', level) parses an operand then its operators of at least ``level``;
+    # ('atom',) parses one operand; ('close',) consumes a closing parenthesis; ('unary', token)
+    # applies a prefix operator; ('operators', level) continues an expression after an operand;
+    # ('combine', operator, level) applies a binary operator to the two newest values.
+    tasks, values = [('expression', 1)], []
     try:
-        value = expression_at(1)
-        return value if position == len(tokens) else None
+        while tasks:
+            task = tasks.pop()
+            kind = task[0]
+            if kind == 'expression':
+                tasks.append(('operators', task[1]))
+                tasks.append(('atom',))
+            elif kind == 'atom':
+                if position >= count: raise ValueError('missing operand')
+                token = tokens[position]; position += 1
+                if token == '(':
+                    tasks.append(('close',))
+                    tasks.append(('expression', 1))
+                elif token in ('+', '!'):
+                    tasks.append(('unary', token))
+                    tasks.append(('atom',))
+                else:
+                    if _INTEGER_LITERAL.fullmatch(token):
+                        literal = _LONG_SUFFIX.sub('', token)
+                        value = int(literal, 16 if literal.lower().startswith('0x') else 8 if len(literal) > 1 and literal.startswith('0') else 10)
+                    else:
+                        value = environment.get(token)
+                        if isinstance(value, dict): value = value.get('value')
+                    if not isinstance(value, (int, bool)) or not 0 <= value <= 0x7fffffff: raise ValueError('unbounded operand')
+                    values.append(int(value))
+            elif kind == 'close':
+                if position >= count or tokens[position] != ')': raise ValueError('missing closer')
+                position += 1
+            elif kind == 'unary':
+                if task[1] == '!':
+                    values[-1] = int(not values[-1])
+            elif kind == 'operators':
+                level = task[1]
+                if position < count and precedence.get(tokens[position], 0) >= level:
+                    operator = tokens[position]; position += 1
+                    tasks.append(('combine', operator, level))
+                    tasks.append(('expression', precedence[operator] + 1))
+            else:
+                _, operator, level = task
+                right = values.pop()
+                left = values.pop()
+                if operator == '+': value = left + right
+                elif operator == '-': value = left - right
+                elif operator == '*': value = left * right
+                elif operator == '/':
+                    if not right or left % right: raise ValueError('division domain')
+                    value = left // right
+                elif operator == '%': value = left % right
+                elif operator in ('<<', '>>'):
+                    if not 0 <= right <= 30: raise ValueError('shift domain')
+                    value = left << right if operator == '<<' else left >> right
+                elif operator == '|': value = left | right
+                elif operator == '&': value = left & right
+                elif operator == '^': value = left ^ right
+                elif operator == '&&': value = int(bool(left) and bool(right))
+                elif operator == '||': value = int(bool(left) or bool(right))
+                else: value = int({'==': left == right, '!=': left != right, '<': left < right, '<=': left <= right, '>': left > right, '>=': left >= right}[operator])
+                if not 0 <= value <= 0x7fffffff: raise ValueError('unbounded result')
+                values.append(value)
+                tasks.append(('operators', level))
+        return values[0] if position == count else None
     except (ValueError, ArithmeticError, TypeError):
         return None
 
@@ -298,13 +321,19 @@ def syntax_adapter(code, origins, physical, record):
                 result.append((replacement, expression))
         return result
     def name_of(declarator):
-        if declarator is None: return ''
-        if declarator.type in ('identifier', 'field_identifier', 'type_identifier'): return text(declarator)
-        child = declarator.child_by_field_name('declarator')
-        if child: return name_of(child)
-        for candidate in declarator.named_children:
-            value = name_of(candidate)
-            if value: return value
+        """First declared identifier in preorder, following a ``declarator`` field where one exists."""
+        stack = [declarator] if declarator is not None else []
+        while stack:
+            node = stack.pop()
+            if node.type in ('identifier', 'field_identifier', 'type_identifier'):
+                value = text(node)
+                if value: return value
+                continue
+            child = node.child_by_field_name('declarator')
+            if child:
+                stack.append(child)
+            else:
+                stack.extend(reversed(node.named_children))
         return ''
     def declarators(node):
         declared = node.children_by_field_name('declarator')
@@ -407,71 +436,109 @@ def syntax_adapter(code, origins, physical, record):
                      'declaration_id': selected['declaration_id'], 'source_span': selected['source_span']}
         return identifiers[0], operands[0], authority
 
-    def expression_fact(node, depth=0):
-        if node is None:
+    def expression_fact(root):
+        """Nested expression fact of ``root``; nodes 24 levels below it are recorded unresolved."""
+        if root is None:
             return None
-        fact = {'kind': node.type, 'expression': text(node), **metadata(node)}
-        if depth >= 24:
-            fact['unresolved'] = 'expression nesting exceeds bounded def/use model'
-            return fact
-        cast = typedef_cast(node)
-        if cast:
-            type_node, value_node, authority = cast
-            fact.update(kind='cast_expression', type={
-                'kind': 'type_descriptor', 'expression': text(type_node), **metadata(type_node)},
-                value=expression_fact(value_node, depth + 1), typedef_authority=authority)
-            return fact
-        operator = node.child_by_field_name('operator')
-        if operator is not None:
-            fact['operator'] = text(operator)
-        fields = {
-            'call_expression': ('function', 'arguments'),
-            'subscript_expression': ('argument', 'index'),
-            'field_expression': ('argument', 'field'),
-            'pointer_expression': ('argument',),
-            'unary_expression': ('argument',),
-            'update_expression': ('argument',),
-            'initializer_pair': ('value',),
-            'cast_expression': ('type', 'value'),
-            'assignment_expression': ('left', 'right'),
-            'binary_expression': ('left', 'right'),
-            'comma_expression': ('left', 'right'),
-            'conditional_expression': ('condition', 'consequence', 'alternative'),
-        }.get(node.type, ())
-        for field in fields:
-            child = node.child_by_field_name(field)
-            if child:
-                fact[field] = expression_fact(child, depth + 1)
-        if node.type in ('argument_list', 'initializer_list', 'parenthesized_expression', 'compound_literal_expression', 'concatenated_string'):
-            fact['children'] = [expression_fact(child, depth + 1) for child in node.named_children if child.type != 'comment']
-        operator = node.child_by_field_name('operator')
-        if operator:
-            fact['operator'] = text(operator)
-        elif node.type in ('pointer_expression', 'field_expression'):
-            fact['operator'] = next((text(child) for child in node.children if not child.is_named), '')
-        return fact
-    def initializer_fact(node):
-        fact = {'expression': text(node), 'raw_expression': raw(node),
-                'source_span': loc(node), 'syntax_kind': node.type}
-        if node.type == 'initializer_list':
-            fact['fields'] = [initializer_fact(child) for child in node.named_children if child.type != 'comment']
-        elif node.type == 'initializer_pair':
-            value = node.child_by_field_name('value')
-            fact['value'] = initializer_fact(value) if value else None
-            fact['designators'] = [initializer_fact(child) for child in node.named_children if child != value and child.type != 'comment']
-        return fact
+        result = None
+        # Each entry is (syntax node, depth, container, key): the fact built for the node is stored
+        # at container[key], or becomes the result for the root.
+        stack = [(root, 0, None, None)]
+        while stack:
+            node, depth, container, key = stack.pop()
+            fact = {'kind': node.type, 'expression': text(node), **metadata(node)}
+            if container is None:
+                result = fact
+            else:
+                container[key] = fact
+            if depth >= 24:
+                fact['unresolved'] = 'expression nesting exceeds bounded def/use model'
+                continue
+            cast = typedef_cast(node)
+            if cast:
+                type_node, value_node, authority = cast
+                fact.update(kind='cast_expression', type={
+                    'kind': 'type_descriptor', 'expression': text(type_node), **metadata(type_node)},
+                    value=None, typedef_authority=authority)
+                if value_node is not None:
+                    stack.append((value_node, depth + 1, fact, 'value'))
+                continue
+            operator = node.child_by_field_name('operator')
+            if operator is not None:
+                fact['operator'] = text(operator)
+            fields = {
+                'call_expression': ('function', 'arguments'),
+                'subscript_expression': ('argument', 'index'),
+                'field_expression': ('argument', 'field'),
+                'pointer_expression': ('argument',),
+                'unary_expression': ('argument',),
+                'update_expression': ('argument',),
+                'initializer_pair': ('value',),
+                'cast_expression': ('type', 'value'),
+                'assignment_expression': ('left', 'right'),
+                'binary_expression': ('left', 'right'),
+                'comma_expression': ('left', 'right'),
+                'conditional_expression': ('condition', 'consequence', 'alternative'),
+            }.get(node.type, ())
+            pending = []
+            for field in fields:
+                child = node.child_by_field_name(field)
+                if child:
+                    fact[field] = None
+                    pending.append((child, depth + 1, fact, field))
+            if node.type in ('argument_list', 'initializer_list', 'parenthesized_expression', 'compound_literal_expression', 'concatenated_string'):
+                children = [child for child in node.named_children if child.type != 'comment']
+                slots = fact['children'] = [None] * len(children)
+                pending.extend((child, depth + 1, slots, index) for index, child in enumerate(children))
+            if operator:
+                fact['operator'] = text(operator)
+            elif node.type in ('pointer_expression', 'field_expression'):
+                fact['operator'] = next((text(child) for child in node.children if not child.is_named), '')
+            stack.extend(reversed(pending))
+        return result
+    def initializer_table(root):
+        """Initializer facts of ``root`` and of its nested initializer syntax, in preorder.
+
+        A fact refers to nested facts by position in the returned list: ``fields`` and
+        ``designators`` hold lists of positions and ``value`` a position or None."""
+        nodes = []
+        stack = [(root, None, None)]
+        while stack:
+            node, parent, slot = stack.pop()
+            position = len(nodes)
+            fact = {'expression': text(node), 'raw_expression': raw(node),
+                    'source_span': loc(node), 'syntax_kind': node.type}
+            nodes.append(fact)
+            if slot == 'value':
+                parent['value'] = position
+            elif slot is not None:
+                parent[slot].append(position)
+            pending = []
+            if node.type == 'initializer_list':
+                fact['fields'] = []
+                pending = [(child, fact, 'fields') for child in node.named_children if child.type != 'comment']
+            elif node.type == 'initializer_pair':
+                value = node.child_by_field_name('value')
+                fact['value'] = None
+                fact['designators'] = []
+                pending = [(value, fact, 'value')] if value else []
+                pending.extend((child, fact, 'designators') for child in node.named_children if child != value and child.type != 'comment')
+            stack.extend(reversed(pending))
+        return nodes
 
     def variable_initializer(declaration, declarator):
         actual = declarator.child_by_field_name('declarator') if declarator.type == 'init_declarator' else declarator
         initializer = declarator.child_by_field_name('value') if declarator.type == 'init_declarator' else None
         arrays = tree_index.select(('array_declarator',), actual)
-        rows = [dict(initializer_fact(child), initializer_ordinal=index) for index, child in enumerate(
-            child for child in initializer.named_children if child.type != 'comment')] if initializer and initializer.type == 'initializer_list' else []
+        nodes = initializer_table(initializer) if initializer else []
+        rows = [nodes[position] for position in nodes[0]['fields']] if initializer and initializer.type == 'initializer_list' else []
+        for ordinal, row in enumerate(rows):
+            row['initializer_ordinal'] = ordinal
         return {'type_expression': text(declaration.child_by_field_name('type')),
                 'declaration_specifiers': canonical(original_data[declaration.start_byte:actual.start_byte].decode('utf-8')),
                 'declarator_expression': text(actual), 'array_dimensions': [
                     {'expression': text(node.child_by_field_name('size')), 'source_span': loc(node)} for node in arrays],
-                'initializer': initializer_fact(initializer) if initializer else None,
+                'initializer': nodes[0] if nodes else None, 'initializer_nodes': nodes,
                 'initializer_rows': rows, 'initializer_row_count': len(rows),
                 'initializer_constants': selected_constants(text(actual) + ' ' + text(initializer), constants)}
 
@@ -747,26 +814,51 @@ def syntax_adapter(code, origins, physical, record):
                 events['semantic_unassessed'] = body_barriers
             if tree_index.has(('goto_statement', 'labeled_statement', 'switch_statement'), body):
                 events['control_flow_unresolved'] = ['jump/label/switch flow unassessed']
-            def terminates(child):
-                if child.type == 'return_statement': return True
-                if child.type == 'compound_statement': return any(terminates(nested) for nested in child.named_children)
-                if child.type == 'else_clause': return any(terminates(nested) for nested in child.named_children)
-                if child.type == 'if_statement':
-                    consequence, alternative = child.child_by_field_name('consequence'), child.child_by_field_name('alternative')
-                    return consequence is not None and alternative is not None and terminates(consequence) and terminates(alternative)
-                return False
-            def visit(child, guards):
-                if child.end_byte <= body_start:
-                    return
-                if child.type == 'declaration':
-                    for variable in variables:
-                        if child.start_byte <= variable.get('byte_start', -1) < child.end_byte:
-                            variable['guards'] = list(guards)
-                if child.type == 'compound_statement':
-                    current = list(guards)
-                    for statement in child.named_children:
-                        visit(statement, current)
-                        if terminates(statement): break
+            terminated = {}
+            def terminates(statement):
+                """Whether every path through ``statement`` reaches a return, memoized per syntax node."""
+                stack = [statement]
+                while stack:
+                    child = stack[-1]
+                    if child.id in terminated:
+                        stack.pop()
+                        continue
+                    if child.type in ('compound_statement', 'else_clause'):
+                        parts = child.named_children
+                    elif child.type == 'if_statement':
+                        consequence, alternative = child.child_by_field_name('consequence'), child.child_by_field_name('alternative')
+                        parts = [consequence, alternative] if consequence is not None and alternative is not None else None
+                    else:
+                        terminated[child.id] = child.type == 'return_statement'
+                        stack.pop()
+                        continue
+                    pending = [part for part in parts or () if part.id not in terminated]
+                    if pending:
+                        stack.extend(reversed(pending))
+                        continue
+                    stack.pop()
+                    if child.type == 'if_statement':
+                        terminated[child.id] = parts is not None and all(terminated[part.id] for part in parts)
+                    else:
+                        terminated[child.id] = any(terminated[part.id] for part in parts)
+                return terminated[statement.id]
+            guard_parents, guard_entries = [], []
+            events['guard_table'] = {'parents': guard_parents, 'guards': guard_entries}
+            def visit(root):
+                """Record events in source order with the guards under which each is reached.
+
+                Guards are views into the function's ``guard_table``: each branch adds one entry
+                under the guards of its enclosing branch, so nested paths share their prefixes.
+                Work items are ('visit', node, guards) or ('statements', statements, index, guards),
+                the latter resuming a compound statement after its statement ``index`` was visited."""
+                work = [('visit', root, chain_root(guard_parents, guard_entries))]
+                while work:
+                    item = work.pop()
+                    if item[0] == 'statements':
+                        _, statements, index, current = item
+                        statement = statements[index]
+                        if terminates(statement):
+                            continue
                         if statement.type == 'if_statement':
                             consequence, alternative = statement.child_by_field_name('consequence'), statement.child_by_field_name('alternative')
                             then_end = consequence is not None and terminates(consequence)
@@ -774,94 +866,139 @@ def syntax_adapter(code, origins, physical, record):
                             if then_end != else_end:
                                 condition = text(statement.child_by_field_name('condition'))
                                 if condition.startswith('( ') and condition.endswith(' )'): condition = condition[2:-2]
-                                current = current + [{'condition': condition, 'branch': 'else' if then_end else 'then',
-                                                      'condition_id': statement.start_byte, 'source_span': loc(statement)}]
-                    return
-                if child.type == 'if_statement':
-                    condition_node = child.child_by_field_name('condition')
-                    condition = text(condition_node)
-                    if condition.startswith('( ') and condition.endswith(' )'): condition = condition[2:-2]
-                    identity = loc(child)
-                    events['conditions'].append({'control_kind': 'if_statement', 'expression': condition, 'expression_node': expression_fact(condition_node),
-                                                 'source_span': identity, 'guards': guards, **metadata(condition_node)})
-                    events['conditions'][-1]['condition_id'] = child.start_byte
-                    visit(condition_node, guards)
-                    consequence = child.child_by_field_name('consequence')
-                    alternative = child.child_by_field_name('alternative')
-                    if consequence: visit(consequence, guards + [{'condition': condition, 'branch': 'then', 'condition_id': child.start_byte, 'source_span': identity}])
-                    if alternative: visit(alternative, guards + [{'condition': condition, 'branch': 'else', 'condition_id': child.start_byte, 'source_span': identity}])
-                    return
-                if child.type in ('for_statement', 'while_statement', 'do_statement', 'switch_statement'):
-                    control = child.child_by_field_name('condition')
-                    if control:
-                        events['control_expressions'].append({
-                            'expression': text(control), 'expression_node': expression_fact(control),
-                            'control_kind': child.type, 'source_span': loc(control),
-                            'guards': guards, **metadata(control)})
-                if child.type == 'call_expression' and typedef_cast(child) is None:
-                    expression = text(child)
-                    callee_name = text(child.child_by_field_name('function'))
-                    candidates = global_functions.get(callee_name, [])
-                    visible = [v for v in variables if v['name'] == callee_name
-                               and v.get('byte_start', -1) <= child.start_byte
-                               and v.get('scope_start', -1) <= child.start_byte < v.get('scope_end', body.end_byte)]
-                    shadow = max(visible, key=lambda v: v.get('scope_start', -1))['declaration_point'] if visible else point_for_name(node.child_by_field_name('declarator'), callee_name)
-                    callee = {'name': callee_name, 'kind': 'NON_FUNCTION_BINDING', 'source_span': shadow} if visible or callee_name in params else candidates[0] if candidates else None
-                    events['calls'].append({'expression': expression, 'expression_node': expression_fact(child),
-                                            'source_span': loc(child), 'guards': guards, 'callee': callee, **metadata(child)})
-                elif child.type == 'return_statement':
-                    value = next(iter(child.named_children), None)
-                    events['returns'].append({'expression': return_expression(text(child)), 'expression_node': expression_fact(value),
-                                              'source_span': loc(child), 'guards': guards, **metadata(child)})
-                elif (child.type == 'expression_statement' and len(child.named_children) == 1
-                      and child.named_children[0].type not in ('assignment_expression', 'update_expression')
-                      and (child.named_children[0].type != 'call_expression' or typedef_cast(child.named_children[0]))):
-                    expression_node = child.named_children[0]
-                    events['expressions'].append({'expression': text(expression_node), 'expression_node': expression_fact(expression_node),
-                                                   'source_span': loc(child), 'guards': guards, **metadata(expression_node)})
-                elif child.type in ('assignment_expression', 'update_expression'):
-                    target = child.child_by_field_name('left') or child.child_by_field_name('argument')
-                    value = child.child_by_field_name('right')
-                    operator = child.child_by_field_name('operator')
-                    events['writes'].append({'expression': text(child), 'target': text(target) if target else re.sub(r'\+\+|--', '', text(child)).strip(),
-                                            'target_node': expression_fact(target), 'value_node': expression_fact(value),
-                                            'operator': text(operator) if operator else 'update',
-                                            'source_span': loc(child), 'guards': guards, **metadata(child)})
-                for nested in child.named_children: visit(nested, guards)
-            visit(body, [])
-            def flow(child):
-                if child.type in ('compound_statement', 'else_clause'):
-                    return {'kind': 'block', 'children': [flow(nested) for nested in child.named_children if nested.type != 'comment']}
-                if child.type == 'if_statement':
-                    condition = text(child.child_by_field_name('condition'))
-                    if condition.startswith('( ') and condition.endswith(' )'):
-                        condition = condition[2:-2]
-                    return {'kind': 'if', 'condition': condition, 'byte_start': child.start_byte,
-                            'condition_start': child.child_by_field_name('condition').start_byte,
-                            'condition_end': child.child_by_field_name('condition').end_byte,
-                            'then': flow(child.child_by_field_name('consequence')),
-                            'else': flow(child.child_by_field_name('alternative')) if child.child_by_field_name('alternative') else {'kind': 'fallthrough'}}
-                if child.type == 'return_statement':
-                    return {'kind': 'return', 'byte_start': child.start_byte, 'byte_end': child.end_byte, 'loops': metadata(child)['loops']}
-                if (child.type == 'expression_statement' and len(child.named_children) == 1
-                        and child.named_children[0].type == 'call_expression'
-                        and typedef_cast(child.named_children[0]) is None):
-                    return {'kind': 'call', 'byte_start': child.named_children[0].start_byte,
-                            'byte_end': child.named_children[0].end_byte}
-                if child.type in ('for_statement', 'while_statement', 'do_statement'):
-                    return {'kind': 'loop', 'loop_kind': child.type, 'byte_start': child.start_byte,
-                            'initializer_expression': text(child.child_by_field_name('initializer')) if child.child_by_field_name('initializer') else None,
-                            'condition_expression': text(child.child_by_field_name('condition')) if child.child_by_field_name('condition') else None,
-                            'update_expression': text(child.child_by_field_name('update')) if child.child_by_field_name('update') else None,
-                            'body': flow(child.child_by_field_name('body'))}
-                if child.type in ('continue_statement', 'break_statement'):
-                    return {'kind': child.type.removesuffix('_statement'), 'byte_start': child.start_byte}
-                if child.type == 'goto_statement':
-                    return {'kind': 'goto', 'target': text(child.child_by_field_name('label')), 'byte_start': child.start_byte}
-                if child.type == 'labeled_statement':
-                    return {'kind': 'label', 'name': text(child.child_by_field_name('label')), 'byte_start': child.start_byte,
-                            'children': [flow(nested) for nested in child.named_children if nested.type != 'statement_identifier']}
-                return {'kind': 'fallthrough', 'byte_start': child.start_byte, 'byte_end': child.end_byte}
+                                current = current.extend({'condition': condition, 'branch': 'else' if then_end else 'then',
+                                                          'condition_id': statement.start_byte, 'source_span': loc(statement)})
+                        if index + 1 < len(statements):
+                            work.append(('statements', statements, index + 1, current))
+                            work.append(('visit', statements[index + 1], current))
+                        continue
+                    _, child, guards = item
+                    if child.end_byte <= body_start:
+                        continue
+                    if child.type == 'declaration':
+                        for variable in variables:
+                            if child.start_byte <= variable.get('byte_start', -1) < child.end_byte:
+                                variable['guards'] = guards
+                    if child.type == 'compound_statement':
+                        statements = child.named_children
+                        if statements:
+                            current = guards
+                            work.append(('statements', statements, 0, current))
+                            work.append(('visit', statements[0], current))
+                        continue
+                    if child.type == 'if_statement':
+                        condition_node = child.child_by_field_name('condition')
+                        condition = text(condition_node)
+                        if condition.startswith('( ') and condition.endswith(' )'): condition = condition[2:-2]
+                        identity = loc(child)
+                        events['conditions'].append({'control_kind': 'if_statement', 'expression': condition, 'expression_node': expression_fact(condition_node),
+                                                     'source_span': identity, 'guards': guards, **metadata(condition_node)})
+                        events['conditions'][-1]['condition_id'] = child.start_byte
+                        consequence = child.child_by_field_name('consequence')
+                        alternative = child.child_by_field_name('alternative')
+                        then_guards = guards.extend({'condition': condition, 'branch': 'then', 'condition_id': child.start_byte, 'source_span': identity}) if consequence else None
+                        else_guards = guards.extend({'condition': condition, 'branch': 'else', 'condition_id': child.start_byte, 'source_span': identity}) if alternative else None
+                        if alternative: work.append(('visit', alternative, else_guards))
+                        if consequence: work.append(('visit', consequence, then_guards))
+                        work.append(('visit', condition_node, guards))
+                        continue
+                    if child.type in ('for_statement', 'while_statement', 'do_statement', 'switch_statement'):
+                        control = child.child_by_field_name('condition')
+                        if control:
+                            events['control_expressions'].append({
+                                'expression': text(control), 'expression_node': expression_fact(control),
+                                'control_kind': child.type, 'source_span': loc(control),
+                                'guards': guards, **metadata(control)})
+                    if child.type == 'call_expression' and typedef_cast(child) is None:
+                        expression = text(child)
+                        callee_name = text(child.child_by_field_name('function'))
+                        candidates = global_functions.get(callee_name, [])
+                        visible = [v for v in variables if v['name'] == callee_name
+                                   and v.get('byte_start', -1) <= child.start_byte
+                                   and v.get('scope_start', -1) <= child.start_byte < v.get('scope_end', body.end_byte)]
+                        shadow = max(visible, key=lambda v: v.get('scope_start', -1))['declaration_point'] if visible else point_for_name(node.child_by_field_name('declarator'), callee_name)
+                        callee = {'name': callee_name, 'kind': 'NON_FUNCTION_BINDING', 'source_span': shadow} if visible or callee_name in params else candidates[0] if candidates else None
+                        events['calls'].append({'expression': expression, 'expression_node': expression_fact(child),
+                                                'source_span': loc(child), 'guards': guards, 'callee': callee, **metadata(child)})
+                    elif child.type == 'return_statement':
+                        value = next(iter(child.named_children), None)
+                        events['returns'].append({'expression': return_expression(text(child)), 'expression_node': expression_fact(value),
+                                                  'source_span': loc(child), 'guards': guards, **metadata(child)})
+                    elif (child.type == 'expression_statement' and len(child.named_children) == 1
+                          and child.named_children[0].type not in ('assignment_expression', 'update_expression')
+                          and (child.named_children[0].type != 'call_expression' or typedef_cast(child.named_children[0]))):
+                        expression_node = child.named_children[0]
+                        events['expressions'].append({'expression': text(expression_node), 'expression_node': expression_fact(expression_node),
+                                                       'source_span': loc(child), 'guards': guards, **metadata(expression_node)})
+                    elif child.type in ('assignment_expression', 'update_expression'):
+                        target = child.child_by_field_name('left') or child.child_by_field_name('argument')
+                        value = child.child_by_field_name('right')
+                        operator = child.child_by_field_name('operator')
+                        events['writes'].append({'expression': text(child), 'target': text(target) if target else re.sub(r'\+\+|--', '', text(child)).strip(),
+                                                'target_node': expression_fact(target), 'value_node': expression_fact(value),
+                                                'operator': text(operator) if operator else 'update',
+                                                'source_span': loc(child), 'guards': guards, **metadata(child)})
+                    work.extend(('visit', nested, guards) for nested in reversed(child.named_children))
+            visit(body)
+            def flow(root):
+                """Structured control flow of ``root`` as a preorder node table.
+
+                Node 0 is ``root``. ``children``, ``then``, ``else`` and ``body`` hold positions of
+                other nodes in the table, so the table nests no deeper than one node."""
+                table = []
+                # Each entry is (syntax node, parent node, slot); a None syntax node in an ``else``
+                # slot is the fallthrough of an if statement without an else clause.
+                work = [(root, None, None)]
+                while work:
+                    child, parent, slot = work.pop()
+                    position = len(table)
+                    pending = []
+                    if child is None and slot == 'else':
+                        entry = {'kind': 'fallthrough'}
+                    elif child.type in ('compound_statement', 'else_clause'):
+                        entry = {'kind': 'block', 'children': []}
+                        pending = [(nested, entry, 'children') for nested in child.named_children if nested.type != 'comment']
+                    elif child.type == 'if_statement':
+                        condition = text(child.child_by_field_name('condition'))
+                        if condition.startswith('( ') and condition.endswith(' )'):
+                            condition = condition[2:-2]
+                        entry = {'kind': 'if', 'condition': condition, 'byte_start': child.start_byte,
+                                 'condition_start': child.child_by_field_name('condition').start_byte,
+                                 'condition_end': child.child_by_field_name('condition').end_byte,
+                                 'then': None, 'else': None}
+                        pending = [(child.child_by_field_name('consequence'), entry, 'then'),
+                                   (child.child_by_field_name('alternative'), entry, 'else')]
+                    elif child.type == 'return_statement':
+                        entry = {'kind': 'return', 'byte_start': child.start_byte, 'byte_end': child.end_byte, 'loops': metadata(child)['loops']}
+                    elif (child.type == 'expression_statement' and len(child.named_children) == 1
+                            and child.named_children[0].type == 'call_expression'
+                            and typedef_cast(child.named_children[0]) is None):
+                        entry = {'kind': 'call', 'byte_start': child.named_children[0].start_byte,
+                                 'byte_end': child.named_children[0].end_byte}
+                    elif child.type in ('for_statement', 'while_statement', 'do_statement'):
+                        entry = {'kind': 'loop', 'loop_kind': child.type, 'byte_start': child.start_byte,
+                                 'initializer_expression': text(child.child_by_field_name('initializer')) if child.child_by_field_name('initializer') else None,
+                                 'condition_expression': text(child.child_by_field_name('condition')) if child.child_by_field_name('condition') else None,
+                                 'update_expression': text(child.child_by_field_name('update')) if child.child_by_field_name('update') else None,
+                                 'body': None}
+                        pending = [(child.child_by_field_name('body'), entry, 'body')]
+                    elif child.type in ('continue_statement', 'break_statement'):
+                        entry = {'kind': child.type.removesuffix('_statement'), 'byte_start': child.start_byte}
+                    elif child.type == 'goto_statement':
+                        entry = {'kind': 'goto', 'target': text(child.child_by_field_name('label')), 'byte_start': child.start_byte}
+                    elif child.type == 'labeled_statement':
+                        entry = {'kind': 'label', 'name': text(child.child_by_field_name('label')), 'byte_start': child.start_byte,
+                                 'children': []}
+                        pending = [(nested, entry, 'children') for nested in child.named_children if nested.type != 'statement_identifier']
+                    else:
+                        entry = {'kind': 'fallthrough', 'byte_start': child.start_byte, 'byte_end': child.end_byte}
+                    table.append(entry)
+                    if slot == 'children':
+                        parent['children'].append(position)
+                    elif slot is not None:
+                        parent[slot] = position
+                    work.extend(reversed(pending))
+                return table
             events['flow'] = flow(body)
             declaration_identity = global_functions.get(name, [{'name': name, 'kind': 'FUNCTION_DECL', 'source_span': point_for_name(node.child_by_field_name('declarator'), name)}])[0]
             functions.append({'id': function_id(physical, name, loc(node)), 'declaration_identity': declaration_identity, 'name': name, 'linkage': 'static' if text(node).startswith('static ') else 'external', 'parameters': params, 'source_span': loc(node), 'events': events, 'constants': function_constants(node, body), 'body_expression': body_expression,
