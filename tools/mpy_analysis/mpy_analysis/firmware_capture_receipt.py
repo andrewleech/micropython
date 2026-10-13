@@ -12,6 +12,7 @@ from typing import Any
 
 from .argv_tokens import enables_lto, flatten
 from .elf_evidence import dynamic_needed
+from .firmware_inputs import header_accounting
 from .firmware_receipt import receipt_id, validate_firmware_receipt
 from .gnu_map import parse_gnu_map
 from .toolchain_runtime import classify, machine_flags
@@ -498,6 +499,7 @@ def receipt_from_journal(
         map_error = None
 
     generated_source_inputs = {}
+    generated_producers: dict[str, tuple[str, list[dict[str, str]]]] = {}
     for action in actions:
         if action["kind"] != "generate":
             continue
@@ -509,6 +511,7 @@ def receipt_from_journal(
                     producer_bindings.append(marked)
         for output in action["outputs"]:
             generated_source_inputs[output["path"]] = producer_bindings
+            generated_producers[output["path"]] = (action["id"], producer_bindings)
 
     source_for_object = {}
     object_records = {}
@@ -712,6 +715,7 @@ def receipt_from_journal(
                 item["path"] for item in action["inputs"] if item["role"] == "archive-member"
             )
     object_accounting = []
+    contributed_objects = []
     for path, record in sorted(object_records.items()):
         bindings = source_for_object.get(path, [])
         if path in archive_object_accounting:
@@ -754,7 +758,17 @@ def receipt_from_journal(
                     + (capture["reason"] if capture else "the action recorded no dependency capture"),
                 }
             )
+        if disposition == "contributed":
+            contributed_objects.append((path, action))
 
+    headers, header_unresolved = header_accounting(
+        contributed_objects,
+        build_root=build_root,
+        bindings_for=lambda header: _bindings(header, source_roots),
+        producers=generated_producers,
+        roles={path: role for role, path in toolchain},
+    )
+    unresolved.extend(header_unresolved)
     if map_error:
         unresolved.append({"path": str(Path(map_file).resolve()), "reason": f"unsupported map evidence: {map_error}"})
     if parsed is not None:
@@ -815,6 +829,7 @@ def receipt_from_journal(
             "lto": lto,
         },
         "object_accounting": object_accounting,
+        "header_accounting": headers,
         "artifacts": list(image_artifacts.values()),
     }
     receipt = {
@@ -885,6 +900,10 @@ def merge_receipts(receipts: list[dict[str, Any]]) -> dict[str, Any]:
     for receipt_index, receipt in enumerate(checked):
         image = json.loads(json.dumps(receipt["images"][0]))
         image["link_action"] = action_ids[(receipt_index, image["link_action"])]
+        for entry in image.get("header_accounting", []):
+            entry["consumed_by"] = sorted(action_ids[(receipt_index, item)] for item in entry["consumed_by"])
+            if "producer" in entry:
+                entry["producer"] = action_ids[(receipt_index, entry["producer"])]
         image["configuration"] = receipt["configuration"]
         images.append(image)
 

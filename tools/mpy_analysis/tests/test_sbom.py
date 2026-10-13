@@ -241,6 +241,7 @@ def firmware_receipt(inventory, app, build_dir, source_path="selected.c"):
                         "evidence": "compiler action and link map",
                     }
                 ],
+                "header_accounting": [],
                 "artifacts": [record(elf, "elf")],
             }
         ],

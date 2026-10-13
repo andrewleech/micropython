@@ -473,7 +473,8 @@ $(BUILD)/firmware.bin: $(BUILD)/firmware.elf
         if item["type"] == "file"
         and any(prop["name"] == "mpy:root" and prop["value"] == "fixture" for prop in item["properties"])
     }
-    assert dependencies[firmware["bom-ref"]] == {
+    toolchain_headers = {ref for ref in dependencies[firmware["bom-ref"]] if ref.startswith("urn:mpy:toolchain-headers:")}
+    assert dependencies[firmware["bom-ref"]] - toolchain_headers == {
         file_components["main.c"],
         file_components["used.c"],
         file_components["left/shared.c"],

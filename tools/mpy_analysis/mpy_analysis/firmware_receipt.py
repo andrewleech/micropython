@@ -16,6 +16,7 @@ from typing import Any
 
 from .argv_tokens import enables_lto
 from .elf_evidence import dynamic_needed, section_table
+from .firmware_inputs import consumed_headers
 from .gnu_map import parse_gnu_map
 
 SCHEMA = "mpy-firmware-build/v1"
@@ -136,7 +137,7 @@ def _validate_actions(actions, build_id, verify_files):
     outputs = {}
     output_versions = {}
     compiled_objects = {}
-    object_captures = {}
+    object_actions = {}
     allowed_kinds = {"compile", "assemble", "archive", "link", "generate", "transform", "sign", "package", "deploy"}
     for index, raw in enumerate(actions):
         action = _object(raw, f"actions[{index}]")
@@ -233,7 +234,7 @@ def _validate_actions(actions, build_id, verify_files):
             if kind in ("compile", "assemble") and role == "object":
                 image = _text(action.get("image"), f"action {action_id}.image")
                 compiled_objects[(image, path)] = output
-                object_captures[(image, path)] = (kind, capture)
+                object_actions[(image, path)] = action
         if kind == "link" and not action_outputs:
             raise FirmwareReceiptError(f"link action {action_id} has no output")
     if verify_files:
@@ -243,7 +244,7 @@ def _validate_actions(actions, build_id, verify_files):
                 f"action {action_id} final output",
                 verify_files=True,
             )
-    return action_inputs, outputs, output_versions, compiled_objects, object_captures
+    return action_inputs, outputs, output_versions, compiled_objects, object_actions
 
 def _validate_toolchain_library(operand, path, image_id, toolchain_executables):
     toolchain = _object(operand.get("toolchain"), f"image {image_id} toolchain library {path}")
@@ -508,6 +509,79 @@ def _validate_object_accounting(image, image_id, repo_names, compiled_objects, b
             raise FirmwareReceiptError(
                 f"linked object disposition disagrees with object accounting: {path}"
             )
+
+
+def _validate_header_accounting(
+    image, image_id, repo_names, actions, object_actions, toolchain_executables, verify_files
+):
+    """Every header a contributing compile read is attributed exactly once, from its depfile."""
+    entries = image.get("header_accounting")
+    if entries is None:
+        return []
+    if not isinstance(entries, list):
+        raise FirmwareReceiptError(f"image {image_id}.header_accounting must be an array")
+    by_id = {action["id"]: action for action in actions}
+    expected: dict[str, tuple[str, set[str]]] = {}
+    for row in image["object_accounting"]:
+        if row["disposition"] != "contributed":
+            continue
+        action = object_actions[(image_id, row["object"]["path"])]
+        if action["kind"] != "compile":
+            continue
+        for path, dependency in consumed_headers(action).items():
+            digest, consumers = expected.setdefault(path, (dependency["sha256"], set()))
+            if digest != dependency["sha256"]:
+                raise FirmwareReceiptError(f"compiles of image {image_id} read different bytes of header {path}")
+            consumers.add(action["id"])
+    listed = set()
+    for index, raw in enumerate(entries):
+        label = f"image {image_id}.header_accounting[{index}]"
+        entry = _object(raw, label)
+        record = _path_record(
+            {"path": entry.get("path"), "sha256": entry.get("sha256")}, label, verify_files=verify_files
+        )
+        path = record["path"]
+        if path in listed:
+            raise FirmwareReceiptError(f"{label} repeats header {path}")
+        listed.add(path)
+        if path not in expected:
+            raise FirmwareReceiptError(f"{label} names a header no contributing compile read: {path}")
+        digest, consumers = expected[path]
+        if record["sha256"] != digest or entry.get("consumed_by") != sorted(consumers):
+            raise FirmwareReceiptError(f"{label} disagrees with the compile dependency evidence: {path}")
+        _text(entry.get("evidence"), f"{label}.evidence")
+        aliases = entry.get("aliases", [])
+        if not isinstance(aliases, list) or not all(
+            isinstance(item, str) and Path(item).is_absolute() for item in aliases
+        ):
+            raise FirmwareReceiptError(f"{label}.aliases must be absolute paths")
+        disposition = entry.get("disposition")
+        if disposition == "source":
+            _source_bindings(entry.get("source_bindings"), f"{label}.source_bindings", repo_names)
+        elif disposition == "generated":
+            _source_bindings(entry.get("source_bindings"), f"{label}.source_bindings", repo_names)
+            producer = by_id.get(entry.get("producer"))
+            if producer is None or not any(
+                item["path"] == path and item["sha256"] == record["sha256"] for item in producer["outputs"]
+            ):
+                raise FirmwareReceiptError(f"{label} is not an output of its producer action: {path}")
+        elif disposition == "toolchain":
+            binding = _object(entry.get("toolchain"), f"{label}.toolchain")
+            executable = _object(binding.get("executable"), f"{label}.toolchain.executable")
+            if toolchain_executables.get((binding.get("role"), executable.get("path"))) != executable.get("sha256"):
+                raise FirmwareReceiptError(f"{label} is not bound to a captured toolchain tool: {path}")
+            _text(binding.get("include_dir"), f"{label}.toolchain.include_dir")
+        elif disposition == "unowned":
+            _text(entry.get("reason"), f"{label}.reason")
+        else:
+            raise FirmwareReceiptError(f"{label}.disposition must be explicit")
+    if listed != set(expected):
+        raise FirmwareReceiptError(
+            f"image {image_id} header accounting omits headers: {sorted(set(expected) - listed)[:3]}"
+        )
+    return entries
+
+
 def validate_firmware_receipt(
     value: dict[str, Any], *, verify_files: bool = True
 ) -> dict[str, Any]:
@@ -565,7 +639,7 @@ def validate_firmware_receipt(
         toolchain_executables[(tool["role"], executable["path"])] = executable["sha256"]
 
     actions = receipt.get("actions")
-    action_inputs, outputs, output_versions, compiled_objects, object_captures = _validate_actions(
+    action_inputs, outputs, output_versions, compiled_objects, object_actions = _validate_actions(
         actions, build_id, verify_files
     )
 
@@ -613,6 +687,9 @@ def validate_firmware_receipt(
         _validate_object_accounting(
             image, image_id, repo_names, compiled_objects, by_operand, verify_files
         )
+        _validate_header_accounting(
+            image, image_id, repo_names, actions, object_actions, toolchain_executables, verify_files
+        )
         if not isinstance(link.get("unresolved"), list):
             raise FirmwareReceiptError(f"image {image_id}.link.unresolved must be an array")
         discarded_sections = link.get("discarded_sections")
@@ -648,8 +725,10 @@ def validate_firmware_receipt(
                 raise FirmwareReceiptError(f"complete receipt contains unsupported link evidence: {image['id']}")
             if any(row["disposition"] == "unsupported" for row in image["object_accounting"]):
                 raise FirmwareReceiptError(f"complete receipt contains unsupported object accounting: {image['id']}")
+            if any(entry["disposition"] == "unowned" for entry in image.get("header_accounting", [])):
+                raise FirmwareReceiptError(f"complete receipt contains unattributed headers: {image['id']}")
             for row in image["object_accounting"]:
-                _, capture = object_captures[(image["id"], row["object"]["path"])]
+                capture = object_actions[(image["id"], row["object"]["path"])].get("dependency_capture")
                 if row["disposition"] == "contributed" and capture is not None and capture["status"] != "collected":
                     raise FirmwareReceiptError(
                         f"complete receipt contains a compile without captured headers: {row['object']['path']}"

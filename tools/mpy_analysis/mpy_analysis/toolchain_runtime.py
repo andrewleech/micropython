@@ -102,6 +102,52 @@ def layout(compiler: str, flags: tuple[str, ...]) -> dict[str, Any]:
     }
 
 
+@lru_cache(maxsize=None)
+def include_directories(compiler: str, flags: tuple[str, ...], language: str = "c") -> tuple[Path, ...] | None:
+    """The existing directories the compiler searches for headers on its own, resolved.
+
+    The compiler reports them (``-E -v``) for the machine flags and language of a compile; the
+    directories named by ``-I``, ``-isystem`` and the like are not among them. None when the
+    compiler cannot be queried.
+    """
+    try:
+        result = subprocess.run(
+            [compiler, *flags, "-E", "-v", "-x", language, "-"],
+            input="",
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode:
+        return None
+    directories: list[Path] = []
+    listing = False
+    for line in result.stderr.splitlines():
+        if line.startswith("#include") and line.endswith("search starts here:"):
+            listing = True
+        elif line.startswith("End of search list"):
+            break
+        elif listing and line.startswith(" ") and "(framework directory)" not in line:
+            directory = Path(line.strip())
+            if directory.is_dir():
+                directories.append(directory.resolve())
+    return tuple(dict.fromkeys(directories))
+
+
+def in_compiler_headers(path: str, compiler: str, flags: tuple[str, ...], language: str = "c") -> Path | None:
+    """The compiler's own header directory or sysroot that contains the header, if any."""
+    resolved = Path(path).resolve()
+    for directory in include_directories(compiler, flags, language) or ():
+        if resolved.is_relative_to(directory):
+            return directory
+    sysroot = layout(compiler, flags)["sysroot"]
+    if sysroot is not None and resolved.is_relative_to(sysroot):
+        return sysroot
+    return None
+
+
 def classify(path: str, compiler: str, flags: tuple[str, ...]) -> tuple[str | None, dict[str, Any] | None, str]:
     """Return (kind, record, "") with kind "compiler-runtime" or "c-library", or (None, None, reason)."""
     found = layout(compiler, flags)

@@ -50,6 +50,8 @@ FIRMWARE_BLOCKING_GAPS = frozenset(
     {
         "checkout-gitlink-mismatch",
         "dirty-selected-repository",
+        "header-accounting-unavailable",
+        "linked-header-not-in-selected-scope",
         "linked-source-not-in-selected-scope",
         "posthoc-linked-source-not-in-selected-scope",
         "repository-provenance-unavailable",
@@ -223,7 +225,8 @@ class _Builder:
                     {
                         "root": record["root"],
                         "path": record["path"],
-                        "owner": record["owner"],
+                        "owner": record.get("owner"),
+                        "role": record.get("role"),
                         "selection": group,
                         "target-path": record.get("target_path"),
                     }
@@ -380,11 +383,188 @@ def _runtime_components(
     return references
 
 
+def _enclosing_boundary(
+    scope: dict[str, Any], boundaries: list[dict[str, Any]], root: str, path: str
+) -> dict[str, Any] | None:
+    """The selected boundary of the same root whose directory contains the path, deepest first.
+
+    The path is canonical, so a file reached through a symlink alias is placed by the location
+    it resolves to; a boundary of another root never matches.
+    """
+    physical = Path(scope["roots"][root]) / path
+    best: tuple[int, dict[str, Any]] | None = None
+    for boundary in boundaries:
+        if boundary["root"] != root:
+            continue
+        directory = Path(scope["roots"][root]) / boundary["path"]
+        if physical.is_relative_to(directory) and (best is None or len(directory.parts) > best[0]):
+            best = (len(directory.parts), boundary)
+    return best[1] if best else None
+
+
+def _boundary_owner(builder: _Builder, boundary: dict[str, Any]) -> str | None:
+    """The one owner class of the boundary's selected sources, or None when there is not exactly one."""
+    owners = {
+        builder.components[source["component"]].properties.get("owner")
+        for source in builder.sources
+        if source.get("dependency_component") == boundary["component"]
+    } - {None}
+    return next(iter(owners)) if len(owners) == 1 else None
+
+
+def _owned_file(
+    builder: _Builder,
+    scope: dict[str, Any],
+    boundaries: list[dict[str, Any]],
+    source_refs: dict[tuple[str, str], set[str]],
+    binding: tuple[str, str],
+    group: str,
+    provenance: str,
+) -> tuple[set[str] | None, str]:
+    """Attach the file of a root/path binding to the boundary that contains it.
+
+    Returns the file component references, or None and the reason when no selected boundary
+    owns the path. A file that is already a selected source or an earlier input keeps its
+    component and is only added to the owning boundary.
+    """
+    root, path = binding
+    boundary = _enclosing_boundary(scope, boundaries, root, path)
+    if boundary is None:
+        return None, "no selected component boundary of this root contains the file"
+    if binding not in source_refs:
+        source_refs[binding] = {
+            builder.file(
+                group,
+                {
+                    "root": root,
+                    "path": path,
+                    "owner": _boundary_owner(builder, boundary),
+                    "role": group,
+                    "provenance": {"kind": provenance},
+                },
+            )
+        }
+    builder.depends_on[boundary["component"]].update(source_refs[binding])
+    return source_refs[binding], ""
+
+
+def _header_components(
+    builder: _Builder,
+    scope: dict[str, Any],
+    boundaries: list[dict[str, Any]],
+    source_refs: dict[tuple[str, str], set[str]],
+    image: dict[str, Any],
+    receipt: dict[str, Any],
+) -> tuple[set[str], dict[str, Any]]:
+    """Attribute every header a contributing compile read of one image.
+
+    Source headers and the generator inputs of generated headers become file components under
+    the boundary that owns them; headers in the captured compiler's own directories become file
+    components of one toolchain header library; anything else is a named gap.
+    """
+    entries = image.get("header_accounting")
+    if entries is None:
+        builder.gaps.append(
+            {
+                "kind": "header-accounting-unavailable",
+                "image": image["id"],
+                "detail": "The receipt predates header accounting; recapture the build.",
+            }
+        )
+        return set(), {"status": "unavailable"}
+    counts = {"consumed": len(entries), "source": 0, "generated": 0, "toolchain": 0, "unattributed": 0}
+    toolchain: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+
+    def gap(entry: dict[str, Any], reason: str, binding: tuple[str, str] | None = None) -> None:
+        counts["unattributed"] += 1
+        builder.gaps.append(
+            {
+                "kind": "linked-header-not-in-selected-scope",
+                "path": entry["path"],
+                **({"root": binding[0], "binding-path": binding[1]} if binding else {}),
+                "image": image["id"],
+                "reason": reason,
+            }
+        )
+
+    for entry in entries:
+        disposition = entry["disposition"]
+        if disposition == "unowned":
+            gap(entry, entry["reason"])
+        elif disposition == "toolchain":
+            binding = entry["toolchain"]
+            key = (binding["role"], binding["executable"]["path"], binding["executable"]["sha256"])
+            toolchain.setdefault(key, []).append(entry)
+            counts["toolchain"] += 1
+        else:
+            group, provenance = (
+                ("header", "captured-compiler-dependency")
+                if disposition == "source"
+                else ("generator-input", "captured-generator-input")
+            )
+            placed = []
+            for item in entry["source_bindings"]:
+                binding = (item["root"], item["path"])
+                refs, reason = _owned_file(
+                    builder, scope, boundaries, source_refs, binding, group, provenance
+                )
+                placed.append(refs is not None)
+                if refs is None:
+                    gap(entry, reason, binding)
+            if all(placed):
+                counts[disposition] += 1
+
+    references: set[str] = set()
+    for (role, compiler, sha256), members in sorted(toolchain.items()):
+        tool = next(
+            item
+            for item in receipt["toolchain"]
+            if item["role"] == role and item["executable"]["path"] == compiler
+        )
+        release = next((item["toolchain"]["release"] for item in members if "release" in item["toolchain"]), None)
+        library = builder.add(
+            "toolchain-headers",
+            [receipt["build_id"], image["id"], role, sha256],
+            Component(
+                kind=LIBRARY,
+                name=f"{Path(compiler).name} compiler headers",
+                version=release,
+                properties=property_values(
+                    {
+                        "selection": "compiler-header-directories",
+                        "toolchain-compiler": compiler,
+                        "toolchain-compiler-sha256": sha256,
+                        "toolchain-compiler-banner": tool["version"],
+                        "include-dirs": sorted({item["toolchain"]["include_dir"] for item in members}),
+                        "header-count": str(len(members)),
+                    }
+                ),
+            ),
+        )
+        for item in members:
+            builder.add(
+                "toolchain-header-file",
+                [library, item["path"]],
+                Component(
+                    kind=FILE,
+                    name=item["path"],
+                    hashes=_runtime_file_hashes(item["path"], item["sha256"]),
+                    properties=property_values(
+                        {"role": "header", "include-dir": item["toolchain"]["include_dir"]}
+                    ),
+                ),
+                parent=library,
+            )
+        references.add(library)
+    return references, {"status": "attributed" if not counts["unattributed"] else "incomplete", **counts}
+
+
 def _attach_firmware_images(
     receipt: dict[str, Any],
     scope: dict[str, Any],
     builder: _Builder,
     root_dependencies: set[str],
+    boundaries: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Add build-bound firmware subjects and their exact selected source dependencies."""
     validated = receipt
@@ -453,9 +633,13 @@ def _attach_firmware_images(
                         "image": image["id"],
                     }
                 )
+        header_refs, headers = _header_components(builder, scope, boundaries, source_refs, image, validated)
         link_status = (
             "complete"
-            if validated["status"] == "complete" and link["status"] == "complete" and not missing
+            if validated["status"] == "complete"
+            and link["status"] == "complete"
+            and not missing
+            and headers["status"] == "attributed"
             else "incomplete"
         )
         component = Component(
@@ -483,6 +667,7 @@ def _attach_firmware_images(
         if link["dynamic_needed"]:
             builder.dynamic_links[reference] = list(link["dynamic_needed"])
         mapped.update(_runtime_components(builder, link, validated["toolchain"], validated["build_id"]))
+        mapped.update(header_refs)
         builder.depends_on[reference] = mapped
         root_dependencies.add(reference)
         images.append(
@@ -492,6 +677,7 @@ def _attach_firmware_images(
                 "elf_sha256": link["elf"]["sha256"],
                 "link_closure": link_status,
                 "linked_components": sorted(mapped),
+                "headers": headers,
                 "unmapped_source_bindings": [
                     {"root": root, "path": path} for root, path in missing
                 ],
@@ -667,7 +853,7 @@ def generate_sbom(
     root_dependencies.update(info["ref"] for info in builder.repositories.values() if info)
     if firmware_evidence:
         link_closure = _attach_firmware_images(
-            firmware_evidence, scope, builder, root_dependencies
+            firmware_evidence, scope, builder, root_dependencies, inventory["metadata"]
         )
     elif posthoc_evidence:
         link_closure = _attach_posthoc_firmware_image(
@@ -700,6 +886,7 @@ def generate_sbom(
         for group, records in scope["groups"].items()
         if group not in (FROZEN_GROUP, "native") and records
     }
+
     firmware_established = bool(
         firmware_evidence
         and link_closure
@@ -722,7 +909,11 @@ def generate_sbom(
                 else ["Compilation databases select compiled sources, not linked objects."]
             ),
             "Manifest selection does not inventory runtime-loaded or build-fetched dependencies.",
-            "Header/sysroot and generated-input provenance remain separate closure requirements.",
+            *(
+                []
+                if firmware_evidence
+                else ["Header/sysroot and generated-input provenance remain separate closure requirements."]
+            ),
             "Unmarked vendored boundaries cannot be discovered reliably; declare selected dependencies explicitly.",
         ],
         **inventory,
