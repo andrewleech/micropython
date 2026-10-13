@@ -44,6 +44,20 @@ def _ref(kind: str, identity: Any) -> str:
     return f"urn:mpy:{kind}:{hashlib.sha256(value.encode()).hexdigest()}"
 
 
+# Gap kinds that prevent `firmware_completeness: established`; `sbom_policy` rejects a summary
+# that claims `established` while carrying one of these.
+FIRMWARE_BLOCKING_GAPS = frozenset(
+    {
+        "checkout-gitlink-mismatch",
+        "dirty-selected-repository",
+        "linked-source-not-in-selected-scope",
+        "posthoc-linked-source-not-in-selected-scope",
+        "repository-provenance-unavailable",
+        "selected-source-not-tracked",
+    }
+)
+
+
 def _git(directory: Path, *arguments: str) -> str | None:
     result = subprocess.run(
         ["git", "-C", str(directory), *arguments], capture_output=True, text=True
@@ -686,19 +700,11 @@ def generate_sbom(
         for group, records in scope["groups"].items()
         if group not in (FROZEN_GROUP, "native") and records
     }
-    firmware_blocking_gaps = {
-        "checkout-gitlink-mismatch",
-        "dirty-selected-repository",
-        "linked-source-not-in-selected-scope",
-        "posthoc-linked-source-not-in-selected-scope",
-        "repository-provenance-unavailable",
-        "selected-source-not-tracked",
-    }
     firmware_established = bool(
         firmware_evidence
         and link_closure
         and link_closure["status"] == "complete"
-        and not any(gap["kind"] in firmware_blocking_gaps for gap in builder.gaps)
+        and not any(gap["kind"] in FIRMWARE_BLOCKING_GAPS for gap in builder.gaps)
     )
     receipt = {
         "schema_version": 1,
