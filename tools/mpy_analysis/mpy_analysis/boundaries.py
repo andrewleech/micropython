@@ -23,7 +23,7 @@ from .declarations import revision_matches_selected, selected_digest, source_bin
 from .metadata_bom import UnsupportedBomError, parse_json, read_bom
 from .metadata_native import parse_library_json, parse_native
 from .locks import LOCK_FILES, inspect_lock
-from .scope import FROZEN_GROUP, source_path
+from .scope import SELECTED_GROUPS, source_path
 from .submodules import SubmoduleInspector
 
 
@@ -514,7 +514,7 @@ def discover_boundaries(
             {"kind": "declared", "root": declaration["root"], "path": declaration["path"]},
         )
 
-    for group in (FROZEN_GROUP, "native"):
+    for group in SELECTED_GROUPS:
         for record in scope["groups"].get(group, []):
             physical = source_path(scope, record)
             containing_roots = [root for root in roots.values() if _contains(root, physical)]
@@ -629,6 +629,31 @@ def discover_boundaries(
             registry[directory], kinds[directory], package_assertions.get(directory, {})
         )
     return sorted((registry[directory] for directory in owned), key=lambda value: value["id"])
+
+
+def uncovered_headers(
+    scope: dict[str, Any],
+    boundaries: Sequence[Mapping[str, Any]],
+    headers: Sequence[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    """The header records no boundary of their root contains, from a Git checkout.
+
+    ``boundaries`` are the boundaries of the selected sources. A package directory counts as
+    containing its files even when no selected source claims it. A header outside every Git
+    checkout is left out: its owner cannot be named.
+    """
+    containing = [(item["root"], Path(item["directory"])) for item in boundaries]
+    containing += [
+        (package["root"], source_path(scope, package).parent) for package in scope.get("packages", [])
+    ]
+    result = []
+    for record in headers:
+        physical = source_path(scope, record)
+        if any(root == record["root"] and _contains(directory, physical) for root, directory in containing):
+            continue
+        if _repository_root(physical.parent) is not None:
+            result.append(record)
+    return result
 
 
 # A boundary with its own package identity needs no enclosing metadata.

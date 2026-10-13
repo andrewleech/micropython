@@ -209,6 +209,7 @@ __all__ = [
     "components",
     "gap_kinds",
     "generate",
+    "run_git",
     "scope_of",
     "requires_gnu_build",
     "spdx",

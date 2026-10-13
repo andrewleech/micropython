@@ -20,6 +20,12 @@ from .compdb import entry_file, validate_entry
 
 SCHEMA_VERSION = 1
 FROZEN_GROUP = "runtime_frozen_python"
+# Group of the headers a captured build consumed from a checkout that has no selected source
+# boundary. It exists only in the derived scope the SBOM builds for boundary discovery; an input
+# scope never carries it.
+HEADER_GROUP = "consumed-header"
+# Groups whose records are the physical files a boundary is selected for.
+SELECTED_GROUPS = (FROZEN_GROUP, "native", HEADER_GROUP)
 _NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 _PACKAGE_METADATA_FIELDS = (
     "version",

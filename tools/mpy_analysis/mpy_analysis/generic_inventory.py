@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from jsonschema import FormatChecker
 
-from .boundaries import discover_boundaries, metadata_context
+from .boundaries import discover_boundaries, metadata_context, uncovered_headers
 from .declarations import load_declarations, merge_declaration, revision_matches_selected
 from .metadata import collect_metadata
 from .fetch_provenance import summarise
@@ -21,7 +21,7 @@ from .sbom_model import (
     Party,
     property_values,
 )
-from .scope import FROZEN_GROUP, source_path
+from .scope import HEADER_GROUP, SELECTED_GROUPS, source_path
 
 REQUIRED = ("name", "version", "license", "license_applicability")
 OPTIONAL = ("description", "author", "url", "copyright", "dependencies")
@@ -181,12 +181,32 @@ def _dependency_component(
 
 
 def assemble(
-    builder: Any, scope: dict[str, Any], declaration_files: list[Path]
+    builder: Any,
+    scope: dict[str, Any],
+    declaration_files: list[Path],
+    headers: Sequence[dict[str, str]] = (),
 ) -> dict[str, Any]:
+    """Resolve the boundary and metadata of every selected component.
+
+    ``headers`` are the root/path/sha256 records of the headers a captured build consumed.
+    Those that no boundary of the selected sources contains, and that lie in a Git checkout,
+    are selected files of their own boundaries, resolved with the same markers, licence
+    evidence, declarations and repository provenance as a source boundary. They never change
+    the boundary of a selected source.
+    """
     declarations, declaration_issues = load_declarations(scope, declaration_files)
     boundaries = discover_boundaries(
         scope, declared_boundaries=declarations, submodules=builder.submodules
     )
+    unowned = uncovered_headers(scope, boundaries, headers)
+    if unowned:
+        if HEADER_GROUP in scope["groups"]:
+            raise ValueError(f"scope group name is reserved: {HEADER_GROUP}")
+        scope = {**scope, "groups": {**scope["groups"], HEADER_GROUP: unowned}}
+        declarations, declaration_issues = load_declarations(scope, declaration_files)
+        boundaries = discover_boundaries(
+            scope, declared_boundaries=declarations, submodules=builder.submodules
+        )
     for boundary in boundaries:
         for candidate in boundary.get("candidates", []):
             if candidate.get("invalid_input"):
@@ -232,7 +252,7 @@ def assemble(
     binding_paths = sorted(
         {
             source_path(scope, record)
-            for group in (FROZEN_GROUP, "native")
+            for group in SELECTED_GROUPS
             for record in scope["groups"].get(group, [])
         }
     )
@@ -307,6 +327,8 @@ def assemble(
         for identity in boundary["package_ids"]:
             package_refs[identity] = ref
         for group, record in boundary["sources"]:
+            if group == HEADER_GROUP:
+                continue
             key = (group, record["root"], record["path"], record.get("target_path"))
             builder.depends_on[ref].update(source_refs[key])
             for row in builder.sources:
@@ -361,8 +383,14 @@ def assemble(
                         "remediation": "Fix upstream declarative metadata or supply a pinned application dependency declaration.",
                     }
                 )
+        selected_sources = [item for item in boundary["sources"] if item[0] != HEADER_GROUP]
+        header_records = [
+            {"root": record["root"], "path": record["path"], "sha256": record["sha256"]}
+            for group, record in boundary["sources"]
+            if group == HEADER_GROUP
+        ]
         matrix["source_content"] = {
-            "status": "known" if boundary["sources"] else "not-applicable",
+            "status": "known" if selected_sources else "not-applicable",
             "required": False,
             "evidence": [
                 {
@@ -374,6 +402,11 @@ def assemble(
                 for row in builder.sources
                 if row.get("dependency_component") == ref
             ],
+        }
+        matrix["header_content"] = {
+            "status": "known" if header_records else "not-applicable",
+            "required": False,
+            "evidence": header_records,
         }
         matrix["source_revision"] = {
             "status": "known" if repository else "missing",
@@ -412,6 +445,7 @@ def assemble(
                 "issues": metadata["issues"],
                 "declared_dependencies": metadata.get("declared_dependencies", []),
                 "fetch_provenance": boundary.get("fetch_provenance", []),
+                "headers": header_records,
             }
         )
     for declaration in declarations:

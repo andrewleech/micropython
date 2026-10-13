@@ -13,7 +13,7 @@ from typing import Any
 
 from .metadata import LICENSEREF, LICENSING, validate_license
 from .metadata_bom import parse_json, validate_cyclonedx
-from .scope import FROZEN_GROUP, source_path
+from .scope import SELECTED_GROUPS, source_path
 
 PREFIX = "mpy:source:"
 STRING_FIELDS = ("name", "version", "description", "author", "copyright")
@@ -107,7 +107,7 @@ def source_binding(scope: dict[str, Any], root: str, relative: str) -> Path:
 def selected_digest(scope: dict[str, Any], directory: Path) -> tuple[str, int]:
     selected: dict[str, str] = {}
     count = 0
-    for group in (FROZEN_GROUP, "native"):
+    for group in SELECTED_GROUPS:
         for record in scope["groups"].get(group, []):
             path = source_path(scope, record)
             if path.is_relative_to(directory):
@@ -124,7 +124,7 @@ def revision_matches_selected(scope: dict[str, Any], directory: Path) -> bool:
     directory = directory.resolve(strict=True)
     selected = {
         source_path(scope, record).resolve(strict=True)
-        for group in (FROZEN_GROUP, "native")
+        for group in SELECTED_GROUPS
         for record in scope["groups"].get(group, [])
         if source_path(scope, record).resolve(strict=True).is_relative_to(directory)
     }
@@ -141,7 +141,7 @@ def revision_matches_selected(scope: dict[str, Any], directory: Path) -> bool:
     else:
         roots = {
             Path(scope["roots"][record["root"]]).resolve(strict=True)
-            for group in (FROZEN_GROUP, "native")
+            for group in SELECTED_GROUPS
             for record in scope["groups"].get(group, [])
             if source_path(scope, record).resolve(strict=True) in selected
         }

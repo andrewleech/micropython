@@ -484,6 +484,26 @@ def _owned_file(
     return source_refs[binding], ""
 
 
+def _consumed_headers(receipt: dict[str, Any]) -> list[dict[str, Any]]:
+    """The root, path and hash of every source header a contributing compile of any image read."""
+    records: dict[tuple[str, str], dict[str, Any]] = {}
+    for image in receipt["images"]:
+        for entry in image.get("header_accounting") or ():
+            if entry["disposition"] != "source":
+                continue
+            for binding in entry["source_bindings"]:
+                records.setdefault(
+                    (binding["root"], binding["path"]),
+                    {
+                        "root": binding["root"],
+                        "path": binding["path"],
+                        "sha256": entry["sha256"],
+                        "provenance": {"kind": "captured-compiler-dependency"},
+                    },
+                )
+    return [records[key] for key in sorted(records)]
+
+
 def _header_components(
     builder: _Builder,
     scope: dict[str, Any],
@@ -495,8 +515,9 @@ def _header_components(
     """Attribute every header a contributing compile read of one image.
 
     Source headers and the generator inputs of generated headers become file components under
-    the boundary that owns them; headers in the captured compiler's own directories become file
-    components of one toolchain header library; anything else is a named gap.
+    the boundary that owns them (a header-only boundary when no boundary of the selected sources
+    does, which the image then depends on); headers in the captured compiler's own directories
+    become file components of one toolchain header library; anything else is a named gap.
     """
     entries = image.get("header_accounting")
     if entries is None:
@@ -510,6 +531,7 @@ def _header_components(
         return set(), {"status": "unavailable"}
     counts = {"consumed": len(entries), "source": 0, "generated": 0, "toolchain": 0, "unattributed": 0}
     toolchain: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    references: set[str] = set()
 
     def gap(entry: dict[str, Any], reason: str, binding: tuple[str, str] | None = None) -> None:
         counts["unattributed"] += 1
@@ -547,10 +569,13 @@ def _header_components(
                 placed.append(refs is not None)
                 if refs is None:
                     gap(entry, reason, binding)
+                elif disposition == "source":
+                    boundary = _enclosing_boundary(scope, boundaries, *binding)
+                    if boundary["headers"]:
+                        references.add(boundary["component"])
             if all(placed):
                 counts[disposition] += 1
 
-    references: set[str] = set()
     for (role, compiler, sha256), members in sorted(toolchain.items()):
         tool = next(
             item
@@ -1100,7 +1125,12 @@ def generate_sbom(
             builder.file(group, record)
     if not builder.sources:
         raise ValueError("SBOM requires selected frozen sources or compiler inputs")
-    inventory = assemble(builder, scope, list(declaration_files))
+    inventory = assemble(
+        builder,
+        scope,
+        list(declaration_files),
+        _consumed_headers(firmware_evidence) if firmware_evidence else (),
+    )
     if "packages" not in scope:
         builder.gaps.append(
             {
