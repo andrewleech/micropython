@@ -121,8 +121,8 @@ def capture(
     return Build(root, build, receipt_path, journal, absolute, code, name)
 
 
-def generate(built: Build, *, receipt=None):
-    """The SBOM model and summary for a captured build; the selection is its compiled sources."""
+def scope_of(built: Build) -> dict:
+    """The scope inventory of a captured build; the selection is its compiled sources."""
     events = [json.loads(line) for line in built.journal.read_text().splitlines()]
     compdb = built.root.parent / f"{built.name}-compile_commands.json"
     compdb.write_text(
@@ -158,8 +158,16 @@ def generate(built: Build, *, receipt=None):
     inventory["groups"]["native"] = scope.collect_compdb_sources(
         compdb, roots=inventory["roots"], owners={key: "application" for key in built.roots}
     )
+    return inventory
+
+
+def generate(built: Build, *, receipt=None, **options):
+    """The SBOM model and summary for a captured build; `options` go to generate_sbom."""
     return sbom.generate_sbom(
-        inventory, micropython_root=MPY_ROOT, build_receipt=receipt if receipt is not None else built.receipt_path
+        scope_of(built),
+        micropython_root=MPY_ROOT,
+        build_receipt=receipt if receipt is not None else built.receipt_path,
+        **options,
     )
 
 
@@ -201,6 +209,7 @@ __all__ = [
     "components",
     "gap_kinds",
     "generate",
+    "scope_of",
     "requires_gnu_build",
     "spdx",
 ]

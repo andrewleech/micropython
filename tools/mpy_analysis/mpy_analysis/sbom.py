@@ -19,6 +19,7 @@ from typing import Any, Sequence
 from urllib.parse import quote, urlparse
 
 from .compdb import arguments_of, entry_file, validate_entry
+from .deployment import IMAGE_KINDS, NOT_DECLARED, load_deployment, verify_deployment
 from .firmware_inventory import load_posthoc_link_inventory
 from .firmware_receipt import load_firmware_receipt, validate_firmware_receipt
 from .generic_inventory import assemble
@@ -788,6 +789,63 @@ def _attach_firmware_images(
         "images": images,
     }
 
+
+def _attach_deployment(
+    builder: _Builder, evidence: dict[str, Any], root_dependencies: set[str]
+) -> str:
+    """Add the deployment component, the verified deployed non-image files nested under it, and
+    its dependencies on the receipt images the manifest binds.
+
+    Only members whose file hashes to the declared digest become file components. Image members
+    are represented by the firmware components of the receipt, never by a second component.
+    """
+    component = Component(
+        kind=APPLICATION,
+        name=evidence["name"],
+        properties=property_values(
+            {
+                "role": "deployment",
+                "target": evidence["target"],
+                "deployment-completeness": evidence["status"],
+                "deployment-manifest-sha256": evidence["manifest_sha256"],
+                "runtime-fetch": evidence["runtime_fetch"]["mode"],
+            }
+        ),
+    )
+    reference = builder.add(
+        "deployment", [evidence["name"], evidence["target"], evidence["manifest_sha256"]], component
+    )
+    bound = set()
+    for row in evidence["members"]:
+        if row["kind"] in IMAGE_KINDS:
+            binding = row["receipt_binding"]
+            if binding and evidence["receipt"]:
+                bound.add(_ref("firmware-image", [evidence["receipt"]["build_id"], binding["image"]]))
+            continue
+        if row["digest"] != "match":
+            continue
+        builder.add(
+            "deployment-file",
+            [reference, row["id"], row["actual_sha256"]],
+            Component(
+                kind=FILE,
+                name=row["path"],
+                hashes={"sha1": row["actual_sha1"], "sha256": row["actual_sha256"]},
+                properties=property_values(
+                    {
+                        "role": f"deployed-{row['kind']}",
+                        "deployment": evidence["name"],
+                        "deployment-member": row["id"],
+                    }
+                ),
+            ),
+            parent=reference,
+        )
+    builder.depends_on[reference] = {item for item in bound if item in builder.components}
+    root_dependencies.add(reference)
+    return reference
+
+
 def _attach_posthoc_firmware_image(
     evidence: dict[str, Any],
     scope: dict[str, Any],
@@ -886,6 +944,7 @@ def generate_sbom(
     build_receipt: Path | dict[str, Any] | None = None,
     posthoc_link_inventory: Path | None = None,
     link_generation: Path | None = None,
+    deployment: Path | None = None,
 ) -> tuple[Model, dict[str, Any]]:
     """Return the neutral SBOM model of the selected dependencies and field-level evidence."""
     if build_receipt is not None and posthoc_link_inventory is not None:
@@ -956,6 +1015,12 @@ def generate_sbom(
         )
     else:
         link_closure = None
+    deployment_evidence = None
+    if deployment is not None:
+        deployment_evidence = verify_deployment(
+            load_deployment(deployment), target=scope["target"], receipt=firmware_evidence
+        )
+        _attach_deployment(builder, deployment_evidence, root_dependencies)
     root = Component(
         kind=APPLICATION,
         name=scope["target"],
@@ -965,6 +1030,7 @@ def generate_sbom(
                 **build_identity,
                 "scope": "manifest-and-compiler-selected-sources",
                 "link-closure": link_closure["status"] if link_closure else "not-established",
+                "deployment-completeness": deployment_evidence["status"] if deployment_evidence else None,
             }
         ),
     )
@@ -997,6 +1063,7 @@ def generate_sbom(
         else "selected-sources-accounted",
         "source_accounting": "accounted" if not unassessed else "incomplete",
         "firmware_completeness": "established" if firmware_established else "not-established",
+        "deployment_completeness": deployment_evidence["status"] if deployment_evidence else NOT_DECLARED,
         "limitations": [
             *(
                 []
@@ -1016,6 +1083,7 @@ def generate_sbom(
         "unassessed_groups": unassessed,
         "sources": builder.sources,
         "link_closure": link_closure or {"status": "not-established"},
+        "deployment": deployment_evidence,
         "packages": scope.get("packages", []),
         "package_requirements": scope.get("package_requirements", []),
         "component_count": sum(1 for item in builder.components.values() if item.parent is None),
@@ -1119,6 +1187,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="versioned actual-build/link receipt from the selected firmware build",
     )
     parser.add_argument(
+        "--deployment",
+        type=Path,
+        help="mpy-deployment/v1 manifest naming the deployed images, files and runtime fetch policy",
+    )
+    parser.add_argument(
         "--link-inventory",
         type=Path,
         help="qualified published linker inventory, recorded as posthoc/incomplete evidence",
@@ -1151,6 +1224,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         for evidence_path in (args.build_receipt, args.link_inventory, args.link_generation):
             if evidence_path:
                 protected.add(evidence_path.resolve())
+        if args.deployment:
+            protected.add(args.deployment.resolve())
         _invalidate_outputs(destinations, protected)
         if input_error is not None:
             raise input_error
@@ -1162,6 +1237,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             build_receipt=args.build_receipt,
             posthoc_link_inventory=args.link_inventory,
             link_generation=args.link_generation,
+            deployment=args.deployment,
         )
         rendered = (
             serialize_spdx(to_spdx(model))
