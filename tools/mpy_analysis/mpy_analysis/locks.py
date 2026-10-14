@@ -470,3 +470,43 @@ def inspect_lock(path: Path, filename: str | None = None) -> dict[str, Any]:
     except UnsupportedLockFormat as exc:
         item.update(status="unsupported", reason=str(exc), entries=[])
     return item
+
+
+def idf_component_identity(directory: Path) -> dict[str, str] | None:
+    """Identity of an ESP-IDF component the component manager fetched into ``directory``.
+
+    The manager writes ``.component_hash`` (the registry's SHA-256 of the component) beside the
+    ``idf_component.yml`` it was published with, which carries ``version``. Both must be present
+    and well formed; the name is the directory name with ``__`` as the namespace separator. A
+    directory without them (a project's own component, an unreadable manifest) has no identity.
+    """
+    marker, manifest = directory / ".component_hash", directory / "idf_component.yml"
+    namespace, separator, name = directory.name.partition("__")
+    if not (separator and namespace and name and marker.is_file() and manifest.is_file()):
+        return None
+    try:
+        component_hash = marker.read_text(encoding="ascii").strip()
+        top = _mapping(_yaml_tree(manifest.read_text(encoding="utf-8-sig")), "idf_component.yml")
+        if not _HEX64.fullmatch(component_hash):
+            return None
+        identity = {
+            "name": f"{namespace}/{name}",
+            "version": _string(top["version"], "version") if "version" in top else "",
+            "component_hash": component_hash,
+        }
+        if "url" in top:
+            identity["url"] = _string(top["url"], "url")
+    except (OSError, UnicodeError, UnsupportedLockFormat):
+        return None
+    return identity if identity["version"] else None
+
+
+def enclosing_idf_component(path: Path, stop: Path) -> tuple[Path, dict[str, str]] | None:
+    """The nearest directory above ``path``, below ``stop``, that is a fetched ESP-IDF component."""
+    for directory in path.parents:
+        if directory == stop or stop not in directory.parents:
+            return None
+        identity = idf_component_identity(directory)
+        if identity:
+            return directory, identity
+    return None

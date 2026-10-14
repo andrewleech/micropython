@@ -503,3 +503,33 @@ def test_local_override_prevents_firmware_completeness(workspace, tmp_path):
     receipt = firmware_summary(workspace, tmp_path)
     assert gaps(receipt, "submodule-local-override")
     assert receipt["firmware_completeness"] == "not-established"
+
+
+def managed_component(app, hash_text="a" * 64, manifest="version: 1.3.2\nurl: https://example.invalid/mdns\n"):
+    directory = app / "managed_components/espressif__mdns"
+    directory.mkdir(parents=True)
+    (directory / "mdns.c").write_text("int mdns;\n")
+    (directory / "idf_component.yml").write_text(manifest)
+    (directory / ".component_hash").write_text(hash_text + "\n")
+    return directory
+
+
+def test_registry_fetched_component_is_identified_by_its_manifest_and_hash(workspace):
+    managed_component(workspace["app"])
+    model, receipt = generate(workspace, rows=(("app", "main.py"), ("app", "managed_components/espressif__mdns/mdns.c")))
+    assert gaps(receipt, "selected-source-not-tracked") == []
+    [source] = [c for c in model.components.values() if c.properties.get("registry-component")]
+    assert source.properties["registry-component"] == "espressif/mdns@1.3.2"
+    assert source.properties["registry-component-hash"] == "a" * 64
+    package = [c for c in model.components.values() if c.name == "espressif/mdns"]
+    assert [c.version for c in package] == ["1.3.2"]
+
+
+@pytest.mark.parametrize(
+    "hash_text, manifest",
+    [("not-a-hash", "version: 1.3.2\n"), ("a" * 64, "description: no version\n")],
+)
+def test_untracked_component_without_registry_identity_is_a_gap(workspace, hash_text, manifest):
+    managed_component(workspace["app"], hash_text, manifest)
+    _, receipt = generate(workspace, rows=(("app", "main.py"), ("app", "managed_components/espressif__mdns/mdns.c")))
+    assert len(gaps(receipt, "selected-source-not-tracked")) == 1

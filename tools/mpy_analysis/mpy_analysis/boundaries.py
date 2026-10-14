@@ -20,12 +20,11 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping, Sequence
 
 from .declarations import revision_matches_selected, selected_digest, source_binding
+from .locks import LOCK_FILES, idf_component_identity, inspect_lock
 from .metadata_bom import UnsupportedBomError, parse_json, read_bom
 from .metadata_native import parse_library_json, parse_native
-from .locks import LOCK_FILES, inspect_lock
 from .scope import SELECTED_GROUPS, source_path
 from .submodules import SubmoduleInspector
-
 
 _PACKAGE_MARKERS = ("metadata.txt", "setup.py")
 _KIND_ORDER = (
@@ -278,6 +277,9 @@ def _markers(directory: Path, root: Path, scope: dict[str, Any]) -> list[dict[st
         path = _marker(directory, name, root)
         if path is not None:
             result.append(inspect_lock(path, name))
+    path = _marker(directory, "idf_component.yml", root)
+    if path is not None and idf_component_identity(directory):
+        result.append({"kind": "package-metadata", "path": str(path)})
     result.extend(_generated_markers(scope, directory, root))
     return result
 

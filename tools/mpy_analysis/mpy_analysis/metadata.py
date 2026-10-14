@@ -862,6 +862,18 @@ class _Collector:
                 )
                 self.issue(field, "unsupported" if status == "candidate" else status, reason, path)
 
+    def parse_idf_component(self, path: Path) -> None:
+        from .locks import idf_component_identity
+
+        identity = idf_component_identity(path.parent)
+        if identity is None:
+            return
+        self.read(path.parent / ".component_hash")
+        parser = "idf-component-manifest-1"
+        for field in ("name", "version", "url"):
+            if field in identity:
+                self.add(field, identity[field], path, parser)
+
     def parse_bom(self, path: Path) -> None:
         from .metadata_bom import parse_json, read_bom, schema_paths
 
@@ -1378,6 +1390,7 @@ def collect_metadata(
         "CMakeLists.txt": collector.parse_native,
         "meson.build": collector.parse_native,
         "library.json": collector.parse_library_json,
+        "idf_component.yml": collector.parse_idf_component,
     }
     for name, parse in dispatch.items():
         path = collector.directory / name

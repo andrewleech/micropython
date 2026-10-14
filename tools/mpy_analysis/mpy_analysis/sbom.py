@@ -23,6 +23,7 @@ from .deployment import IMAGE_KINDS, NOT_DECLARED, load_deployment, verify_deplo
 from .firmware_inventory import load_posthoc_link_inventory
 from .generic_inventory import assemble
 from .link_evidence import load_link_evidence
+from .locks import enclosing_idf_component
 from .metadata import collect_metadata
 from .metadata_bom import valid_uri
 from .sbom_cyclonedx import serialize_cyclonedx, to_cyclonedx
@@ -268,7 +269,17 @@ class _Builder:
             component.properties.update(property_values({"git-tracked": tracked}))
             if tracked:
                 self.depends_on[repository["ref"]].add(reference)
-            if not tracked:
+            fetched = None if tracked else enclosing_idf_component(path, Path(repository["directory"]))
+            if fetched:
+                component.properties.update(
+                    property_values(
+                        {
+                            "registry-component": f"{fetched[1]['name']}@{fetched[1]['version']}",
+                            "registry-component-hash": fetched[1]["component_hash"],
+                        }
+                    )
+                )
+            elif not tracked:
                 gap = {
                     "kind": "selected-source-not-tracked",
                     "path": str(path),
