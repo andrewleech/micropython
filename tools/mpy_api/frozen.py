@@ -9,6 +9,7 @@ import io
 import keyword
 import math
 from pathlib import PurePosixPath
+import re
 import tokenize
 import unicodedata
 from typing import Any
@@ -18,6 +19,29 @@ from .structure import deep_copy, deep_equal
 
 
 _UNSUPPORTED = {"kind": "unresolved", "reason": "source value contract is not resolved"}
+_LINE = re.compile(r"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+")
+
+
+def _source_segments(text: str):
+    """``segment(node)``, which returns what ``ast.get_source_segment(text, node)`` returns for a node
+    parsed from ``text``, with ``text`` split into lines once (after each carriage return, line feed
+    or both, as the parser splits it) instead of at every call."""
+    lines = _LINE.findall(text)
+
+    def segment(node):
+        try:
+            if node.end_lineno is None or node.end_col_offset is None:
+                return None
+            lineno, end_lineno = node.lineno - 1, node.end_lineno - 1
+            col_offset, end_col_offset = node.col_offset, node.end_col_offset
+        except AttributeError:
+            return None
+        if end_lineno == lineno:
+            return lines[lineno].encode()[col_offset:end_col_offset].decode()
+        first = lines[lineno].encode()[col_offset:].decode()
+        last = lines[end_lineno].encode()[:end_col_offset].decode()
+        return "".join([first, *lines[lineno + 1:end_lineno], last])
+    return segment
 
 
 def _identifier(name: str) -> bool:
@@ -763,9 +787,10 @@ def collect_frozen_modules(scope: dict) -> list[dict]:
                     if token.type == tokenize.NAME and unicodedata.normalize("NFKC", token.string) != token.string:
                         raise ValueError(f"frozen identifier would be normalized by Python AST: {physical}:{token.start[0]}: {token.string!r}")
                 tree = ast.parse(text, filename=str(physical), feature_version=(3, 10))
+                segment = _source_segments(text)
                 for identifier in ast.walk(tree):
                     if isinstance(identifier, (ast.Name, ast.arg)):
-                        original = ast.get_source_segment(text, identifier)
+                        original = segment(identifier)
                         spelling = identifier.id if isinstance(identifier, ast.Name) else identifier.arg
                         if original is not None:
                             raw_name = original.split(":", 1)[0].strip() if isinstance(identifier, ast.arg) else original.strip()
@@ -774,13 +799,13 @@ def collect_frozen_modules(scope: dict) -> list[dict]:
                             if raw_name.isidentifier() and raw_name != spelling:
                                 raise ValueError(f"frozen identifier differs from its AST projection: {physical}:{identifier.lineno}: {original!r}")
                     elif isinstance(identifier, (ast.Attribute, ast.keyword)):
-                        original = ast.get_source_segment(text, identifier)
+                        original = segment(identifier)
                         if original:
                             for token in tokenize.generate_tokens(io.StringIO(original).readline):
                                 if token.type == tokenize.NAME and unicodedata.normalize("NFKC", token.string) != token.string:
                                     raise ValueError(f"frozen identifier would be normalized within an expression: {physical}:{identifier.lineno}: {token.string!r}")
                     elif isinstance(identifier, ast.JoinedStr):
-                        original = ast.get_source_segment(text, identifier)
+                        original = segment(identifier)
                         if original and unicodedata.normalize("NFKC", original) != original:
                             raise ValueError(f"frozen f-string is outside the NFKC-stable segment projection subset: {physical}:{identifier.lineno}")
             except (SyntaxError, UnicodeError, LookupError, tokenize.TokenError) as exc:

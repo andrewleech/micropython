@@ -7,6 +7,7 @@ import subprocess
 from .compiler import executable, expand_arguments, read_recorded, recorded_inputs, reconcile_inputs
 from .bindings import materialize, split_args, strip_outer, row_pair, coalesce_definitions
 from .semantics import demand_semantics, frontend_unresolved
+from .prefetch import prefetch_unit_semantics
 
 
 def symbols(path, nm, directory):
@@ -230,10 +231,11 @@ def collect_ownership(records, link):
             'receipts': receipts}
 
 
-def join(inputs, ownership, store):
+def join(inputs, ownership, store, jobs=1):
     """Join the unit indexes ``inputs`` to the selected link ownership; the unit semantics of the
     functions the join reads (bound wrapper functions, delegation providers) are demanded from
-    ``store`` (``semantics.demand_semantics``)."""
+    ``store`` (``semantics.demand_semantics``), the wrapper functions' first in ``jobs`` processes
+    when ``jobs`` is above 1 (``prefetch.prefetch_unit_semantics``)."""
     selected = {o['translation_unit']: o for o in ownership['objects']}
     definitions = [(f, d) for f in inputs for d in coalesce_definitions(f['definitions'])]
     strong = {}
@@ -242,17 +244,34 @@ def join(inputs, ownership, store):
             if symbol['kind'].isupper() and symbol['kind'] not in ('U', 'W', 'V'):
                 strong.setdefault(symbol['name'], []).append(obj)
 
+    allocated = {}
+
     def present(facts, definition):
         owner = selected.get(facts['translation_unit'])
-        return bool(owner and any(s['name'] == definition['name'] for s in owner['allocated_symbols']))
+        if not owner:
+            return False
+        names = allocated.get(facts['translation_unit'])
+        if names is None:
+            names = allocated[facts['translation_unit']] = {s['name'] for s in owner['allocated_symbols']}
+        return definition['name'] in names
+
+    # Definitions and functions by name, and by unit and name, in the order of ``inputs``.
+    definitions_by_name, definitions_by_unit_name, functions_by_name, functions_by_unit_name = {}, {}, {}, {}
+    for facts, definition in definitions:
+        definitions_by_name.setdefault(definition['name'], []).append((facts, definition))
+        definitions_by_unit_name.setdefault((facts['translation_unit'], definition['name']), []).append((facts, definition))
+    for facts in inputs:
+        for function in facts['functions']:
+            functions_by_name.setdefault(function['name'], []).append((facts, function))
+            functions_by_unit_name.setdefault((facts['translation_unit'], function['name']), []).append((facts, function))
 
     def resolve(name, from_tu):
-        local = [(f, d) for f, d in definitions if f['translation_unit'] == from_tu and d['name'] == name]
+        local = definitions_by_unit_name.get((from_tu, name), [])
         if len(local) == 1 and present(*local[0]):
             return local[0], 'same-translation-unit-allocated-object'
         if len(local) > 1:
             return None, 'ambiguous-translation-unit-definition'
-        candidates = [(f, d) for f, d in definitions if d['name'] == name and d['linkage'] == 'external' and present(f, d)]
+        candidates = [(f, d) for f, d in definitions_by_name.get(name, ()) if d['linkage'] == 'external' and present(f, d)]
         owners = strong.get(name, [])
         if len(owners) == 1:
             matched = [(f, d) for f, d in candidates if f['translation_unit'] == owners[0]['translation_unit']]
@@ -261,17 +280,27 @@ def join(inputs, ownership, store):
         return None, 'missing-ambiguous-or-unallocated-owner'
 
     def resolve_function(name, from_tu):
-        local = [(facts, fn) for facts in inputs for fn in facts['functions']
-                 if facts['translation_unit'] == from_tu and fn['name'] == name and present(facts, fn)]
+        local = [(facts, fn) for facts, fn in functions_by_unit_name.get((from_tu, name), ()) if present(facts, fn)]
         if len(local) == 1:
             return local[0], 'same-translation-unit-allocated-function'
         if len(local) > 1:
             return None, 'ambiguous-local-function'
         owners = strong.get(name, [])
-        candidates = [(facts, fn) for facts in inputs for fn in facts['functions']
-                      if fn['name'] == name and fn['linkage'] == 'external' and present(facts, fn)
+        candidates = [(facts, fn) for facts, fn in functions_by_name.get(name, ())
+                      if fn['linkage'] == 'external' and present(facts, fn)
                       and len(owners) == 1 and facts['translation_unit'] == owners[0]['translation_unit']]
         return (candidates[0], 'unique-selected-allocated-external-function') if len(candidates) == 1 else (None, 'missing-ambiguous-or-unallocated-function')
+
+    if jobs > 1:
+        # The functions named by the wrapper definitions of allocated units are the ones the bindings
+        # below read the unit semantics of; computing them in forked processes is ``prefetch``'s.
+        wrappers = []
+        for facts, definition in definitions:
+            if definition['kind'] == 'wrapper' and present(facts, definition):
+                function, _ = resolve_function((definition.get('callshape') or {}).get('function'), facts['translation_unit'])
+                if function:
+                    wrappers.append(function[1])
+        prefetch_unit_semantics(store, wrappers, jobs)
 
     result = materialize(inputs, resolve, selected, present, resolve_function,
                          lambda function: frontend_unresolved(store, function))
