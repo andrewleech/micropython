@@ -41,6 +41,7 @@
 #include "mboot_types.h"
 #include "mboot_request.h"
 #include "mboot_update.h"
+#include "mboot_bl_info.h"
 #include "mboot_app.h"
 
 _Static_assert(BOOT_SWAP_TYPE_NONE == MBOOT_APP_SWAP_NONE, "swap type values");
@@ -49,29 +50,19 @@ _Static_assert(BOOT_SWAP_TYPE_PERM == MBOOT_APP_SWAP_PERM, "swap type values");
 _Static_assert(BOOT_SWAP_TYPE_REVERT == MBOOT_APP_SWAP_REVERT, "swap type values");
 _Static_assert(BOOT_SWAP_TYPE_FAIL == MBOOT_APP_SWAP_FAIL, "swap type values");
 _Static_assert(MBOOT_APP_ELEMS_MAX == MBOOT_REQ_ELEMS_MAX, "element stream limit");
+_Static_assert(MBOOT_APP_BL_F_DFU == MBOOT_BL_INFO_F_DFU, "info block flags");
+_Static_assert(MBOOT_APP_BL_F_FSLOAD == MBOOT_BL_INFO_F_FSLOAD, "info block flags");
+_Static_assert(MBOOT_APP_BL_F_GZIP == MBOOT_BL_INFO_F_GZIP, "info block flags");
+_Static_assert(MBOOT_APP_BL_F_KEY_HW == MBOOT_BL_INFO_F_KEY_HW, "info block flags");
+_Static_assert(MBOOT_APP_BL_F_TRUSTZONE == MBOOT_BL_INFO_F_TRUSTZONE, "info block flags");
+_Static_assert(MBOOT_APP_BL_F_ENC_IMAGES == MBOOT_BL_INFO_F_ENC_IMAGES, "info block flags");
+_Static_assert(MBOOT_APP_BL_UPDATE_IN_PLACE == MBOOT_BL_INFO_UPDATE_IN_PLACE, "bootloader update methods");
+_Static_assert(MBOOT_APP_BL_UPDATE_DUAL_COPY == MBOOT_BL_INFO_UPDATE_DUAL_COPY, "bootloader update methods");
 
 // Bytes the writer collects before a flash write.
 #define WRITER_CHUNK 256
 
 _Static_assert(WRITER_CHUNK % 32 == 0, "writer chunk is a multiple of every write unit");
-
-// Info block in the last 64 bytes of the bootloader area, as placed by the bootloader build
-// (shared/mboot/src/boot_info.c).
-#define BL_INFO_SIZE        64
-#define BL_INFO_MAGIC       0x4E49424Du
-#define BL_INFO_VERSION     1
-
-typedef struct {
-    uint32_t magic;
-    uint16_t info_version;
-    uint16_t flags;
-    uint32_t layout_id;
-    uint32_t api_version;
-    char version[24];
-    uint8_t reserved[24];
-} bl_info_raw_t;
-
-_Static_assert(sizeof(bl_info_raw_t) == BL_INFO_SIZE, "bootloader info block size");
 
 enum {
     WRITER_IDLE = 0,
@@ -131,15 +122,18 @@ static int check_map(void) {
     return 0;
 }
 
-static int read_bl_info(bl_info_raw_t *raw) {
+// Reads the info block from the end of the bootloader area. -ENOENT when it is absent, of another
+// info version, or its size field is below the fields read here or above MBOOT_BL_INFO_SIZE.
+static int read_bl_info(mboot_bl_info_t *raw) {
     const struct flash_area *fap;
     if (flash_area_open(FLASH_AREA_BOOTLOADER, &fap) != 0) {
         return -ENOENT;
     }
     uint32_t size = flash_area_get_size(fap);
     int rc = -ENOENT;
-    if (size >= BL_INFO_SIZE && flash_area_read(fap, size - BL_INFO_SIZE, raw, BL_INFO_SIZE) == 0
-        && raw->magic == BL_INFO_MAGIC && raw->info_version == BL_INFO_VERSION) {
+    if (size >= MBOOT_BL_INFO_SIZE && flash_area_read(fap, size - MBOOT_BL_INFO_SIZE, raw, MBOOT_BL_INFO_SIZE) == 0
+        && raw->magic == MBOOT_BL_INFO_MAGIC && raw->info_version == MBOOT_BL_INFO_VERSION
+        && raw->size >= MBOOT_BL_INFO_DEFINED && raw->size <= MBOOT_BL_INFO_SIZE) {
         raw->version[sizeof(raw->version) - 1] = '\0';
         rc = 0;
     }
@@ -150,7 +144,7 @@ static int read_bl_info(bl_info_raw_t *raw) {
 // 0 when the layout of the running application matches the bootloader info block or the info
 // block is absent, -ENODEV when the layout ids differ.
 static int mboot_app_check_layout(void) {
-    bl_info_raw_t raw;
+    mboot_bl_info_t raw;
     if (read_bl_info(&raw) != 0) {
         return 0;
     }
@@ -228,7 +222,7 @@ int mboot_app_version(unsigned slot, mboot_app_version_t *version) {
 }
 
 int mboot_app_bootloader_info(mboot_app_bl_info_t *info) {
-    bl_info_raw_t raw;
+    mboot_bl_info_t raw;
     int rc = read_bl_info(&raw);
     if (rc != 0) {
         return rc;
@@ -237,6 +231,11 @@ int mboot_app_bootloader_info(mboot_app_bl_info_t *info) {
     info->version[sizeof(raw.version)] = '\0';
     info->layout_id = raw.layout_id;
     info->api = raw.api_version;
+    info->flags = raw.flags;
+    info->bl_update = (raw.flags & MBOOT_BL_INFO_F_UPDATE_MASK) >> MBOOT_BL_INFO_F_UPDATE_SHIFT;
+    info->bl_image_id = raw.bl_image_id;
+    info->bl_counter = raw.bl_counter;
+    memcpy(info->key_hash, raw.key_hash, sizeof(info->key_hash));
     return 0;
 }
 

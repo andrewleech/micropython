@@ -66,7 +66,7 @@
 #define MICROPY_HW_MBOOT_DEV0_SIZE FLASH_SIZE_DEFAULT
 #define MICROPY_HW_MBOOT_DEV0_ERASE FLASH_SECTOR_SIZE
 
-// Eight sectors for the bootloader, of which the last 64 bytes are its info block.
+// Eight sectors for the bootloader, of which the last 128 bytes are its info block.
 #ifndef MICROPY_HW_MBOOT_BOOT_SIZE
 #define MICROPY_HW_MBOOT_BOOT_SIZE (8 * MICROPY_HW_MBOOT_DEV0_ERASE)
 #endif
@@ -96,7 +96,7 @@
 #error "mboot_dev.h: the sector table of ports/stm32/flash.h does not end at FLASH_END of this device"
 #endif
 
-// Two sectors of the first run for the bootloader, of which the last 64 bytes are its info
+// Two sectors of the first run for the bootloader, of which the last 128 bytes are its info
 // block.
 #ifndef MICROPY_HW_MBOOT_BOOT_SIZE
 #define MICROPY_HW_MBOOT_BOOT_SIZE (2 * MICROPY_HW_MBOOT_DEV0_RUN0_ERASE)

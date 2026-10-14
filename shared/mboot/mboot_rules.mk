@@ -33,7 +33,8 @@ MBOOT_GEN_STAMP = $(MBOOT_GEN_DIR)/mboot_layout.stamp
 MBOOT_GEN_DEPS = $(BOARD_DIR)/mpconfigboard.h $(MBOOT_DIR)/include/mboot_layout.h \
 	$(MBOOT_DEV_DIR)/mboot_dev.h $(TOP)/tools/mboot_gen.py $(MBOOT_PUBKEY)
 
-MBOOT_GEN_FILES = mboot_layout.ld mboot_layout.mk mboot_layout.json mboot_keys_gen.c
+MBOOT_GEN_FILES = mboot_layout.ld mboot_layout.mk mboot_layout.json mboot_keys_gen.c \
+	mboot_keyhash_gen.h
 
 # The generator writes all files of MBOOT_GEN_FILES in one run.
 $(MBOOT_GEN_STAMP): $(MBOOT_GEN_DEPS)

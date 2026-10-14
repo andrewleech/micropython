@@ -114,9 +114,11 @@ endif
 MBOOT_CFLAGS += -DMICROPY_MBOOT_PRODUCTION=$(MBOOT_PRODUCTION)
 MBOOT_CFLAGS += -DMICROPY_MBOOT_BL_VERSION='"$(MBOOT_BL_VERSION)"'
 
+# The key table, and the key hash header that the info block (src/boot_info.c) includes.
 MBOOT_GEN_SRC_C :=
 ifeq ($(MBOOT_ROLE),bootloader)
 MBOOT_GEN_SRC_C += $(MBOOT_GEN_DIR)/mboot_keys_gen.c
+MBOOT_INC += -I$(MBOOT_GEN_DIR)
 endif
 
 # Sources, relative to TOP.

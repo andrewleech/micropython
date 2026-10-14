@@ -27,36 +27,32 @@
 #include <stdint.h>
 
 #include "mcuboot_config/mcuboot_config.h"
+#include "mboot_bl_info.h"
+#include "mboot_port.h"
+#include "mboot_keyhash_gen.h"
 
 int mboot_main(void);
 
-// Bootloader info block, placed in the last 64 bytes of the boot area by the linker script
-// (section .mboot_info). The application reads it through mboot_app_bootloader_info() and the
-// layout check.
-typedef struct {
-    uint32_t magic;
-    uint16_t info_version;
-    uint16_t flags;         // bit0 DFU, bit1 fsload, bit2 gzip
-    uint32_t layout_id;
-    uint32_t api_version;
-    char version[24];
-    uint8_t reserved[24];
-} mboot_bl_info_t;
-
-_Static_assert(sizeof(mboot_bl_info_t) == 64, "bootloader info block size");
-
+// The bootloader info block (format in mboot_bl_info.h), placed at the end of the boot area by
+// the linker script.
 __attribute__((section(".mboot_info"), used)) const mboot_bl_info_t mboot_bl_info = {
-    .magic = 0x4E49424Du,
-    .info_version = 1,
-    .flags = (MBOOT_DFU_ENABLE ? 1u : 0u) | (MBOOT_FSLOAD_ENABLE ? 2u : 0u)
+    .magic = MBOOT_BL_INFO_MAGIC,
+    .info_version = MBOOT_BL_INFO_VERSION,
+    .size = MBOOT_BL_INFO_DEFINED,
+    .flags = (MBOOT_DFU_ENABLE ? MBOOT_BL_INFO_F_DFU : 0u)
+        | (MBOOT_FSLOAD_ENABLE ? MBOOT_BL_INFO_F_FSLOAD : 0u)
         #if MICROPY_MBOOT_FSLOAD_GZIP
-        | 4u
+        | MBOOT_BL_INFO_F_GZIP
         #endif
-    ,
+        | (MBOOT_BL_INFO_UPDATE_NONE << MBOOT_BL_INFO_F_UPDATE_SHIFT),
     .layout_id = MBOOT_LAYOUT_ID,
     .api_version = MBOOT_API_VERSION,
     .version = MICROPY_MBOOT_BL_VERSION,
-    .reserved = {[0 ... 23] = 0xFF},
+    .bl_image_id = MBOOT_SECCNT_ID_BOOTLOADER,
+    // This bootloader build carries no security counter value.
+    .bl_counter = 0,
+    .key_hash = MBOOT_KEY_HASH,
+    .reserved = {[0 ... sizeof(mboot_bl_info.reserved) - 1] = 0xFF},
 };
 
 // The port's reset or start-up code calls main() once .data and .bss are initialised.

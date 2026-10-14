@@ -3,16 +3,16 @@
  *
  * The flash addresses come from the board layout, mboot_layout.ld, and the SRAM addresses from
  * mboot_sram.ld (generated from the port's mboot_sram.ld.S). Both must be passed to the linker before
- * this script. The bootloader owns the boot area from MBOOT_BOOT_START; the last 64 bytes hold
- * the info block (section .mboot_info). Its RAM is a window at the start of SRAM. The RAM above
- * the window, up to the request region, is unused; an application may point the status word of
- * a request at an address in it.
+ * this script. The bootloader owns the boot area from MBOOT_BOOT_START; the last 128 bytes hold
+ * the info block (section .mboot_info, format in include/mboot_bl_info.h). Its RAM is a window
+ * at the start of SRAM. The RAM above the window, up to the request region, is unused; an
+ * application may point the status word of a request at an address in it.
  */
 
 MEMORY
 {
-    FLASH_BL (rx)   : ORIGIN = MBOOT_BOOT_START, LENGTH = MBOOT_BOOT_SIZE - 64
-    FLASH_INFO (r)  : ORIGIN = MBOOT_BOOT_START + MBOOT_BOOT_SIZE - 64, LENGTH = 64
+    FLASH_BL (rx)   : ORIGIN = MBOOT_BOOT_START, LENGTH = MBOOT_BOOT_SIZE - 128
+    FLASH_INFO (r)  : ORIGIN = MBOOT_BOOT_START + MBOOT_BOOT_SIZE - 128, LENGTH = 128
     RAM (xrw)       : ORIGIN = MBOOT_SRAM_START, LENGTH = 64K
 }
 
@@ -89,4 +89,4 @@ SECTIONS
     }
 }
 
-ASSERT(SIZEOF(.mboot_info) <= 64, "info block larger than 64 bytes")
+ASSERT(SIZEOF(.mboot_info) == 128, "info block is not 128 bytes")

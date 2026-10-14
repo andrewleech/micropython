@@ -125,7 +125,7 @@
 // 4 KiB erase block; a secondary slot on it needs the erase unit of the primary slot and a write
 // unit equal to the trailer alignment.
 
-#define MBOOT_API_VERSION 1u
+#define MBOOT_API_VERSION 2u
 
 // Alternatives of the choices above, defined before the board is read so that mpconfigboard.h can
 // name them.

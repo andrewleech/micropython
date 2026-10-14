@@ -75,10 +75,28 @@ typedef struct {
     bool layout_mismatch;           // the bootloader info block reports a different layout id
 } mboot_app_state_t;
 
+// Bits of mboot_app_bl_info_t.flags (equal to the info block flags, checked by app_api.c).
+#define MBOOT_APP_BL_F_DFU              (1u << 0)   // DFU front end
+#define MBOOT_APP_BL_F_FSLOAD           (1u << 1)   // fsload front end
+#define MBOOT_APP_BL_F_GZIP             (1u << 2)   // fsload accepts gzip files
+#define MBOOT_APP_BL_F_KEY_HW           (1u << 5)   // key hash from hardware (reserved, 0)
+#define MBOOT_APP_BL_F_TRUSTZONE        (1u << 6)   // secure world bootloader (reserved, 0)
+#define MBOOT_APP_BL_F_ENC_IMAGES       (1u << 7)   // encrypted images (reserved, 0)
+
+// Values of mboot_app_bl_info_t.bl_update.
+#define MBOOT_APP_BL_UPDATE_NONE        0
+#define MBOOT_APP_BL_UPDATE_IN_PLACE    1
+#define MBOOT_APP_BL_UPDATE_DUAL_COPY   2
+
 typedef struct {
     char version[25];               // NUL terminated
     uint32_t layout_id;
     uint32_t api;
+    uint32_t flags;                 // MBOOT_APP_BL_F_*; bits 3 and 4 hold bl_update
+    uint8_t bl_update;              // MBOOT_APP_BL_UPDATE_*, how the bootloader can be updated
+    uint32_t bl_image_id;           // security counter image id of the bootloader
+    uint32_t bl_counter;            // security counter value of the running bootloader
+    uint8_t key_hash[32];           // SHA-256 of the public key the bootloader trusts
 } mboot_app_bl_info_t;
 
 
