@@ -184,28 +184,69 @@ check("version secondary header in spare sector ignored", mboot.version(1) is No
 
 setup()
 check("bootloader_info absent", mboot.bootloader_info() is None)
-info_addr = BOOT_START + BOOT_SIZE - 64
+# The info block (shared/mboot/include/mboot_bl_info.h): 128 bytes at the end of the boot area,
+# 84 of them defined.
+info_addr = BOOT_START + BOOT_SIZE - 128
+KEY_HASH = bytes(range(32))
 
 
-def put_info(magic=INFO_MAGIC, info_version=1, layout=None, api=1, version=b"mpy-test 1.2"):
+def put_info(
+    magic=INFO_MAGIC,
+    info_version=1,
+    size=84,
+    flags=3 | 1 << 3,
+    layout=None,
+    api=2,
+    version=b"mpy-test 1.2",
+):
     if layout is None:
         layout = ff.layout_id()
     ff.erase(info_addr - info_addr % ERASE, ERASE)
     ff.write(
         info_addr,
-        struct.pack("<IHHII24s24s", magic, info_version, 3, layout, api, version, b"\xff" * 24),
+        struct.pack(
+            "<IHHIII24sII32s44s",
+            magic,
+            info_version,
+            size,
+            flags,
+            layout,
+            api,
+            version,
+            0x100,
+            7,
+            KEY_HASH,
+            b"\xff" * 44,
+        ),
     )
 
 
 put_info()
 d = mboot.bootloader_info()
 check(
-    "bootloader_info", d == {"version": "mpy-test 1.2", "layout_id": ff.layout_id(), "api": 1}, d
+    "bootloader_info",
+    d
+    == {
+        "version": "mpy-test 1.2",
+        "layout_id": ff.layout_id(),
+        "api": 2,
+        "bl_update": 1,
+        "bl_image_id": 0x100,
+        "bl_counter": 7,
+        "key_hash": KEY_HASH,
+    },
+    d,
 )
 put_info(magic=0)
 check("bootloader_info bad magic", mboot.bootloader_info() is None)
 put_info(info_version=2)
 check("bootloader_info bad info_version", mboot.bootloader_info() is None)
+put_info(size=83)
+check("bootloader_info size short of the fields", mboot.bootloader_info() is None)
+put_info(size=129)
+check("bootloader_info size beyond the block", mboot.bootloader_info() is None)
+put_info(size=128)
+check("bootloader_info size of the whole block", mboot.bootloader_info() is not None)
 put_info(version=b"x" * 24)
 check("bootloader_info unterminated version", mboot.bootloader_info()["version"] == "x" * 23)
 
@@ -384,6 +425,15 @@ w2 = mboot.Writer()
 oserror("older writer invalidated", errno.EBADF, w1.write, b"x")
 w2.write(image((2, 0, 0, 0), ERASE + 1000))
 check("newer writer usable", w2.finish() == ERASE + 1000)
+
+# An open writer is aborted when a newer one opens: what it wrote is erased.
+setup()
+w1 = mboot.Writer()
+w1.write(image((3, 0, 0, 0), ERASE + 1000))
+w2 = mboot.Writer()
+check("open older writer aborted", mboot.version(1) is None)
+oserror("aborted older writer invalidated", errno.EBADF, w1.finish)
+w2.abort()
 
 # context manager
 setup()

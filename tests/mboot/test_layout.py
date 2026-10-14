@@ -157,7 +157,7 @@ class TestRealBoard(unittest.TestCase):
         self.assertEqual((a["shadow"]["addr"], a["shadow"]["size"]), (0x080B8000, 0x4000))
         self.assertEqual((a["fs"]["addr"], a["fs"]["size"]), (0x080BC000, 0x44000))
         self.assertEqual(lay["max_img_sectors"], 81)
-        self.assertEqual(lay["layout_id"], "3535692f")
+        self.assertEqual(lay["layout_id"], "36356ac2")
         self.assertEqual({a["erase"] for a in lay["areas"].values()}, {0x2000})
         self.assertEqual(lay["trailer_size"], 2688)
         self.assertEqual(lay["max_image_size"], 0x9E000)

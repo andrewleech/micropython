@@ -14,6 +14,9 @@ ok bootloader_info absent
 ok bootloader_info
 ok bootloader_info bad magic
 ok bootloader_info bad info_version
+ok bootloader_info size short of the fields
+ok bootloader_info size beyond the block
+ok bootloader_info size of the whole block
 ok bootloader_info unterminated version
 ok state confirmed idle
 ok state unconfirmed without trailer
@@ -58,6 +61,8 @@ ok abort after finish
 ok finished image still pending
 ok older writer invalidated
 ok newer writer usable
+ok open older writer aborted
+ok aborted older writer invalidated
 ok with success finishes
 ok with after explicit finish
 ok with exception aborts
