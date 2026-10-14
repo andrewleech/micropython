@@ -7,7 +7,7 @@ from heapq import merge
 from .chains import ChainView
 from .frontend import constant
 from .bindings import call_parts, constant_value, errors_at, intersect, strip_outer
-from .facts import LinkedFunctions
+from .facts import LinkedFunctions, UnitFunctions, Unloaded
 from .structure import deep_copy
 
 CONSTRUCTORS = {'mp_obj_new_bool': 'bool', 'mp_obj_new_int': 'int', 'mp_obj_new_int_from_uint': 'int', 'mp_obj_new_int_from_ll': 'int', 'mp_obj_new_int_from_ull': 'int', 'mp_obj_new_bytes': 'bytes', 'mp_obj_new_bytes_from_vstr': 'bytes', 'mp_obj_new_str': 'str', 'mp_obj_new_str_from_utf8_vstr': 'str'}
@@ -1555,6 +1555,37 @@ def unit_semantics(function, functions, errors, contracts):
     finally:
         _helper_lookups = None
     return result, None if any(found for *_, found in lookups) else [lookup[:3] for lookup in lookups]
+
+
+def demand_semantics(store, function):
+    """The complete record of ``function`` (an index record or a complete record) with its unit
+    semantics, computed here on the first demand when its worker did not compute them.
+
+    The result is ``unit_semantics`` of the unit's functions as the worker would have run it.
+    The summary replaces the record's unloaded ``semantics``; the helper lookups and frontend
+    unresolved reasons that the worker's index leaves unloaded are filled in the function's index
+    record. A function nobody demands keeps ``Unloaded`` values, which fail on any read."""
+    record = store.index_record(function)
+    complete = store.function(record)
+    if isinstance(complete['semantics'], Unloaded):
+        unit = store.unit_index(record['translation_unit'])
+        try:
+            summary, lookups = unit_semantics(complete, UnitFunctions(store, unit['functions']),
+                                              unit['errors'], unit['contracts'])
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise RuntimeError(f'API extraction failed for compiled TU {unit["translation_unit"]}; '
+                               f'physical source {unit["source"]}: {exc}') from exc
+        store.counts['unit_semantics_demanded'] += 1
+        complete['semantics'] = {**summary, 'diagnostic_stage': 'translation-unit-extraction'}
+        complete['semantic_helper_lookups'] = record['semantic_helper_lookups'] = lookups
+        record['frontend_unresolved'] = summary.get('frontend_unresolved', [])
+    return complete
+
+
+def frontend_unresolved(store, function):
+    """The frontend-unresolved reasons of the unit semantics of ``function`` (see ``demand_semantics``)."""
+    demand_semantics(store, function)
+    return store.index_record(function)['frontend_unresolved']
 
 
 def linked_semantics_unchanged(lookups, linked_functions):

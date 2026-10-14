@@ -407,11 +407,12 @@ def row_pair(entry, contracts):
     return key['qstr'], fields[1]
 
 
-def materialize(inputs, resolve, selected=None, present=None, resolve_function=None):
+def materialize(inputs, resolve, selected, present, resolve_function, frontend_unresolved):
     """One object-binding path for TU and selected-link views, preserving gaps.
 
     ``inputs`` are unit indexes; a binding to a wrapper function records its unit semantics as a
-    ``SemanticsReference`` to the function's index record."""
+    ``SemanticsReference`` to the function's index record, and reads that function's frontend
+    unresolved reasons through ``frontend_unresolved(function)``."""
     linked = selected is not None
     bindings, containers, resolutions, unassessed_entries = [], [], [], []
     runtime_module, runtime_status = resolve('mp_type_module', '<runtime-module-framework>') if linked else (None, 'translation-unit-configuration-only')
@@ -500,7 +501,7 @@ def materialize(inputs, resolve, selected=None, present=None, resolve_function=N
                                         candidates = [f for f in wrapper_facts.get('functions', []) if f['name'] == shape.get('function')]
                                     if len(candidates) == 1:
                                         semantic = SemanticsReference(candidates[0])
-                                        if candidates[0]['frontend_unresolved']: unresolved.append('wrapper function has frontend errors')
+                                        if frontend_unresolved(candidates[0]): unresolved.append('wrapper function has frontend errors')
                                     else: unresolved.append('wrapper function missing, ambiguous or unallocated')
                             elif object_definition['kind'] not in ('type', 'module'):
                                 unresolved.append('unsupported exported object family ' + object_definition['kind'])

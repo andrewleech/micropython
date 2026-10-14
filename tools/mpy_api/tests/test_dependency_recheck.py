@@ -34,7 +34,7 @@ def extract(directory, wrapper_body, arguments):
     _, snapshot = compiler.read_input(directory / 'a.c')
     record = {**entry, 'physical': str(directory / 'a.c'), 'identity': str(directory / 'a.c'),
               'object': str(directory / 'a.o'), '_source_snapshot': snapshot, '_response_snapshots': {}}
-    return inventory._extract(record, compdb, ROOT)
+    return inventory._extract(record, compdb, ROOT, full_semantics=True)
 
 
 @needs_gcc

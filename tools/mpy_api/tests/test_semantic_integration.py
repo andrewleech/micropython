@@ -296,7 +296,7 @@ def test_exact_linked_cross_tu_identity_and_unallocated_definition(tmp_path, opt
         _, snapshot = compiler.read_input(physical)
         record = {"directory": str(tmp_path), "file": str(physical), "physical": str(physical), "identity": str(physical),
                   "object": str(obj), "arguments": args, "_source_snapshot": snapshot, "_response_snapshots": {}}
-        facts.append(_extract(record, compiler.authority(ROOT), tmp_path))
+        facts.append(_extract(record, compiler.authority(ROOT), tmp_path, full_semantics=True))
         records.append(record)
         subprocess.run(args, check=True, capture_output=True)
     elf, map_path = tmp_path / "fixture.elf", tmp_path / "fixture.map"

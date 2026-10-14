@@ -20,7 +20,7 @@ from mpy_api.link import _map_contributions, collect_ownership, join
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def extract_c(tmp_path, source, filename="fixture.c"):
+def extract_c(tmp_path, source, filename="fixture.c", *, full_semantics=True):
     physical = tmp_path / filename
     physical.parent.mkdir(parents=True, exist_ok=True)
     physical.write_text(source)
@@ -31,12 +31,12 @@ def extract_c(tmp_path, source, filename="fixture.c"):
     record = {"directory": str(tmp_path), "file": str(physical), "physical": str(physical),
               "identity": str(physical), "object": str(object_path), "arguments": arguments,
               "_source_snapshot": snapshot, "_response_snapshots": {}}
-    facts = _extract(record, compiler.authority(ROOT), tmp_path)
+    facts = _extract(record, compiler.authority(ROOT), tmp_path, full_semantics=full_semantics)
     return facts, record
 
 
-def linked_artifacts(tmp_path, source, filename="fixture.c"):
-    facts, record = extract_c(tmp_path, source, filename)
+def linked_artifacts(tmp_path, source, filename="fixture.c", *, full_semantics=True):
+    facts, record = extract_c(tmp_path, source, filename, full_semantics=full_semantics)
     subprocess.run(record["arguments"], cwd=tmp_path, check=True, capture_output=True, text=True)
     elf, map_path = tmp_path / "fixture.elf", tmp_path / "fixture.map"
     argv = ["gcc", record["object"], "-Wl,-Map=" + str(map_path), "-o", str(elf)]
@@ -57,10 +57,10 @@ def index_view(directory, *units):
     return indexes, store
 
 
-def linked_c(tmp_path, source, filename="fixture.c"):
-    facts, record, link = linked_artifacts(tmp_path, source, filename)
+def linked_c(tmp_path, source, filename="fixture.c", *, full_semantics=True):
+    facts, record, link = linked_artifacts(tmp_path, source, filename, full_semantics=full_semantics)
     ownership = collect_ownership([record], link)
-    (index,), store = index_view(tmp_path / "facts", facts)
+    (index,), store = index_view(tmp_path / ("facts" if full_semantics else "facts-demanded"), facts)
     raw, resolve, present = join([index], ownership, store)
     return index, raw, resolve, present, store
 

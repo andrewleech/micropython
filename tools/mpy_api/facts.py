@@ -3,11 +3,13 @@
 A fact object is the contract between the per-unit stage and the link stage. Its index section is
 what the link stage holds for every unit: the unit's identity, definitions, registrations, errors,
 contracts and dependency identities, and for every function its identity fields, a call index (each
-call's callee declaration and source span), its syntax barriers, its frontend-unresolved reasons and
-the helper lookups its unit semantics made. Its evidence section is everything else: per function
-the complete record (events, flow, syntax subtrees, full semantics, the parameter source contract),
-and per unit the frontend tables, the complete input record and the complete coverage record. The
-link stage loads evidence per function, on demand, through a ``FactStore``.
+call's callee declaration and source span) and its syntax barriers. A worker that computes the unit
+semantics of the unit's functions also leaves their frontend-unresolved reasons and helper lookups in
+the index; otherwise the semantics and those two fields are ``Unloaded`` until the link stage demands
+the function's unit semantics (``semantics.demand_semantics``). The evidence section is everything
+else: per function the complete record (events, flow, syntax subtrees, semantics, the parameter
+source contract), and per unit the frontend tables, the complete input record and the complete
+coverage record. The link stage loads evidence per function, on demand, through a ``FactStore``.
 
 An index record names each field it leaves in the evidence with an ``Unloaded`` value, so reading
 such a field from the index fails instead of seeing a default.
@@ -100,7 +102,9 @@ def _function_index(function, position):
     record['call_index'] = [{'callee': call.get('callee'), 'source_span': call['source_span']}
                             for call in events['calls']]
     record['semantic_unassessed'] = events.get('semantic_unassessed', [])
-    record['frontend_unresolved'] = function['semantics'].get('frontend_unresolved', [])
+    semantics = function['semantics']
+    record['frontend_unresolved'] = (unloaded('frontend_unresolved') if isinstance(semantics, Unloaded)
+                                     else semantics.get('frontend_unresolved', []))
     record['evidence'] = position
     for key in function:
         if key not in record:
@@ -238,21 +242,21 @@ class _Section(pickle.Unpickler):
 
 
 class _Unit:
-    __slots__ = ('location', 'nodes', 'table', 'primer', 'evidence')
+    __slots__ = ('location', 'nodes', 'table', 'primer', 'evidence', 'index', 'records')
 
-    def __init__(self, location, nodes):
-        self.location, self.nodes, self.evidence = location, nodes, None
-        self.table = self.primer = None
+    def __init__(self, location, nodes, index):
+        self.location, self.nodes, self.evidence, self.index = location, nodes, None, index
+        self.table = self.primer = self.records = None
 
 
 class FactStore:
     """The fact objects of one run, read by the link stage.
 
-    Holds the location and node table of every unit. ``function`` and ``unit_evidence`` load and keep
-    what composition reads, so every reader of one function or unit gets the same objects; the
-    ``peek`` variants give the kept value when there is one and otherwise load without keeping. Every
-    section read is checked against the sha256 its worker recorded, and ``verify`` checks every
-    whole file."""
+    Holds the index, location and node table of every unit. ``function`` and ``unit_evidence`` load
+    and keep what composition reads, so every reader of one function or unit gets the same objects;
+    the ``peek`` variants give the kept value when there is one and otherwise load without keeping.
+    Every section read is checked against the sha256 its worker recorded, and ``verify`` checks
+    every whole file."""
 
     def __init__(self, directory, compression=COMPRESSION):
         self.directory = Path(directory)
@@ -260,8 +264,9 @@ class FactStore:
         self._units = {}
         self._functions = {}
         # Sections loaded by kind, bytes read, and how composition obtained each selected function's
-        # linked semantics (``inventory._normal_surface``).
-        self.counts = {'function': 0, 'unit': 0, 'shared': 0, 'bytes': 0,
+        # linked semantics (``inventory._normal_surface``); ``unit_semantics_demanded`` counts the
+        # unit semantics the link stage computed itself (``semantics.demand_semantics``).
+        self.counts = {'function': 0, 'unit': 0, 'shared': 0, 'bytes': 0, 'unit_semantics_demanded': 0,
                        'unit_semantics_reused': 0, 'linked_semantics_runs': 0}
 
     def path(self, ordinal):
@@ -272,7 +277,22 @@ class FactStore:
         identity = index['translation_unit']
         if identity in self._units:
             raise RuntimeError(f'repeated fact object for translation unit {identity}')
-        self._units[identity] = _Unit(location, nodes)
+        self._units[identity] = _Unit(location, nodes, index)
+
+    def unit_index(self, translation_unit):
+        """The index of the unit ``translation_unit``."""
+        return self._units[translation_unit].index
+
+    def index_record(self, function):
+        """The index record of the function ``function`` (an index record or a complete record) of
+        its unit."""
+        unit = self._units[function['translation_unit']]
+        if unit.records is None:
+            unit.records = {}
+            for record in unit.index['functions']:
+                if unit.records.setdefault(record['id'], record) is not record:
+                    raise RuntimeError(f'repeated function identity {record["id"]}')
+        return unit.records[function['id']]
 
     def _read(self, unit, section):
         offset, length, expected = unit.location['sections'][section]
@@ -340,6 +360,22 @@ class FactStore:
         """Sizes and load counts of the run's fact objects."""
         return {'units': len(self._units), 'bytes': sum(unit.location['bytes'] for unit in self._units.values()),
                 'compression': self.compression, 'counts': dict(self.counts)}
+
+
+class UnitFunctions:
+    """The functions of one unit by name, as ``semantics`` looks up same-unit helpers: each lookup
+    gives the complete records of the unit's functions of that name, loaded from the store."""
+    __slots__ = ('store', 'by_name')
+
+    def __init__(self, store, records):
+        self.store = store
+        self.by_name = {}
+        for record in records:
+            self.by_name.setdefault(record['name'], []).append(record)
+
+    def get(self, name, default):
+        records = self.by_name.get(name)
+        return [self.store.function(record) for record in records] if records else default
 
 
 class LinkedFunctions(dict):

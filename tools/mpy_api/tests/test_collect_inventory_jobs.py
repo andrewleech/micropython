@@ -74,7 +74,7 @@ def snapshot(digest):
 
 def planned_unit(plan):
     """A stand-in for one unit's extraction whose include constraints and input snapshots follow ``plan``."""
-    def extract(record, compdb, root, path, level):
+    def extract(record, compdb, root, path, level, full_semantics):
         step = plan[int(record['identity'][2:])]
         if step.get('fail'):
             raise RuntimeError('extraction failure ' + record['identity'])
@@ -117,3 +117,14 @@ def test_input_conflict_alone_names_both_units(monkeypatch, tmp_path, jobs):
 def test_a_later_extraction_failure_wins_over_earlier_conflicts(monkeypatch, tmp_path, jobs):
     plan = [*BOTH_CONFLICTS, {'selection': [], 'snapshot': '1', 'fail': True}]
     assert planned_failure(monkeypatch, tmp_path, jobs, plan) == 'extraction failure tu2'
+
+
+def test_parallel_extraction_refuses_a_runs_directory_that_is_not_new(tmp_path):
+    project = build(tmp_path, {'a_valid.c': VALID, 'b_valid.c': VALID})
+    database, build_dir = project
+    selection = inventory.select_records(database=database, root=ROOT, build_dir=build_dir)
+    store = FactStore(tempfile.mkdtemp(dir=database.parent))
+    (Path(store.directory) / 'runs').mkdir()
+    with pytest.raises(FileExistsError):
+        inventory.collect_inventory(selection, port='test', target='test', variant='test', link={},
+                                    store=store, jobs=2)
