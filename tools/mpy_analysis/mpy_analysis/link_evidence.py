@@ -121,8 +121,30 @@ def _compiler_record(path: str) -> dict[str, Any]:
     }
 
 
-def _depfile(entry: dict[str, Any]) -> Path | None:
-    """The dependency file a compile wrote, or the `.P` copy make kept of it."""
+@lru_cache(maxsize=None)
+def _ninja_deps(build_dir: str) -> dict[str, list[str]]:
+    """Prerequisites per object from `ninja -t deps`; Ninja deletes the compilers' dependency files."""
+    if not Path(build_dir, ".ninja_deps").is_file():
+        return {}
+    try:
+        result = subprocess.run(["ninja", "-C", build_dir, "-t", "deps"], capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    deps: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    for line in result.stdout.splitlines():
+        if line.startswith(" "):
+            if current is not None:
+                current.append(line.strip())
+        elif ": #deps" in line:
+            current = deps.setdefault(_real(os.path.join(build_dir, line.split(": #deps")[0])), [])
+        else:
+            current = None
+    return deps
+
+
+def _prerequisites(entry: dict[str, Any]) -> list[str] | None:
+    """The files a compile read: its dependency file, the `.P` copy make kept of it, or Ninja's record."""
     args = arguments_of(entry)
     candidates = []
     if "-MF" in args:
@@ -131,7 +153,10 @@ def _depfile(entry: dict[str, Any]) -> Path | None:
     if obj:
         candidates.append(Path(obj).with_suffix(".P"))
         candidates.append(Path(obj).with_suffix(".d"))
-    return next((path for path in candidates if path.is_file()), None)
+    depfile = next((path for path in candidates if path.is_file()), None)
+    if depfile is not None:
+        return depfile_prerequisites(depfile.read_text(encoding="utf-8"))
+    return _ninja_deps(_real(entry["directory"])).get(_real(os.path.join(entry["directory"], obj))) if obj else None
 
 
 def _headers(entries: list[dict[str, Any]], roots: _Roots) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
@@ -144,14 +169,13 @@ def _headers(entries: list[dict[str, Any]], roots: _Roots) -> tuple[list[dict[st
         language = "c++" if compiler and "++" in Path(compiler).name else "c"
         if entry_file(entry).endswith(".s"):
             continue  # assembled without the preprocessor, so it reads no headers through a dependency file
-        depfile = _depfile(entry)
-        if depfile is None:
-            unresolved.append({"kind": "dependency-file", "path": entry_file(entry), "reason": "no dependency file for the compile"})
-            continue
         try:
-            names = depfile_prerequisites(depfile.read_text(encoding="utf-8"))
+            names = _prerequisites(entry)
         except (DepfileError, OSError, UnicodeDecodeError) as error:
-            unresolved.append({"kind": "dependency-file", "path": str(depfile), "reason": str(error)})
+            unresolved.append({"kind": "dependency-file", "path": entry_file(entry), "reason": str(error)})
+            continue
+        if names is None:
+            unresolved.append({"kind": "dependency-file", "path": entry_file(entry), "reason": "no dependency file or Ninja record for the compile"})
             continue
         source = _real(entry_file(entry))
         for name in names:
@@ -262,7 +286,11 @@ def _image(
                 if _sha256(obj) in members.get(name, set())
             }
             origins = {entry_file(entry) for entry in matches.values()}
-            if len(origins) == 1:
+            sources_by_hash: dict[str | None, set[str]] = {}
+            for obj, entry in matches.items():
+                sources_by_hash.setdefault(_sha256(obj), set()).add(entry_file(entry))
+            # An archive may hold several members of one name (the map cannot tell them apart); each needs exactly one source.
+            if sources_by_hash and set(sources_by_hash) == members.get(name) and all(len(found) == 1 for found in sources_by_hash.values()):
                 compiled.update(matches)
             else:
                 unresolved.append(

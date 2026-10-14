@@ -101,3 +101,33 @@ def test_missing_dependency_file_is_unresolved_not_dropped(project):
     evidence, _ = evidence_of(project)
 
     assert [row["kind"] for row in evidence["images"][0]["unresolved"]] == ["dependency-file"]
+
+
+@pytest.mark.skipif(shutil.which("cmake") is None or shutil.which("ninja") is None, reason="needs cmake and ninja")
+def test_cmake_ninja_build_takes_headers_from_ninja_and_binds_same_named_archive_members(tmp_path):
+    """Ninja deletes the dependency files, and an archive can hold two members with one name."""
+    src, build = tmp_path / "src", tmp_path / "build"
+    (src / "a").mkdir(parents=True)
+    (src / "b").mkdir()
+    (src / "cfg.h").write_text("#define CFG 1\n")
+    (src / "a" / "dup.c").write_text('#include "cfg.h"\nint dup_a(void) { return CFG; }\n')
+    (src / "b" / "dup.c").write_text("int dup_b(void) { return 2; }\n")
+    (src / "main.c").write_text("int dup_a(void);\nint dup_b(void);\nint main(void) { return dup_a() + dup_b(); }\n")
+    (src / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.16)\nproject(p C)\n"
+        "add_library(dup STATIC a/dup.c b/dup.c)\nadd_executable(app main.c)\n"
+        f"target_include_directories(dup PRIVATE {src})\n"
+        "target_link_libraries(app dup)\ntarget_link_options(app PRIVATE -Wl,-Map=app.map)\n"
+    )
+    build.mkdir()
+    run("cmake", "-G", "Ninja", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", str(src), cwd=build)
+    run("ninja", cwd=build)
+    assert not list(build.rglob("*.d"))
+
+    image = {"id": "app", "role": "application", "elf": str(build / "app"), "map": str(build / "app.map")}
+    evidence, _ = link_evidence.build_evidence([str(build / "compile_commands.json")], [image], {"src": str(src)})
+    [item] = evidence["images"]
+
+    assert item["unresolved"] == []
+    assert {entry["path"] for entry in item["sources"]} == {"main.c", "a/dup.c", "b/dup.c"}
+    assert {Path(entry["path"]).name for entry in item["header_accounting"]} >= {"cfg.h"}

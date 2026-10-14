@@ -5,10 +5,8 @@ import os
 from pathlib import Path
 
 import pytest
-
 from conftest import write, write_db
 from mpy_analysis import scope
-
 
 MPY_ROOT = Path(__file__).resolve().parents[3]
 
@@ -886,6 +884,20 @@ def test_scope_cli_collects_plain_manifest_and_native_database(tmp_path):
     data = scope.load_scope(output)
     assert frozen(data)[0]["target_path"] == "main.py"
     assert data["groups"]["native"][0]["path"] == "port/main.c"
+
+
+def test_scope_cli_takes_the_whole_selection_from_the_database_without_a_manifest(tmp_path):
+    write(tmp_path, "port/main.c")
+    database = write_db(
+        tmp_path / "compile_commands.json",
+        [{"directory": str(tmp_path / "port"), "file": "main.c", "arguments": ["cc", "-c", "main.c"]}],
+    )
+    output = tmp_path / "scope.json"
+    argv = ["--micropython-root", str(MPY_ROOT), "--root", f"project={tmp_path}", "--owner", "project=project-owner"]
+    argv += ["--target", "t", "--variant", "v", "--port", "p", "--compile-database", str(database), "--output", str(output)]
+    assert scope.main(argv) == 0
+    assert scope.load_scope(output)["groups"]["native"][0]["path"] == "port/main.c"
+    assert scope.main(argv[:-4] + ["--output", str(output)]) == 2
 
 
 def test_scope_cli_rejects_failed_scope_without_output(tmp_path, capsys):

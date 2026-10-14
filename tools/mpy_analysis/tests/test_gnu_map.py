@@ -132,3 +132,13 @@ def test_unknown_and_malformed_formats_fail_closed(text):
 def test_ambiguous_quoted_load_operand_fails_closed():
     with pytest.raises(ValueError, match="ambiguous GNU ld map LOAD operand"):
         parse_gnu_map('LOAD "/tmp/file with spaces.o" trailing\n')
+
+
+def test_section_name_without_a_leading_dot_wraps_like_any_other():
+    text = (
+        "Discarded input sections\n\n"
+        " custom_section\n"
+        "                0x0000000000000000       0x10 lib.a(x.o)\n"
+    )
+    [record] = parse_gnu_map(text)["discarded_sections"]
+    assert (record["section"], record["size"]) == ("custom_section", 0x10)

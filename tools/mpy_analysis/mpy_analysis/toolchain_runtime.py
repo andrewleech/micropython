@@ -32,6 +32,7 @@ _C_LIBRARIES = (
             }
         ),
     ),
+    ("picolibc", "picolibc.h", ("__PICOLIBC__", "__PICOLIBC_MINOR__", "__PICOLIBC_PATCHLEVEL__"), None),
     ("newlib", "newlib.h", ("_NEWLIB_VERSION",), None),
 )
 
@@ -84,6 +85,8 @@ def layout(compiler: str, flags: tuple[str, ...]) -> dict[str, Any]:
             continue
         if name == "glibc":
             version = f"{macros['__GLIBC__']}.{macros['__GLIBC_MINOR__']}"
+        elif name == "picolibc":
+            version = ".".join(macros[key] for key in keys)
         else:
             version = macros["_NEWLIB_VERSION"].strip('"')
         c_library = {
@@ -92,6 +95,11 @@ def layout(compiler: str, flags: tuple[str, ...]) -> dict[str, Any]:
             "version_source": f"{header} macros from the captured compiler",
             "files": files,
         }
+        if name == "picolibc":
+            # The headers sit in <root>/include and the archives in <root>/<triple>/lib/...
+            for directory in include_directories(compiler, flags) or ():
+                if directory.joinpath(header).is_file():
+                    c_library["root"] = directory.parent
         break
     return {
         "runtime_dir": runtime_dir,
@@ -157,7 +165,7 @@ def classify(path: str, compiler: str, flags: tuple[str, ...]) -> tuple[str | No
         if release is None:
             return None, None, "compiler does not report its release version (-dumpfullversion)"
         return "compiler-runtime", {"release": release}, ""
-    if found["library_dir"] is not None and resolved.parent == found["library_dir"]:
+    if found["library_dir"] is not None and resolved.parent == found["library_dir"] and (found["c_library"] or {}).get("root") is None:
         library = found["c_library"]
         if library is None:
             return None, None, "file lies in the compiler's C library directory but its version macros are unavailable"
@@ -166,6 +174,9 @@ def classify(path: str, compiler: str, flags: tuple[str, ...]) -> tuple[str | No
         sysroot = found["sysroot"]
         if sysroot is not None and not resolved.parent.is_relative_to(sysroot):
             return None, None, "file lies outside the compiler's configured sysroot"
-        record = {key: value for key, value in library.items() if key != "files"}
+        record = {key: value for key, value in library.items() if key not in ("files", "root")}
         return "c-library", record, ""
+    library = found["c_library"]
+    if library is not None and library.get("root") is not None and resolved.is_relative_to(library["root"]) and resolved.suffix == ".a":
+        return "c-library", {key: value for key, value in library.items() if key not in ("files", "root")}, ""
     return None, None, "file is neither compiler runtime nor in the compiler's C library directory"

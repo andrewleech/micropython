@@ -6,7 +6,7 @@
 
 - A compilation database. For make ports use [compiledb](https://github.com/nickdiego/compiledb) in dry-run mode, then build normally; for CMake projects use `CMAKE_EXPORT_COMPILE_COMMANDS`. Each entry's `-o` operand names the object, and its `file` the source.
 - The GNU ld map of each image. Only input sections that land in a section the final ELF allocates (`SHF_ALLOC`) count as contributing, so an object whose code the linker discarded is not a component.
-- The compilers' dependency files (`-MF`, or the `.P` copy `py/mkrules.mk` keeps). A compile without one is reported, never assumed to read no headers. An assembler source named `.s` is not preprocessed and reads no headers through a dependency file.
+- The compilers' dependency files (`-MF`, or the `.P` copy `py/mkrules.mk` keeps). Ninja deletes these after use, so for a Ninja build the same data comes from `ninja -t deps` in the compile database's directory. A compile with neither is reported, never assumed to read no headers. An assembler source named `.s` is not preprocessed and reads no headers through a dependency file.
 - The ELF, for its `DT_NEEDED` list and its allocated sections.
 
 ```sh

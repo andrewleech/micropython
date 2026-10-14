@@ -294,8 +294,6 @@ def collect_manifest_scope(
         raise ValueError("MPY_DIR must name the explicit MicroPython authority checkout")
     variables["MPY_DIR"] = str(mpy)
     manifest_paths = [Path(path).resolve(strict=True) for path in manifests]
-    if not manifest_paths:
-        raise ValueError("at least one manifest is required")
     for path in manifest_paths:
         if not path.is_file() or path.suffix != ".py":
             raise ValueError(f"manifest must be a Python file: {path}")
@@ -405,7 +403,7 @@ def collect_manifest_scope(
         if package_id is not None:
             record["provenance"]["package_id"] = package_id
         records.append(record)
-    if not records:
+    if not records and manifest_paths:
         raise ValueError("manifest resolved no Python sources")
     for package_id, package in resolver.packages.items():
         metadata = resolver.package_metadata.get(package_id)
@@ -413,18 +411,18 @@ def collect_manifest_scope(
             package["metadata"] = {
                 field: getattr(metadata, field) for field in _PACKAGE_METADATA_FIELDS
             }
-    return parse_scope(
-        {
-            "schema_version": SCHEMA_VERSION,
-            "roots": roots,
-            "target": target,
-            "variant": variant,
-            "port": port,
-            "groups": {group: records},
-            "packages": list(resolver.packages.values()),
-            "package_requirements": resolver.package_requirements,
-        }
-    )
+    data = {
+        "schema_version": SCHEMA_VERSION,
+        "roots": roots,
+        "target": target,
+        "variant": variant,
+        "port": port,
+        "groups": {group: records},
+        "packages": list(resolver.packages.values()),
+        "package_requirements": resolver.package_requirements,
+    }
+    # Without a manifest the compilation database supplies the whole selection, so validation follows it.
+    return parse_scope(data) if records else data
 
 
 def collect_compdb_sources(
@@ -471,7 +469,7 @@ def _assignments(values: Sequence[str], label: str) -> dict[str, str]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs = parser.add_mutually_exclusive_group()
     inputs.add_argument("--scope", type=Path, help="validate a consumer-supplied scope")
     inputs.add_argument(
         "--manifest", type=Path, action="append", help="trusted MicroPython manifest"
@@ -508,10 +506,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise ValueError(
                     "manifest collection requires --micropython-root, --target, --variant, --port"
                 )
+            if not (args.manifest or args.compile_database):
+                raise ValueError("collection requires --manifest or --compile-database")
             owners = _assignments(args.owner, "--owner")
             data = collect_manifest_scope(
                 args.micropython_root,
-                args.manifest,
+                args.manifest or [],
                 roots=_assignments(args.root, "--root"),
                 path_vars=_assignments(args.var, "--var"),
                 owners=owners,

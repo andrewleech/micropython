@@ -220,7 +220,7 @@ def parse_gnu_map(text: str, *, base_dir: str | os.PathLike[str] | None = None) 
                         wrapped.group("identity"),
                     )
                     pending_section = None
-                elif section_only and section_only.group("section").startswith("."):
+                elif section_only and not section_only.group("section").startswith("*"):
                     pending_section = section_only.group("section")
                     continue
                 else:
@@ -256,6 +256,8 @@ def parse_gnu_map(text: str, *, base_dir: str | os.PathLike[str] | None = None) 
         if stripped.startswith("GNU ld") or stripped.startswith("OUTPUT(") or stripped.startswith("START GROUP") or stripped.startswith("END GROUP"):
             recognized = True
             continue
+    if pending_section is not None:
+        raise ValueError(f"section {pending_section!r} has no address, size and origin")
 
     if not recognized or not (saw_extracted or saw_discarded or saw_allocated):
         raise ValueError("unrecognized or unsupported linker map format (expected GNU ld map sections)")
