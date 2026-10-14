@@ -1,14 +1,20 @@
-"""Where the libraries carried in MicroPython's tree keep their own version.
+"""Identity of MicroPython itself and of the libraries it carries in-tree.
 
-``VERSION_SOURCES`` and ``FAMILY_SOURCES`` record locations, never values. A
-library that is checked out but whose source cannot be parsed raises, so an
-upstream change to a version marker is noticed instead of yielding a stale or
-missing version.
+MicroPython declares two things about its own tree. ``py/mpconfig.h`` holds the
+release (the same macros ``py/makeversionhdr.py`` falls back on), and the tree
+in ``LICENSE`` lists the licence of each carried library by path. Library
+versions are not declared uniformly; ``VERSION_SOURCES`` records where each
+library keeps its own version, never the version itself. A library that is
+checked out but whose source cannot be parsed is an error, so a library update
+that moves its version marker fails ``tests/test_mpy_tree.py`` instead of
+producing a stale or missing value.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import re
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -179,3 +185,164 @@ def generation_of(relative: str, selected: tuple[Path, ...]) -> str | None:
         if re.match(pattern, path.name)
     }
     return found.pop() if len(found) == 1 else None
+
+
+def find_root(directory: Path) -> Path | None:
+    """The nearest enclosing MicroPython checkout root, which may be the directory itself."""
+    for candidate in (directory, *directory.parents):
+        if (candidate / "py" / "mpconfig.h").is_file() and (candidate / "LICENSE").is_file():
+            return candidate
+    return None
+
+
+def license_tree(text: str) -> list[tuple[tuple[str, ...], str]]:
+    """The ``/path (LICENCE)`` entries under the tree heading in ``LICENSE``, as path parts.
+
+    ``A + B`` in an entry means both licences apply and is returned as ``A AND B``.
+    """
+    entries: list[tuple[tuple[str, ...], str]] = []
+    stack: list[str] = []
+    started = False
+    for line in text.splitlines():
+        found = re.fullmatch(r"( *)/([^ ]*)(?: \((.*)\))?", line.rstrip())
+        if not found:
+            continue
+        indent, name, licence = found.groups()
+        if not started:
+            started = name == "" and licence is not None
+            if not started:
+                continue
+        depth = len(indent) // 4
+        del stack[depth:]
+        stack.append(name)
+        if licence:
+            entries.append(
+                (tuple(part for part in stack if part), licence.replace(" + ", " AND "))
+            )
+    return entries
+
+
+def _key(part: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", part.lower())
+
+
+def listed_licence(root: Path, relative: tuple[str, ...]) -> tuple[str, Path] | None:
+    """The licence the LICENSE tree gives the directory at ``relative``, if it lists it."""
+    text, path = _read(root, "LICENSE")
+    wanted = tuple(_key(part) for part in relative)
+    for parts, licence in license_tree(text):
+        if tuple(_key(part) for part in parts) == wanted:
+            return licence, path
+    return None
+
+
+def deviations(root: Path, relative: str) -> list[tuple[str, str]]:
+    """Tree entries (pattern, licence) other than the root's that cover ``relative``."""
+    text, _ = _read(root, "LICENSE")
+    found = []
+    for parts, licence in license_tree(text):
+        pattern = "/".join(parts)
+        if parts and (
+            fnmatch.fnmatchcase(relative, pattern) or relative.startswith(pattern + "/")
+        ):
+            found.append((pattern, licence))
+    return found
+
+
+def release(root: Path) -> tuple[str, Path]:
+    """The release from ``py/mpconfig.h``, with the ``-preview`` suffix ``makeversionhdr.py`` adds."""
+    text, path = _read(root, "py/mpconfig.h")
+    numbers = []
+    for part in ("MAJOR", "MINOR", "MICRO", "PRERELEASE"):
+        found = re.search(rf"^#define\s+MICROPY_VERSION_{part}\s+(\d+)", text, re.MULTILINE)
+        if not found:
+            raise ValueError(f"py/mpconfig.h: MICROPY_VERSION_{part} not found")
+        numbers.append(int(found.group(1)))
+    return ".".join(map(str, numbers[:3])) + ("-preview" if numbers[3] else ""), path
+
+
+def _exact_tag(directory: Path) -> tuple[str, None] | None:
+    """The version-like git tag naming the commit checked out in a library's own repository."""
+    if not (directory / ".git").exists():
+        return None
+    done = subprocess.run(
+        ["git", "describe", "--tags", "--exact-match", "HEAD"],
+        cwd=directory,
+        capture_output=True,
+        text=True,
+    )
+    tag = done.stdout.strip()
+    return (
+        (tag.removeprefix("v"), None)
+        if done.returncode == 0 and re.match(r"v?\d+\.\d", tag)
+        else None
+    )
+
+
+def library_version(
+    root: Path, relative: str, selected: tuple[Path, ...] = ()
+) -> tuple[str, Path] | None:
+    """The version of the checked-out library at ``relative``, or None if it has no source.
+
+    Raises ValueError when the library is present and its recorded source does not parse.
+    """
+    directory = root / relative
+    if not directory.is_dir() or not any(directory.iterdir()):
+        return None
+    try:
+        if relative in FAMILY_SOURCES:
+            return FAMILY_SOURCES[relative](directory, tuple(p.resolve() for p in selected))
+        if relative in VERSION_SOURCES:
+            return VERSION_SOURCES[relative](directory)
+    except OSError as error:
+        raise ValueError(f"{relative}: {error}") from error
+    return None
+
+
+def identity(
+    directory: Path, selected: tuple[Path, ...] = ()
+) -> dict[str, tuple[str, Path | None]] | None:
+    """Name, version and licence MicroPython itself declares for ``directory``, per field."""
+    root = find_root(directory)
+    if root is None:
+        return None
+    directory = directory.resolve()
+    root = root.resolve()
+    if directory == root:
+        entry = listed_licence(root, ())
+        found = {"name": ("micropython", root / "LICENSE"), "version": release(root)}
+        if entry:
+            found["license"] = entry
+        return found
+    relative = directory.relative_to(root)
+    entry = listed_licence(root, relative.parts)
+    version = library_version(root, relative.as_posix(), selected)
+    if version is None and entry is not None:
+        version = _exact_tag(directory)
+    if entry is None and version is None:
+        return None
+    generation = generation_of(relative.as_posix(), selected)
+    name = f"{directory.name}-{generation}" if generation else directory.name
+    found = {"name": (name, (entry or version)[1] or root / "LICENSE")}
+    if entry:
+        found["license"] = entry
+    if version:
+        found["version"] = version
+    return found
+
+
+def relative_to_root(directory: Path) -> str | None:
+    """``directory`` as a POSIX path below its enclosing MicroPython root, None outside one."""
+    root = find_root(directory)
+    return directory.resolve().relative_to(root.resolve()).as_posix() if root else None
+
+
+def declaring_file(directory: Path) -> Path | None:
+    """The ``LICENSE`` that makes ``directory`` MicroPython's root or a library it carries."""
+    root = find_root(directory)
+    if root is None:
+        return None
+    relative = directory.resolve().relative_to(root.resolve())
+    listed = relative.as_posix() in VERSION_SOURCES or relative.as_posix() in FAMILY_SOURCES
+    carried = listed or listed_licence(root, relative.parts)
+    return root / "LICENSE" if not relative.parts or carried else None

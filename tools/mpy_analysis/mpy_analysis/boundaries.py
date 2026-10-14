@@ -17,8 +17,9 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
+from . import mpy_tree
 from .declarations import revision_matches_selected, selected_digest, source_binding
 from .locks import LOCK_FILES, idf_component_identity, idf_sbom_manifest, inspect_lock
 from .metadata_bom import UnsupportedBomError, parse_json, read_bom
@@ -288,6 +289,9 @@ def _markers(directory: Path, root: Path, scope: dict[str, Any]) -> list[dict[st
     path = _marker(directory, "sbom.yml", root)
     if path is not None and idf_sbom_manifest(directory):
         result.append({"kind": "package-metadata", "path": str(path)})
+    path = mpy_tree.declaring_file(directory)
+    if path is not None:
+        result.append({"kind": "package-metadata", "path": str(path)})
     result.extend(_generated_markers(scope, directory, root))
     return result
 
@@ -421,6 +425,46 @@ def _finalize_boundary(
             item.get("package_id", ""),
         )
     )
+
+
+def _split_generations(boundaries: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One boundary per generation of a library that keeps several in one directory.
+
+    The selected sources of each generation form their own boundary (id suffixed
+    ``#<generation>``); sources of no generation stay with the original id.
+    """
+    result = []
+    for value in boundaries:
+        relative = mpy_tree.relative_to_root(Path(value["directory"]))
+        groups = mpy_tree.GENERATIONS.get(relative or "", {})
+        parts: dict[str, list] = {name: [] for name in groups}
+        rest = []
+        for item in value["sources"]:
+            name = Path(item[1]["path"]).name
+            for generation, pattern in groups.items():
+                if re.match(pattern, name):
+                    parts[generation].append(item)
+                    break
+            else:
+                rest.append(item)
+        present = {name: items for name, items in parts.items() if items}
+        if len(present) < 2:
+            result.append(value)
+            continue
+        if rest:
+            result.append({**value, "sources": rest})
+        for name, items in present.items():
+            result.append(
+                {
+                    **value,
+                    "id": f"{value['id']}#{name}",
+                    "sources": items,
+                    "issues": list(value["issues"]),
+                    "candidates": list(value["candidates"]),
+                    "fetch_provenance": list(value["fetch_provenance"]),
+                }
+            )
+    return result
 
 
 def discover_boundaries(
@@ -638,7 +682,9 @@ def discover_boundaries(
         _finalize_boundary(
             registry[directory], kinds[directory], package_assertions.get(directory, {})
         )
-    return sorted((registry[directory] for directory in owned), key=lambda value: value["id"])
+    return sorted(
+        _split_generations(registry[directory] for directory in owned), key=lambda v: v["id"]
+    )
 
 
 def uncovered_headers(
@@ -654,12 +700,16 @@ def uncovered_headers(
     """
     containing = [(item["root"], Path(item["directory"])) for item in boundaries]
     containing += [
-        (package["root"], source_path(scope, package).parent) for package in scope.get("packages", [])
+        (package["root"], source_path(scope, package).parent)
+        for package in scope.get("packages", [])
     ]
     result = []
     for record in headers:
         physical = source_path(scope, record)
-        if any(root == record["root"] and _contains(directory, physical) for root, directory in containing):
+        if any(
+            root == record["root"] and _contains(directory, physical)
+            for root, directory in containing
+        ):
             continue
         if _repository_root(physical.parent) is not None:
             result.append(record)

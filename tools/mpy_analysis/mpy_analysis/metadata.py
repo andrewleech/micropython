@@ -21,6 +21,7 @@ from reuse.copyright import SourceType
 from reuse.global_licensing import NestedReuseTOML, PrecedenceType, ReuseDep5, ReuseTOML
 from reuse.project import Project
 
+from . import license_text, mpy_tree
 from .metadata_bom import valid_uri
 
 FIELDS = ("name", "version", "description", "author", "license", "url")
@@ -160,6 +161,7 @@ class _Collector:
         self.custom_text: dict[str, dict[str, Any]] = {}
         self.license_scope: str | None = None
         self.licensing_inputs: set[Path] = set()
+        self.license_is_default = False
         self.context_dirs = self._context_chain()
         self.context_directory: Path | None = None
         for label, files in (("selected", self.files), ("binding", self.binding_files)):
@@ -899,6 +901,63 @@ class _Collector:
                 "esp-idf-version-header-1",
             )
 
+    def parse_mpy_tree(self) -> None:
+        """Name, version and licence MicroPython declares for its own root and carried libraries."""
+        found = mpy_tree.identity(self.directory, tuple(self.files or ()))
+        if not found:
+            return
+        root = mpy_tree.find_root(self.directory)
+        if "license" in found and root is not None and self.directory == root.resolve():
+            found["license"] = self._root_license(root, found["license"])
+        if self.assertions.get("name"):
+            del found["name"]
+        for field, (value, path) in found.items():
+            if path is None:
+                if not self.assertions.get(field):
+                    self.add(field, value, None, "git-exact-tag-1")
+                continue
+            self.licensing_inputs.add(path.resolve())
+            self.add(field, value, path, "mpy-tree-1")
+        self.license_is_default = "license" in found
+
+    def parse_license_files(self) -> None:
+        """A licence file in the boundary root whose text is exactly a canonical SPDX text."""
+        for path in sorted(self.directory.iterdir()):
+            if (
+                path.is_file()
+                and path.resolve().is_relative_to(self.directory)
+                and re.fullmatch(
+                    r"(?:LICENSE|LICENCE|COPYING)(?:\.(?:md|txt))?", path.name, re.IGNORECASE
+                )
+            ):
+                identifier = license_text.identify(self.text(path))
+                if identifier:
+                    self.add("license", identifier, path, "license-text-match-1")
+                    self.license_is_default = True
+
+    def _root_license(self, root: Path, declared: tuple[str, Path]) -> tuple[str, Path]:
+        """The root licence AND the licences the LICENSE tree gives selected files it lists."""
+        licences, unmodelled = [declared[0]], {}
+        for selected in self.files or []:
+            relative = selected.resolve().relative_to(root.resolve()).as_posix()
+            for pattern, licence in mpy_tree.deviations(root, relative):
+                try:
+                    licences.append(validate_license(licence))
+                except ValueError:
+                    unmodelled.setdefault(f"{pattern} ({licence})", []).append(str(selected))
+        for entry, paths in unmodelled.items():
+            self.issue(
+                "license_applicability",
+                "unsupported",
+                f"LICENSE lists selected files under {entry}, which is not an SPDX expression",
+                declared[1],
+                selected_paths=paths,
+            )
+        unique = list(dict.fromkeys(licences))
+        return " AND ".join(
+            f"({value})" if len(unique) > 1 else value for value in unique
+        ), declared[1]
+
     def parse_bom(self, path: Path) -> None:
         from .metadata_bom import parse_json, read_bom, schema_paths
 
@@ -1240,7 +1299,20 @@ class _Collector:
             values = sorted(set(file_expressions))
             combined = validate_license(" AND ".join(f"({value})" for value in values))
             if not missing or distribution_licenses:
-                self.assertions.setdefault("license", []).append(combined)
+                if self.license_is_default and distribution_licenses:
+                    extra = [
+                        value
+                        for value in values
+                        if not any(
+                            LICENSING.is_equivalent(value, d) for d in distribution_licenses
+                        )
+                    ]
+                    combined = validate_license(
+                        " AND ".join(f"({value})" for value in [*distribution_licenses, *extra])
+                    )
+                    self.assertions["license"] = [combined]
+                else:
+                    self.assertions.setdefault("license", []).append(combined)
             if not missing and not distribution_licenses:
                 self.license_scope = "selected-file-annotations"
             self.evidence(
@@ -1472,6 +1544,16 @@ def collect_metadata(
                     )
             except (OSError, ValueError) as error:
                 collector.issue("metadata", "unsupported", str(error), path)
+    try:
+        collector.parse_mpy_tree()
+    except (OSError, ValueError) as error:
+        collector.issue("metadata", "unsupported", f"cannot read MicroPython tree: {error}")
+        for field in FIELDS:
+            collector.issue(field, "unsupported", f"MicroPython tree parser failed: {error}")
+    try:
+        collector.parse_license_files()
+    except (OSError, UnicodeError) as error:
+        collector.issue("license", "unsupported", f"cannot read licence file: {error}")
     for directory in collector.context_dirs:
         collector.parse_context(directory)
     collector.parse_licensing()
