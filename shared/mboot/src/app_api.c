@@ -49,7 +49,11 @@ _Static_assert(BOOT_SWAP_TYPE_PERM == MBOOT_APP_SWAP_PERM, "swap type values");
 _Static_assert(BOOT_SWAP_TYPE_REVERT == MBOOT_APP_SWAP_REVERT, "swap type values");
 _Static_assert(BOOT_SWAP_TYPE_FAIL == MBOOT_APP_SWAP_FAIL, "swap type values");
 _Static_assert(MBOOT_APP_ELEMS_MAX == MBOOT_REQ_ELEMS_MAX, "element stream limit");
-_Static_assert(MBOOT_APP_WRITER_CHUNK % 32 == 0, "writer chunk is a multiple of every write unit");
+
+// Bytes the writer collects before a flash write.
+#define WRITER_CHUNK 256
+
+_Static_assert(WRITER_CHUNK % 32 == 0, "writer chunk is a multiple of every write unit");
 
 // Info block in the last 64 bytes of the bootloader area, as placed by the bootloader build
 // (shared/mboot/src/boot_info.c).
@@ -70,7 +74,8 @@ typedef struct {
 _Static_assert(sizeof(bl_info_raw_t) == BL_INFO_SIZE, "bootloader info block size");
 
 enum {
-    WRITER_OPEN = 1,
+    WRITER_IDLE = 0,
+    WRITER_OPEN,
     WRITER_FINISHED,
     WRITER_ABORTED,
     WRITER_FAILED,
@@ -87,6 +92,29 @@ enum {
 #define HAVE_SECONDARY 0
 #else
 #define HAVE_SECONDARY 1
+#endif
+
+#if HAVE_SECONDARY
+// The update slot writer. One at a time; the application only sees it through the
+// mboot_app_writer_*() calls.
+typedef struct {
+    uint8_t state;
+    bool permanent;
+    uint8_t write_unit;
+    uint8_t erased_val;
+    uint32_t erase_unit;
+    uint32_t update_off;            // offset of the update base inside the secondary area
+    uint32_t capacity;              // bytes that can be accepted
+    uint32_t trailer_off;           // offset inside the secondary area of the pre-erased trailer sectors
+    uint32_t erased_to;             // update relative offset up to which sectors are erased
+    uint32_t flushed;               // update relative offset of the next flash write
+    uint32_t total;                 // bytes accepted from the caller
+    uint32_t fill;                  // bytes held in chunk
+    uint32_t chunk[WRITER_CHUNK / 4];
+} writer_t;
+
+static writer_t s_writer;
+
 #endif
 
 static int s_map_checked;
@@ -282,7 +310,13 @@ int mboot_app_slot_get(size_t index, mboot_app_slot_t *slot) {
         return -ENOENT;
     }
     const struct flash_area *fa = &mboot_areas[index];
-    slot->name = area_name(fa->fa_id);
+    const char *name = area_name(fa->fa_id);
+    size_t n = strlen(name);
+    if (n >= sizeof(slot->name)) {
+        n = sizeof(slot->name) - 1;
+    }
+    memcpy(slot->name, name, n);
+    memset(slot->name + n, 0, sizeof(slot->name) - n);
     slot->start = mboot_devs[fa->fa_device_id].base + fa->fa_off;
     slot->size = fa->fa_size;
     return 0;
@@ -396,10 +430,18 @@ int mboot_app_request_fsload(const uint8_t *elems, size_t len) {
     mboot_request_set_and_reset(MBOOT_REQ_FSLOAD, elems, (size_t)extent);
 }
 
+uint32_t mboot_app_reset_flags(uint32_t current) {
+    return mboot_reset_flags_take(current);
+}
+
 // ---- Writer ----
 
-int mboot_app_writer_open(mboot_app_writer_t *w, bool permanent) {
+int mboot_app_writer_open(bool permanent) {
     #if HAVE_SECONDARY
+    writer_t *w = &s_writer;
+    if (w->state == WRITER_OPEN) {
+        return -EBUSY;
+    }
     memset(w, 0, sizeof(*w));
     int rc = check_ready();
     if (rc != 0) {
@@ -435,7 +477,6 @@ int mboot_app_writer_open(mboot_app_writer_t *w, bool permanent) {
     w->state = WRITER_OPEN;
     return 0;
     #else
-    (void)w;
     (void)permanent;
     return -EPERM;
     #endif
@@ -443,7 +484,7 @@ int mboot_app_writer_open(mboot_app_writer_t *w, bool permanent) {
 
 #if HAVE_SECONDARY
 // Writes the buffered bytes (padded to the write unit), erasing sectors ahead of the write.
-static int writer_flush(mboot_app_writer_t *w) {
+static int writer_flush(writer_t *w) {
     if (w->fill == 0) {
         return 0;
     }
@@ -483,8 +524,9 @@ static int writer_flush(mboot_app_writer_t *w) {
 }
 #endif
 
-int mboot_app_writer_write(mboot_app_writer_t *w, const uint8_t *buf, size_t len) {
+int mboot_app_writer_write(const uint8_t *buf, size_t len) {
     #if HAVE_SECONDARY
+    writer_t *w = &s_writer;
     if (w->state == WRITER_FAILED) {
         return -EIO;
     } else if (w->state != WRITER_OPEN) {
@@ -495,7 +537,7 @@ int mboot_app_writer_write(mboot_app_writer_t *w, const uint8_t *buf, size_t len
     }
     uint8_t *chunk = (uint8_t *)w->chunk;
     while (len > 0) {
-        size_t n = MBOOT_APP_WRITER_CHUNK - w->fill;
+        size_t n = WRITER_CHUNK - w->fill;
         if (n > len) {
             n = len;
         }
@@ -504,7 +546,7 @@ int mboot_app_writer_write(mboot_app_writer_t *w, const uint8_t *buf, size_t len
         w->total += n;
         buf += n;
         len -= n;
-        if (w->fill == MBOOT_APP_WRITER_CHUNK) {
+        if (w->fill == WRITER_CHUNK) {
             int rc = writer_flush(w);
             if (rc != 0) {
                 w->state = WRITER_FAILED;
@@ -514,15 +556,15 @@ int mboot_app_writer_write(mboot_app_writer_t *w, const uint8_t *buf, size_t len
     }
     return 0;
     #else
-    (void)w;
     (void)buf;
     (void)len;
     return -EPERM;
     #endif
 }
 
-int mboot_app_writer_finish(mboot_app_writer_t *w, uint32_t *total) {
+int mboot_app_writer_finish(uint32_t *total) {
     #if HAVE_SECONDARY
+    writer_t *w = &s_writer;
     if (w->state == WRITER_FAILED) {
         return -EIO;
     } else if (w->state != WRITER_OPEN) {
@@ -553,17 +595,17 @@ int mboot_app_writer_finish(mboot_app_writer_t *w, uint32_t *total) {
     *total = w->total;
     return 0;
     #else
-    (void)w;
     (void)total;
     return -EPERM;
     #endif
 }
 
-int mboot_app_writer_abort(mboot_app_writer_t *w) {
+int mboot_app_writer_abort(void) {
     #if HAVE_SECONDARY
+    writer_t *w = &s_writer;
     if (w->state == WRITER_ABORTED) {
         return 0;
-    } else if (w->state == WRITER_FINISHED) {
+    } else if (w->state == WRITER_FINISHED || w->state == WRITER_IDLE) {
         return -EBADF;
     }
     const struct flash_area *sec;
@@ -579,7 +621,6 @@ int mboot_app_writer_abort(mboot_app_writer_t *w) {
     w->state = WRITER_ABORTED;
     return 0;
     #else
-    (void)w;
     return -EPERM;
     #endif
 }

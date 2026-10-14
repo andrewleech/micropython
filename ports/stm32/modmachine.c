@@ -50,7 +50,6 @@
 #include "shared/tinyusb/mp_usbd.h"
 #if MICROPY_HW_MBOOT_APP
 #include "shared/mboot/include/mboot_app.h"
-#include "shared/mboot/include/mboot_port.h"
 #endif
 
 #define PYB_RESET_SOFT      (0)
@@ -129,7 +128,7 @@ void machine_init(void) {
         uint32_t state = RCC->RCC_SR;
         #if MICROPY_HW_MBOOT_APP
         // The MCUboot bootloader clears the flags and hands them over in a backup register.
-        state = mboot_reset_flags_take(state);
+        state = mboot_app_reset_flags(state);
         #endif
         if (state & RCC_SR_IWDGRSTF || state & RCC_SR_WWDGRSTF) {
             reset_cause = PYB_RESET_WDT;

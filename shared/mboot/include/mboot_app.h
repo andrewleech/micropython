@@ -32,6 +32,16 @@
 // flash map headers.
 //
 // Functions returning int return 0 on success and a negative errno value on failure.
+//
+// Boundary rule. These calls are the only way application code reaches bootloader state, and a
+// build may serve them from a separate security domain (TrustZone non-secure callable entry
+// points). Every call therefore follows these rules:
+// - arguments are scalars, or caller buffers with an explicit length (a fixed size struct
+//   declared here counts as one);
+// - results are copied out into caller buffers, never returned as pointers;
+// - no callbacks;
+// - no pointers into bootloader memory are taken or handed out, and no state is kept in caller
+//   memory between calls.
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -73,29 +83,11 @@ typedef struct {
 
 
 typedef struct {
-    const char *name;               // static string
+    char name[12];                  // NUL terminated
     uint32_t start;                 // CPU/DFU address
     uint32_t size;
 } mboot_app_slot_t;
 
-// Update slot writer. The caller provides the storage and treats the content as opaque.
-#define MBOOT_APP_WRITER_CHUNK    256
-
-typedef struct {
-    uint8_t state;
-    bool permanent;
-    uint8_t write_unit;
-    uint8_t erased_val;
-    uint32_t erase_unit;
-    uint32_t update_off;            // offset of the update base inside the secondary area
-    uint32_t capacity;              // bytes that can be accepted
-    uint32_t trailer_off;           // offset inside the secondary area of the pre-erased trailer sectors
-    uint32_t erased_to;             // update relative offset up to which sectors are erased
-    uint32_t flushed;               // update relative offset of the next flash write
-    uint32_t total;                 // bytes accepted from the caller
-    uint32_t fill;                  // bytes held in chunk
-    uint32_t chunk[MBOOT_APP_WRITER_CHUNK / 4];
-} mboot_app_writer_t;
 
 // ---- queries ----
 
@@ -137,19 +129,29 @@ int mboot_app_request_fsload(const uint8_t *elems, size_t len);
 // Base (DFU address) and length of the application filesystem area. -ENOENT if the map has none.
 int mboot_app_fs_area(uint32_t *base, uint32_t *len);
 
+// Reset cause handoff: the bootloader clears the hardware reset flags and keeps them for the
+// application. Returns those flags and consumes them, or current (the port's hardware reset
+// status register) when there are none. Called once at start.
+uint32_t mboot_app_reset_flags(uint32_t current);
+
 // ---- Writer ----
+
+// One writer at a time, its state held by app_api.c. Opening while a writer is open returns
+// -EBUSY; a finished, aborted or failed writer may be opened again.
 
 // -EPERM for policy single, -ENODEV for a layout/map mismatch, -EIO on flash errors. Erases the
 // secondary trailer sectors and the spare sector before returning.
-int mboot_app_writer_open(mboot_app_writer_t *w, bool permanent);
-// -ENOSPC when the data does not fit (nothing is written then), -EIO on flash errors, -EBADF if closed.
-int mboot_app_writer_write(mboot_app_writer_t *w, const uint8_t *buf, size_t len);
+int mboot_app_writer_open(bool permanent);
+// -ENOSPC when the data does not fit (nothing is written then), -EIO on flash errors or after a
+// failure, -EBADF if no writer is open.
+int mboot_app_writer_write(const uint8_t *buf, size_t len);
 // Flushes, checks the image header, marks the image pending. Returns the byte count in *total.
 // -EINVAL when no image header is at the update base, or when the image is at most one erase unit
 // with swap using offset (MBOOT_MIN_IMAGE_SIZE): the writer has then erased what it wrote.
 // The writer is closed after either error.
-int mboot_app_writer_finish(mboot_app_writer_t *w, uint32_t *total);
-// Erases the first sector of the update slot. Idempotent after abort.
-int mboot_app_writer_abort(mboot_app_writer_t *w);
+int mboot_app_writer_finish(uint32_t *total);
+// Erases the first sector of the update slot and closes the writer. Idempotent after abort;
+// -EBADF after finish or when no writer was opened.
+int mboot_app_writer_abort(void);
 
 #endif // MICROPY_INCLUDED_SHARED_MBOOT_MBOOT_APP_H
