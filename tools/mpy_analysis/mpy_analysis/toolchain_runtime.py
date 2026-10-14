@@ -39,7 +39,7 @@ _C_LIBRARIES = (
 
 def machine_flags(argv: list[str]) -> tuple[str, ...]:
     """Flags that select the multilib variant, taken from an already flattened link command."""
-    return tuple(arg for arg in argv if arg.startswith(("-m", "--sysroot", "-specs=")))
+    return tuple(arg for arg in argv if arg.startswith(("-m", "--sysroot", "-specs=")) or arg == "-fno-rtti")
 
 
 def _query(compiler: str, flags: tuple[str, ...], *arguments: str, stdin: str | None = None) -> str | None:
@@ -165,6 +165,8 @@ def classify(path: str, compiler: str, flags: tuple[str, ...]) -> tuple[str | No
         if release is None:
             return None, None, "compiler does not report its release version (-dumpfullversion)"
         return "compiler-runtime", {"release": release}, ""
+    if resolved.name.startswith(("libstdc++", "libsupc++")) and found["library_dir"] == resolved.parent and found["release"]:
+        return "compiler-runtime", {"release": found["release"]}, ""
     if found["library_dir"] is not None and resolved.parent == found["library_dir"] and (found["c_library"] or {}).get("root") is None:
         library = found["c_library"]
         if library is None:

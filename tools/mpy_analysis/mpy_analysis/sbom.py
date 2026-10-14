@@ -336,6 +336,25 @@ def _runtime_components(
                     properties=property_values({"linkage": "static", "contributing-members": members or None}),
                 )
             )
+        elif "prebuilt" in item:
+            references.add(
+                builder.add(
+                    "prebuilt-library",
+                    [evidence_id, sha256],
+                    Component(
+                        kind=LIBRARY,
+                        name=Path(path).name,
+                        hashes={"sha256": sha256},
+                        properties=property_values(
+                            {
+                                "selection": "linked-prebuilt-binary",
+                                "path": path,
+                                "contributing-members": str(len(members)),
+                            }
+                        ),
+                    ),
+                )
+            )
         elif "toolchain" in item:
             compiler = next(
                 tool

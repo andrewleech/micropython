@@ -103,6 +103,23 @@ def test_missing_dependency_file_is_unresolved_not_dropped(project):
     assert [row["kind"] for row in evidence["images"][0]["unresolved"]] == ["dependency-file"]
 
 
+def test_archive_outside_the_build_with_no_compiled_member_is_a_prebuilt_binary(project):
+    build = project["build"]
+    blob = Path(project["roots"]["vendor"]) / "libblob.a"
+    (build / "blob.c").write_text("int blob(void) { return 4; }\n")
+    run("gcc", "-c", "-o", "blob.o", "blob.c", cwd=build)
+    run("ar", "rcs", str(blob), "blob.o", cwd=build)
+    run("gcc", "-Wl,-Map=app.map", "-Wl,-u,blob", "-o", "app", "main.o", "helper.o", "vendor.o", str(blob), cwd=build)
+
+    evidence, _ = evidence_of(project)
+    [image] = evidence["images"]
+
+    assert image["unresolved"] == []
+    assert [(Path(item["path"]).name, item["contributing_members"]) for item in image["runtime"] if "prebuilt" in item] == [
+        ("libblob.a", ["blob.o"])
+    ]
+
+
 @pytest.mark.skipif(shutil.which("cmake") is None or shutil.which("ninja") is None, reason="needs cmake and ninja")
 def test_cmake_ninja_build_takes_headers_from_ninja_and_binds_same_named_archive_members(tmp_path):
     """Ninja deletes the dependency files, and an archive can hold two members with one name."""

@@ -227,20 +227,32 @@ def _image(
         for group in parsed["allocated_sections"]
         if any(row["size"] and row["output_section"] in loaded for row in group["sections"])
     ]
-    flag_sets = Counter(
-        (_compiler(entry), machine_flags(arguments_of(entry))) for entry in entries if _compiler(entry)
-    )
-    compiler, flags = flag_sets.most_common(1)[0][0] if flag_sets else (None, ())
+    # The link command is not captured; the multilib a compile selects (such as -fno-rtti) can differ between its entries.
+    candidates = [
+        key
+        for key, _ in Counter(
+            (_compiler(entry), machine_flags(arguments_of(entry))) for entry in entries if _compiler(entry)
+        ).most_common()
+    ]
+    compiler = candidates[0][0] if candidates else None
 
     compiled: dict[str, dict[str, Any]] = {}
     runtime: dict[str, dict[str, Any]] = {}
     unresolved: list[dict[str, str]] = []
     wanted: dict[str, set[str]] = {}
+    used_tools: set[str] = set()
+
+    # C compiles do not carry -fno-rtti, yet a link that includes C++ selects that multilib.
+    variants = candidates + [(tool, (*flags, "-fno-rtti")) for tool, flags in candidates if "-fno-rtti" not in flags]
 
     def runtime_file(path: str, member: str | None = None) -> bool:
-        kind, record, _ = classify(path, compiler, flags) if compiler else (None, None, "")
-        if kind is None:
+        for tool, flags in variants:
+            kind, record, _ = classify(path, tool, flags)
+            if kind is not None:
+                break
+        else:
             return False
+        used_tools.add(tool)
         item = runtime.setdefault(path, {"path": path, "sha256": _sha256(path), "contributing_members": []})
         if member:
             item["contributing_members"].append(member)
@@ -248,8 +260,8 @@ def _image(
             item["c_library"] = record
         else:
             item["toolchain"] = {
-                "role": "cc",
-                "executable": {"path": compiler, "sha256": _sha256(compiler)},
+                "role": "cxx" if "++" in Path(tool).name else "cc",
+                "executable": {"path": tool, "sha256": _sha256(tool)},
                 "release": record["release"],
             }
         return True
@@ -279,6 +291,7 @@ def _image(
         except (OSError, ValueError) as error:
             unresolved.extend({"kind": "archive-member", "path": f"{archive}({name})", "reason": str(error)} for name in sorted(names))
             continue
+        missing: list[str] = []
         for name in sorted(names):
             matches = {
                 obj: entry
@@ -292,14 +305,22 @@ def _image(
             # An archive may hold several members of one name (the map cannot tell them apart); each needs exactly one source.
             if sources_by_hash and set(sources_by_hash) == members.get(name) and all(len(found) == 1 for found in sources_by_hash.values()):
                 compiled.update(matches)
+            elif not origins:
+                missing.append(name)
             else:
                 unresolved.append(
-                    {
-                        "kind": "archive-member",
-                        "path": f"{archive}({name})",
-                        "reason": "no compiled object has the member's bytes" if not origins else "several sources match the member's bytes",
-                    }
+                    {"kind": "archive-member", "path": f"{archive}({name})", "reason": "several sources match the member's bytes"}
                 )
+        # An archive from outside the build whose members were compiled by none of its compiles is a prebuilt binary.
+        if missing and len(missing) == len(names) and not roots.generated(archive):
+            item = runtime.setdefault(archive, {"path": archive, "sha256": _sha256(archive), "contributing_members": []})
+            item["prebuilt"] = {}
+            item["contributing_members"].extend(missing)
+        else:
+            unresolved.extend(
+                {"kind": "archive-member", "path": f"{archive}({name})", "reason": "no compiled object has the member's bytes"}
+                for name in missing
+            )
 
     sources: dict[tuple[str, str], dict[str, str]] = {}
     generated: set[str] = set()
@@ -317,8 +338,7 @@ def _image(
     headers, header_gaps = _headers(list({id(entry): entry for entry in compiled.values()}.values()), roots)
     unresolved.extend(header_gaps)
     tools = {}
-    for entry in compiled.values():
-        executable = _compiler(entry)
+    for executable in {_compiler(entry) for entry in compiled.values()} | used_tools:
         if executable:
             tools[executable] = _compiler_record(executable)
     image = {

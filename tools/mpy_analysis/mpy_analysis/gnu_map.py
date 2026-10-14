@@ -86,7 +86,7 @@ def parse_gnu_map(text: str, *, base_dir: str | os.PathLike[str] | None = None) 
         stripped = line.strip()
         if re.match(r"^(?:LLD\b|LLVM linker\b)", stripped, re.IGNORECASE):
             raise ValueError("unsupported linker map dialect: LLD")
-        if stripped == "Memory Configuration":
+        if stripped in ("Memory Configuration", "Cross Reference Table"):
             mode = None
             pending_section = None
             continue
@@ -112,7 +112,13 @@ def parse_gnu_map(text: str, *, base_dir: str | os.PathLike[str] | None = None) 
             mode = "as-needed"
             recognized = True
             continue
-        if mode == "as-needed" and not stripped.startswith(("LOAD ", "Linker script and memory map")):
+        if stripped == "Allocating common symbols":
+            # The symbols are placed by COMMON rows in the memory map, which carry the contribution.
+            mode = "common"
+            pending_archive = None
+            recognized = True
+            continue
+        if mode in ("as-needed", "common") and not stripped.startswith(("LOAD ", "Linker script and memory map")):
             continue
         if stripped.startswith("Linker script and memory map"):
             mode = "allocated"

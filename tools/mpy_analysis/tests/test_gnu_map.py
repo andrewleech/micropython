@@ -142,3 +142,21 @@ def test_section_name_without_a_leading_dot_wraps_like_any_other():
     )
     [record] = parse_gnu_map(text)["discarded_sections"]
     assert (record["section"], record["size"]) == ("custom_section", 0x10)
+
+
+def test_common_symbol_listing_and_cross_reference_table_are_not_section_records():
+    text = (
+        "Archive member included to satisfy reference by file (symbol)\n"
+        "/w/libv.a(v.o)  /w/main.o (api)\n\n"
+        "Allocating common symbols\nCommon symbol       size              file\n\n"
+        "shared_buf          0x14              /w/libv.a(v.o)\n\n"
+        "Linker script and memory map\n.text 0x08000000 0x10\n"
+        " .text.api 0x08000000 0x10 /w/libv.a(v.o)\n"
+        "OUTPUT(app elf32-littlearm)\n\nCross Reference Table\n\n"
+        "Symbol                                            File\n"
+        "api                                               /w/libv.a(v.o)\n"
+        "                                                  /w/main.o\n"
+    )
+    result = parse_gnu_map(text, base_dir="/")
+    assert [group["identity"]["member"] for group in result["allocated_sections"]] == ["v.o"]
+    assert result["discarded_sections"] == []
