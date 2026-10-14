@@ -44,7 +44,13 @@ files = ["requirements.txt"]
 [tool.hatch.version]
 source = "vcs"
 tag-pattern = "(?P<version>v(\\d+).(\\d+).(\\d+)(-preview)?)"
-raw-options = { root = "../..", version_scheme = "post-release" }
+# `git describe` otherwise reports whatever tag is nearest, so any non-version
+# tag on the checked-out commit (a pin, a snapshot, a local marker) is handed to
+# tag-pattern and fails the build rather than being skipped. Restrict the search
+# to version tags; the rest of the command is setuptools_scm's own default.
+raw-options = { root = "../..", version_scheme = "post-release", git_describe_command = [
+    "git", "describe", "--dirty", "--tags", "--long", "--match", "v[0-9]*",
+] }
 
 [tool.hatch.build]
 packages = ["mpremote"]
