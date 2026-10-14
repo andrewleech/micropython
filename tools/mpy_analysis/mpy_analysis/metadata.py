@@ -910,7 +910,7 @@ class _Collector:
         if "license" in found and root is not None and self.directory == root.resolve():
             found["license"] = self._root_license(root, found["license"])
         if self.assertions.get("name"):
-            del found["name"]
+            found.pop("name", None)
         for field, (value, path) in found.items():
             if path is None:
                 if not self.assertions.get(field):

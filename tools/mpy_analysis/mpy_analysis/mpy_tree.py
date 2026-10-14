@@ -299,6 +299,30 @@ def library_version(
     return None
 
 
+def _package_index_licence(directory: Path, root: Path) -> tuple[str, Path] | None:
+    """The licence a package index build gives a manifest package that declares none.
+
+    A checkout that builds a package index (``tools/build.py`` in an ancestor of the
+    package, as micropython-lib does) publishes each package under
+    ``metadata.license or "<default>"``; the default is read from that script, and
+    an index script without it is an error. A package whose manifest sets ``license=``
+    keeps its own value.
+    """
+    manifest = directory / "manifest.py"
+    if not manifest.is_file() or re.search(r"\blicense\s*=", manifest.read_text(errors="replace")):
+        return None
+    for ancestor in directory.parents:
+        script = ancestor / "tools" / "build.py"
+        if script.is_file():
+            found = re.search(r'metadata\.license\s+or\s+"([^"]+)"', script.read_text())
+            if not found:
+                raise ValueError(f"{script}: no default package licence in the index build")
+            return found.group(1), script
+        if ancestor == root:
+            return None
+    return None
+
+
 def identity(
     directory: Path, selected: tuple[Path, ...] = ()
 ) -> dict[str, tuple[str, Path | None]] | None:
@@ -315,6 +339,9 @@ def identity(
             found["license"] = entry
         return found
     relative = directory.relative_to(root)
+    packaged = _package_index_licence(directory, root)
+    if packaged:
+        return {"license": packaged}
     entry = listed_licence(root, relative.parts)
     version = library_version(root, relative.as_posix(), selected)
     if version is None and entry is not None:

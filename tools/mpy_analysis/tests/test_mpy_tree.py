@@ -159,3 +159,29 @@ def test_littlefs_generations_are_versioned_and_split_into_boundaries(tmp_path):
         "micropython/lib/littlefs#lfs1": ["lib/littlefs/lfs1.c"],
         "micropython/lib/littlefs#lfs2": ["lib/littlefs/lfs2.c"],
     }
+
+
+def _index_checkout(tmp_path, build, manifest, name="a"):
+    (tmp_path / "py").mkdir(exist_ok=True)
+    (tmp_path / "py/mpconfig.h").write_text("")
+    (tmp_path / "LICENSE").write_text("The MIT License (MIT)\n")
+    package = tmp_path / "lib/pkgs/pkg" / name
+    package.mkdir(parents=True, exist_ok=True)
+    (package / "manifest.py").write_text(manifest)
+    (tmp_path / "lib/pkgs/tools").mkdir(exist_ok=True)
+    (tmp_path / "lib/pkgs/tools/build.py").write_text(build)
+    return package
+
+
+def test_package_without_licence_takes_the_index_build_default(tmp_path):
+    build = 'index["license"] = metadata.license or "BSD-2-Clause"\n'
+    package = _index_checkout(tmp_path, build, 'metadata(version="1.0")\n')
+    assert mpy_tree.identity(package)["license"][0] == "BSD-2-Clause"
+    own = _index_checkout(tmp_path, build, 'metadata(version="1.0", license="Apache-2.0")\n', "b")
+    assert mpy_tree.identity(own) is None
+
+
+def test_index_build_without_a_default_licence_is_an_error(tmp_path):
+    package = _index_checkout(tmp_path, "pass\n", 'metadata(version="1.0")\n')
+    with pytest.raises(ValueError, match="default package licence"):
+        mpy_tree.identity(package)
