@@ -8,6 +8,7 @@ Type "help()" for more information.
 >>> time.sleep(10)
 ########
 \.\*Traceback (most recent call last):
+########
   File "<stdin>", line 1, in <module>
 KeyboardInterrupt: \$
 >>> print('repl still responds')

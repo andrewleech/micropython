@@ -47,6 +47,10 @@
 #error "Undefined Feature Level"
 #endif
 
+// The asyncio REPL needs pollable stdin, which the Zephyr console does not
+// provide; use the blocking REPL.
+#define MICROPY_REPL_ASYNCIO (0)
+
 // Usually passed from Makefile
 #ifndef MICROPY_HEAP_SIZE
 #define MICROPY_HEAP_SIZE (16 * 1024)

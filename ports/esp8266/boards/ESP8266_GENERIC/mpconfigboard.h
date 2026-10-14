@@ -26,6 +26,9 @@
 #define MICROPY_READER_VFS              (MICROPY_VFS)
 #define MICROPY_VFS                     (1)
 
+// No room to freeze asyncio.arepl, so keep the blocking REPL.
+#define MICROPY_REPL_ASYNCIO            (0)
+
 #elif defined(MICROPY_ESP8266_512K)
 
 #define MICROPY_HW_BOARD_NAME "ESP module (512K)"
@@ -39,6 +42,7 @@
 #define MICROPY_PY_REVERSE_SPECIAL_METHODS (0)
 #define MICROPY_PY_SYS_STDIO_BUFFER     (0)
 #define MICROPY_PY_ASYNCIO              (0)
+#define MICROPY_REPL_ASYNCIO            (0)
 #define MICROPY_PY_RE_SUB               (0)
 #define MICROPY_PY_CRYPTOLIB            (0)
 #define MICROPY_PY_FRAMEBUF             (0)

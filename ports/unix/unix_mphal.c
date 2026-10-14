@@ -107,6 +107,7 @@ void mp_hal_stdio_mode_raw(void) {
     static struct termios termios;
     termios = orig_termios;
     termios.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    termios.c_oflag &= ~OPOST;  // raw output: don't translate \n to \r\n
     termios.c_cflag = (termios.c_cflag & ~(CSIZE | PARENB)) | CS8;
     termios.c_lflag = 0;
     termios.c_cc[VMIN] = 1;
