@@ -1,7 +1,10 @@
 """Bounded C syntax facts from the selected build compiler expansion."""
+import hashlib
+import os
+import pickle
 import re
 from collections import namedtuple
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from itertools import chain
 from .chains import chain_root
 from .gnu import adapt_source, restore_text
@@ -283,26 +286,357 @@ def _context_index(tree, text):
     return _tree_index(tree, text).contexts
 
 
-def syntax_adapter(code, origins, physical, record):
+# Bytes of a run of header text blanked for the parser: every byte but a line break becomes a space.
+_BLANK = bytes(value if value in (10, 13) else 32 for value in range(256))
+_NEWLINE = re.compile(b'\n')
+# Declaration tables of system header text by content, one per distinct run (``_system_runs``); None
+# marks a run that stays in the unit's text.
+_RUN_TABLES = {}
+# The directory in which the processes of one run share those tables, or None.
+_RUN_DIRECTORY = None
+
+
+def clear_run_tables():
+    """Forget the declaration tables of the system header runs analysed so far, and stop sharing
+    them through a directory."""
+    global _RUN_DIRECTORY
+    _RUN_TABLES.clear()
+    _RUN_DIRECTORY = None
+
+
+def share_run_tables(directory):
+    """Store the tables of each run analysed from now on in ``directory`` (None: stop), and take the
+    ones another process stored there instead of analysing the run again.
+
+    Each table is a file named by the hash of the run's key, written whole to a temporary name and
+    renamed into place, and read back only after its sha256 matches. The directory belongs to one
+    run: it is created by the caller, empty, and removed with the run's fact objects."""
+    global _RUN_DIRECTORY
+    _RUN_DIRECTORY = directory
+
+
+def _shared_run_tables(key, data, origins):
+    """The tables of the run ``data`` with ``origins``, from the run directory when it holds them."""
+    if _RUN_DIRECTORY is None:
+        return _run_tables(data, origins)
+    path = os.path.join(_RUN_DIRECTORY, hashlib.sha256(key[0] + key[1]).hexdigest())
+    try:
+        with open(path, 'rb') as stream:
+            blob = stream.read()
+    except FileNotFoundError:
+        tables = _run_tables(data, origins)
+        payload = pickle.dumps(tables, protocol=pickle.HIGHEST_PROTOCOL)
+        temporary = f'{path}.{os.getpid()}'
+        with open(temporary, 'xb') as stream:
+            stream.write(hashlib.sha256(payload).digest() + payload)
+        os.replace(temporary, path)
+        return tables
+    if hashlib.sha256(blob[32:]).digest() != blob[:32]:
+        raise RuntimeError(f'system header run tables changed during generation: {path}')
+    return pickle.loads(blob[32:])
+
+
+def _parse(data):
     from tree_sitter import Language, Parser
     import tree_sitter_c
+    return Parser(Language(tree_sitter_c.language())).parse(data)
+
+
+class _Syntax:
+    """The text, location and declarator helpers of one parsed text, and its tree index.
+
+    ``whole`` is the scope of a declaration outside every block: the text's byte range, or
+    ``(None, None)`` for a run of header text, whose range depends on the unit it joins."""
+    __slots__ = ('raw', 'text', 'loc', 'name_of', 'declarators', 'point_for_name', 'binding_scope',
+                 'index', 'contexts')
+
+    def __init__(self, original_data, origins, evidence, tree, whole):
+        text_cache = {}
+        def raw(n): return restore_text(original_data, evidence, n.start_byte, n.end_byte) if n else ''
+        def text(n):
+            if not n: return ''
+            key = (n.start_byte, n.end_byte)
+            value = text_cache.get(key)
+            if value is None:
+                value = text_cache[key] = canonical(restore_text(original_data, evidence, key[0], key[1]))
+            return value
+        def loc(n): return span(origins, n.start_point.row + 1, n.end_point.row + 1)
+        def name_of(declarator):
+            """First declared identifier in preorder, following a ``declarator`` field where one exists."""
+            stack = [declarator] if declarator is not None else []
+            while stack:
+                node = stack.pop()
+                if node.type in ('identifier', 'field_identifier', 'type_identifier'):
+                    value = text(node)
+                    if value: return value
+                    continue
+                child = node.child_by_field_name('declarator')
+                if child:
+                    stack.append(child)
+                else:
+                    stack.extend(reversed(node.named_children))
+            return ''
+        def declarators(node):
+            declared = node.children_by_field_name('declarator')
+            return [c for c in node.named_children if c.type == 'init_declarator' or c in declared or c.type in ('pointer_declarator', 'array_declarator', 'function_declarator', 'identifier')]
+        index = _tree_index(tree, text)
+        contexts = index.contexts
+        def point_for_name(node, name):
+            identifier = next((n for n in index.select(('identifier',), node) if text(n) == name), node)
+            location = loc(identifier)
+            return {**location, 'end_line': location['start_line']}
+        def binding_scope(node):
+            context = contexts[node.id]
+            if node.type == 'parameter_declaration':
+                # A definition owns all of its parameters, including nested prototype declarators.
+                scope = context.function_definition or context.function_declarator
+            else:
+                scope = context.scope
+            return (scope.start_byte, scope.end_byte) if scope else whole
+        self.raw, self.text, self.loc, self.name_of, self.declarators = raw, text, loc, name_of, declarators
+        self.point_for_name, self.binding_scope, self.index, self.contexts = point_for_name, binding_scope, index, contexts
+
+
+def _ordinary_bindings(syntax):
+    """The names declared anywhere in the parsed text, each with the scope in which it is visible."""
+    bindings = {}
+    for declaration in syntax.index.select_all(_BINDING_TYPES):
+        if declaration.type in ('type_definition', 'declaration'):
+            names = declaration.children_by_field_name('declarator')
+        elif declaration.type in ('parameter_declaration', 'function_definition'):
+            names = [declaration.child_by_field_name('declarator')]
+        elif declaration.type == 'enumerator':
+            names = [declaration.child_by_field_name('name')]
+        else:
+            continue
+        for declarator in names:
+            name = syntax.name_of(declarator)
+            if not name:
+                continue
+            start, end = syntax.binding_scope(declaration)
+            bindings.setdefault(name, []).append({
+                'name': name, 'typedef': declaration.type == 'type_definition',
+                'declaration_id': declarator.start_byte, 'source_span': syntax.loc(declaration),
+                'visible_start': declarator.end_byte if declaration.type == 'type_definition' else declarator.start_byte,
+                'scope_start': start, 'scope_end': end})
+    return bindings
+
+
+def _global_functions(syntax, nodes):
+    """The function definitions and function declarations among the top-level ``nodes``, in order, as
+    ``(position, name, declaration)``."""
+    found = []
+    for node in nodes:
+        if node.type == 'function_definition':
+            name = syntax.name_of(node.child_by_field_name('declarator'))
+            found.append((node.start_byte, name, {'name': name, 'kind': 'FUNCTION_DECL', 'source_span': syntax.point_for_name(node.child_by_field_name('declarator'), name)}))
+        elif node.type == 'declaration' and '=' not in syntax.text(node):
+            for decl in syntax.declarators(node):
+                name = syntax.name_of(decl.child_by_field_name('declarator') if decl.type == 'init_declarator' else decl)
+                if name and _name_call(name).search(syntax.text(decl)):
+                    found.append((node.start_byte, name, {'name': name, 'kind': 'FUNCTION_DECL', 'source_span': syntax.point_for_name(decl, name)}))
+    return found
+
+
+def _complete(node, data):
+    """Whether no token that follows the top-level ``node`` in ``data`` continues it: it is a function
+    definition or ends with a semicolon. (A bare ``struct s { ... }`` is a top-level node too, which a
+    declarator after it continues.)"""
+    return node.type == 'function_definition' or data[node.end_byte - 1:node.end_byte] == b';'
+
+
+class _RunTables:
+    """What the frontend looks up by name in a run of system header text, as tuples that take little
+    memory: ``functions`` maps a name to ``(position, source, first line, last line)`` for each function
+    declaration, and ``bindings`` maps a name to ``(typedef, declaration id, visible start, scope start,
+    scope end, source, first line, last line)`` for each ordinary binding. Byte positions are relative
+    to the start of the run, and a scope start and end of None is the scope of the whole text."""
+    __slots__ = ('functions', 'bindings')
+
+    def __init__(self, functions, bindings):
+        self.functions, self.bindings = functions, bindings
+
+
+def _run_tables(data, origins):
+    """The tables of the run of header text ``data`` whose lines come from ``origins``, or None when
+    the run cannot stand for itself in the unit's text.
+
+    A run stands for itself when its own GNU adaptation succeeds without projecting anything, its own
+    parse has no error, and its last top-level node is complete (``_complete``), so that it holds only
+    whole top-level declarations and the text around it is parsed as when it is present."""
+    try:
+        _, evidence = adapt_source(data.decode('utf-8'), origins)
+    except ValueError:
+        return None
+    if evidence['replacements'] or evidence['unassessed']:
+        return None
+    tree = _parse(data)
+    children = tree.root_node.children
+    if tree.root_node.has_error or not children or not _complete(children[-1], data):
+        return None
+    syntax = _Syntax(data, origins, evidence, tree, (None, None))
+    functions = {}
+    for position, name, declaration in _global_functions(syntax, tree.root_node.named_children):
+        span = declaration['source_span']
+        functions.setdefault(name, []).append((position, span['source'], span['start_line'], span['end_line']))
+    bindings = {name: [(binding['typedef'], binding['declaration_id'], binding['visible_start'],
+                        binding['scope_start'], binding['scope_end'], binding['source_span']['source'],
+                        binding['source_span']['start_line'], binding['source_span']['end_line'])
+                       for binding in found]
+                for name, found in _ordinary_bindings(syntax).items()}
+    return _RunTables(functions, bindings)
+
+
+def _system_runs(original_data, origins, physical, record):
+    """The runs of consecutive lines of system header text in a unit that have tables, as
+    ``(start byte, end byte, tables)`` in order.
+
+    System header text is every line that comes from a captured dependency that is neither the unit's
+    own file nor a project header. Each distinct run (its bytes and the origins of its lines) is
+    analysed once per process."""
+    owned_sources = {physical, *record.get('project_dependencies', ())}
+    system = {path for path in record['dependencies'] if path not in owned_sources}
+    if not system:
+        return []
+    line_starts = [0, *(match.end() for match in _NEWLINE.finditer(original_data))]
+    lines = len(line_starts) - (1 if not original_data or original_data.endswith(b'\n') else 0)
+    if len(origins) != lines:
+        return []
+    view = memoryview(original_data)
+    runs, first = [], None
+    for row, origin in enumerate(origins):
+        if origin[0] in system:
+            if first is None:
+                first = row
+        elif first is not None:
+            runs.append((first, row))
+            first = None
+    if first is not None:
+        runs.append((first, lines))
+    found = []
+    for first, last in runs:
+        start = line_starts[first]
+        end = line_starts[last] if last < len(line_starts) else len(original_data)
+        key = (hashlib.sha256(view[start:end]).digest(), hashlib.sha256(repr(origins[first:last]).encode()).digest())
+        if key not in _RUN_TABLES:
+            _RUN_TABLES[key] = _shared_run_tables(key, bytes(view[start:end]), origins[first:last])
+        if _RUN_TABLES[key] is not None:
+            found.append((start, end, _RUN_TABLES[key]))
+    return found
+
+
+def _isolated(tree, data, runs):
+    """Whether the text ``data`` parsed as ``tree`` with ``runs`` blanked is the text around them as it
+    is parsed with them present: it has no error, the top-level node before each run is complete (or
+    there is none), and no top-level node spans a run. A run's own last top-level node is complete
+    (``_run_tables``)."""
+    root = tree.root_node
+    if root.has_error:
+        return False
+    children = root.children
+    starts, ends = [child.start_byte for child in children], [child.end_byte for child in children]
+    for start, end, _ in runs:
+        before = bisect_right(ends, start) - 1
+        if before >= 0 and not _complete(children[before], data):
+            return False
+        after = bisect_left(starts, end) - 1
+        if after >= 0 and ends[after] > start:
+            return False
+    return True
+
+
+class _SystemTables:
+    """The tables of a unit's blanked system runs, looked up by name in the unit's byte positions."""
+    __slots__ = ('runs', 'length', '_functions', '_bindings')
+
+    def __init__(self, runs, length):
+        self.runs, self.length = runs, length
+        self._functions, self._bindings = {}, {}
+
+    def functions(self, name):
+        """The function declarations of ``name`` in the runs, as ``(position, declaration)``."""
+        found = self._functions.get(name)
+        if found is None:
+            found = self._functions[name] = [
+                (start + position, {'name': name, 'kind': 'FUNCTION_DECL',
+                                    'source_span': {'source': source, 'start_line': first, 'end_line': last}})
+                for start, _, tables in self.runs
+                for position, source, first, last in tables.functions.get(name, ())]
+        return found
+
+    def bindings(self, name):
+        """The ordinary bindings of ``name`` in the runs, with the unit's byte positions."""
+        found = self._bindings.get(name)
+        if found is None:
+            found = self._bindings[name] = [
+                {'name': name, 'typedef': typedef, 'declaration_id': start + declaration,
+                 'source_span': {'source': source, 'start_line': first, 'end_line': last},
+                 'visible_start': start + visible,
+                 'scope_start': 0 if scope_start is None else start + scope_start,
+                 'scope_end': self.length if scope_end is None else start + scope_end}
+                for start, _, tables in self.runs
+                for typedef, declaration, visible, scope_start, scope_end, source, first, last
+                in tables.bindings.get(name, ())]
+        return found
+
+
+class _GlobalFunctions:
+    """The function declarations of a unit by name, in text order: those of its own parsed text and
+    those in its blanked system runs."""
+    __slots__ = ('_own', '_system', '_merged')
+
+    def __init__(self, own, system):
+        self._own, self._system, self._merged = own, system, {}
+
+    def get(self, name, default):
+        merged = self._merged.get(name)
+        if merged is None:
+            found = [*self._own.get(name, ()), *(self._system.functions(name) if self._system else ())]
+            merged = self._merged[name] = [declaration for _, declaration in sorted(found, key=lambda item: item[0])]
+        return merged or default
+
+    def __contains__(self, name):
+        return bool(self.get(name, ()))
+
+
+def syntax_adapter(code, origins, physical, record, *, cached_runs=True):
+    """Declarations, functions, errors and frontend tables of the expanded unit ``code``.
+
+    With ``cached_runs`` the parts of ``code`` that come from system headers are not adapted, parsed
+    or indexed with the unit when they can stand for themselves (``_run_tables``): the parser sees them
+    blanked, and the frontend looks the names they declare up in tables made once per distinct run.
+    A unit whose blanked text is not isolated from them, or fails to adapt, is processed whole."""
     original_data = code.encode()
-    parse_code, syntax_evidence = adapt_source(code, origins)
+    runs = _system_runs(original_data, origins, physical, record) if cached_runs else []
+    if runs:
+        blanked = bytearray(original_data)
+        for start, end, _ in runs:
+            blanked[start:end] = original_data[start:end].translate(_BLANK)
+        blanked = bytes(blanked)
+        try:
+            parse_code, syntax_evidence = adapt_source(blanked.decode('utf-8'), origins)
+        except ValueError:
+            return syntax_adapter(code, origins, physical, record, cached_runs=False)
+    else:
+        parse_code, syntax_evidence = adapt_source(code, origins)
     data = parse_code.encode()
-    tree = Parser(Language(tree_sitter_c.language())).parse(data)
-    text_cache = {}
-    def raw(n): return restore_text(original_data, syntax_evidence, n.start_byte, n.end_byte) if n else ''
-    def text(n):
-        if not n: return ''
-        key = (n.start_byte, n.end_byte)
-        value = text_cache.get(key)
-        if value is None:
-            value = text_cache[key] = canonical(restore_text(original_data, syntax_evidence, key[0], key[1]))
-        return value
+    tree = _parse(data)
+    if runs:
+        if not _isolated(tree, data, runs):
+            return syntax_adapter(code, origins, physical, record, cached_runs=False)
+        whole = bytearray(data)
+        for start, end, _ in runs:
+            whole[start:end] = original_data[start:end]
+        syntax_evidence['original_sha256'] = hashlib.sha256(original_data).hexdigest()
+        syntax_evidence['transformed_sha256'] = hashlib.sha256(whole).hexdigest()
+    syntax = _Syntax(original_data, origins, syntax_evidence, tree, (0, len(data)))
+    raw, text, loc, name_of, declarators = syntax.raw, syntax.text, syntax.loc, syntax.name_of, syntax.declarators
+    point_for_name, binding_scope = syntax.point_for_name, syntax.binding_scope
+    tree_index, contexts = syntax.index, syntax.contexts
+    system_tables = _SystemTables(runs, len(data)) if runs else None
     def selected_constants(expression, environment):
         names = {token for token in TOKEN.findall(expression) if _IDENTIFIER_TOKEN.fullmatch(token)}
         return {name: environment[name] for name in sorted(names) if name in environment}
-    def loc(n): return span(origins, n.start_point.row + 1, n.end_point.row + 1)
     def adapted_expressions(node, *, kind=None, barriers=False):
         result, seen = [], set()
         for replacement in syntax_evidence['replacements']:
@@ -320,24 +654,6 @@ def syntax_adapter(code, origins, physical, record):
                 seen.add(identity)
                 result.append((replacement, expression))
         return result
-    def name_of(declarator):
-        """First declared identifier in preorder, following a ``declarator`` field where one exists."""
-        stack = [declarator] if declarator is not None else []
-        while stack:
-            node = stack.pop()
-            if node.type in ('identifier', 'field_identifier', 'type_identifier'):
-                value = text(node)
-                if value: return value
-                continue
-            child = node.child_by_field_name('declarator')
-            if child:
-                stack.append(child)
-            else:
-                stack.extend(reversed(node.named_children))
-        return ''
-    def declarators(node):
-        declared = node.children_by_field_name('declarator')
-        return [c for c in node.named_children if c.type == 'init_declarator' or c in declared or c.type in ('pointer_declarator', 'array_declarator', 'function_declarator', 'identifier')]
     def parameters(node):
         legacy = adapted_expressions(node, kind='old_style_function_header')
         if legacy:
@@ -353,13 +669,6 @@ def syntax_adapter(code, origins, physical, record):
             elif param.type == 'identifier':
                 result.append(text(param))
         return result
-    def point_for_name(node, name):
-        identifier = next((n for n in tree_index.select(('identifier',), node) if text(n) == name), node)
-        location = loc(identifier)
-        return {**location, 'end_line': location['start_line']}
-
-    tree_index = _tree_index(tree, text)
-    contexts = tree_index.contexts
     signature_attribute_types = tuple(name for name in tree_index.by_type if 'attribute' in name or name in (
         'ms_call_modifier', 'ms_declspec_modifier', 'gnu_asm_expression'))
 
@@ -384,35 +693,11 @@ def syntax_adapter(code, origins, physical, record):
                 'scope_end': scope.end_byte, 'loops': loops,
                 'conditional_evaluation': conditional_evaluation}
 
-    def binding_scope(node):
-        context = contexts[node.id]
-        if node.type == 'parameter_declaration':
-            # A definition owns all of its parameters, including nested prototype declarators.
-            scope = context.function_definition or context.function_declarator
-        else:
-            scope = context.scope
-        return (scope.start_byte, scope.end_byte) if scope else (0, len(data))
+    ordinary_bindings = _ordinary_bindings(syntax)
 
-    ordinary_bindings = {}
-    for declaration in tree_index.select_all(_BINDING_TYPES):
-        if declaration.type in ('type_definition', 'declaration'):
-            names = declaration.children_by_field_name('declarator')
-        elif declaration.type in ('parameter_declaration', 'function_definition'):
-            names = [declaration.child_by_field_name('declarator')]
-        elif declaration.type == 'enumerator':
-            names = [declaration.child_by_field_name('name')]
-        else:
-            continue
-        for declarator in names:
-            name = name_of(declarator)
-            if not name:
-                continue
-            start, end = binding_scope(declaration)
-            ordinary_bindings.setdefault(name, []).append({
-                'name': name, 'typedef': declaration.type == 'type_definition',
-                'declaration_id': declarator.start_byte, 'source_span': loc(declaration),
-                'visible_start': declarator.end_byte if declaration.type == 'type_definition' else declarator.start_byte,
-                'scope_start': start, 'scope_end': end})
+    def binding_candidates(name):
+        found = ordinary_bindings.get(name, [])
+        return [*found, *system_tables.bindings(name)] if system_tables else found
 
     def typedef_cast(node):
         if node.type != 'call_expression':
@@ -426,7 +711,7 @@ def syntax_adapter(code, origins, physical, record):
         if len(identifiers) != 1 or identifiers[0].type != 'identifier' or len(operands) != 1:
             return None
         name = text(identifiers[0])
-        bindings = [binding for binding in ordinary_bindings.get(name, [])
+        bindings = [binding for binding in binding_candidates(name)
                     if binding['visible_start'] <= node.start_byte
                     and binding['scope_start'] <= node.start_byte < binding['scope_end']]
         selected = max(bindings, key=lambda binding: (binding['scope_start'], binding['visible_start'])) if bindings else None
@@ -682,16 +967,11 @@ def syntax_adapter(code, origins, physical, record):
                                      'conflicting_sources': locations}
         return selected_constants(text(node), environment)
 
-    global_functions, constants = {}, {}
+    own_functions, constants = {}, {}
+    for position, name, declaration in _global_functions(syntax, tree.root_node.named_children):
+        own_functions.setdefault(name, []).append((position, declaration))
+    global_functions = _GlobalFunctions(own_functions, system_tables)
     for node in tree.root_node.named_children:
-        if node.type == 'function_definition':
-            name = name_of(node.child_by_field_name('declarator'))
-            global_functions.setdefault(name, []).append({'name': name, 'kind': 'FUNCTION_DECL', 'source_span': point_for_name(node.child_by_field_name('declarator'), name)})
-        elif node.type == 'declaration' and '=' not in text(node):
-            for decl in declarators(node):
-                name = name_of(decl.child_by_field_name('declarator') if decl.type == 'init_declarator' else decl)
-                if name and _name_call(name).search(text(decl)):
-                    global_functions.setdefault(name, []).append({'name': name, 'kind': 'FUNCTION_DECL', 'source_span': point_for_name(decl, name)})
         if node.type != 'function_definition' and owned(loc(node)['source'], physical, record):
             constants = enum_constants(node, constants, inplace=True)
     declarations, functions = [], []

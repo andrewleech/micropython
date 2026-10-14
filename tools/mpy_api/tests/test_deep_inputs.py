@@ -107,13 +107,14 @@ def check_nested(facts):
 
 @needs_gcc
 def test_deep_sources_extract_serially(deep_records):
-    check_nested(inventory._extract(deep_records[1], compiler.authority(ROOT), ROOT))
+    check_nested(inventory._extract(deep_records[1], compiler.authority(ROOT), ROOT, full_semantics=True))
 
 
 @needs_gcc
 def test_deep_sources_extract_into_fact_objects_through_two_workers(deep_records, tmp_path):
     store, results = FactStore(tmp_path), []
-    inventory._extract_parallel(deep_records, compiler.authority(ROOT), ROOT, 2, store, results.append)
+    inventory._extract_parallel(deep_records, compiler.authority(ROOT), ROOT, 2, store, results.append,
+                                full_semantics=True)
     for index, nodes, location, _, _ in results:
         store.add(index, nodes, location)
     complete = [{**index, 'functions': [store.function(record) for record in index['functions']]}

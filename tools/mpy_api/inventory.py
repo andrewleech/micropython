@@ -7,6 +7,7 @@ import hashlib
 import importlib.metadata
 import json
 import multiprocessing
+import os
 import re
 import subprocess
 import traceback
@@ -14,10 +15,11 @@ import traceback
 from . import compiler
 from . import facts as factobjects
 from .facts import UNIT_INDEX, LinkedFunctions
-from .frontend import syntax_adapter, constant
+from .frontend import syntax_adapter, constant, clear_run_tables, share_run_tables
 from .bindings import definitions, registration_records, call_parts, scalar_field, strip_outer, constant_value
-from .semantics import (semantics, unit_semantics, linked_semantics_unchanged, direct_parameter, bind_public_contracts,
-                        checked_receiver_authority, input_helper_authority, lexical_constant, event_applicability)
+from .semantics import (semantics, unit_semantics, demand_semantics, linked_semantics_unchanged, direct_parameter,
+                        bind_public_contracts, checked_receiver_authority, input_helper_authority, lexical_constant,
+                        event_applicability)
 from .link import collect_ownership, join
 from .frozen_payload import collect_frozen_payload
 from .structure import JSONStream, deep_copy
@@ -27,15 +29,15 @@ def _resolution(status, reasons=(), **evidence):
     return {'status': status, 'reasons': sorted(set(reasons)), **evidence}
 
 
-def _extract(record, compdb, root):
+def _extract(record, compdb, root, *, full_semantics):
     try:
-        return _extract_impl(record, compdb, root)
+        return _extract_impl(record, compdb, root, full_semantics)
     except (OSError, ValueError, RuntimeError) as exc:
         raise RuntimeError(f'API extraction failed for compiled TU {record["identity"]}; '
                            f'physical source {record["physical"]}: {exc}') from exc
 
 
-def _extract_impl(record, compdb, root):
+def _extract_impl(record, compdb, root, full_semantics):
     physical = record['physical']
     if Path(physical).suffix != '.c':
         arguments = compdb.arguments_of(record)
@@ -85,9 +87,13 @@ def _extract_impl(record, compdb, root):
         tests = [{'name': name, 'expression': condition['expression'], 'source_span': condition['source_span']}
                  for condition in (function['events']['conditions'] if not function['events'].get('semantic_unassessed') else [])
                  for name in re.findall(r'MP_QSTR_(\w+)', condition['expression'])]
-        summary, lookups = unit_semantics(function, by_name, errors, contracts)
+        if full_semantics:
+            summary, lookups = unit_semantics(function, by_name, errors, contracts)
+            summary = {**summary, 'diagnostic_stage': 'translation-unit-extraction'}
+        else:
+            summary, lookups = factobjects.unloaded('semantics'), factobjects.unloaded('semantic_helper_lookups')
         function.update(
-            semantics={**summary, 'diagnostic_stage': 'translation-unit-extraction'},
+            semantics=summary,
             semantic_helper_lookups=lookups,
             handler_attributes=sorted({test['name'] for test in tests}),
             handler_attribute_tests=tests)
@@ -1107,18 +1113,20 @@ def _normal_surface(raw, inputs, resolve, present, root, store):
     semantic_cache = {}
 
     def selected_semantics(facts, function):
-        """The linked semantics of the index function ``function``: its unit semantics when no helper
-        lookup it made finds a linked helper (``linked_semantics_unchanged``), else a linked run."""
+        """The linked semantics of the index function ``function``: its unit semantics, demanded
+        from the store (``demand_semantics``), when no helper lookup it made finds a linked helper
+        (``linked_semantics_unchanged``), else a linked run."""
         if function['id'] not in semantic_cache:
+            unit = demand_semantics(store, function)
             if linked_semantics_unchanged(function['semantic_helper_lookups'], linked_functions):
                 store.counts['unit_semantics_reused'] += 1
-                result = deep_copy(store.function(function)['semantics'])
+                result = deep_copy(unit['semantics'])
             else:
                 store.counts['linked_semantics_runs'] += 1
                 functions = {}
                 for item in facts['functions']:
                     functions.setdefault(item['name'], []).append(item)
-                result = semantics(store.function(function), functions, facts.get('errors', []), facts.get('contracts', {}),
+                result = semantics(unit, functions, facts.get('errors', []), facts.get('contracts', {}),
                                    linked_functions=linked_functions)
             semantic_cache[function['id']] = {**result, 'diagnostic_stage': 'selected-linked-semantics'}
         return semantic_cache[function['id']]
@@ -1361,7 +1369,7 @@ def _normal_surface(raw, inputs, resolve, present, root, store):
             mask = constant(framework[0].get('contracts', {}).get('iterator_mask', ''),
                             store.frontend(framework[0]).get('contract_constants', {}))
             next_tests = [test for test in framework[1]['handler_attribute_tests'] if test['name'] == '__next__']
-            writes = [write for write in framework[1]['semantics']['destination_writes']
+            writes = [write for write in demand_semantics(store, framework[1])['semantics']['destination_writes']
                       if write['destination_index'] == 0 and '& mp_builtin_next_obj' in write['expression']
                       and any('MP_QSTR___next__' in guard['condition'] and 'type -> flags &' in guard['condition']
                               for guard in write['guards'])]
@@ -1403,7 +1411,7 @@ def _normal_surface(raw, inputs, resolve, present, root, store):
             if not provider:
                 policy['unresolved'].append('type attribute handler owner/definition unassessed')
                 continue
-            for write in provider[1]['semantics']['destination_writes']:
+            for write in demand_semantics(store, provider[1])['semantics']['destination_writes']:
                 if write['destination_index'] != 0: continue
                 qualification = _handler_write_contract(
                     write, provider[1], provider[0].get('contracts', {}), handler_dispatch,
@@ -1494,7 +1502,7 @@ def _normal_surface(raw, inputs, resolve, present, root, store):
                  'implicit_argument_offset': 0, 'descriptor': 'constructor', 'function': function['name'],
                  'parameters_resolution': 'unresolved',
                  'unresolved': ['constructor argument input/default domain unassessed']}
-        return {'callable': True, 'callshape': shape, 'semantics': function['semantics'],
+        return {'callable': True, 'callshape': shape, 'semantics': demand_semantics(store, function)['semantics'],
                 'source': function['source_span'],
                 'resolution': _resolution('bounded-resolved', authority='allocated make_new and selected direct argument-count checker',
                                           checker=checker[1]['id'], check_source=event['source_span'])}
@@ -1719,13 +1727,16 @@ class _WorkerTraceback(Exception):
     """Carries the formatted traceback of an exception raised in an extraction worker process."""
 
 
-def _extract_unit(record, compdb, root, path, level):
+def _extract_unit(record, compdb, root, path, level, full_semantics):
     """Extract one translation unit into the fact object at ``path``.
+
+    The unit semantics of every function are computed only when ``full_semantics``; otherwise the
+    link stage demands the ones it reads (``semantics.demand_semantics``).
 
     Returns what the link stage keeps, the unit index, its node table and the fact object's location,
     then what the parent checks once and does not keep: the unit's consumed input snapshots and its
     include selection constraints."""
-    facts = _extract(record, compdb, root)
+    facts = _extract(record, compdb, root, full_semantics=full_semantics)
     constraints = facts.pop('_selection', ())
     index, nodes, location = factobjects.write(path, facts, level)
     return index, nodes, location, facts['input']['input_snapshots'], constraints
@@ -1736,14 +1747,15 @@ _EXTRACTION = None
 
 def _extract_worker(ordinal):
     gc.disable()
-    records, compdb, root, store = _EXTRACTION
+    records, compdb, root, store, full_semantics = _EXTRACTION
     try:
-        return True, _extract_unit(records[ordinal], compdb, root, store.path(ordinal), store.compression), None
+        return True, _extract_unit(records[ordinal], compdb, root, store.path(ordinal), store.compression,
+                                   full_semantics), None
     except Exception as exc:
         return False, exc, traceback.format_exc()
 
 
-def _extract_parallel(records, compdb, root, jobs, store, consume, concurrent=None):
+def _extract_parallel(records, compdb, root, jobs, store, consume, concurrent=None, *, full_semantics):
     """Extract translation units in forked worker processes into fact objects in ``store``, passing
     each unit's result to ``consume`` in record order and keeping none.
 
@@ -1754,7 +1766,7 @@ def _extract_parallel(records, compdb, root, jobs, store, consume, concurrent=No
     is raised only after every record has extracted.
     """
     global _EXTRACTION
-    _EXTRACTION = (records, compdb, root, store)
+    _EXTRACTION = (records, compdb, root, store, full_semantics)
     try:
         with ProcessPoolExecutor(max_workers=min(jobs, len(records)),
                                  mp_context=multiprocessing.get_context('fork')) as pool:
@@ -1784,11 +1796,11 @@ def _extract_parallel(records, compdb, root, jobs, store, consume, concurrent=No
         _EXTRACTION = None
 
 
-def _extract_serial(records, compdb, root, store, consume):
+def _extract_serial(records, compdb, root, store, consume, *, full_semantics):
     """Extract translation units in record order into fact objects in ``store``, passing each unit's
     result to ``consume``."""
     for ordinal, record in enumerate(records):
-        consume(_extract_unit(record, compdb, root, store.path(ordinal), store.compression))
+        consume(_extract_unit(record, compdb, root, store.path(ordinal), store.compression, full_semantics))
 
 
 def _gc_paused(function):
@@ -1827,6 +1839,7 @@ def select_records(*, database: Path, root: Path, build_dir: Path) -> dict:
     compiler.clear_resolution_cache()
     compiler.clear_replay_cache()
     compiler.clear_input_table()
+    clear_run_tables()
     database_content, database_snapshot = compiler.read_recorded(database)
     root, build_dir, database = Path(root).resolve(), Path(build_dir).resolve(), Path(database).resolve()
     if not root.is_dir() or not build_dir.is_dir():
@@ -1887,7 +1900,9 @@ def collect_inventory(selection: dict, *, port: str, target: str, variant: str, 
 
     Every unit is extracted into a fact object in ``store``. This process keeps each unit's index
     and checks, then drops, its consumed input snapshots and include selection constraints as the
-    unit arrives; composition loads the evidence it reads from the fact objects.
+    unit arrives; composition loads the evidence it reads from the fact objects. Workers compute
+    the unit semantics of every function only when ``inventory`` is set, because the inventory
+    publishes them for every function; otherwise composition computes the ones it reads, on demand.
 
     Returns the published surface (build, modules, types, coverage, diagnostics and the frontend
     provenance); what the final verification before publication checks (``compiler.verify_collection``):
@@ -1925,11 +1940,20 @@ def collect_inventory(selection: dict, *, port: str, target: str, variant: str, 
     # Ownership uses record identities, including the object for repeated physical sources.
     ownership_records = [{**r, 'physical': r['identity']} for r in records]
     if jobs == 1:
-        _extract_serial(records, compdb, root, store, consume)
+        _extract_serial(records, compdb, root, store, consume, full_semantics=inventory)
+        # Linking never reads the run tables.
+        clear_run_tables()
         ownership = collect_ownership(ownership_records, link)
     else:
-        ownership = _extract_parallel(records, compdb, root, jobs, store, consume,
-                                      lambda: collect_ownership(ownership_records, link))
+        # The workers share the tables of the system header runs they analyse, through the store's directory.
+        runs_directory = os.path.join(store.directory, 'runs')
+        os.mkdir(runs_directory)
+        share_run_tables(runs_directory)
+        try:
+            ownership = _extract_parallel(records, compdb, root, jobs, store, consume,
+                                          lambda: collect_ownership(ownership_records, link), full_semantics=inventory)
+        finally:
+            share_run_tables(None)
     for conflict in conflicts.values():
         if conflict is not None:
             raise conflict

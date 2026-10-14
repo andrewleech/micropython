@@ -14,7 +14,7 @@ def records(count):
     return [{'identity': f'tu-{index}', 'physical': f'/src/{index}.c', 'index': index} for index in range(count)]
 
 
-def fake_unit(record, compdb, root, path, level):
+def fake_unit(record, compdb, root, path, level, full_semantics):
     """Deterministic stand-in for one unit's extraction result, with shared references and tuples."""
     index = record['index']
     if index in compdb['fail']:
@@ -37,13 +37,14 @@ def store(tmp_path):
 
 def serial(items, compdb, root, store):
     results = []
-    inventory._extract_serial(items, compdb, root, store, results.append)
+    inventory._extract_serial(items, compdb, root, store, results.append, full_semantics=False)
     return results
 
 
 def run(items, compdb, jobs, store, concurrent=None):
     results = []
-    side = inventory._extract_parallel(items, compdb, '/root', jobs, store, results.append, concurrent)
+    side = inventory._extract_parallel(items, compdb, '/root', jobs, store, results.append, concurrent,
+                                       full_semantics=False)
     return results, side
 
 
@@ -74,7 +75,7 @@ def test_single_record_and_more_workers_than_records(patched, store):
     assert run(items, {'fail': {}}, 8, store)[0] == serial(items, {'fail': {}}, '/root', store)
 
 
-def gated_unit(record, compdb, root, path, level):
+def gated_unit(record, compdb, root, path, level, full_semantics):
     """A unit that, when its index is in ``compdb['gated']``, waits for the file ``compdb['gate']``
     (up to a minute, so a defect fails the test instead of hanging it), then leaves a marker file
     at ``path``."""
@@ -95,7 +96,8 @@ def test_each_result_is_consumed_before_later_records_complete(monkeypatch, stor
     def consume(result):
         seen.append((result, sum(store.path(index).exists() for index in range(8))))
         gate.touch()
-    inventory._extract_parallel(items, {'gated': range(4, 8), 'gate': gate}, '/root', 2, store, consume)
+    inventory._extract_parallel(items, {'gated': range(4, 8), 'gate': gate}, '/root', 2, store, consume,
+                                full_semantics=False)
     assert [result for result, _ in seen] == [f'tu-{index}' for index in range(8)]
     # Records 4 to 7 cannot finish before the first result is consumed.
     assert seen[0][1] <= 4
@@ -109,7 +111,8 @@ def test_a_consume_failure_cancels_the_records_not_yet_started(monkeypatch, stor
         gate.touch()
         raise RuntimeError('repeated fact object for translation unit ' + result)
     with pytest.raises(RuntimeError, match='repeated fact object for translation unit tu-0'):
-        inventory._extract_parallel(records(40), {'gated': range(1, 40), 'gate': gate}, '/root', 2, store, consume)
+        inventory._extract_parallel(records(40), {'gated': range(1, 40), 'gate': gate}, '/root', 2, store, consume,
+                                    full_semantics=False)
     assert inventory._EXTRACTION is None
     # Only records already handed to a worker when tu-0 was consumed can finish.
     assert sum(store.path(index).exists() for index in range(40)) < 10
@@ -148,7 +151,7 @@ def test_worker_state_is_released_after_success_and_failure(patched, store):
 
 def test_workers_are_separate_processes(monkeypatch, store):
     parent = os.getpid()
-    monkeypatch.setattr(inventory, '_extract_unit', lambda record, compdb, root, path, level: os.getpid())
+    monkeypatch.setattr(inventory, '_extract_unit', lambda record, compdb, root, path, level, full_semantics: os.getpid())
     pids, _ = run(records(8), {}, 4, store)
     assert parent not in pids and 1 <= len(set(pids)) <= 4
 

@@ -161,7 +161,7 @@ def test_a_changed_fact_object_is_refused_on_load_and_at_publication(tmp_path, s
         load()
 
 
-def synthetic_extract(record, compdb, root):
+def synthetic_extract(record, compdb, root, *, full_semantics):
     """A unit with about 4 MB of evidence and a small index."""
     return {**unit_facts(record['identity'], functions=8, payload=500_000), '_selection': []}
 
@@ -179,7 +179,7 @@ def parent_memory(tmp_path, monkeypatch, count):
         kept.append(index)
     tracemalloc.start()
     try:
-        inventory._extract_parallel(records, None, '/root', 2, store, consume)
+        inventory._extract_parallel(records, None, '/root', 2, store, consume, full_semantics=False)
         current, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
@@ -216,7 +216,8 @@ def test_unit_semantics_stand_for_the_linked_run_unless_a_lookup_finds_a_helper(
         _, snapshot = compiler.read_input(physical)
         record = {'directory': str(tmp_path), 'file': str(physical), 'physical': str(physical), 'identity': str(physical),
                   'object': str(obj), 'arguments': args, '_source_snapshot': snapshot, '_response_snapshots': {}}
-        facts.append({key: value for key, value in _extract(record, compiler.authority(ROOT), tmp_path).items()
+        facts.append({key: value for key, value in _extract(record, compiler.authority(ROOT), tmp_path,
+                                                            full_semantics=True).items()
                       if key != '_selection'})
         records.append(record)
         subprocess.run(args, check=True, capture_output=True)

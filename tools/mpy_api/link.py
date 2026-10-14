@@ -6,6 +6,7 @@ import subprocess
 
 from .compiler import executable, expand_arguments, read_recorded, recorded_inputs, reconcile_inputs
 from .bindings import materialize, split_args, strip_outer, row_pair, coalesce_definitions
+from .semantics import demand_semantics, frontend_unresolved
 
 
 def symbols(path, nm, directory):
@@ -230,8 +231,9 @@ def collect_ownership(records, link):
 
 
 def join(inputs, ownership, store):
-    """Join the unit indexes ``inputs`` to the selected link ownership; the delegation provider's
-    semantics are loaded from ``store``."""
+    """Join the unit indexes ``inputs`` to the selected link ownership; the unit semantics of the
+    functions the join reads (bound wrapper functions, delegation providers) are demanded from
+    ``store`` (``semantics.demand_semantics``)."""
     selected = {o['translation_unit']: o for o in ownership['objects']}
     definitions = [(f, d) for f in inputs for d in coalesce_definitions(f['definitions'])]
     strong = {}
@@ -271,7 +273,8 @@ def join(inputs, ownership, store):
                       and len(owners) == 1 and facts['translation_unit'] == owners[0]['translation_unit']]
         return (candidates[0], 'unique-selected-allocated-external-function') if len(candidates) == 1 else (None, 'missing-ambiguous-or-unallocated-function')
 
-    result = materialize(inputs, resolve, selected, present, resolve_function)
+    result = materialize(inputs, resolve, selected, present, resolve_function,
+                         lambda function: frontend_unresolved(store, function))
     result['unassessed_containers'] = [{'identity': d['id'], 'source': d['source_span'], 'name': d['name'],
                                         'reason': 'container has no qualified allocated object/ELF ownership'}
                                        for f, d in definitions if d['kind'] in ('type', 'module') and not present(f, d)]
@@ -318,7 +321,7 @@ def join(inputs, ownership, store):
             if len(functions) == 1:
                 provider_facts, provider = functions[0]
                 row['handler_function'] = provider['id']
-                for helper in store.function(provider)['semantics']['inputs']:
+                for helper in demand_semantics(store, provider)['semantics']['inputs']:
                     if helper['helper'] != 'mp_module_generic_attr':
                         continue
                     for argument in helper['arguments']:

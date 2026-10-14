@@ -68,7 +68,7 @@ def extract(directory, arguments=(), *, after=None, source='a.c'):
     compiler.recorded(directory / source)
     record = {**entry, 'physical': snapshot['resolved'], 'identity': snapshot['resolved'], 'object': str(directory / 'a.o'),
               '_source_snapshot': snapshot, '_response_snapshots': {}}
-    return inventory._extract(record, compdb, ROOT)
+    return inventory._extract(record, compdb, ROOT, full_semantics=True)
 
 
 def final(*facts):
@@ -247,7 +247,7 @@ def test_dependency_rule_disagreeing_with_the_expansion_is_rejected(tmp_path):
     record = {**entry, 'physical': snapshot['resolved'], 'identity': snapshot['resolved'],
               'object': str(tmp_path / 'a.o'), '_source_snapshot': snapshot, '_response_snapshots': {}}
     with pytest.raises(RuntimeError, match='compiler dependency rule disagrees with the files its expansion entered'):
-        inventory._extract(record, compiler.authority(ROOT), ROOT)
+        inventory._extract(record, compiler.authority(ROOT), ROOT, full_semantics=True)
 
 
 def test_pass_two_reads_no_include(tmp_path):
