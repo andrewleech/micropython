@@ -241,6 +241,13 @@ void mboot_port_led(uint32_t mask);    // bit0 alive, bit1 USB active, bit2 erro
 // ---- log sink (both; bootloader mandatory when MICROPY_MBOOT_LOG_LEVEL > 0) ----
 void mboot_port_log_write(const char *s, size_t n);   // UART, SWO, RTT or empty
 
+// ---- security counter image ids (both backends) ----
+// bootutil passes the image index as the id: MBOOT_SECCNT_ID_APP for the application. The
+// bootloader's own counter has an id outside the image indexes; the bootloader reports it in its
+// info block.
+#define MBOOT_SECCNT_ID_APP         (0u)
+#define MBOOT_SECCNT_ID_BOOTLOADER  (0x100u)
+
 // ---- security counter backend (only if MICROPY_MBOOT_SECCNT_PORT) ----
 int mboot_port_seccnt_read(uint32_t image_id, uint32_t *value);     // 0 ok
 int mboot_port_seccnt_write(uint32_t image_id, uint32_t value);     // monotonic: value >= current; idempotent

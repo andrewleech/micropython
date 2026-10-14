@@ -35,9 +35,11 @@
 //
 // MBOOT_AREA_SECCNT holds two erase units. Records of max(write unit, 16) bytes:
 // 'SCNT', image id, value, CRC-32 over the first 12 bytes, padded with the erased value.
-// The value is the largest valid record; records with a bad CRC or an unreadable word are
-// skipped. A new record is appended in the unit that holds the largest value; when that unit
-// is full the other unit is erased first and the record becomes its first.
+// The value of an image is its largest valid record; records with a bad CRC or an unreadable
+// word are skipped. Up to four images with a non-zero value share the area. A new record is
+// appended to the one unit that holds every image's largest value; when it is full (or both
+// units hold them all) that unit is kept, the other one is erased and gets a copy of every
+// image's largest value and then the record.
 
 #define MBOOT_SECCNT_REC_MAGIC 0x544E4353u    // bytes "SCNT"
 
@@ -49,14 +51,16 @@
 int mboot_seccnt_init(void);
 
 // Current value for the image; 0 when the area is erased or no record carries the image. Returns
-// 0 or a negative errno; -EIO when the area is not erased and holds no valid record.
+// 0 or a negative errno; -EIO when the area is not erased and holds no valid record, or holds
+// non-zero values of more than four images.
 int mboot_seccnt_flash_read(uint32_t image_id, uint32_t *value);
 
 // Raises the stored value; a value that is not above the stored one is a successful no-op.
-// Returns 0 or a negative errno; -EIO as for read.
+// Returns 0 or a negative errno; -EIO as for read, -ENOSPC for a non-zero value of a fifth image.
 int mboot_seccnt_flash_write(uint32_t image_id, uint32_t value);
 
-// True when a record can be stored: the area is readable and writable and read does not fail.
+// True when a record can be stored: the area is readable and writable, read does not fail and
+// the image has a counter, there is room for one or value is 0.
 bool mboot_seccnt_flash_can_update(uint32_t image_id, uint32_t value);
 
 #endif // MICROPY_INCLUDED_SHARED_MBOOT_MBOOT_SECCNT_H

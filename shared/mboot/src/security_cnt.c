@@ -38,6 +38,8 @@
 #include "mboot_port.h"
 #include "mboot_seccnt.h"
 
+_Static_assert(MBOOT_SECCNT_ID_BOOTLOADER >= MCUBOOT_IMAGE_NUMBER, "bootloader counter id is an image index");
+
 #if defined(MBOOT_SECCNT_FLASH)
 #define BACKEND_INIT() mboot_seccnt_init()
 #define BACKEND_READ(id, v) mboot_seccnt_flash_read(id, v)
