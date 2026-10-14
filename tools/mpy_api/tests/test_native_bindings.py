@@ -1,12 +1,14 @@
 """Native declaration identity, handler protocols and receiver-table consistency."""
 import copy
 from pathlib import Path
+import pickle
 import subprocess
 
 import pytest
 
 from mpy_api import compiler
 from mpy_api.bindings import constant_value, definitions
+from mpy_api.facts import FactStore, write
 from mpy_api.frontend import syntax_adapter
 from mpy_api.inventory import (
     _extract, _handler_dispatch_authority, _handler_write_contract, _normal_surface,
@@ -42,11 +44,25 @@ def linked_artifacts(tmp_path, source, filename="fixture.c"):
     return facts, record, {"directory": tmp_path, "elf": elf, "map": map_path, "argv": argv}
 
 
+def index_view(directory, *units):
+    """Write extracted ``units`` as fact objects in ``directory``; return their unit indexes, as the
+    link stage receives them from a worker, and the store that loads their evidence."""
+    directory.mkdir(parents=True, exist_ok=True)
+    store, indexes = FactStore(directory), []
+    for ordinal, facts in enumerate(units):
+        facts = {key: value for key, value in facts.items() if key != "_selection"}
+        index, nodes, location = pickle.loads(pickle.dumps(write(store.path(ordinal), facts)))
+        store.add(index, nodes, location)
+        indexes.append(index)
+    return indexes, store
+
+
 def linked_c(tmp_path, source, filename="fixture.c"):
     facts, record, link = linked_artifacts(tmp_path, source, filename)
     ownership = collect_ownership([record], link)
-    raw, resolve, present = join([facts], ownership)
-    return facts, raw, resolve, present
+    (index,), store = index_view(tmp_path / "facts", facts)
+    raw, resolve, present = join([index], ownership, store)
+    return index, raw, resolve, present, store
 
 
 def parsed_definitions(source, physical="/fixture/declarations.c"):
@@ -59,7 +75,7 @@ def parsed_definitions(source, physical="/fixture/declarations.c"):
 
 
 def test_one_initialized_static_object_owns_its_tentative_declarations(tmp_path):
-    facts, _, resolve, _ = linked_c(tmp_path, """typedef struct { int marker; } mp_obj_type_t;
+    facts, _, resolve, _, _ = linked_c(tmp_path, """typedef struct { int marker; } mp_obj_type_t;
 static const mp_obj_type_t native_type;
 static const mp_obj_type_t native_type = { 7 };
 const mp_obj_type_t *exported_type = &native_type;
@@ -84,7 +100,7 @@ def test_multiple_or_incompatible_definitions_remain_ambiguous(source):
     assert len(entries) == 2
     assert all("tentative_declarations" not in item for item in entries)
     facts = {"translation_unit": "/fixture/declarations.c", "definitions": entries, "functions": []}
-    _, resolve, _ = join([facts], {"objects": []})
+    _, resolve, _ = join([facts], {"objects": []}, None)
     owner, status = resolve("native_type", facts["translation_unit"])
     assert owner is None
     assert status == "ambiguous-translation-unit-definition"
@@ -164,16 +180,16 @@ int main(void) { return exported_type->name != MP_QSTR_Sample; }
 
 
 def handler_fixture(tmp_path, source=HANDLERS):
-    facts, raw, resolve, present = linked_c(tmp_path, source, "py/runtime.c")
-    functions = {function["name"]: function for function in facts["functions"]}
+    facts, raw, resolve, present, store = linked_c(tmp_path, source, "py/runtime.c")
+    functions = {function["name"]: store.function(function) for function in facts["functions"]}
     dispatch = _handler_dispatch_authority((facts, functions["mp_load_method_maybe"]))
     assert dispatch["status"] == "bounded-resolved"
-    return facts, raw, resolve, present, functions, dispatch
+    return facts, raw, resolve, present, functions, dispatch, store
 
 
 def test_unresolved_and_method_handler_values_are_not_ordinary_constants(tmp_path):
-    facts, raw, resolve, present, _, _ = handler_fixture(tmp_path)
-    _, types, _ = _normal_surface(raw, [facts], resolve, present, tmp_path)
+    facts, raw, resolve, present, _, _, store = handler_fixture(tmp_path)
+    _, types, _ = _normal_surface(raw, [facts], resolve, present, tmp_path, store)
     sample = next(item for item in types if item["name"] == "Sample")
     members = {item["name"]: item for item in sample["members"]}
     assert members["unknown"]["kind"] == "unknown"
@@ -207,9 +223,9 @@ def test_handler_presence_requires_complete_getter_path_coverage(tmp_path, gette
     return dest[0] != MP_OBJ_NULL;
 }""")
     source = source.replace("{ { exported_type }, 0 }", "{ { exported_type }, " + str(payload) + " }")
-    facts, raw, resolve, present, _, _ = handler_fixture(tmp_path, source)
+    facts, raw, resolve, present, _, _, store = handler_fixture(tmp_path, source)
     subprocess.run([str(tmp_path / "fixture.elf")], check=True, capture_output=True)
-    _, types, _ = _normal_surface(raw, [facts], resolve, present, tmp_path)
+    _, types, _ = _normal_surface(raw, [facts], resolve, present, tmp_path, store)
     sample = next(item for item in types if item["name"] == "Sample")
     value = next(item for item in sample["members"] if item["name"] == "value")
     assert value["kind"] == "unknown"
@@ -222,8 +238,8 @@ def test_handler_presence_requires_complete_getter_path_coverage(tmp_path, gette
 
 def test_missing_selected_null_contract_cannot_qualify_handler_presence(tmp_path):
     source = HANDLERS.replace("#define MP_OBJ_NULL ((mp_obj_t)0)", "enum { MP_OBJ_NULL = 0 };")
-    facts, _, resolve, present = linked_c(tmp_path, source, "py/runtime.c")
-    functions = {function["name"]: function for function in facts["functions"]}
+    facts, _, resolve, present, store = linked_c(tmp_path, source, "py/runtime.c")
+    functions = {function["name"]: store.function(function) for function in facts["functions"]}
     dispatch = _handler_dispatch_authority((facts, functions["mp_load_method_maybe"]))
     assert "null" not in facts["contracts"]
     assert dispatch["status"] == "unresolved"
@@ -244,7 +260,7 @@ def selected_pointer_contract(write, contracts):
 
 
 def test_store_and_null_success_writes_are_not_getter_values(tmp_path):
-    facts, _, resolve, present, functions, dispatch = handler_fixture(tmp_path)
+    facts, _, resolve, present, functions, dispatch, _ = handler_fixture(tmp_path)
     handler = functions["sample_attr"]
     writes = [item for item in handler["semantics"]["destination_writes"]
               if item["destination_index"] == 0 and item["expression"] == facts["contracts"]["null"]]
@@ -260,7 +276,7 @@ def test_nonnull_store_write_cannot_be_published_as_a_getter_value(tmp_path):
     source = HANDLERS.replace(
         "if (attr == MP_QSTR_value) {\n            dest[0] = MP_OBJ_NULL;",
         "if (attr == MP_QSTR_value) {\n            dest[0] = mp_const_none;")
-    facts, _, resolve, present, functions, dispatch = handler_fixture(tmp_path, source)
+    facts, _, resolve, present, functions, dispatch, _ = handler_fixture(tmp_path, source)
     handler = functions["sample_attr"]
     writes = [item for item in handler["semantics"]["destination_writes"]
               if item["destination_index"] == 0
@@ -348,7 +364,8 @@ const mp_obj_fun_builtin_var_t configure_obj = {
     _receiver_offset(shape, 1)
     function = next(item for item in facts["functions"] if item["name"] == "configure")
     parser = next(item for item in facts["functions"] if item["name"] == "mp_arg_parse_all")
-    _parameters(shape, function["semantics"], facts, (facts, parser))
+    (index,), store = index_view(tmp_path / "facts", facts)
+    _parameters(shape, function["semantics"], index, store, (index, parser))
     assert shape["parameters_resolution"] == "resolved"
     assert [row["name"] for row in shape["parser_parameters"]] == ["self", "mode", "filter"]
     assert [row["name"] for row in shape["parameters"]] == ["mode", "filter"]

@@ -229,7 +229,9 @@ def collect_ownership(records, link):
             'receipts': receipts}
 
 
-def join(inputs, ownership):
+def join(inputs, ownership, store):
+    """Join the unit indexes ``inputs`` to the selected link ownership; the delegation provider's
+    semantics are loaded from ``store``."""
     selected = {o['translation_unit']: o for o in ownership['objects']}
     definitions = [(f, d) for f in inputs for d in coalesce_definitions(f['definitions'])]
     strong = {}
@@ -316,7 +318,7 @@ def join(inputs, ownership):
             if len(functions) == 1:
                 provider_facts, provider = functions[0]
                 row['handler_function'] = provider['id']
-                for helper in provider['semantics']['inputs']:
+                for helper in store.function(provider)['semantics']['inputs']:
                     if helper['helper'] != 'mp_module_generic_attr':
                         continue
                     for argument in helper['arguments']:

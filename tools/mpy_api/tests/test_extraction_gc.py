@@ -4,6 +4,7 @@ import gc
 import pytest
 
 from mpy_api import inventory
+from mpy_api.facts import FactStore
 from mpy_api.frontend import syntax_adapter
 from mpy_api.semantics import semantics
 
@@ -56,22 +57,26 @@ def test_gc_paused_returns_result_and_passes_arguments():
     assert inventory._gc_paused(lambda *args, **kwargs: (args, kwargs))(1, key=2) == ((1,), {'key': 2})
 
 
-def test_serial_extraction_preserves_order_and_results(monkeypatch):
+def test_serial_extraction_preserves_order_and_results(monkeypatch, tmp_path):
     calls = []
 
-    def fake(record, compdb, root):
+    def fake(record, compdb, root, path, level):
         calls.append(record['index'])
-        return {'index': record['index'], 'nested': [record['index']] * 3, 'root': root}
-    monkeypatch.setattr(inventory, '_extract', fake)
+        return {'index': record['index'], 'nested': [record['index']] * 3, 'root': root, 'path': path}
+    monkeypatch.setattr(inventory, '_extract_unit', fake)
     records = [{'index': index} for index in range(7)]
-    results = inventory._gc_paused(lambda: inventory._extract_serial(records, None, '/root'))()
+    store = FactStore(tmp_path)
+    results = []
+    inventory._gc_paused(lambda: inventory._extract_serial(records, None, '/root', store, results.append))()
     assert calls == list(range(7))
-    assert results == [{'index': index, 'nested': [index] * 3, 'root': '/root'} for index in range(7)]
+    assert results == [{'index': index, 'nested': [index] * 3, 'root': '/root', 'path': store.path(index)}
+                       for index in range(7)]
 
 
-def test_worker_runs_extraction_with_collection_disabled(monkeypatch):
-    monkeypatch.setattr(inventory, '_extract', lambda record, compdb, root: (record['index'], gc.isenabled()))
-    monkeypatch.setattr(inventory, '_EXTRACTION', ([{'index': 0}, {'index': 1}], None, None))
+def test_worker_runs_extraction_with_collection_disabled(monkeypatch, tmp_path):
+    monkeypatch.setattr(inventory, '_extract_unit',
+                        lambda record, compdb, root, path, level: (record['index'], gc.isenabled()))
+    monkeypatch.setattr(inventory, '_EXTRACTION', ([{'index': 0}, {'index': 1}], None, None, FactStore(tmp_path)))
     gc.enable()
     assert inventory._extract_worker(1) == (True, (1, False), None)
     assert not gc.isenabled()

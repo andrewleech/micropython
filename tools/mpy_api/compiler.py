@@ -249,21 +249,32 @@ def read_recorded(path):
     return content, snapshot
 
 
-def reconcile_inputs(groups):
-    """Reject different content or physical ownership for the same input."""
-    result, owners, physical = {}, {}, {}
-    for owner, records in groups:
+class InputTable:
+    """Consumed input snapshots of several owners, reconciled as each owner's are added."""
+
+    def __init__(self):
+        self.records, self._owners, self._physical = {}, {}, {}
+
+    def add(self, owner, records):
+        """Reject different content or physical ownership for an input already added."""
         for path, record in records.items():
-            existing = result.get(path)
-            same_target = physical.get(record['resolved'])
+            existing = self.records.get(path)
+            same_target = self._physical.get(record['resolved'])
             if existing and existing != record:
-                raise RuntimeError(f'conflicting consumed input snapshots for {path}: {owners[path]} and {owner}')
+                raise RuntimeError(f'conflicting consumed input snapshots for {path}: {self._owners[path]} and {owner}')
             if same_target and any(same_target[field] != record[field] for field in ('sha256', '_stat')):
                 raise RuntimeError(f'conflicting consumed content snapshots for {record["resolved"]}: {owner}')
-            result[path] = record
-            owners[path] = owner
-            physical[record['resolved']] = record
-    return result
+            self.records[path] = record
+            self._owners[path] = owner
+            self._physical[record['resolved']] = record
+
+
+def reconcile_inputs(groups):
+    """Reject different content or physical ownership for the same input."""
+    table = InputTable()
+    for owner, records in groups:
+        table.add(owner, records)
+    return table.records
 
 
 def verify_inputs(records):
@@ -995,9 +1006,11 @@ def validate_selection(record, compdb):
     record['_selection'] = []
 
 
-def merge_selection(groups):
-    """Join include selection constraints from every translation unit into one table."""
-    selection = {'absent': set(), 'is': {}, 'probe': {}, 'directory': {}}
+def merge_selection(groups, selection=None):
+    """Join include selection constraints from every translation unit into one table, ``selection``
+    when given."""
+    if selection is None:
+        selection = {'absent': set(), 'is': {}, 'probe': {}, 'directory': {}}
     for constraints in groups:
         for kind, path, resolved in constraints:
             if kind == 'absent':

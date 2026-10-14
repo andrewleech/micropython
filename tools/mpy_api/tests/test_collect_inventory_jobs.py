@@ -1,11 +1,13 @@
 """collect_inventory raises the same extraction error for every --jobs value."""
 import json
 import shutil
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from mpy_api import inventory
+from mpy_api.facts import FactStore
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -37,7 +39,9 @@ def failure(project, jobs):
     database, build_dir = project
     with pytest.raises(RuntimeError) as raised:
         selection = inventory.select_records(database=database, root=ROOT, build_dir=build_dir)
-        inventory.collect_inventory(selection, port='test', target='test', variant='test', link={}, jobs=jobs)
+        store = FactStore(tempfile.mkdtemp(dir=database.parent))
+        inventory.collect_inventory(selection, port='test', target='test', variant='test', link={},
+                                    store=store, jobs=jobs)
     return str(raised.value)
 
 
@@ -62,3 +66,54 @@ def test_ownership_failure_surfaces_when_every_record_extracts(tmp_path, ownersh
     project = build(tmp_path, {'a_valid.c': VALID, 'b_valid.c': VALID})
     for jobs in (1, 3):
         assert failure(project, jobs) == 'ownership failed'
+
+
+def snapshot(digest):
+    return {'/x.h': {'path': '/x.h', 'resolved': '/x.h', 'sha256': digest, '_stat': (1,)}}
+
+
+def planned_unit(plan):
+    """A stand-in for one unit's extraction whose include constraints and input snapshots follow ``plan``."""
+    def extract(record, compdb, root, path, level):
+        step = plan[int(record['identity'][2:])]
+        if step.get('fail'):
+            raise RuntimeError('extraction failure ' + record['identity'])
+        location = {'path': str(path), 'bytes': 0, 'sha256': '', 'compression': level, 'sections': []}
+        return ({'translation_unit': record['identity'], 'functions': []}, [], location,
+                snapshot(step['snapshot']), step['selection'])
+    return extract
+
+
+def planned_failure(monkeypatch, tmp_path, jobs, plan):
+    monkeypatch.setattr(inventory, '_extract_unit', planned_unit(plan))
+    monkeypatch.setattr(inventory, 'collect_ownership', lambda records, link: {'input_snapshots': {}})
+    records = [{'identity': f'tu{index}', 'physical': f'/tu{index}.c'} for index in range(len(plan))]
+    selection = {'root': tmp_path, 'build_dir': tmp_path, 'database': tmp_path / 'db', 'compdb': None,
+                 'records': records, 'completeness': {}, 'inputs': {}}
+    with pytest.raises(RuntimeError) as raised:
+        inventory.collect_inventory(selection, port='p', target='t', variant='v', link={},
+                                    store=FactStore(tempfile.mkdtemp(dir=tmp_path)), jobs=jobs)
+    return str(raised.value)
+
+
+BOTH_CONFLICTS = [{'selection': [('is', '/a.h', 'A')], 'snapshot': '1'},
+                  {'selection': [('is', '/a.h', 'B')], 'snapshot': '2'}]
+
+
+@pytest.mark.parametrize('jobs', [1, 2])
+def test_selection_conflict_is_raised_before_an_input_conflict(monkeypatch, tmp_path, jobs):
+    assert (planned_failure(monkeypatch, tmp_path, jobs, BOTH_CONFLICTS)
+            == 'compiler include selection changed during collection: /a.h')
+
+
+@pytest.mark.parametrize('jobs', [1, 2])
+def test_input_conflict_alone_names_both_units(monkeypatch, tmp_path, jobs):
+    plan = [{'selection': [], 'snapshot': '1'}, {'selection': [], 'snapshot': '2'}]
+    assert (planned_failure(monkeypatch, tmp_path, jobs, plan)
+            == 'conflicting consumed input snapshots for /x.h: tu0 and tu1')
+
+
+@pytest.mark.parametrize('jobs', [1, 2])
+def test_a_later_extraction_failure_wins_over_earlier_conflicts(monkeypatch, tmp_path, jobs):
+    plan = [*BOTH_CONFLICTS, {'selection': [], 'snapshot': '1', 'fail': True}]
+    assert planned_failure(monkeypatch, tmp_path, jobs, plan) == 'extraction failure tu2'

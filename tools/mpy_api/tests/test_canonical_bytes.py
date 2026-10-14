@@ -9,6 +9,7 @@ import tracemalloc
 import pytest
 
 from mpy_api import cli
+from mpy_api.structure import JSONStream
 
 
 def reference(value):
@@ -182,3 +183,41 @@ def test_streaming_does_not_hold_a_copy_of_the_document():
         tracemalloc.stop()
     assert document > 24_000_000
     assert peak < document // 4
+
+
+def stream_of(items):
+    return JSONStream(iter(items))
+
+
+@pytest.mark.parametrize("depth", [0, 1, 2, 4, 9])
+@pytest.mark.parametrize("seed", range(10))
+def test_streamed_arrays_write_the_bytes_of_their_items_as_a_list(seed, depth, monkeypatch):
+    monkeypatch.setattr(cli, "_SPLIT_DEPTH", depth)
+    rng = random.Random(seed)
+    items = [random_value(rng, 0) for _ in range(rng.randrange(0, 6))]
+    nested = [random_value(rng, 0) for _ in range(3)]
+    expected = reference({"a": items, "b": {"c": nested, "d": []}, "e": [items]})
+    value = {"a": stream_of(items), "b": {"c": stream_of(nested), "d": stream_of([])}, "e": [stream_of(items)]}
+    assert streamed(value)[0] == expected
+
+
+def test_streamed_items_are_produced_while_written_and_released():
+    produced = []
+
+    def items():
+        for index in range(200):
+            produced.append(index)
+            yield {"index": index, "text": "abc" * 100000}
+
+    class Discard:
+        def write(self, data):
+            pass
+
+    tracemalloc.start()
+    try:
+        cli.write_canonical({"units": JSONStream(items())}, Discard())
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert produced == list(range(200))
+    assert peak < 200 * 300000 // 8

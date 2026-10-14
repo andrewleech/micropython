@@ -1,4 +1,4 @@
-"""Deeply nested C reaches facts, semantics and the worker pickle at the default recursion limit."""
+"""Deeply nested C reaches facts, semantics and the fact objects at the default recursion limit."""
 import pickle
 import shutil
 import sys
@@ -8,6 +8,7 @@ import pytest
 
 from mpy_api import compiler, inventory
 from mpy_api.chains import ChainView
+from mpy_api.facts import FactStore
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -110,10 +111,15 @@ def test_deep_sources_extract_serially(deep_records):
 
 
 @needs_gcc
-def test_deep_sources_extract_and_pickle_through_two_workers(deep_records):
-    results, _ = inventory._extract_parallel(deep_records, compiler.authority(ROOT), ROOT, 2)
-    check_chain(results[0])
-    check_nested(results[1])
-    for facts in results:
-        restored = pickle.loads(pickle.dumps(facts, protocol=pickle.HIGHEST_PROTOCOL))
-        assert restored['functions'][0]['events']['flow'] == facts['functions'][0]['events']['flow']
+def test_deep_sources_extract_into_fact_objects_through_two_workers(deep_records, tmp_path):
+    store, results = FactStore(tmp_path), []
+    inventory._extract_parallel(deep_records, compiler.authority(ROOT), ROOT, 2, store, results.append)
+    for index, nodes, location, _, _ in results:
+        store.add(index, nodes, location)
+    complete = [{**index, 'functions': [store.function(record) for record in index['functions']]}
+                for index, _, _, _, _ in results]
+    check_chain(complete[0])
+    check_nested(complete[1])
+    for facts in complete:
+        restored = pickle.loads(pickle.dumps(facts['functions'], protocol=pickle.HIGHEST_PROTOCOL))
+        assert restored[0]['events']['flow'] == facts['functions'][0]['events']['flow']
