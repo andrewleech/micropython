@@ -32,7 +32,7 @@
 #include "usbd_core.h"
 #include "py/obj.h"
 #include "py/mphal.h"
-#if !BUILDING_MBOOT
+#if !BUILDING_MBOOT || MICROPY_MBOOT_TINYUSB
 #include "shared/tinyusb/mp_usbd.h"
 #endif
 #include "irq.h"
@@ -40,8 +40,8 @@
 
 #if MICROPY_HW_STM_USB_STACK || MICROPY_HW_TINYUSB_STACK
 
-#if BUILDING_MBOOT
-// TinyUSB not used in mboot
+#if BUILDING_MBOOT && !MICROPY_MBOOT_TINYUSB
+// The ST USB device stack is used in mboot, unless the bootloader is built with TinyUSB.
 #undef MICROPY_HW_TINYUSB_STACK
 #endif
 

@@ -19,8 +19,8 @@ $(error Invalid BOARD_VARIANT specified: $(BOARD_VARIANT))
 endif
 endif
 
-# If the build directory is not given, make it reflect the board name (and
-# optionally the board variant).
+# If the build directory is not given, make it reflect the board name and
+# optionally the board variant.
 ifneq ($(BOARD_VARIANT),)
 BUILD ?= build-$(BOARD)-$(BOARD_VARIANT)
 else
@@ -262,6 +262,7 @@ SRC_C += \
 	led.c \
 	pin.c \
 	pin_defs_stm32.c \
+	mphalport_hw.c \
 	pin_named_pins.c \
 	bufhelper.c \
 	dma.c \
@@ -537,7 +538,9 @@ endif
 
 all: $(TOP)/lib/stm32lib/README.md all_main $(BUILD)/firmware.hex
 
-ifeq ($(MBOOT_ENABLE_PACKING),1)
+ifeq ($(MBOOT_ROLE),app)
+all_main: $(BUILD)/firmware.bin
+else ifeq ($(MBOOT_ENABLE_PACKING),1)
 all_main: $(BUILD)/firmware.pack.dfu
 else ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),n6))
 ifeq ($(USE_MBOOT),1)
@@ -725,5 +728,9 @@ $(GEN_CDCINF_HEADER): $(GEN_CDCINF_FILE) $(FILE2H) | $(HEADER_BUILD)
 $(GEN_CDCINF_FILE): $(CDCINF_TEMPLATE) $(INSERT_USB_IDS) $(USB_IDS_FILE) | $(HEADER_BUILD)
 	$(ECHO) "GEN $@"
 	$(Q)$(PYTHON) $(INSERT_USB_IDS) $(USB_IDS_FILE) $< > $@
+
+ifeq ($(MBOOT_ROLE),app)
+include mboot_app_rules.mk
+endif
 
 include $(TOP)/py/mkrules.mk

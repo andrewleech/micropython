@@ -24,6 +24,7 @@
  * THE SOFTWARE.
  */
 
+#include "py/mperrno.h"
 #include "py/mphal.h"
 #include "irq.h"
 #include "powerctrl.h"
@@ -691,3 +692,141 @@ void SystemClock_Config(void) {
 }
 
 #endif
+
+#if !defined(STM32N6)
+#if !defined(STM32F0) && !defined(STM32L0) && !defined(STM32WB) && !defined(STM32WL)
+
+typedef struct _sysclk_scaling_table_entry_t {
+    uint16_t mhz;
+    uint16_t value;
+} sysclk_scaling_table_entry_t;
+
+#if defined(STM32F7)
+static const sysclk_scaling_table_entry_t volt_scale_table[] = {
+    { 151, PWR_REGULATOR_VOLTAGE_SCALE3 },
+    { 180, PWR_REGULATOR_VOLTAGE_SCALE2 },
+    // Above 180MHz uses default PWR_REGULATOR_VOLTAGE_SCALE1
+};
+#elif defined(STM32H7A3xx) || defined(STM32H7A3xxQ) || \
+    defined(STM32H7B3xx) || defined(STM32H7B3xxQ)
+static const sysclk_scaling_table_entry_t volt_scale_table[] = {
+    // See table 15 "FLASH recommended number of wait states and programming delay" of RM0455.
+    {88, PWR_REGULATOR_VOLTAGE_SCALE3},
+    {160, PWR_REGULATOR_VOLTAGE_SCALE2},
+    {225, PWR_REGULATOR_VOLTAGE_SCALE1},
+    {280, PWR_REGULATOR_VOLTAGE_SCALE0},
+};
+#elif defined(STM32H7)
+static const sysclk_scaling_table_entry_t volt_scale_table[] = {
+    // See table 55 "Kernel clock distribution overview" of RM0433.
+    {200, PWR_REGULATOR_VOLTAGE_SCALE3},
+    {300, PWR_REGULATOR_VOLTAGE_SCALE2},
+    // Above 300MHz uses default PWR_REGULATOR_VOLTAGE_SCALE1
+    // (above 400MHz needs special handling for overdrive, currently unsupported)
+};
+#endif
+
+static int powerctrl_config_vos(uint32_t sysclk_mhz) {
+    #if defined(STM32F7) || defined(STM32H7)
+    uint32_t volt_scale = PWR_REGULATOR_VOLTAGE_SCALE1;
+    for (int i = 0; i < MP_ARRAY_SIZE(volt_scale_table); ++i) {
+        if (sysclk_mhz <= volt_scale_table[i].mhz) {
+            volt_scale = volt_scale_table[i].value;
+            break;
+        }
+    }
+    if (HAL_PWREx_ControlVoltageScaling(volt_scale) != HAL_OK) {
+        return -MP_EIO;
+    }
+    #endif
+    return 0;
+}
+
+// Assumes that PLL is used as the SYSCLK source
+int powerctrl_rcc_clock_config_pll(RCC_ClkInitTypeDef *rcc_init, uint32_t sysclk_mhz, bool need_pll48) {
+    uint32_t flash_latency;
+
+    #if HAVE_PLL48
+    if (need_pll48) {
+        // Configure secondary PLL at 48MHz for those peripherals that need this freq
+        // (the calculation assumes it can get an integral value of PLL-N).
+
+        #if defined(STM32F413xx)
+        const uint32_t plli2sm = HSE_VALUE / 1000000;
+        const uint32_t plli2sq = 2;
+        const uint32_t plli2sr = 2;
+        const uint32_t plli2sn = 48 * plli2sq;
+        RCC->PLLI2SCFGR = plli2sr << RCC_PLLI2SCFGR_PLLI2SR_Pos
+            | plli2sq << RCC_PLLI2SCFGR_PLLI2SQ_Pos
+            | plli2sn << RCC_PLLI2SCFGR_PLLI2SN_Pos
+            | plli2sm << RCC_PLLI2SCFGR_PLLI2SM_Pos;
+        #else
+        const uint32_t pllm = (RCC->PLLCFGR >> RCC_PLLCFGR_PLLM_Pos) & 0x3f;
+        const uint32_t pllsaip = 4;
+        const uint32_t pllsaiq = 2;
+        const uint32_t pllsain = 48 * pllsaip * pllm / (HSE_VALUE / 1000000);
+        RCC->PLLSAICFGR = pllsaiq << RCC_PLLSAICFGR_PLLSAIQ_Pos
+            | (pllsaip / 2 - 1) << RCC_PLLSAICFGR_PLLSAIP_Pos
+            | pllsain << RCC_PLLSAICFGR_PLLSAIN_Pos;
+        #endif
+
+        // Turn on the PLL and wait for it to be ready.
+        RCC->CR |= RCC_CR_PLL48_ON;
+        uint32_t ticks = mp_hal_ticks_ms();
+        while (!(RCC->CR & RCC_CR_PLL48_RDY)) {
+            if (mp_hal_ticks_ms() - ticks > 200) {
+                return -MP_ETIMEDOUT;
+            }
+        }
+
+        // Select the alternate 48MHz source.
+        RCC->DCKCFGR2 |= RCC_DCKCFGR2_CK48MSEL;
+    }
+    #endif
+
+    // If possible, scale down the internal voltage regulator to save power
+    int ret = powerctrl_config_vos(sysclk_mhz);
+    if (ret) {
+        return ret;
+    }
+
+    #if defined(STM32F7)
+
+    // These flash_latency values assume a supply voltage between 2.7V and 3.6V
+    if (sysclk_mhz <= 30) {
+        flash_latency = FLASH_LATENCY_0;
+    } else if (sysclk_mhz <= 60) {
+        flash_latency = FLASH_LATENCY_1;
+    } else if (sysclk_mhz <= 90) {
+        flash_latency = FLASH_LATENCY_2;
+    } else if (sysclk_mhz <= 120) {
+        flash_latency = FLASH_LATENCY_3;
+    } else if (sysclk_mhz <= 150) {
+        flash_latency = FLASH_LATENCY_4;
+    } else if (sysclk_mhz <= 180) {
+        flash_latency = FLASH_LATENCY_5;
+    } else if (sysclk_mhz <= 210) {
+        flash_latency = FLASH_LATENCY_6;
+    } else {
+        flash_latency = FLASH_LATENCY_7;
+    }
+
+    #elif defined(MICROPY_HW_FLASH_LATENCY)
+    flash_latency = MICROPY_HW_FLASH_LATENCY;
+    #else
+    flash_latency = FLASH_LATENCY_5;
+    #endif
+
+    rcc_init->SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+    if (HAL_RCC_ClockConfig(rcc_init, flash_latency) != HAL_OK) {
+        return -MP_EIO;
+    }
+
+    powerctrl_disable_hsi_if_unused();
+
+    return 0;
+}
+
+#endif
+
+#endif // !defined(STM32N6)
