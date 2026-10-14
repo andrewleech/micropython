@@ -158,10 +158,6 @@ const char *mp_usbd_runtime_string_cb(uint8_t index) {
     return NULL;
 }
 
-bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const *request) {
-    return false; // Currently no support for Vendor control transfers on the Python side
-}
-
 // Generic "runtime device" TinyUSB class driver, delegates everything to Python callbacks
 
 static void runtime_dev_init(void) {
@@ -354,6 +350,23 @@ static bool runtime_dev_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_cont
     }
 
     return result;
+}
+
+// TinyUSB calls this for every vendor-type control request, for both device
+// and interface recipients, before any class driver dispatch: the
+// TUSB_REQ_TYPE_VENDOR check in process_setup_received() returns ahead of the
+// recipient switch. Unlike class requests it is therefore not gated by
+// interface ownership, so check usbd->active here to avoid forwarding to
+// Python while the runtime device is configured but is not what the host has
+// enumerated. Forwarding through the class-request marshalling means a Python
+// control_xfer_cb sees vendor requests with the same stage and return
+// semantics; filtering by recipient or wIndex is left to Python.
+bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const *request) {
+    mp_obj_usb_device_t *usbd = MP_OBJ_TO_PTR(MP_STATE_VM(usbd));
+    if (!usbd || !usbd->active) {
+        return false;
+    }
+    return runtime_dev_control_xfer_cb(rhport, stage, request);
 }
 
 static bool runtime_dev_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes) {
