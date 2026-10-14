@@ -54,13 +54,23 @@
 #if defined(STM32G4)
 // assuming 24MHz clock
 #define CAN_DEFAULT_PRESCALER       (16)
+#define CAN_DEFAULT_BS1             (8)
+#define CAN_DEFAULT_BS2             (3)
+#elif defined(STM32H5)
+// FDCAN kernel clock is HSE (see can_get_source_freq()). HSE_VALUE is a
+// whole number of MHz on every in-tree H5 board, so a prescaler of
+// HSE_VALUE/1000000 with 8 time quanta divides out to exactly 125Kbps
+// at a 75% sample point regardless of crystal frequency.
+#define CAN_DEFAULT_PRESCALER       (HSE_VALUE / 1000000)
+#define CAN_DEFAULT_BS1             (5)
+#define CAN_DEFAULT_BS2             (2)
 #else
 // assuming 48MHz clock
 #define CAN_DEFAULT_PRESCALER       (32)
-#endif
-#define CAN_DEFAULT_SJW             (1)
 #define CAN_DEFAULT_BS1             (8)
 #define CAN_DEFAULT_BS2             (3)
+#endif
+#define CAN_DEFAULT_SJW             (1)
 
 #define CAN_MAXIMUM_NBRP            (512)
 #define CAN_MAXIMUM_NBS1            (256)
