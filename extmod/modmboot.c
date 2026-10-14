@@ -56,10 +56,10 @@
 #define DEFAULT_FS_TYPE FS_FAT
 #endif
 
+// The writer state is kept by the app API, which has one writer at a time.
 typedef struct _mboot_writer_obj_t {
     mp_obj_base_t base;
     uint32_t generation;
-    mboot_app_writer_t writer;
 } mboot_writer_obj_t;
 
 // Opening a Writer invalidates earlier ones, only the newest may touch the slot.
@@ -141,10 +141,14 @@ static mp_obj_t mboot_bootloader_info(void) {
     if (mboot_app_bootloader_info(&info) != 0) {
         return mp_const_none;
     }
-    mp_obj_t d = mp_obj_new_dict(3);
+    mp_obj_t d = mp_obj_new_dict(7);
     dict_store(d, MP_QSTR_version, mp_obj_new_str(info.version, strlen(info.version)));
     dict_store(d, MP_QSTR_layout_id, mp_obj_new_int_from_uint(info.layout_id));
     dict_store(d, MP_QSTR_api, mp_obj_new_int_from_uint(info.api));
+    dict_store(d, MP_QSTR_bl_update, MP_OBJ_NEW_SMALL_INT(info.bl_update));
+    dict_store(d, MP_QSTR_bl_image_id, mp_obj_new_int_from_uint(info.bl_image_id));
+    dict_store(d, MP_QSTR_bl_counter, mp_obj_new_int_from_uint(info.bl_counter));
+    dict_store(d, MP_QSTR_key_hash, mp_obj_new_bytes(info.key_hash, sizeof(info.key_hash)));
     return d;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mboot_bootloader_info_obj, mboot_bootloader_info);
@@ -336,13 +340,12 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mboot_slots_obj, mboot_slots);
 
 // ---- Writer ----
 
-static mboot_writer_obj_t *writer_get(mp_obj_t self_in) {
+static void writer_check(mp_obj_t self_in) {
     mboot_writer_obj_t *self = MP_OBJ_TO_PTR(self_in);
     if (self->generation != writer_generation) {
         // A newer Writer has been opened.
         mp_raise_OSError(MP_EBADF);
     }
-    return self;
 }
 
 static mp_obj_t mboot_writer_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
@@ -354,7 +357,14 @@ static mp_obj_t mboot_writer_make_new(const mp_obj_type_t *type, size_t n_args, 
     mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
 
     mboot_writer_obj_t *self = mp_obj_malloc(mboot_writer_obj_t, type);
-    int rc = mboot_app_writer_open(&self->writer, args[ARG_permanent].u_bool);
+    int rc = mboot_app_writer_open(args[ARG_permanent].u_bool);
+    if (rc == -EBUSY) {
+        // An older Writer is still open: abort it, it becomes invalid below.
+        rc = mboot_app_writer_abort();
+        if (rc == 0) {
+            rc = mboot_app_writer_open(args[ARG_permanent].u_bool);
+        }
+    }
     if (rc != 0) {
         // The slot may have been partly erased, so no earlier Writer remains usable.
         ++writer_generation;
@@ -365,25 +375,25 @@ static mp_obj_t mboot_writer_make_new(const mp_obj_type_t *type, size_t n_args, 
 }
 
 static mp_obj_t mboot_writer_write(mp_obj_t self_in, mp_obj_t buf_in) {
-    mboot_writer_obj_t *self = writer_get(self_in);
+    writer_check(self_in);
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(buf_in, &bufinfo, MP_BUFFER_READ);
-    check_rc(mboot_app_writer_write(&self->writer, bufinfo.buf, bufinfo.len));
+    check_rc(mboot_app_writer_write(bufinfo.buf, bufinfo.len));
     return mp_obj_new_int_from_uint(bufinfo.len);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mboot_writer_write_obj, mboot_writer_write);
 
 static mp_obj_t mboot_writer_finish(mp_obj_t self_in) {
-    mboot_writer_obj_t *self = writer_get(self_in);
+    writer_check(self_in);
     uint32_t total;
-    check_rc(mboot_app_writer_finish(&self->writer, &total));
+    check_rc(mboot_app_writer_finish(&total));
     return mp_obj_new_int_from_uint(total);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mboot_writer_finish_obj, mboot_writer_finish);
 
 static mp_obj_t mboot_writer_abort(mp_obj_t self_in) {
-    mboot_writer_obj_t *self = writer_get(self_in);
-    check_rc(mboot_app_writer_abort(&self->writer));
+    writer_check(self_in);
+    check_rc(mboot_app_writer_abort());
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mboot_writer_abort_obj, mboot_writer_abort);
@@ -391,14 +401,14 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mboot_writer_abort_obj, mboot_writer_abort);
 // Leaving the with block finishes the update, or aborts it if an exception is in flight. A Writer
 // already finished or aborted inside the block is left as it is.
 static mp_obj_t mboot_writer_exit(size_t n_args, const mp_obj_t *args) {
-    mboot_writer_obj_t *self = writer_get(args[0]);
+    writer_check(args[0]);
     bool failed = n_args > 1 && args[1] != mp_const_none;
     int rc;
     if (failed) {
-        rc = mboot_app_writer_abort(&self->writer);
+        rc = mboot_app_writer_abort();
     } else {
         uint32_t total;
-        rc = mboot_app_writer_finish(&self->writer, &total);
+        rc = mboot_app_writer_finish(&total);
     }
     if (rc != -EBADF) {
         check_rc(rc);

@@ -50,6 +50,10 @@ Querying the state
    * ``'version'``: the bootloader version string (a ``str``, taken from the MicroPython version the bootloader was built from).
    * ``'layout_id'``: the layout identifier of the flash layout the bootloader was built for, as an ``int``.
    * ``'api'``: the version number of the interface between the bootloader and this module, as an ``int``.
+   * ``'bl_update'``: how the bootloader itself can be updated, as an ``int``: ``0`` not at all, ``1`` in place, ``2`` with two copies. The bootloaders in this repository report ``0``.
+   * ``'bl_image_id'``: the security counter image identifier of the bootloader, as an ``int``.
+   * ``'bl_counter'``: the security counter value of the running bootloader, as an ``int`` (``0`` for the bootloaders in this repository).
+   * ``'key_hash'``: the SHA-256 hash of the public key the bootloader accepts images signed with, as 32 ``bytes``. It is the hash that a signed image carries in its key hash TLV.
 
 .. function:: state()
 
@@ -106,7 +110,7 @@ Confirming and installing images
 
    *permanent* is passed on to the final marking of the image, as in :func:`request_upgrade`.
 
-   Only the most recently opened writer is usable. Opening a writer, even one whose opening fails, makes every older writer raise ``OSError(EBADF)``, because opening erases the sectors that all writers share.
+   Only the most recently opened writer is usable. Opening a writer aborts an older writer that is still open (as :meth:`Writer.abort` does, raising ``OSError(EIO)`` if that erase fails), and opening, even when it fails, makes every older writer raise ``OSError(EBADF)``, because opening erases the sectors that all writers share.
 
    Opening raises ``OSError(EPERM)`` with the ``single`` slot policy, ``OSError(ENODEV)`` if the flash layout check fails or the layout identifier of the bootloader differs (see :func:`state`), and ``OSError(EIO)`` if a flash erase fails.
 
