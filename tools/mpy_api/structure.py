@@ -152,7 +152,7 @@ def _json_height(root, heights):
     while frames:
         frame = frames[-1]
         for item in frame[1]:
-            if type(item) is ChainView:
+            if type(item) is ChainView or type(item) is JSONStream:
                 frame[3] = False
             elif isinstance(item, (dict, list, tuple)):
                 if not item:
@@ -190,6 +190,15 @@ def _json_height(root, heights):
 _JSON_SCALARS = frozenset((str, int, float, bool, type(None)))
 
 
+class JSONStream:
+    """A JSON array whose items ``items`` produces while it is written, so they are never held
+    together. ``json_pieces`` writes each item with a walk of its own."""
+    __slots__ = ('items',)
+
+    def __init__(self, items):
+        self.items = items
+
+
 def _json_nested(container):
     """An iterator over the items of ``container`` (values of a dict) that are not plain scalars."""
     return iter([item for item in (container.values() if isinstance(container, dict) else container)
@@ -225,13 +234,15 @@ def _json_entries(value, encode_string, encode_one):
 
 def json_pieces(value, encoder, split_depth):
     """Yield the JSON text of ``value`` in pieces whose concatenation is ``encoder.encode(value)``, with a
-    ChainView written as the array of its items.
+    ChainView written as the array of its items and a JSONStream as the array of the items it produces.
 
     ``encoder`` is a ``json.JSONEncoder`` with ``sort_keys``, no ``indent`` and compact separators, so it runs
     its C implementation. A container at depth ``split_depth`` or deeper that is at most ``_C_ENCODER_HEIGHT``
-    levels high, holds no ChainView and does not contain itself, and every other value, is encoded whole by
-    the C encoder. Every other container is walked here with an explicit stack, dicts in sorted key order,
-    so nesting deeper than ``_C_ENCODER_HEIGHT`` never reaches the C encoder's recursion."""
+    levels high, holds no ChainView or JSONStream and does not contain itself, and every other value, is
+    encoded whole by the C encoder. Every other container is walked here with an explicit stack, dicts in
+    sorted key order, so nesting deeper than ``_C_ENCODER_HEIGHT`` never reaches the C encoder's recursion.
+    Each item of a JSONStream is written by its own call at the depth the item lies at, so the heights
+    measured for one item, which is released after it is written, are never consulted for another."""
     encode_string = encode_basestring_ascii if encoder.ensure_ascii else encode_basestring
     encode_one = _json_one_call(encoder)
     heights = {}
@@ -246,6 +257,14 @@ def json_pieces(value, encoder, split_depth):
                 yield text
             if isinstance(item, str):
                 yield encode_string(item)
+                continue
+            if type(item) is JSONStream:
+                separator = "["
+                for element in item.items:
+                    yield separator
+                    separator = ","
+                    yield from json_pieces(element, encoder, split_depth - len(frames))
+                yield "[]" if separator == "[" else "]"
                 continue
             if type(item) is ChainView:
                 walk = bool(item)

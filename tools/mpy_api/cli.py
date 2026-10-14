@@ -232,7 +232,9 @@ def qualify_frozen_payload(inventory, modules):
             "status": "resolved", "sha256": source["sha256"], "source": source["source"]}
 
 
-def write_generation(output, inventory, declarations, identities, *, notices, verify):
+def write_generation(output, surface, declarations, identities, *, notices, verify, inventory=None):
+    """Publish the declarations and notices with their ``generation.json`` receipt, and ``inventory``
+    as ``inventory.json`` when it is given."""
     if output.exists() or output.is_symlink():
         raise FileExistsError(f"output already exists; use a fresh generation directory: {output}")
     artifacts = {}
@@ -255,9 +257,11 @@ def write_generation(output, inventory, declarations, identities, *, notices, ve
     with tempfile.TemporaryDirectory(prefix=".mpy-api-", dir=output.parent) as temporary:
         staging = Path(temporary) / "generation"
         staging.mkdir()
-        with (staging / "inventory.json").open("xb") as stream:
-            identity = write_canonical(inventory, stream)
-        records = {"inventory.json": {"path": "inventory.json", **identity, "role": "inventory"}}
+        records = {}
+        if inventory is not None:
+            with (staging / "inventory.json").open("xb") as stream:
+                identity = write_canonical(inventory, stream)
+            records["inventory.json"] = {"path": "inventory.json", **identity, "role": "inventory"}
         for name, data in artifacts.items():
             destination = staging / name
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -265,9 +269,9 @@ def write_generation(output, inventory, declarations, identities, *, notices, ve
             records[name] = {"path": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
                              "role": "enrichment-license-notice" if name.startswith("enrichment-notices/") else
                              "runtime-builtins" if name == "typeshed/stdlib/builtins.pyi" else "runtime-module"}
-        body = {"schema_version": 1, "producer": "mpy-api", "build": inventory["build"],
+        body = {"schema_version": 1, "producer": "mpy-api", "build": surface["build"],
                 "inputs": identities, "artifacts": [records[name] for name in sorted(records)],
-                "coverage": inventory["coverage"],
+                "coverage": surface["coverage"],
                 "typing_compatibility": {"status": "unverified", "reason": "generation is not supported builtin-aware checker approval"}}
         body["generation_id"] = hashlib.sha256(canonical_bytes(body)).hexdigest()
         (staging / "generation.json").write_bytes(canonical_bytes(body))
@@ -296,6 +300,8 @@ def argument_parser():
     parser.add_argument("--source-owner", action="append", default=[], metavar="NAME=OWNER")
     parser.add_argument("--enrichment", type=Path, help="optional schema-v1 manifest pinning a .pyi enrichment tree and its source/licence inputs")
     parser.add_argument("--jobs", type=int, default=1)
+    parser.add_argument("--inventory", action="store_true",
+                        help="also publish inventory.json, a diagnostic projection of the collected facts")
     parser.add_argument("--output", required=True, type=Path)
     return parser
 
@@ -335,57 +341,67 @@ def generate(args):
     link = link_inputs(args.link_command, args.elf.resolve(strict=True), args.map_path.resolve(strict=True), args.nm)
     frozen, frozen_inputs = collect_frozen(args, root, scope)
     from .declarations import render_declarations
+    from .facts import FactStore
     from . import __version__
-    inventory, verification = collect_inventory(selection, port=args.port, target=args.target,
-                                                variant=args.variant, link=link, jobs=args.jobs)
-    if args.manifest:
-        qualify_frozen_payload(inventory, frozen)
-    names = {module["name"] for module in inventory["modules"]}
-    for module in frozen:
-        if module["name"] in names:
-            raise ValueError(f"frozen/native import conflict is not qualified: {module['name']}")
-        names.add(module["name"])
-        inventory["modules"].append(module)
-    inventory["modules"].sort(key=lambda module: module["name"])
-    inventory["build"]["source"] = revision
-    inventory["build"]["compiler_database_completeness"] = completeness
-    inventory["coverage"]["frozen"] = {"processed_modules": len(frozen),
+    # Fact objects live beside the output for the run; they are inputs to publication, not part of it.
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".mpy-api-facts-", dir=output.parent) as directory:
+        store = FactStore(directory)
+        surface, verification, document = collect_inventory(
+            selection, port=args.port, target=args.target, variant=args.variant, link=link,
+            store=store, jobs=args.jobs, inventory=args.inventory)
+        if args.manifest:
+            qualify_frozen_payload(surface, frozen)
+        names = {module["name"] for module in surface["modules"]}
+        for module in frozen:
+            if module["name"] in names:
+                raise ValueError(f"frozen/native import conflict is not qualified: {module['name']}")
+            names.add(module["name"])
+            surface["modules"].append(module)
+        surface["modules"].sort(key=lambda module: module["name"])
+        surface["build"]["source"] = revision
+        surface["build"]["compiler_database_completeness"] = completeness
+        surface["coverage"]["frozen"] = {"processed_modules": len(frozen),
                                          "records": [module["provenance"] for module in frozen]}
-    identities = {**inputs, "tool_version": __version__, "python": sys.version,
-                  "tools": tools, "parser": parser, "frozen": frozen_inputs,
-                  "enrichment": None}
-    inventory.setdefault("provenance", {})["producer_inputs"] = identities
-    if enrichment:
-        merge_enrichment(inventory, enrichment)
-    declarations = render_declarations(inventory)
-    if "typeshed/stdlib/builtins.pyi" not in declarations:
-        raise ValueError("selected inventory has no generated builtin replacement")
-    def verify_publication_inputs():
-        verify_identities([*inputs.values(), *frozen_inputs["manifests"],
-                           *frozen_inputs["sources"]])
-        from . import compiler
-        compiler.verify_collection(verification)
-        if producer_tools(root) != tools:
-            raise RuntimeError("producer code graph changed during generation")
-        if parser_identity() != parser:
-            raise RuntimeError("parser installation changed during generation")
-        if source_revision(root) != revision:
-            raise RuntimeError("source revision changed during generation")
+        identities = {**inputs, "tool_version": __version__, "python": sys.version,
+                      "tools": tools, "parser": parser, "frozen": frozen_inputs,
+                      "enrichment": None}
+        surface["provenance"]["producer_inputs"] = identities
         if enrichment:
-            verify_enrichment(enrichment)
+            merge_enrichment(surface, enrichment)
+        declarations = render_declarations(surface)
+        if "typeshed/stdlib/builtins.pyi" not in declarations:
+            raise ValueError("selected inventory has no generated builtin replacement")
+        def verify_publication_inputs():
+            verify_identities([*inputs.values(), *frozen_inputs["manifests"],
+                               *frozen_inputs["sources"]])
+            from . import compiler
+            compiler.verify_collection(verification)
+            store.verify()
+            if producer_tools(root) != tools:
+                raise RuntimeError("producer code graph changed during generation")
+            if parser_identity() != parser:
+                raise RuntimeError("parser installation changed during generation")
+            if source_revision(root) != revision:
+                raise RuntimeError("source revision changed during generation")
+            if enrichment:
+                verify_enrichment(enrichment)
 
-    return output, write_generation(output, inventory, declarations, identities,
-                                    notices=enrichment["notice_artifacts"] if enrichment else {},
-                                    verify=verify_publication_inputs)
+        receipt = write_generation(output, surface, declarations, identities,
+                                   notices=enrichment["notice_artifacts"] if enrichment else {},
+                                   verify=verify_publication_inputs,
+                                   inventory=document.value(surface) if document else None)
+        return output, receipt, store.report()
 
 
 def main(argv=None):
     args = argument_parser().parse_args(argv)
     try:
-        output, receipt = generate(args)
+        output, receipt, facts = generate(args)
     except (ValueError, RuntimeError, OSError, ImportError) as exc:
         print(f"mpy-api: {exc}", file=sys.stderr)
         return 1
     print(json.dumps({"output": str(output), "generation_id": receipt["generation_id"],
-                      "artifacts": len(receipt["artifacts"]), "typing_compatibility": "unverified"}, sort_keys=True))
+                      "artifacts": len(receipt["artifacts"]), "typing_compatibility": "unverified",
+                      "fact_objects": facts}, sort_keys=True))
     return 0

@@ -7,6 +7,7 @@ from heapq import merge
 from .chains import ChainView
 from .frontend import constant
 from .bindings import call_parts, constant_value, errors_at, intersect, strip_outer
+from .facts import LinkedFunctions
 from .structure import deep_copy
 
 CONSTRUCTORS = {'mp_obj_new_bool': 'bool', 'mp_obj_new_int': 'int', 'mp_obj_new_int_from_uint': 'int', 'mp_obj_new_int_from_ll': 'int', 'mp_obj_new_int_from_ull': 'int', 'mp_obj_new_bytes': 'bytes', 'mp_obj_new_bytes_from_vstr': 'bytes', 'mp_obj_new_str': 'str', 'mp_obj_new_str_from_utf8_vstr': 'str'}
@@ -1503,7 +1504,9 @@ def _constant_operand(expression, function, use, environment, seen=()):
         expression, use, seen = initializer.get('expression', ''), local.get('definition_use', local), (*seen, expression)
 
 
-def _selected_helpers(call, name, functions, linked_functions, caller=None):
+def helper_candidates(call, name, functions, linked_functions, caller=None):
+    """The helper definitions and authorities ``call`` selects for ``name``: from ``linked_functions``
+    when given, else from the same-unit ``functions``. Linked rows give their ``function`` as stored."""
     if not call or (call.get('callee') or {}).get('kind') != 'FUNCTION_DECL':
         return []
     local = [(definition, {'resolution': 'bounded-resolved', 'kind': 'same-TU-declaration-definition', 'declaration_identity': call['callee']})
@@ -1521,6 +1524,44 @@ def _selected_helpers(call, name, functions, linked_functions, caller=None):
     for definition, authority in (linked if linked_functions is not None else local):
         candidates[definition['id']] = (definition, authority)
     return list(candidates.values())
+
+
+def _selected_helpers(call, name, functions, linked_functions, caller=None):
+    candidates = helper_candidates(call, name, functions, linked_functions, caller)
+    if _helper_lookups is not None and call and (call.get('callee') or {}).get('kind') == 'FUNCTION_DECL':
+        _helper_lookups.append((name, call['callee'], (caller or {}).get('translation_unit'), bool(candidates)))
+    if isinstance(linked_functions, LinkedFunctions):
+        return [(linked_functions.function(definition), authority) for definition, authority in candidates]
+    return candidates
+
+
+# The helper lookups of the running ``unit_semantics``: (name, callee declaration, caller translation
+# unit, whether a helper was found) for each.
+_helper_lookups = None
+
+
+def unit_semantics(function, functions, errors, contracts):
+    """``semantics`` of ``function`` within its unit, and the helper lookups it made.
+
+    A helper lookup (``_selected_helpers``) is the only point at which a run with ``linked_functions``
+    can differ from this one. The lookups are None when one of them found a same-unit helper, and
+    otherwise ``(name, callee declaration, caller translation unit)`` for each; when no lookup finds a
+    linked helper either, the linked run makes the same lookups with the same results, and so equals
+    this one (``linked_semantics_unchanged``)."""
+    global _helper_lookups
+    _helper_lookups = lookups = []
+    try:
+        result = semantics(function, functions, errors, contracts)
+    finally:
+        _helper_lookups = None
+    return result, None if any(found for *_, found in lookups) else [lookup[:3] for lookup in lookups]
+
+
+def linked_semantics_unchanged(lookups, linked_functions):
+    """Whether ``semantics`` with ``linked_functions`` equals the unit run that made ``lookups``."""
+    return lookups is not None and not any(
+        helper_candidates({'callee': callee}, name, {}, linked_functions, {'translation_unit': translation_unit})
+        for name, callee, translation_unit in lookups)
 
 
 def _reference_key(reference):

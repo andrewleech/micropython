@@ -3,6 +3,7 @@ from pathlib import Path
 import re
 from .frontend import canonical, constant
 from .compiler import read_recorded, reconcile_inputs
+from .facts import SemanticsReference
 
 
 def split_args(text):
@@ -407,7 +408,10 @@ def row_pair(entry, contracts):
 
 
 def materialize(inputs, resolve, selected=None, present=None, resolve_function=None):
-    """One object-binding path for TU and selected-link views, preserving gaps."""
+    """One object-binding path for TU and selected-link views, preserving gaps.
+
+    ``inputs`` are unit indexes; a binding to a wrapper function records its unit semantics as a
+    ``SemanticsReference`` to the function's index record."""
     linked = selected is not None
     bindings, containers, resolutions, unassessed_entries = [], [], [], []
     runtime_module, runtime_status = resolve('mp_type_module', '<runtime-module-framework>') if linked else (None, 'translation-unit-configuration-only')
@@ -495,8 +499,8 @@ def materialize(inputs, resolve, selected=None, present=None, resolve_function=N
                                     else:
                                         candidates = [f for f in wrapper_facts.get('functions', []) if f['name'] == shape.get('function')]
                                     if len(candidates) == 1:
-                                        semantic = candidates[0]['semantics']
-                                        if semantic.get('frontend_unresolved'): unresolved.append('wrapper function has frontend errors')
+                                        semantic = SemanticsReference(candidates[0])
+                                        if candidates[0]['frontend_unresolved']: unresolved.append('wrapper function has frontend errors')
                                     else: unresolved.append('wrapper function missing, ambiguous or unallocated')
                             elif object_definition['kind'] not in ('type', 'module'):
                                 unresolved.append('unsupported exported object family ' + object_definition['kind'])

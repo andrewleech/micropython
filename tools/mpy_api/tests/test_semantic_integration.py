@@ -6,6 +6,7 @@ import subprocess
 import inspect
 import json
 from pathlib import Path
+import tempfile
 
 import pytest
 
@@ -14,7 +15,7 @@ from mpy_api.declarations import render_declarations
 from mpy_api.inventory import _call_slot_abi_matches, _call_slot_binding, _checked_wrapper_type_authority, _extract, _header_helper_authority, _linked_functions, _native_receiver_contract, _normal_surface, _parameters, _public_contracts, _receiver_offset
 from mpy_api.link import collect_ownership, join
 from mpy_api.semantics import checked_receiver_authority, semantics
-from test_native_bindings import ARGUMENT_HEADER, HANDLERS, ROOT, argument_parser_source, extract_c, linked_c, parsed_definitions
+from test_native_bindings import ARGUMENT_HEADER, HANDLERS, ROOT, argument_parser_source, extract_c, index_view, linked_c, parsed_definitions
 from test_semantic_contracts import connected_framework_fixture
 
 
@@ -61,7 +62,8 @@ def bind_wrapper(facts, function, declaration, offset=0, receiver=None):
     shape = copy.deepcopy(declaration["callshape"])
     shape["implicit_argument_offset"] = offset
     parser = next((item for item in facts["functions"] if item["name"] == "mp_arg_parse_all"), None)
-    _parameters(shape, function["semantics"], facts, (facts, parser) if parser else None)
+    (index,), store = index_view(Path(tempfile.mkdtemp(dir=Path(facts["source"]).parent)), facts)
+    _parameters(shape, function["semantics"], index, store, (index, parser) if parser else None)
     summary = _public_contracts(shape, function["semantics"], function,
                                 {"object_id": declaration["id"], "object_source_span": declaration["source_span"]}, receiver)
     symbol = {"name": "selected", "kind": "function", "identity": declaration["id"],
@@ -301,8 +303,9 @@ def test_exact_linked_cross_tu_identity_and_unallocated_definition(tmp_path, opt
     argv = ["gcc", *(record["object"] for record in records), "-Wl,-Map=" + str(map_path), "-o", str(elf)]
     subprocess.run(argv, check=True, capture_output=True)
     ownership = collect_ownership(records, {"directory": tmp_path, "elf": elf, "map": map_path, "argv": argv})
-    _, _, present = join(facts, ownership)
-    linked = _linked_functions(facts, present)
+    indexes, store = index_view(tmp_path / "facts", *facts)
+    _, _, present = join(indexes, ownership, store)
+    linked = _linked_functions(indexes, present, store)
     caller = next(function for function in facts[1]["functions"] if function["name"] == "selected")
     summary = semantics(caller, {"selected": [caller]}, [], facts[1]["contracts"], linked_functions=linked)
     shape = {"minimum": 1, "maximum": 1, "keywords": False, "implicit_argument_offset": 0}
@@ -314,7 +317,7 @@ def test_exact_linked_cross_tu_identity_and_unallocated_definition(tmp_path, opt
     if optimization == "-O2":
         assert not present(facts[0], {"name": "backend_alias"})
         assert linked["backend_alias"][0]["authority"]["allocated_caller_authority"]["direct_static_call_path"]
-    reduced = _linked_functions(facts[1:], present)
+    reduced = _linked_functions(indexes[1:], present, store)
     assert "external_identity" not in reduced
     unavailable = semantics(caller, {"selected": [caller]}, [],
                             facts[1]["contracts"], linked_functions=reduced)
@@ -529,13 +532,13 @@ static const mp_obj_type_t sample = {""")
     source = source.replace(
         ".slot_index_attr = 1, .slots = { (const void *)sample_attr },",
         ".slot_index_attr = 1, .slot_index_locals_dict = 2, .slots = { (const void *)sample_attr, &sample_locals },")
-    facts, raw, resolve, present = linked_c(tmp_path, source, "py/runtime.c")
-    _, types, _ = _normal_surface(raw, [facts], resolve, present, tmp_path)
+    facts, raw, resolve, present, store = linked_c(tmp_path, source, "py/runtime.c")
+    _, types, _ = _normal_surface(raw, [facts], resolve, present, tmp_path, store)
     sample = next(item for item in types if item["name"] == "Sample")
     symbol = next(item for item in sample["members"] if item["name"] == "method")
     assert symbol["receiver_contract"]["native_type_identity"] == sample["identity"]
     assert symbol["receiver_contract"]["nominal_authority_resolution"] == "unresolved"
-    function = next(item for item in facts["functions"] if item["name"] == "method")
+    function = store.function(next(item for item in facts["functions"] if item["name"] == "method"))
     declarations = function["parameter_source_contract"]["declarations"]
     assert declarations[0]["name"] == "self_in"
     returned = symbol["semantics"]["returns"][0]
@@ -959,7 +962,7 @@ def test_selected_typed_call_slot_requires_actual_storage_typedef_and_function_a
     facts, _ = extract_c(tmp_path, body, filename="py/runtime.c")
     owner = next(definition for definition in facts["definitions"] if definition["name"] == "mp_type_checked_fun")
     function = next(function for function in facts["functions"] if function["name"] == "checked_fun_call")
-    binding = _call_slot_binding(facts, owner, owner["slots"][0])
+    binding = _call_slot_binding(facts["frontend"], owner, owner["slots"][0])
     assert bool(binding and _call_slot_abi_matches(function, binding)) is accepted
     if accepted:
         assert binding["function"] == function["name"]
@@ -1162,7 +1165,8 @@ def test_header_tag_helper_needs_actual_inline_or_selected_body_ownership(tmp_pa
     getter = next(function for function in facts["functions"] if function["name"] == "mp_obj_get_type")
     caller = {"function": getter, "authority": {"translation_unit": facts["translation_unit"]}}
     present = lambda _facts, declaration: declaration["name"] == ("mp_obj_is_obj" if allocated else "mp_obj_get_type") if static_path or allocated else False
-    linked = _linked_functions([facts], present) if static_path else {}
+    (index,), store = index_view(tmp_path / "facts", facts)
+    linked = _linked_functions([index], present, store) if static_path else {}
     authority = _header_helper_authority(facts, function, caller, linked, present)
     assert bool(authority) is accepted
     if accepted:

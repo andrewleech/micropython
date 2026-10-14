@@ -12,12 +12,15 @@ import subprocess
 import traceback
 
 from . import compiler
+from . import facts as factobjects
+from .facts import UNIT_INDEX, LinkedFunctions
 from .frontend import syntax_adapter, constant
 from .bindings import definitions, registration_records, call_parts, scalar_field, strip_outer, constant_value
-from .semantics import semantics, direct_parameter, bind_public_contracts, checked_receiver_authority, input_helper_authority, lexical_constant, event_applicability
+from .semantics import (semantics, unit_semantics, linked_semantics_unchanged, direct_parameter, bind_public_contracts,
+                        checked_receiver_authority, input_helper_authority, lexical_constant, event_applicability)
 from .link import collect_ownership, join
 from .frozen_payload import collect_frozen_payload
-from .structure import deep_copy
+from .structure import JSONStream, deep_copy
 
 
 def _resolution(status, reasons=(), **evidence):
@@ -82,9 +85,10 @@ def _extract_impl(record, compdb, root):
         tests = [{'name': name, 'expression': condition['expression'], 'source_span': condition['source_span']}
                  for condition in (function['events']['conditions'] if not function['events'].get('semantic_unassessed') else [])
                  for name in re.findall(r'MP_QSTR_(\w+)', condition['expression'])]
+        summary, lookups = unit_semantics(function, by_name, errors, contracts)
         function.update(
-            semantics={**semantics(function, by_name, errors, contracts),
-                       'diagnostic_stage': 'translation-unit-extraction'},
+            semantics={**summary, 'diagnostic_stage': 'translation-unit-extraction'},
+            semantic_helper_lookups=lookups,
             handler_attributes=sorted({test['name'] for test in tests}),
             handler_attribute_tests=tests)
     prepared['frontend'] = frontend
@@ -205,8 +209,8 @@ def _parser_forwarding(parser, function, public_function, shape):
             'authority': 'selected unchanged count/vector/keyword declarations with equal bounded parser offset'}
 
 
-def _parser_protocol(facts, function):
-    """Certify the selected indexed parser loop and its forwarding branches."""
+def _parser_protocol(facts, function, frontend):
+    """Certify the selected indexed parser loop and its forwarding branches (``frontend``: the tables of ``facts``)."""
     events, params = function['events'], function['parameters']
     if len(params) != 6 or events.get('semantic_unassessed'):
         return None
@@ -341,7 +345,7 @@ def _parser_protocol(facts, function):
             str(source_dir / 'runtime.h'), str(source_dir / 'obj.h')}:
         return None
     arguments = call_parts(lookup['expression'])[1]
-    environment = {**facts.get('frontend', {}).get('contract_constants', {}), **function['constants']}
+    environment = {**frontend.get('contract_constants', {}), **function['constants']}
     lookup_mode = constant('MP_MAP_LOOKUP', environment)
     qstr_template = facts.get('contracts', {}).get('rom_qstr', '')
     expected_key = qstr_template.replace('MP_QSTR___name__', allowed + ' [ i ] . qst').replace('mp_rom_obj_t', 'mp_obj_t')
@@ -483,8 +487,11 @@ def _parser_conversions(facts, function, linked_functions=None, protocol=None):
     return conversions
 
 
-def _parameters(shape, semantic, facts, parser_owner=None, linked_functions=None):
-    """Compose a complete parser table with selected count/vector relations."""
+def _parameters(shape, semantic, facts, store, parser_owner=None, linked_functions=None):
+    """Compose a complete parser table with selected count/vector relations.
+
+    ``facts`` is the unit index holding the parser call; ``parser_owner`` is the selected parser's unit
+    index and complete function record."""
     rows = semantic.get('argument_tables', []) if semantic else []
     parsers = semantic.get('parser_calls', []) if semantic else []
     if not rows:
@@ -503,7 +510,9 @@ def _parameters(shape, semantic, facts, parser_owner=None, linked_functions=None
     if not function:
         unresolved('forwarded parser count/vector/default mapping unassessed')
         return
+    function = store.function(function)
     public_function = next((fn for fn in facts['functions'] if fn['id'] == semantic['function_id']), None)
+    public_function = store.function(public_function) if public_function else None
     forwarding = _parser_forwarding(parser, function, public_function, shape) if public_function else None
     if not forwarding or args[4] != rows[0]['table_id'].rsplit('::', 1)[-1]:
         unresolved('parser count/vector/keyword/table relation is not qualified equal-offset forwarding')
@@ -520,7 +529,7 @@ def _parameters(shape, semantic, facts, parser_owner=None, linked_functions=None
     if len(parser_params) != 6:
         unresolved('argument parser parameter family is unsupported')
         return
-    protocol = _parser_protocol(parser_facts, parser_function)
+    protocol = _parser_protocol(parser_facts, parser_function, store.frontend(parser_facts))
     if not protocol:
         unresolved('selected parser complete extent/lookup/default/required/excess protocol is unsupported')
         return
@@ -530,14 +539,14 @@ def _parameters(shape, semantic, facts, parser_owner=None, linked_functions=None
         return
     storage = []
     for owner in (facts, parser_facts):
-        interfaces = owner.get('frontend', {}).get('aggregate_interfaces', [])
+        interfaces = store.frontend(owner).get('aggregate_interfaces', [])
         fields = [scalar_field(interfaces, 'mp_arg_t', name, c_type)
                   for name, c_type in (('qst', 'uint16_t'), ('flags', 'uint16_t'), ('defval', 'mp_arg_val_t'))]
         if not all(fields):
             unresolved('selected caller/parser mp_arg_t scalar field layout is unqualified')
             return
         storage.append(fields)
-    helper_env = {**parser_facts.get('frontend', {}).get('contract_constants', {}), **parser_function['constants']}
+    helper_env = {**store.frontend(parser_facts).get('contract_constants', {}), **parser_function['constants']}
     flags_values = {name: constant(parser_facts.get('contracts', {}).get('arg_' + name, ''), helper_env)
                     for name in ('required', 'kw_only', 'kind_mask', 'bool', 'int', 'obj')}
     if any(value is None or not 0 <= value <= 65535 for value in flags_values.values()):
@@ -868,18 +877,21 @@ def _handler_write_contract(write, function, contracts, dispatch, resolve, prese
             'value_contract': value, 'getter': getter}
 
 
-def _linked_functions(inputs, present):
-    """Join exact declarations to allocated bodies and their direct static helpers."""
+def _linked_functions(inputs, present, store):
+    """Join exact declarations to allocated bodies and their direct static helpers.
+
+    Reads the unit indexes only; the rows keep index function records, whose complete records the
+    returned map loads from ``store``."""
     selected, anchors = [], {}
     for facts in inputs:
         functions = facts['functions']
         statics = {}
         for function in functions:
-            if function['linkage'] == 'static' and not function['events'].get('semantic_unassessed'):
+            if function['linkage'] == 'static' and not function['semantic_unassessed']:
                 statics.setdefault(function['name'], []).append(function)
         roots = [function for function in functions
                  if present(facts, {'name': function['name']})
-                 and not function['events'].get('semantic_unassessed')]
+                 and not function['semantic_unassessed']]
         pending = [(function, {'allocated_function': function['id'], 'source': function['source_span'],
                                'direct_static_call_path': []}) for function in roots]
         while pending:
@@ -888,7 +900,7 @@ def _linked_functions(inputs, present):
                 continue
             anchors[function['id']] = anchor
             selected.append((facts, function))
-            for call in function['events']['calls']:
+            for call in function['call_index']:
                 declaration = call.get('callee') or {}
                 candidates = [child for child in statics.get(declaration.get('name'), [])
                               if child['declaration_identity'] == declaration]
@@ -900,10 +912,10 @@ def _linked_functions(inputs, present):
         locals_by_name.setdefault((facts['translation_unit'], function['name']), []).append((facts, function))
         if function['linkage'] == 'external':
             externals_by_name.setdefault(function['name'], []).append((facts, function))
-    linked, seen = {}, set()
+    linked, seen = LinkedFunctions(store), set()
     for caller_facts in inputs:
         for caller in caller_facts['functions']:
-            for call in caller['events']['calls']:
+            for call in caller['call_index']:
                 declaration = call.get('callee') or {}
                 if declaration.get('kind') != 'FUNCTION_DECL':
                     continue
@@ -934,7 +946,9 @@ def _linked_functions(inputs, present):
 
 
 def _header_helper_authority(facts, function, caller, linked_functions, present, *, terminal_literal=False):
-    """Keep source-inline exceptions distinct from allocated/static-call bodies."""
+    """Keep source-inline exceptions distinct from allocated/static-call bodies.
+
+    ``facts`` is a unit index; ``function`` and the caller's ``function`` are complete records."""
     caller_function = caller['function']
     if (caller['authority'].get('translation_unit') != facts['translation_unit']
             or not any(call.get('callee') == function['declaration_identity']
@@ -995,10 +1009,10 @@ def _checked_wrapper_type_authority(native_definition, receiver_definitions, nat
     return None
 
 
-def _call_slot_binding(facts, definition, slot):
-    """Resolve a call-slot reference through its actual vector and typedef ABI."""
+def _call_slot_binding(frontend, definition, slot):
+    """Resolve a call-slot reference through its actual vector and typedef ABI (``frontend``: the tables of the definition's unit)."""
     source_dir = Path(definition['source_span']['source']).parent
-    interfaces = facts.get('frontend', {}).get('aggregate_interfaces', [])
+    interfaces = frontend.get('aggregate_interfaces', [])
     names = re.findall(r'\bmp_obj_(?:full_|empty_)?type_t\b', definition.get('declaration_specifiers', ''))
     selected = [interface for interface in interfaces
                 if len(names) == 1 and interface['name'] == names[0] and interface['status'] == 'resolved']
@@ -1015,7 +1029,7 @@ def _call_slot_binding(facts, definition, slot):
     typed = re.fullmatch(r'\( ([A-Za-z_]\w*) \) (.*)', expression)
     abi = None
     if typed:
-        candidates = [interface for interface in facts.get('frontend', {}).get('function_pointer_interfaces', [])
+        candidates = [interface for interface in frontend.get('function_pointer_interfaces', [])
                       if interface['name'] == typed[1] and interface['status'] == 'resolved'
                       and interface['source_span']['source'] == str(source_dir / 'obj.h')]
         if len(candidates) != 1:
@@ -1076,7 +1090,11 @@ def _native_receiver_contract(owner, shape, wrapper_definition, receiver_check, 
     return contract
 
 
-def _normal_surface(raw, inputs, resolve, present, root):
+def _normal_surface(raw, inputs, resolve, present, root, store):
+    """Compose the public modules and types from the link join.
+
+    ``inputs`` are unit indexes; every function body, semantics result and frontend table composition
+    reads is loaded from ``store`` where it is read."""
     containers = {c['id']: c for c in raw['containers']}
     facts_by_tu = {f['translation_unit']: f for f in inputs}
     bindings_by_container = {}
@@ -1085,18 +1103,24 @@ def _normal_surface(raw, inputs, resolve, present, root):
         bindings_by_container.setdefault(key, []).append(binding)
     types, diagnostics = {}, []
     constructing = set()
-    linked_functions = _linked_functions(inputs, present)
+    linked_functions = _linked_functions(inputs, present, store)
     semantic_cache = {}
 
     def selected_semantics(facts, function):
+        """The linked semantics of the index function ``function``: its unit semantics when no helper
+        lookup it made finds a linked helper (``linked_semantics_unchanged``), else a linked run."""
         if function['id'] not in semantic_cache:
-            functions = {}
-            for item in facts['functions']:
-                functions.setdefault(item['name'], []).append(item)
-            semantic_cache[function['id']] = {
-                **semantics(function, functions, facts.get('errors', []), facts.get('contracts', {}),
-                            linked_functions=linked_functions),
-                'diagnostic_stage': 'selected-linked-semantics'}
+            if linked_semantics_unchanged(function['semantic_helper_lookups'], linked_functions):
+                store.counts['unit_semantics_reused'] += 1
+                result = deep_copy(store.function(function)['semantics'])
+            else:
+                store.counts['linked_semantics_runs'] += 1
+                functions = {}
+                for item in facts['functions']:
+                    functions.setdefault(item['name'], []).append(item)
+                result = semantics(store.function(function), functions, facts.get('errors', []), facts.get('contracts', {}),
+                                   linked_functions=linked_functions)
+            semantic_cache[function['id']] = {**result, 'diagnostic_stage': 'selected-linked-semantics'}
         return semantic_cache[function['id']]
 
     def complete(steps):
@@ -1133,11 +1157,10 @@ def _normal_surface(raw, inputs, resolve, present, root):
                   'value_contract': binding['value_contract'], 'dictionary_window': binding['dictionary_window']}
         if shape:
             facts = facts_by_tu.get(identity['translation_unit'])
-            function_id = (binding.get('semantics') or {}).get('function_id')
-            semantic_facts = next((f for f in inputs if any(fn['id'] == function_id for fn in f['functions'])), facts)
-            function = next((fn for fn in semantic_facts['functions'] if fn['id'] == function_id), None) if semantic_facts else None
-            summary = selected_semantics(semantic_facts, function) if function else binding.get('semantics')
-            _parameters(shape, summary, semantic_facts,
+            reference = binding.get('semantics')
+            semantic_facts, function = function_owners.get(reference.function['id'], (facts, None)) if reference else (facts, None)
+            summary = selected_semantics(semantic_facts, function) if function else None
+            _parameters(shape, summary, semantic_facts, store,
                         selected_function('mp_arg_parse_all', source='py/argcheck.c'), linked_functions)
             owner = containers.get(identity.get('container_id'))
             if owner is None:
@@ -1154,7 +1177,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
             if receiver is not None:
                 result['receiver_contract'] = receiver
             if function and summary:
-                summary = _public_contracts(shape, summary, function, identity, receiver)
+                summary = _public_contracts(shape, summary, store.function(function), identity, receiver)
             result['callshape'] = shape
             result['semantics'] = summary
             shape_status = 'non-callable' if shape.get('callable') is False else 'resolved' if isinstance(shape.get('minimum'), int) and isinstance(shape.get('maximum'), int) and isinstance(shape.get('keywords'), bool) and not shape.get('unresolved') else 'unresolved'
@@ -1182,24 +1205,26 @@ def _normal_surface(raw, inputs, resolve, present, root):
                                           authority='selected attribute-handler condition and destination write'),
                 'value_contract': value or {'kind': 'unresolved', 'reason': 'attribute result/assignment contract unassessed'}}
 
-    functions_by_name = {}
+    functions_by_name, function_owners = {}, {}
     for f in inputs:
         for fn in f['functions']:
             functions_by_name.setdefault(fn['name'], []).append((f, fn))
+            function_owners.setdefault(fn['id'], (f, fn))
 
     def selected_function(name, *, source=None, translation_unit=None):
+        """The unique selected allocated function ``name``: its unit index and complete record."""
         candidates = [(f, fn) for f, fn in functions_by_name.get(name, ())
                       if present(f, {'name': name})
                       and (source is None or fn['source_span']['source'] == str(root / source))
-                      and not fn['events'].get('semantic_unassessed')]
+                      and not fn['semantic_unassessed']]
         if translation_unit is not None:
             local = [item for item in candidates if item[0]['translation_unit'] == translation_unit]
             if len(local) == 1:
-                return local[0]
+                return local[0][0], store.function(local[0][1])
             if local:
                 return None
             candidates = [item for item in candidates if item[1]['linkage'] == 'external']
-        return candidates[0] if len(candidates) == 1 else None
+        return (candidates[0][0], store.function(candidates[0][1])) if len(candidates) == 1 else None
 
     framework = selected_function('mp_load_method_maybe', source='py/runtime.c')
     type_framework = selected_function('type_attr', source='py/objtype.c')
@@ -1230,7 +1255,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
             candidates = [row for row in linked_functions.get(name, [])
                           if row['function']['source_span']['source'] == str(root / source_path)]
             if len(candidates) == 1:
-                receiver_definitions[name] = candidates[0]
+                receiver_definitions[name] = {**candidates[0], 'function': store.function(candidates[0]['function'])}
         row = receiver_definitions.get(name)
         if row:
             row['authority']['header_declaration_identity'] = row['function'].get('declaration_identity')
@@ -1242,7 +1267,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
                       function['name'] == 'MP_COMPRESSED_ROM_TEXT'
                       and function['source_span']['source'] == str(root / 'py/misc.h')] if facts else []
         if len(candidates) == 1:
-            function = candidates[0]
+            function = store.function(candidates[0])
             authority = _header_helper_authority(
                 facts, function, checked_call, linked_functions, present, terminal_literal=True)
             if authority:
@@ -1279,7 +1304,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
                           function['name'] == name and function['source_span']['source'] == str(root / 'py/obj.h')] if facts else []
             if len(candidates) != 1:
                 continue
-            function = candidates[0]
+            function = store.function(candidates[0])
             authority = _header_helper_authority(facts, function, type_getter, linked_functions, present)
             if authority:
                 receiver_definitions[name] = {
@@ -1292,7 +1317,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
                       function['name'] == 'mp_obj_is_obj'
                       and function['source_span']['source'] == str(root / 'py/obj.h')] if facts else []
         if len(candidates) == 1:
-            function = candidates[0]
+            function = store.function(candidates[0])
             authority = _header_helper_authority(facts, function, dispatch, linked_functions, present)
             if authority:
                 receiver_definitions['dispatch_mp_obj_is_obj'] = {
@@ -1305,7 +1330,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
             facts, definition = checked_type
             slot_authority = None
             slots = [slot for slot in definition.get('slots', []) if slot['slot'] == 'call']
-            slot_binding = _call_slot_binding(facts, definition, slots[0]) if len(slots) == 1 else None
+            slot_binding = _call_slot_binding(store.frontend(facts), definition, slots[0]) if len(slots) == 1 else None
             slot_name = slot_binding['function'] if slot_binding else None
             if slot_name:
                 selected = selected_function(slot_name, translation_unit=facts['translation_unit'])
@@ -1334,7 +1359,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
         if framework and container['kind'] == 'type':
             flags = container.get('type_flags_value')
             mask = constant(framework[0].get('contracts', {}).get('iterator_mask', ''),
-                            framework[0].get('frontend', {}).get('contract_constants', {}))
+                            store.frontend(framework[0]).get('contract_constants', {}))
             next_tests = [test for test in framework[1]['handler_attribute_tests'] if test['name'] == '__next__']
             writes = [write for write in framework[1]['semantics']['destination_writes']
                       if write['destination_index'] == 0 and '& mp_builtin_next_obj' in write['expression']
@@ -1493,7 +1518,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
         policy = compose_policy(container, result['members'])
         flags = container.get('type_flags_value')
         instance_flag = constant(facts_by_tu[container['translation_unit']].get('contracts', {}).get('instance_type_flag', ''),
-                                 facts_by_tu[container['translation_unit']].get('frontend', {}).get('contract_constants', {}))
+                                 store.frontend(facts_by_tu[container['translation_unit']]).get('contract_constants', {}))
         instance_inheritance = flags is not None and instance_flag is not None and bool(flags & instance_flag) and any(
             handler['name'] in ('mp_obj_instance_attr', 'mp_obj_class_attr')
             and selected_function(handler['name'], source='py/objtype.c', translation_unit=container['translation_unit'])
@@ -1508,7 +1533,7 @@ def _normal_surface(raw, inputs, resolve, present, root):
                 result['base_identities'].append(parent_type['identity'])
                 lookup_stops = [condition for fn in (type_framework[0]['functions'] if type_framework else [])
                                 if fn['name'] == 'mp_obj_class_lookup' and fn['source_span']['source'] == str(root / 'py/objtype.c')
-                                for condition in fn['events']['conditions'] if condition['expression'] == 'type == & mp_type_object']
+                                for condition in store.function(fn)['events']['conditions'] if condition['expression'] == 'type == & mp_type_object']
                 parent_lookup_stops = parent[1]['name'] == 'mp_type_object' and bool(lookup_stops)
                 if parent_lookup_stops:
                     policy['parent_lookup_stop'] = {'identity': parent_type['identity'], 'source': lookup_stops[0]['source_span'],
@@ -1623,10 +1648,17 @@ def _publish_initializers(inventory):
         stack.extend(item for item in value.values() if isinstance(item, (dict, list)))
 
 
-def _public_translation_unit(facts):
-    """Retain extraction coverage without duplicating internal branch graphs."""
+def _public_translation_unit(facts, store):
+    """The published form of the unit index ``facts``: its index and evidence fields, with an
+    overview of each function in place of its events, read from its fact object without keeping
+    the evidence that composition did not load."""
+    evidence = store.peek_unit_evidence(facts)
+    unit = {key: facts[key] for key in UNIT_INDEX if key in facts}
+    unit.update(evidence)
+    unit['input'] = {**evidence['input'], 'input_snapshots': compiler.public_inputs(evidence['input']['input_snapshots'])}
     functions = []
-    for function in facts['functions']:
+    for record in facts['functions']:
+        function = store.peek_function(record)
         summary = {key: function[key] for key in (
             'id', 'declaration_identity', 'name', 'linkage', 'source_span',
             'parameters', 'constants', 'parameter_source_contract')}
@@ -1645,63 +1677,118 @@ def _public_translation_unit(facts):
             'syntax_semantic_barriers', 'diagnostic_stage') if key in semantics}
         summary['evidence_role'] = 'extraction overview; selected API fields retain branch/value evidence'
         functions.append(summary)
-    return {**facts, 'functions': functions}
+    unit['functions'] = functions
+    return unit
+
+
+class InventoryDocument:
+    """The ``inventory.json`` projection, built only on request: the published surface, each unit's
+    public form and the raw link provenance. Unit forms and the unit semantics of raw bindings are
+    read from the fact objects one at a time while the document is written."""
+
+    def __init__(self, inputs, store, ownership, raw):
+        ownership['input_snapshots'] = compiler.public_inputs(ownership['input_snapshots'])
+        self._provenance = {'ownership': ownership, 'binding_ownership_resolutions': raw['ownership_resolutions'],
+                            'raw_bindings': raw['bindings'], 'selected_import_rows': raw['import_rows']}
+        _publish_initializers(self._provenance)
+        self._inputs, self._store = inputs, store
+
+    def value(self, surface):
+        """The document for ``surface`` as published, its streamed parts as ``JSONStream`` values."""
+        return {**surface, 'translation_units': JSONStream(self._units()),
+                'provenance': {**surface['provenance'], **self._provenance,
+                               'raw_bindings': JSONStream(self._bindings())}}
+
+    def _units(self):
+        for facts in self._inputs:
+            unit = _public_translation_unit(facts, self._store)
+            _publish_initializers(unit)
+            yield unit
+
+    def _bindings(self):
+        for binding in self._provenance['raw_bindings']:
+            reference = binding['semantics']
+            if reference is not None:
+                semantics = self._store.peek_function(reference.function)['semantics']
+                _publish_initializers(semantics)
+                binding = {**binding, 'semantics': semantics}
+            yield binding
 
 
 class _WorkerTraceback(Exception):
     """Carries the formatted traceback of an exception raised in an extraction worker process."""
 
 
+def _extract_unit(record, compdb, root, path, level):
+    """Extract one translation unit into the fact object at ``path``.
+
+    Returns what the link stage keeps, the unit index, its node table and the fact object's location,
+    then what the parent checks once and does not keep: the unit's consumed input snapshots and its
+    include selection constraints."""
+    facts = _extract(record, compdb, root)
+    constraints = facts.pop('_selection', ())
+    index, nodes, location = factobjects.write(path, facts, level)
+    return index, nodes, location, facts['input']['input_snapshots'], constraints
+
+
 _EXTRACTION = None
 
 
-def _extract_worker(index):
+def _extract_worker(ordinal):
     gc.disable()
-    records, compdb, root = _EXTRACTION
+    records, compdb, root, store = _EXTRACTION
     try:
-        return True, _extract(records[index], compdb, root), None
+        return True, _extract_unit(records[ordinal], compdb, root, store.path(ordinal), store.compression), None
     except Exception as exc:
         return False, exc, traceback.format_exc()
 
 
-def _extract_parallel(records, compdb, root, jobs, concurrent=None):
-    """Extract translation units in forked worker processes, returning results in record order.
+def _extract_parallel(records, compdb, root, jobs, store, consume, concurrent=None):
+    """Extract translation units in forked worker processes into fact objects in ``store``, passing
+    each unit's result to ``consume`` in record order and keeping none.
 
-    Workers inherit the records and the compiler authority module through fork. The first failing
-    record in order raises its own exception, as in serial extraction; later records are cancelled.
-    ``concurrent`` is an independent callable run in this process while the workers extract; its
-    result is returned alongside, and its failure is raised only after every record has extracted.
+    Workers inherit the records, the store and the compiler authority module through fork. The first
+    failing record in order raises its own exception, as in serial extraction, and so does a failure
+    of ``consume``; either cancels the records not yet started. ``concurrent`` is an independent
+    callable run in this process while the workers extract; its result is returned, and its failure
+    is raised only after every record has extracted.
     """
     global _EXTRACTION
-    _EXTRACTION = (records, compdb, root)
+    _EXTRACTION = (records, compdb, root, store)
     try:
         with ProcessPoolExecutor(max_workers=min(jobs, len(records)),
                                  mp_context=multiprocessing.get_context('fork')) as pool:
-            futures = [pool.submit(_extract_worker, index) for index in range(len(records))]
+            futures = [pool.submit(_extract_worker, ordinal) for ordinal in range(len(records))]
             side, side_error = None, None
             if concurrent is not None:
                 try:
                     side = concurrent()
                 except Exception as exc:
                     side_error = exc
-            results = []
-            for future in futures:
-                succeeded, value, formatted = future.result()
-                if not succeeded:
-                    for pending in futures:
+            for ordinal in range(len(futures)):
+                succeeded, value, formatted = futures[ordinal].result()
+                futures[ordinal] = None
+                try:
+                    if not succeeded:
+                        raise value from _WorkerTraceback('\n' + formatted)
+                    consume(value)
+                except BaseException:
+                    for pending in futures[ordinal + 1:]:
                         pending.cancel()
-                    raise value from _WorkerTraceback('\n' + formatted)
-                results.append(value)
+                    raise
+                value = None
             if side_error is not None:
                 raise side_error
-            return results, side
+            return side
     finally:
         _EXTRACTION = None
 
 
-def _extract_serial(records, compdb, root):
-    """Extract translation units in record order."""
-    return [_extract(record, compdb, root) for record in records]
+def _extract_serial(records, compdb, root, store, consume):
+    """Extract translation units in record order into fact objects in ``store``, passing each unit's
+    result to ``consume``."""
+    for ordinal, record in enumerate(records):
+        consume(_extract_unit(record, compdb, root, store.path(ordinal), store.compression))
 
 
 def _gc_paused(function):
@@ -1794,39 +1881,63 @@ def select_records(*, database: Path, root: Path, build_dir: Path) -> dict:
 
 
 @_gc_paused
-def collect_inventory(selection: dict, *, port: str, target: str, variant: str, link: dict, jobs: int = 1):
+def collect_inventory(selection: dict, *, port: str, target: str, variant: str, link: dict,
+                      store: factobjects.FactStore, jobs: int = 1, inventory: bool = False):
     """Collect the selected compiler records and join only qualified allocated owners.
 
-    Returns the inventory and what the final verification before publication checks
-    (``compiler.verify_collection``): every consumed input snapshot and the include selection
-    constraints of every translation unit."""
+    Every unit is extracted into a fact object in ``store``. This process keeps each unit's index
+    and checks, then drops, its consumed input snapshots and include selection constraints as the
+    unit arrives; composition loads the evidence it reads from the fact objects.
+
+    Returns the published surface (build, modules, types, coverage, diagnostics and the frontend
+    provenance); what the final verification before publication checks (``compiler.verify_collection``):
+    every consumed input snapshot and the include selection constraints of every translation unit;
+    and, when ``inventory`` is set, the ``InventoryDocument`` to write as inventory.json, else None."""
     if not isinstance(jobs, int) or isinstance(jobs, bool) or jobs < 1:
         raise ValueError('inventory jobs must be a positive integer')
     for key, value in (('port', port), ('target', target), ('variant', variant)):
         if not isinstance(value, str) or not value.strip(): raise ValueError(f'{key} must be a nonempty build identity')
     root, build_dir, database = selection['root'], selection['build_dir'], selection['database']
     compdb, records, completeness = selection['compdb'], selection['records'], selection['completeness']
-    selection_inputs = selection['inputs']
     for package in ('tree-sitter', 'tree-sitter-c'):
         try: importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError as exc:
             raise ValueError(f'API syntax frontend prerequisite is missing: {package}') from exc
+    inputs = []
+    selection_constraints = compiler.merge_selection(())
+    consumed = compiler.InputTable()
+    consumed.add('selected compiler records', selection['inputs'])
+    # The first conflict of each check, raised after extraction as when every unit was checked then.
+    conflicts = {'selection': None, 'inputs': None}
+
+    def consume(result):
+        index, nodes, location, snapshots, constraints = result
+        store.add(index, nodes, location)
+        inputs.append(index)
+        for kind, check in (('selection', lambda: compiler.merge_selection((constraints,), selection_constraints)),
+                            ('inputs', lambda: consumed.add(index['translation_unit'], snapshots))):
+            if conflicts[kind] is None:
+                try:
+                    check()
+                except RuntimeError as exc:
+                    conflicts[kind] = exc
+
     # Ownership uses record identities, including the object for repeated physical sources.
     ownership_records = [{**r, 'physical': r['identity']} for r in records]
     if jobs == 1:
-        inputs = _extract_serial(records, compdb, root)
+        _extract_serial(records, compdb, root, store, consume)
         ownership = collect_ownership(ownership_records, link)
     else:
-        inputs, ownership = _extract_parallel(records, compdb, root, jobs,
-                                              lambda: collect_ownership(ownership_records, link))
-    selection_constraints = compiler.merge_selection(facts.pop('_selection', ()) for facts in inputs)
-    consumed_inputs = compiler.reconcile_inputs([
-        ('selected compiler records', selection_inputs),
-        *[(facts['translation_unit'], facts['input']['input_snapshots']) for facts in inputs],
-        ('selected linked inputs', ownership['input_snapshots'])])
-    raw, resolve, present = join(inputs, ownership)
-    frozen_payload = collect_frozen_payload(inputs, present)
-    modules, types, diagnostics = _normal_surface(raw, inputs, resolve, present, root)
+        ownership = _extract_parallel(records, compdb, root, jobs, store, consume,
+                                      lambda: collect_ownership(ownership_records, link))
+    for conflict in conflicts.values():
+        if conflict is not None:
+            raise conflict
+    consumed.add('selected linked inputs', ownership['input_snapshots'])
+    consumed_inputs = consumed.records
+    raw, resolve, present = join(inputs, ownership, store)
+    frozen_payload = collect_frozen_payload(inputs, present, store)
+    modules, types, diagnostics = _normal_surface(raw, inputs, resolve, present, root, store)
     if not any(module['name'] == 'builtins' for module in modules):
         raise RuntimeError('selected linked build has no qualified builtin singleton; inspect modbuiltins compiler and allocated owner evidence')
     unassessed = [f['translation_unit'] for f in inputs if f['coverage']['status'] not in ('processed', 'processed-empty')]
@@ -1869,10 +1980,7 @@ def collect_inventory(selection: dict, *, port: str, target: str, variant: str, 
     revision = subprocess.run(['git', '-C', str(root), 'rev-parse', '--verify', 'HEAD'],
                               capture_output=True, text=True)
     source_revision = revision.stdout.strip() if revision.returncode == 0 else None
-    for facts in inputs:
-        facts['input']['input_snapshots'] = compiler.public_inputs(facts['input']['input_snapshots'])
-    ownership['input_snapshots'] = compiler.public_inputs(ownership['input_snapshots'])
-    inventory = {'schema_version': 1,
+    surface = {'schema_version': 1,
             'build': {'port': port, 'target': target, 'variant': variant, 'root': str(root), 'build_dir': str(build_dir),
                       'source_revision': source_revision,
                       'compiler_database': {'path': str(database), 'sha256': selection['database_sha256']},
@@ -1899,10 +2007,9 @@ def collect_inventory(selection: dict, *, port: str, target: str, variant: str, 
                          'limits': ['bounded C helper/control-flow normalization only', 'weak/COMDAT ownership unassessed',
                                     'system-header definitions unassessed', 'complete accepted callable input domains unassessed',
                                     'native parent slots describe class lookup, not implied native instance inheritance']},
-            'diagnostics': diagnostics, 'translation_units': [_public_translation_unit(facts) for facts in inputs],
+            'diagnostics': diagnostics,
             'provenance': {'frontend': 'tree-sitter-c on selected actual compiler expansion',
-                           'packages': {package: importlib.metadata.version(package) for package in ('tree-sitter', 'tree-sitter-c')},
-                           'ownership': ownership, 'binding_ownership_resolutions': raw['ownership_resolutions'],
-                           'raw_bindings': raw['bindings'], 'selected_import_rows': raw['import_rows']}}
-    _publish_initializers(inventory)
-    return inventory, {'inputs': consumed_inputs, 'selection': selection_constraints}
+                           'packages': {package: importlib.metadata.version(package) for package in ('tree-sitter', 'tree-sitter-c')}}}
+    _publish_initializers(surface)
+    document = InventoryDocument(inputs, store, ownership, raw) if inventory else None
+    return surface, {'inputs': consumed_inputs, 'selection': selection_constraints}, document

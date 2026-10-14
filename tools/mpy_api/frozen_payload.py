@@ -120,12 +120,13 @@ def _source(definition: dict) -> dict:
             'authority': 'selected compiler-expanded initializer'}
 
 
-def _loader(inputs: list[dict], present: Callable) -> dict:
+def _loader(inputs: list[dict], present: Callable, store) -> dict:
     candidates = [(facts, function) for facts in inputs for function in facts.get('functions', [])
                   if function.get('name') == 'mp_find_frozen_module' and present(facts, function)]
     if len(candidates) != 1:
         raise ValueError('selected allocated frozen import loader ownership is missing or ambiguous')
     facts, function = candidates[0]
+    function = store.function(function)
     if function.get('events', {}).get('semantic_unassessed'):
         raise ValueError('selected frozen loader body has unassessed GNU expression semantics')
     path = function.get('source_span', {}).get('source')
@@ -247,11 +248,12 @@ def _mpy_payload(result: dict, inputs: list[dict], facts: dict, present: Callabl
     return result
 
 
-def collect_frozen_payload(inputs: list[dict], present: Callable) -> dict:
+def collect_frozen_payload(inputs: list[dict], present: Callable, store) -> dict:
     """Collect allocated compiled names; unknown ownership never grants availability.
 
     ``present(facts, definition)`` must prove qualified allocated object, symbol,
-    and address ownership. Inputs are selected raw translation-unit facts.
+    and address ownership. Inputs are selected translation-unit indexes; the loader body is read
+    from ``store``.
     """
     result = {'status': 'not-selected', 'names': [], 'names_resolution': 'not-selected', 'names_source': None,
               'translation_unit': None, 'availability': {'status': 'not-selected'},
@@ -294,7 +296,7 @@ def collect_frozen_payload(inputs: list[dict], present: Callable) -> dict:
         if any(path.startswith('/') or any(part in ('', '.', '..') for part in path.split('/'))
                or '\\' in path for path in paths):
             raise ValueError('frozen target path is not a bounded relative import path')
-        loader = _loader(inputs, present)
+        loader = _loader(inputs, present, store)
     except (ValueError, UnicodeError) as exc:
         result['gaps'].append(str(exc))
         return result
