@@ -2,12 +2,12 @@
 
 `mpy_analysis.sbom` reports what it could and could not account for in `sbom-summary.json` and
 exits 0 for any valid partial result. This module is the separate gate: it reads only that summary
-(and, optionally, the firmware build receipt the summary names), never the SBOM document, and
+(and, optionally, the link evidence file the summary names), never the SBOM document, and
 exits non-zero unless every requirement of the chosen profile holds.
 
 Exit status: 0 profile satisfied, 1 a requirement is not satisfied, 2 unreadable or invalid input
 (including an unknown summary schema version, an internally inconsistent summary, an unknown
-profile, a receipt that is invalid or does not belong to the summary, or a deployment manifest
+profile, link evidence that is invalid or does not belong to the summary, or a deployment manifest
 that is invalid or no longer verifies as the summary says). A JSON result is always printed on
 standard output.
 """
@@ -24,8 +24,8 @@ from typing import Any, Callable, Sequence
 
 from .deployment import NOT_DECLARED, DeploymentError, load_deployment, verify_deployment
 from .deployment import SCHEMA as DEPLOYMENT_SCHEMA
-from .firmware_receipt import SCHEMA as RECEIPT_SCHEMA
-from .firmware_receipt import FirmwareReceiptError, validate_firmware_receipt
+from .link_evidence import SCHEMA as EVIDENCE_SCHEMA
+from .link_evidence import load_link_evidence
 from .sbom import FIRMWARE_BLOCKING_GAPS
 
 RESULT_SCHEMA = "mpy-sbom-policy/v1"
@@ -230,13 +230,13 @@ def _check_deployment(summary: dict[str, Any], errors: list[str]) -> None:
     if block["runtime_fetch"]["mode"] not in ("none", "restricted"):
         errors.append("deployment_completeness is established but runtime fetch is not none or restricted")
     closure = summary.get("link_closure")
-    receipt = block.get("receipt")
+    evidence = block.get("link_evidence")
     if (
-        not isinstance(receipt, dict)
+        not isinstance(evidence, dict)
         or not isinstance(closure, dict)
-        or any(receipt.get(key) != closure.get(key) for key in ("receipt_id", "build_id"))
+        or evidence.get("evidence_id") != closure.get("evidence_id")
     ):
-        errors.append("deployment_completeness is established but is not bound to the summary's firmware receipt")
+        errors.append("deployment_completeness is established but is not bound to the summary's link evidence")
 
 
 def _is_count(value: Any) -> bool:
@@ -260,11 +260,10 @@ def _check_link_closure(closure: Any, gaps: list[dict[str, Any]], errors: list[s
         return
     if status == "posthoc-incomplete":
         return
-    for key in ("build_id", "receipt_id"):
-        if not isinstance(closure.get(key), str) or not _DIGEST.fullmatch(closure[key]):
-            errors.append(f"link_closure.{key} must be a SHA-256 hex digest")
-    if closure.get("schema") != RECEIPT_SCHEMA:
-        errors.append(f"link_closure.schema must be {RECEIPT_SCHEMA!r}")
+    if not isinstance(closure.get("evidence_id"), str) or not _DIGEST.fullmatch(closure["evidence_id"]):
+        errors.append("link_closure.evidence_id must be a SHA-256 hex digest")
+    if closure.get("schema") != EVIDENCE_SCHEMA:
+        errors.append(f"link_closure.schema must be {EVIDENCE_SCHEMA!r}")
     unmapped_by_image = Counter(
         gap.get("image") for gap in gaps if gap["kind"] == "linked-source-not-in-selected-scope"
     )
@@ -372,7 +371,7 @@ def validate_summary(summary: Any) -> dict[str, Any]:
 
 
 def verify_deployment_file(
-    summary: dict[str, Any], deployment_path: Path, receipt: dict[str, Any] | None
+    summary: dict[str, Any], deployment_path: Path, link_evidence: dict[str, Any] | None
 ) -> None:
     """Check that the manifest still verifies the way the summary recorded it."""
     block = summary.get("deployment")
@@ -380,7 +379,7 @@ def verify_deployment_file(
         raise PolicyInputError(["summary was generated without a deployment manifest"])
     try:
         current = verify_deployment(
-            load_deployment(deployment_path), target=summary["target"], receipt=receipt
+            load_deployment(deployment_path), target=summary["target"], link_evidence=link_evidence
         )
     except DeploymentError as exc:
         raise PolicyInputError([f"deployment manifest is not valid: {exc}"]) from exc
@@ -394,57 +393,47 @@ def verify_deployment_file(
         raise PolicyInputError(errors)
 
 
-def verify_receipt(summary: dict[str, Any], receipt_path: Path) -> dict[str, Any]:
-    """Validate the receipt file and check that it is the one the summary was generated from."""
+def verify_evidence(summary: dict[str, Any], evidence_path: Path) -> dict[str, Any]:
+    """Read the link evidence file and check that it is the one the summary was generated from."""
     try:
-        value = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise PolicyInputError([f"cannot read receipt {receipt_path}: {exc}"]) from exc
-    try:
-        receipt = validate_firmware_receipt(value)
-    except FirmwareReceiptError as exc:
-        raise PolicyInputError([f"receipt is not valid: {exc}"]) from exc
+        evidence = load_link_evidence(evidence_path)
+    except ValueError as exc:
+        raise PolicyInputError([str(exc)]) from exc
     closure = summary["link_closure"]
     if closure["status"] not in ("complete", "incomplete"):
         raise PolicyInputError(
-            [f"summary link_closure.status {closure['status']!r} was not generated from a build receipt"]
+            [f"summary link_closure.status {closure['status']!r} was not generated from link evidence"]
         )
     errors = []
-    for key in ("schema", "receipt_id", "build_id"):
-        if closure[key] != receipt[key]:
-            errors.append(f"summary link_closure.{key} {closure[key]!r} does not match receipt {receipt[key]!r}")
-    configuration = receipt["configuration"]
-    for key in ("port", "target", "variant"):
-        if summary.get(key) != configuration[key]:
-            errors.append(f"summary {key} {summary.get(key)!r} does not match receipt {configuration[key]!r}")
-    receipt_images = {image["id"]: image["link"]["elf"]["sha256"] for image in receipt["images"]}
+    for key in ("schema", "evidence_id"):
+        if closure[key] != evidence[key]:
+            errors.append(f"summary link_closure.{key} {closure[key]!r} does not match the link evidence {evidence[key]!r}")
+    images = {image["id"]: image["elf"]["sha256"] for image in evidence["images"]}
     summary_images = {image["id"]: image["elf_sha256"] for image in closure["images"]}
-    if receipt_images != summary_images:
+    if images != summary_images:
         errors.append(
-            "summary images do not match the receipt images: "
-            f"summary {sorted(summary_images.items())}, receipt {sorted(receipt_images.items())}"
+            "summary images do not match the link evidence images: "
+            f"summary {sorted(summary_images.items())}, evidence {sorted(images.items())}"
         )
-    if closure["status"] == "complete" and receipt["status"] != "complete":
-        errors.append(f"summary link closure is complete but the receipt status is {receipt['status']!r}")
     if errors:
         raise PolicyInputError(errors)
-    return receipt
+    return evidence
 
 
 def evaluate(
-    summary: dict[str, Any], profile: str, receipt: dict[str, Any] | None = None
+    summary: dict[str, Any], profile: str, evidence: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     """Judge a validated summary against a profile and return the machine-readable result."""
     required = set(PROFILES[profile]["require"])
     dimensions = {}
     for name, judge in DIMENSIONS.items():
-        satisfied, evidence = judge(summary)
+        satisfied, detail = judge(summary)
         observed = SATISFIED if satisfied else UNSATISFIED
         dimensions[name] = {
             "required": name in required,
             "status": observed if name in required else NOT_APPLICABLE,
             "observed": observed,
-            "evidence": evidence,
+            "evidence": detail,
         }
     failed = [name for name in DIMENSIONS if dimensions[name]["status"] == UNSATISFIED]
     closure = summary["link_closure"]
@@ -456,15 +445,10 @@ def evaluate(
         "subject": {
             key: summary.get(key) for key in ("target", "variant", "port", "scope_sha256")
         }
-        | {key: closure.get(key) for key in ("build_id", "receipt_id")},
-        "receipt": None
-        if receipt is None
-        else {
-            "verified": True,
-            "receipt_id": receipt["receipt_id"],
-            "build_id": receipt["build_id"],
-            "status": receipt["status"],
-        },
+        | {"evidence_id": closure.get("evidence_id")},
+        "link_evidence": None
+        if evidence is None
+        else {"verified": True, "evidence_id": evidence["evidence_id"]},
         "dimensions": dimensions,
     }
 
@@ -481,7 +465,7 @@ def _invalid(profile: str | None, errors: Sequence[str]) -> dict[str, Any]:
 def run(
     summary_path: Path,
     profile: str,
-    receipt_path: Path | None = None,
+    evidence_path: Path | None = None,
     deployment_path: Path | None = None,
 ) -> dict[str, Any]:
     """Return the policy result for a summary file; `result` is satisfied, unsatisfied or invalid."""
@@ -493,21 +477,21 @@ def run(
         except (OSError, ValueError) as exc:
             raise PolicyInputError([f"cannot read summary {summary_path}: {exc}"]) from exc
         validate_summary(summary)
-        receipt = verify_receipt(summary, receipt_path) if receipt_path else None
+        evidence = verify_evidence(summary, evidence_path) if evidence_path else None
         if deployment_path:
-            verify_deployment_file(summary, deployment_path, receipt)
+            verify_deployment_file(summary, deployment_path, evidence)
     except PolicyInputError as exc:
         return _invalid(profile, exc.errors)
-    return evaluate(summary, profile, receipt)
+    return evaluate(summary, profile, evidence)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--summary", type=Path, required=True, help="sbom-summary.json from mpy_analysis.sbom")
     parser.add_argument(
-        "--receipt",
+        "--link-evidence",
         type=Path,
-        help="mpy-firmware-build/v1 receipt; verified and matched to the summary when given",
+        help="mpy-link-evidence/v1 file; matched to the summary when given",
     )
     parser.add_argument(
         "--deployment",
@@ -516,7 +500,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--profile", required=True, help="profile name: " + ", ".join(sorted(PROFILES)))
     args = parser.parse_args(argv)
-    result = run(args.summary, args.profile, args.receipt, args.deployment)
+    result = run(args.summary, args.profile, args.link_evidence, args.deployment)
     print(json.dumps(result, indent=2, sort_keys=True))
     return EXIT_CODES[result["result"]]
 

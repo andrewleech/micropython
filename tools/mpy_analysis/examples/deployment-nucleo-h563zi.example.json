@@ -8,14 +8,14 @@
       "kind": "firmware-image",
       "path": "/tmp/mpy-g5-req-h563/app/firmware.bin",
       "sha256": "ac789a5c50d4782cc0694efca8815ae0e8b66a8778c988a1dddfeb5f5f623b60",
-      "receipt_image": "application"
+      "image": "application"
     },
     {
       "id": "mboot",
       "kind": "bootloader-image",
       "path": "/tmp/mpy-g5-req-h563/mboot/firmware.bin",
       "sha256": "e135a8d88484bdaaa3a152633a20c53ee44de128709eed432eb989fc01c194f9",
-      "receipt_image": "mboot"
+      "image": "mboot"
     }
   ],
   "runtime_fetch": {"mode": "none"},

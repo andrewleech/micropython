@@ -16,7 +16,7 @@ This package supplies compiler-analysis checks, explicit MicroPython source inve
 - `sast-run` invokes a selected external scanner with consumer-owned policy, records findings separately from operational and coverage failures, and rebases staged source locations.
 - `sast-check-fixtures` checks external positive/negative expectations using the same runner and coverage receipts.
 - `sast-sbom` generates an SPDX 2.3 (default) or CycloneDX 1.6 (`--format cyclonedx`) selected-source inventory and provenance/coverage receipt from the same manifest/compiler scope as SAST.
-- `sast-sbom-policy` judges an `sbom-summary.json` (and optionally its firmware receipt and deployment manifest) against a named completeness profile and exits non-zero unless the profile is satisfied.
+- `sast-sbom-policy` judges an `sbom-summary.json` (and optionally its link evidence and deployment manifest) against a named completeness profile and exits non-zero unless the profile is satisfied.
 
 A project installs it from its MicroPython checkout, like mpremote:
 
@@ -85,20 +85,22 @@ sast-sbom --scope scope.json --micropython-root "$MPY" --output-dir build/sbom
 
 `$MPY` must match the inventory's actual manifest authority, including its version. The library root selected by `MPY_LIB_DIR` need not be the MicroPython checkout's gitlinked library; its actual repository revision is recorded. Explicit roots can also name separately versioned locally frozen libraries. Only `runtime_frozen_python` and compiler-evidenced `native` records enter this SBOM; other groups are reported as unassessed.
 
-The Python API is `generate_sbom(scope, *, micropython_root, declaration_files=(), build_receipt=None, posthoc_link_inventory=None, link_generation=None)` in `mpy_analysis.sbom`, returning `(model, receipt)` where `model` is the format-neutral `mpy_analysis.sbom_model.Model`. `mpy_analysis.sbom_spdx.to_spdx` and `mpy_analysis.sbom_cyclonedx.to_cyclonedx` are independent writers over that model; neither document is derived from the other. The CLI writes a schema-validated SPDX 2.3 `sbom.spdx.json` by default, or CycloneDX 1.6 `sbom.json` with `--format cyclonedx`, plus `sbom-summary.json` (which records `document_format` and `document_file`), deterministically and without network access; a previous document of either format is removed before a run. Selected source files retain SHA-256 hashes and dependency ownership. Actual Git roots/submodules retain their origin, revision, tracked state and gitlink evidence. Git revisions identify checkout state, not release versions. Multiple compiler actions remain distinct receipt rows without duplicating their source file; frozen import aliases remain distinct identities.
+The Python API is `generate_sbom(scope, *, micropython_root, declaration_files=(), link_evidence=None, posthoc_link_inventory=None, link_generation=None, deployment=None)` in `mpy_analysis.sbom`, returning `(model, receipt)` where `model` is the format-neutral `mpy_analysis.sbom_model.Model`. `mpy_analysis.sbom_spdx.to_spdx` and `mpy_analysis.sbom_cyclonedx.to_cyclonedx` are independent writers over that model; neither document is derived from the other. The CLI writes a schema-validated SPDX 2.3 `sbom.spdx.json` by default, or CycloneDX 1.6 `sbom.json` with `--format cyclonedx`, plus `sbom-summary.json` (which records `document_format` and `document_file`), deterministically and without network access; a previous document of either format is removed before a run. Selected source files retain SHA-256 hashes and dependency ownership. Actual Git roots/submodules retain their origin, revision, tracked state and gitlink evidence. Git revisions identify checkout state, not release versions. Multiple compiler actions remain distinct receipt rows without duplicating their source file; frozen import aliases remain distinct identities.
 
-### Firmware build receipts
+### Firmware link evidence
 
-The selected-source SBOM does not establish which compiled code reached a firmware image. G5 build receipts bind captured build/link evidence to final ELF images and add proven link-derived source edges:
+The selected-source SBOM does not establish which compiled code reached a firmware image. `mpy_analysis.link_evidence` derives that from a compilation database (compiledb or CMake), the GNU ld map and the ELF of each image, and `--link-evidence` adds the resulting firmware components and link-derived dependencies:
 
 ```sh
+sast-link-evidence --compile-database cc.json --image application:application:build/firmware.elf:build/firmware.map \
+    --source-root micropython="$MPY" --output evidence.json --selected-database selected.json
 sast-sbom --scope scope.json --micropython-root "$MPY" \
-    --build-receipt firmware-build-receipt.json --output-dir build/sbom
+    --link-evidence evidence.json --output-dir build/sbom
 ```
 
-A qualified published linker inventory can also be imported with `--link-inventory inventory.json`. This verifies exact published hashes and source ownership evidence, but the output is always labelled `posthoc-incomplete`, never a build-time receipt.
+A qualified published linker inventory can also be imported with `--link-inventory inventory.json`. This verifies exact published hashes and source ownership evidence, but the output is always labelled `posthoc-incomplete`.
 
-The receipt and posthoc inventory schemas, API, evidence limits and adapter status are documented in [FIRMWARE-RECEIPT.md](FIRMWARE-RECEIPT.md). Neither source selection nor posthoc inventories establish complete firmware coverage.
+Inputs, resolution rules, SBOM output and limits are documented in [LINK-EVIDENCE.md](LINK-EVIDENCE.md). Neither source selection nor posthoc inventories establish complete firmware coverage.
 
 Dependency discovery starts from selected records and walks their ancestors within explicit physical roots. Authoritative require ownership takes priority; other manifests are candidates, not permission to execute new metadata code. Package/native markers and current source-bound declarations can establish dependency boundaries. A checkout, root directory or licence filename alone does not establish a distribution identity. Unmarked vendored units cannot be found reliably, their discovery limit remains explicit. There is no table of recognised libraries or package-specific version macro rules.
 
@@ -117,7 +119,7 @@ Declared metadata dependencies are retained separately from observed selected re
 
 ### Deployment manifest
 
-A firmware receipt covers what a captured build linked into its images. It does not say what a device carries once deployed. The consuming application owns that statement as an `mpy-deployment/v1` manifest (schema: `mpy_analysis/data/deployment-v1.schema.json`, verifier: `mpy_analysis/deployment.py`), and `sast-sbom --deployment manifest.json` checks it:
+Link evidence covers what a built firmware linked into its images. It does not say what a device carries once deployed. The consuming application owns that statement as an `mpy-deployment/v1` manifest (schema: `mpy_analysis/data/deployment-v1.schema.json`, verifier: `mpy_analysis/deployment.py`), and `sast-sbom --deployment manifest.json` checks it:
 
 ```json
 {
@@ -125,8 +127,8 @@ A firmware receipt covers what a captured build linked into its images. It does 
   "name": "device-A",
   "target": "arm-none-eabi",
   "members": [
-    {"id": "app", "kind": "firmware-image", "path": "images/app.bin", "sha256": "<64 hex>", "receipt_image": "application"},
-    {"id": "mboot", "kind": "bootloader-image", "path": "images/mboot.bin", "sha256": "<64 hex>", "receipt_image": "mboot"},
+    {"id": "app", "kind": "firmware-image", "path": "images/app.bin", "sha256": "<64 hex>", "image": "application"},
+    {"id": "mboot", "kind": "bootloader-image", "path": "images/mboot.bin", "sha256": "<64 hex>", "image": "mboot"},
     {"id": "driver", "kind": "python-package-file", "path": "lib/driver.py", "sha256": "<64 hex>"}
   ],
   "runtime_fetch": {"mode": "restricted", "immutable_by": {"hash_pinning": "sha256-allowlist", "sources": ["https://updates.example.invalid/pkg"]}},
@@ -134,20 +136,20 @@ A firmware receipt covers what a captured build linked into its images. It does 
 }
 ```
 
-`target` must equal the SBOM scope's target. Relative member paths resolve against the manifest's directory. Member `kind` is one of `firmware-image`, `bootloader-image`, `filesystem-file`, `python-package-file`, `native-module`, `resource` and `partition-image`. `receipt_image` is allowed only on the two image kinds. `runtime_fetch.mode` is `none`, `restricted` (which requires `immutable_by` with a `hash_pinning` policy name and a nonempty `sources` list) or `unrestricted`. An exclusion names either a `path` or a `receipt_image` and always carries a nonempty `reason`.
+`target` must equal the SBOM scope's target. Relative member paths resolve against the manifest's directory. Member `kind` is one of `firmware-image`, `bootloader-image`, `filesystem-file`, `python-package-file`, `native-module`, `resource` and `partition-image`. `image` is allowed only on the two image kinds. `runtime_fetch.mode` is `none`, `restricted` (which requires `immutable_by` with a `hash_pinning` policy name and a nonempty `sources` list) or `unrestricted`. An exclusion names either a `path` or a `image` and always carries a nonempty `reason`.
 
-The verifier hashes each member file and reports `deployment_completeness`: `not-declared` when no manifest was given, `established`, or `not-established` with the exact reasons in the summary's `deployment` block (`status`, `reasons` with a code, member and detail, one row per member with declared and actual digests, the digest verdict `match`, `hash-mismatch`, `missing`, `not-a-file` or `unreadable`, and the receipt binding, `runtime_fetch`, `exclusions` and per-receipt-image accounting). It is `established` only when all of the following hold:
+The verifier hashes each member file and reports `deployment_completeness`: `not-declared` when no manifest was given, `established`, or `not-established` with the exact reasons in the summary's `deployment` block (`status`, `reasons` with a code, member and detail, one row per member with declared and actual digests, the digest verdict `match`, `hash-mismatch`, `missing`, `not-a-file` or `unreadable`, and the image binding, `runtime_fetch`, `exclusions` and per-image accounting). It is `established` only when all of the following hold:
 
 - every member file exists and hashes to its `sha256`; a modified file or a stale declared hash is not established;
-- the manifest has at least one `firmware-image` member and every `firmware-image` member is an image of the firmware receipt. A member is bound by its `receipt_image` id, or, without one, by an exact hash match against one image's ELF or deployment artifact hashes (never by name). Its declared hash must be that image's ELF hash or one of its deployment artifact hashes, and its kind must agree with the image role (`bootloader-image` is bound to the role `bootloader`, `firmware-image` to any other role). A `bootloader-image` member with no `receipt_image` and no hash match is reported as `unbound` and does not block;
-- every image of the receipt is bound by a member or excluded with a `receipt_image` exclusion carrying a reason. An image whose role is not `bootloader` cannot be excluded, and an exclusion cannot name a path that is a member or an artifact of an image no member binds; those manifests are rejected;
+- the manifest has at least one `firmware-image` member and every `firmware-image` member is an image of the link evidence. A member is bound by its `image` id, or, without one, by an exact hash match against one image's ELF or deployment artifact hashes (never by name). Its declared hash must be that image's ELF hash or one of its deployment artifact hashes, and its kind must agree with the image role (`bootloader-image` is bound to the role `bootloader`, `firmware-image` to any other role). A `bootloader-image` member with no `image` and no hash match is reported as `unbound` and does not block;
+- every image of the link evidence is bound by a member or excluded with a `image` exclusion carrying a reason. An image whose role is not `bootloader` cannot be excluded, and an exclusion cannot name a path that is a member or an artifact of an image no member binds; those manifests are rejected;
 - `runtime_fetch` is declared and is `none` or `restricted`. `unrestricted` and an absent `runtime_fetch` are not established. The `immutable_by` statement is the application owner's declaration and is reported as declared, not observed on a device.
 
-Without `--build-receipt` members are still verified by hash, but every image member reports `receipt-required` and the deployment is `not-established`. A manifest that is not valid `mpy-deployment/v1`, repeats a member id or path, names another target or excludes a firmware image is invalid input and the CLI exits 2; missing or stale evidence stays exit 0.
+Without `--link-evidence` members are still verified by hash, but every image member reports `link-evidence-required` and the deployment is `not-established`. A manifest that is not valid `mpy-deployment/v1`, repeats a member id or path, names another target or excludes a firmware image is invalid input and the CLI exits 2; missing or stale evidence stays exit 0.
 
-A member whose file matches its hash and whose kind is not an image becomes a `file` component with SHA-1 and SHA-256 (SPDX file element, CycloneDX file component) nested under a deployment component named by the manifest (`application` kind, role `deployment`), with the property `role` set to `deployed-<kind>`. The root component depends on the deployment component, and the deployment component depends on the firmware components of the receipt images its members bind. Files that no member names, including the manifest's exclusions, never appear; a dynamic import never adds a file. Image members are represented by the receipt's firmware components, not by a second component. A member that does not verify is not added as a component.
+A member whose file matches its hash and whose kind is not an image becomes a `file` component with SHA-1 and SHA-256 (SPDX file element, CycloneDX file component) nested under a deployment component named by the manifest (`application` kind, role `deployment`), with the property `role` set to `deployed-<kind>`. The root component depends on the deployment component, and the deployment component depends on the firmware components of the evidence images its members bind. Files that no member names, including the manifest's exclusions, never appear; a dynamic import never adds a file. Image members are represented by the evidence's firmware components, not by a second component. A member that does not verify is not added as a component.
 
-`tools/mpy_analysis/examples/deployment-nucleo-h563zi.example.json` is a worked example for the NUCLEO_H563ZI application and mboot raw binaries recorded in a merged firmware receipt of this repository's build. It shows the shape only: the real deployment manifest, its filesystem content and its runtime fetch policy are owned by the consuming application, and the example's `runtime_fetch` of `none` is not a statement about any device. Its paths point at a build directory that exists only where that build was captured.
+`tools/mpy_analysis/examples/deployment-nucleo-h563zi.example.json` is a worked example for the NUCLEO_H563ZI application and mboot raw binaries of this repository's build. It shows the shape only: the real deployment manifest, its filesystem content and its runtime fetch policy are owned by the consuming application, and the example's `runtime_fetch` of `none` is not a statement about any device. Its paths point at a build directory that exists only where that build was captured.
 
 ### Repository context
 
@@ -223,7 +225,7 @@ Interfile and typing runs stage only selected sources. Frozen Python uses its im
 
 ```sh
 sast-sbom-policy --summary build/sbom/sbom-summary.json \
-    --receipt firmware-build-receipt.json --profile firmware-complete
+    --link-evidence evidence.json --profile firmware-complete
 ```
 
 A JSON result is always printed on standard output. Each dimension carries `required`, `status` (`satisfied`, `unsatisfied`, or `not-applicable` when the profile does not require it), `observed` (what the summary shows regardless of the profile) and numeric `evidence`: gaps by kind and field, per-image link closure with unmapped bindings and unresolved inputs, selected sources accounted against the total, and required metadata fields known against the total.
@@ -234,9 +236,9 @@ A JSON result is always printed on standard output. Each dimension carries `requ
 | `firmware-linked` | `firmware_completeness` established and link closure complete; metadata and other gaps are reported but do not fail |
 | `deployable` | `firmware_completeness` established and `deployment_completeness` established |
 
-Exit status is 0 when the profile is satisfied, 1 when a requirement is not, and 2 for input that cannot be judged: an unreadable file, a `schema_version` the tool does not know, an unknown profile, a summary that contradicts itself (for example `established` with an incomplete link closure or a blocking gap), or a receipt that fails `mpy-firmware-build/v1` validation, is stale on disk, or does not match the summary's receipt id, build id, target, variant, port and image hashes. With `--receipt`, the receipt is validated with the same checks `sast-sbom` applies, including current artifact hashes, so the gate must run where the build outputs still exist. Profiles and dimensions are data in `mpy_analysis/sbom_policy.py`.
+Exit status is 0 when the profile is satisfied, 1 when a requirement is not, and 2 for input that cannot be judged: an unreadable file, a `schema_version` the tool does not know, an unknown profile, a summary that contradicts itself (for example `established` with an incomplete link closure or a blocking gap), or link evidence that is not `mpy-link-evidence/v1` or does not match the summary's evidence id and image hashes. Profiles and dimensions are data in `mpy_analysis/sbom_policy.py`.
 
-`deployment` is a dimension of the summary: `deployment_completeness` absent or `not-declared` leaves `firmware-linked` and `firmware-complete` unaffected and fails `deployable`. The summary check requires an `established` deployment to carry no reasons, only matching member digests, a `none` or `restricted` fetch and the receipt id and build id of the summary's link closure. `sast-sbom-policy --deployment manifest.json` verifies the manifest again against the files on disk (and the receipt, when given) and exits 2 when the summary's manifest hash, status or member digests no longer match, as `--receipt` does for the firmware receipt.
+`deployment` is a dimension of the summary: `deployment_completeness` absent or `not-declared` leaves `firmware-linked` and `firmware-complete` unaffected and fails `deployable`. The summary check requires an `established` deployment to carry no reasons, only matching member digests, a `none` or `restricted` fetch and the evidence id of the summary's link closure. `sast-sbom-policy --deployment manifest.json` verifies the manifest again against the files on disk (and the link evidence, when given) and exits 2 when the summary's manifest hash, status or member digests no longer match, as `--link-evidence` does for the link evidence.
 
 ### Results and failure contract
 

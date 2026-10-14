@@ -21,8 +21,8 @@ from urllib.parse import quote, urlparse
 from .compdb import arguments_of, entry_file, validate_entry
 from .deployment import IMAGE_KINDS, NOT_DECLARED, load_deployment, verify_deployment
 from .firmware_inventory import load_posthoc_link_inventory
-from .firmware_receipt import load_firmware_receipt, validate_firmware_receipt
 from .generic_inventory import assemble
+from .link_evidence import load_link_evidence
 from .metadata import collect_metadata
 from .metadata_bom import valid_uri
 from .sbom_cyclonedx import serialize_cyclonedx, to_cyclonedx
@@ -52,18 +52,13 @@ FIRMWARE_BLOCKING_GAPS = frozenset(
     {
         "checkout-gitlink-mismatch",
         "dirty-selected-repository",
-        "embedded-input-accounting-unavailable",
-        "frozen-accounting-unavailable",
-        "frozen-payload-unbound",
-        "frozen-source-not-in-selected-scope",
-        "header-accounting-unavailable",
-        "linked-embedded-input-not-in-selected-scope",
         "linked-header-not-in-selected-scope",
         "linked-source-not-in-selected-scope",
         "posthoc-linked-source-not-in-selected-scope",
         "repository-provenance-unavailable",
         "selected-source-not-tracked",
         "submodule-local-override",
+        "unresolved-link-input",
     }
 )
 
@@ -303,32 +298,6 @@ class _Builder:
         return reference
 
 
-def _generator_input(builder: _Builder, binding: tuple[str, str]) -> str | None:
-    """Add a file component for an input of a captured generator that wrote a linked source.
-
-    The owner is the one owner the selected sources already assign to the root; with none
-    or several the input stays unmapped.
-    """
-    root, path = binding
-    owners = {
-        builder.components[source["component"]].properties["owner"]
-        for source in builder.sources
-        if source["root"] == root
-        and "owner" in builder.components[source["component"]].properties
-    }
-    if len(owners) != 1:
-        return None
-    return builder.file(
-        "generator-input",
-        {
-            "root": root,
-            "path": path,
-            "owner": owners.pop(),
-            "provenance": {"kind": "captured-generator-input"},
-        },
-    )
-
-
 def _runtime_file_hashes(path: str, sha256: str) -> dict[str, str]:
     """Return the receipt SHA-256 plus a SHA-1 of the file, which SPDX 2.3 requires for files.
 
@@ -346,7 +315,7 @@ def _runtime_file_hashes(path: str, sha256: str) -> dict[str, str]:
 
 
 def _runtime_components(
-    builder: _Builder, link: dict[str, Any], toolchain: list[dict[str, Any]], build_id: str
+    builder: _Builder, runtime: list[dict[str, Any]], toolchain: list[dict[str, Any]], evidence_id: str
 ) -> set[str]:
     """Add components for statically linked compiler runtime files and C library files.
 
@@ -377,7 +346,7 @@ def _runtime_components(
             references.add(
                 builder.add(
                     "toolchain-library",
-                    [build_id, sha256],
+                    [evidence_id, sha256],
                     Component(
                         kind=LIBRARY,
                         name=Path(path).name,
@@ -395,16 +364,12 @@ def _runtime_components(
                 )
             )
 
-    for operand in link["operands"]:
-        if operand["disposition"] == "contributed" and operand["kind"] == "library":
-            collect(operand, operand["input"]["path"], operand["input"]["sha256"], operand["contributing_members"])
-    for entry in link.get("implicit_inputs", []):
-        if entry["disposition"] == "contributed":
-            collect(entry, entry["path"], entry["sha256"], entry.get("contributing_members", []))
+    for item in runtime:
+        collect(item, item["path"], item["sha256"], item["contributing_members"])
     for (name, version, source), files in sorted(libraries.items()):
         library_ref = builder.add(
             "c-library",
-            [name, version, build_id],
+            [name, version, evidence_id],
             Component(
                 kind=LIBRARY,
                 name=name,
@@ -498,7 +463,7 @@ def _consumed_headers(receipt: dict[str, Any]) -> list[dict[str, Any]]:
                         "root": binding["root"],
                         "path": binding["path"],
                         "sha256": entry["sha256"],
-                        "provenance": {"kind": "captured-compiler-dependency"},
+                        "provenance": {"kind": "compiler-dependency-file"},
                     },
                 )
     return [records[key] for key in sorted(records)]
@@ -510,26 +475,17 @@ def _header_components(
     boundaries: list[dict[str, Any]],
     source_refs: dict[tuple[str, str], set[str]],
     image: dict[str, Any],
-    receipt: dict[str, Any],
+    evidence: dict[str, Any],
 ) -> tuple[set[str], dict[str, Any]]:
-    """Attribute every header a contributing compile read of one image.
+    """Attribute every header a contributing compile of one image read.
 
-    Source headers and the generator inputs of generated headers become file components under
-    the boundary that owns them (a header-only boundary when no boundary of the selected sources
-    does, which the image then depends on); headers in the captured compiler's own directories
-    become file components of one toolchain header library; anything else is a named gap.
+    Source headers become file components under the boundary that owns them (a header-only
+    boundary when no boundary of the selected sources does, which the image then depends on);
+    headers in the compiler's own directories become file components of one toolchain header
+    library; anything else is a named gap.
     """
-    entries = image.get("header_accounting")
-    if entries is None:
-        builder.gaps.append(
-            {
-                "kind": "header-accounting-unavailable",
-                "image": image["id"],
-                "detail": "The receipt predates header accounting; recapture the build.",
-            }
-        )
-        return set(), {"status": "unavailable"}
-    counts = {"consumed": len(entries), "source": 0, "generated": 0, "toolchain": 0, "unattributed": 0}
+    entries = image["header_accounting"]
+    counts = {"consumed": len(entries), "source": 0, "toolchain": 0, "unattributed": 0}
     toolchain: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     references: set[str] = set()
 
@@ -555,37 +511,32 @@ def _header_components(
             toolchain.setdefault(key, []).append(entry)
             counts["toolchain"] += 1
         else:
-            group, provenance = (
-                ("header", "captured-compiler-dependency")
-                if disposition == "source"
-                else ("generator-input", "captured-generator-input")
-            )
             placed = []
             for item in entry["source_bindings"]:
                 binding = (item["root"], item["path"])
                 refs, reason = _owned_file(
-                    builder, scope, boundaries, source_refs, binding, group, provenance
+                    builder, scope, boundaries, source_refs, binding, "header", "compiler-dependency-file"
                 )
                 placed.append(refs is not None)
                 if refs is None:
                     gap(entry, reason, binding)
-                elif disposition == "source":
+                else:
                     boundary = _enclosing_boundary(scope, boundaries, *binding)
                     if boundary["headers"]:
                         references.add(boundary["component"])
             if all(placed):
-                counts[disposition] += 1
+                counts["source"] += 1
 
     for (role, compiler, sha256), members in sorted(toolchain.items()):
         tool = next(
             item
-            for item in receipt["toolchain"]
+            for item in evidence["toolchain"]
             if item["role"] == role and item["executable"]["path"] == compiler
         )
         release = next((item["toolchain"]["release"] for item in members if "release" in item["toolchain"]), None)
         library = builder.add(
             "toolchain-headers",
-            [receipt["build_id"], image["id"], role, sha256],
+            [evidence["evidence_id"], image["id"], role, sha256],
             Component(
                 kind=LIBRARY,
                 name=f"{Path(compiler).name} compiler headers",
@@ -620,226 +571,25 @@ def _header_components(
     return references, {"status": "attributed" if not counts["unattributed"] else "incomplete", **counts}
 
 
-def _embedded_components(
-    builder: _Builder,
-    scope: dict[str, Any],
-    boundaries: list[dict[str, Any]],
-    source_refs: dict[tuple[str, str], set[str]],
-    image: dict[str, Any],
-) -> tuple[set[str], dict[str, Any]]:
-    """Attribute the raw binary content a contributing object holds, one file per owning boundary.
-
-    The firmware image depends on each attributed file, since its bytes are part of the image.
-    """
-    rows = image.get("embedded_inputs")
-    if rows is None:
-        builder.gaps.append(
-            {
-                "kind": "embedded-input-accounting-unavailable",
-                "image": image["id"],
-                "detail": "The receipt predates embedded content accounting; recapture the build.",
-            }
-        )
-        return set(), {"status": "unavailable"}
-    counts = {"contributed": 0, "attributed": 0, "unattributed": 0}
-    references: set[str] = set()
-    for row in rows:
-        if row["disposition"] == "no-contribution":
-            continue
-        counts["contributed"] += 1
-        failures = []
-        if row["disposition"] == "unsupported":
-            failures.append((None, row["reason"]))
-        else:
-            for item in row["source_bindings"]:
-                binding = (item["root"], item["path"])
-                if item.get("via") == "generator":
-                    group, provenance = "generator-input", "captured-generator-input"
-                elif row["origin"] == "assembler-dependency":
-                    group, provenance = "assembler-input", "captured-assembler-dependency"
-                else:
-                    group, provenance = "embedded-resource", "captured-embedded-input"
-                refs, reason = _owned_file(builder, scope, boundaries, source_refs, binding, group, provenance)
-                if refs is None:
-                    failures.append((binding, reason))
-                else:
-                    references.update(refs)
-        counts["attributed" if not failures else "unattributed"] += 1
-        for binding, reason in failures:
-            builder.gaps.append(
-                {
-                    "kind": "linked-embedded-input-not-in-selected-scope",
-                    "path": row["blob"]["path"],
-                    **({"root": binding[0], "binding-path": binding[1]} if binding else {}),
-                    "origin": row["origin"],
-                    "image": image["id"],
-                    "reason": reason,
-                }
-            )
-    return references, {"status": "attributed" if not counts["unattributed"] else "incomplete", **counts}
-
-
-def _frozen_components(
-    builder: _Builder,
-    scope: dict[str, Any],
-    boundaries: list[dict[str, Any]],
-    source_refs: dict[tuple[str, str], set[str]],
-    image: dict[str, Any],
-    receipt: dict[str, Any],
-) -> tuple[set[str], dict[str, Any]]:
-    """Attribute the frozen Python payload of one image to the files its generator consumed.
-
-    The frozen sources, the manifests and the other files the captured generator read become
-    file components under the boundary that owns them (a manifest-selected frozen source keeps
-    its component). An element or input the receipt could not bind, and any bound file no
-    selected boundary contains, is a blocking gap. An image without frozen content needs nothing.
-    """
-    accounting = image.get("frozen_accounting")
-    if accounting is None:
-        if any(
-            action["kind"] == "generate"
-            and (action.get("frozen_observation") or {}).get("mode") != "list-c-modules"
-            and any(Path(arg).name == "makemanifest.py" for arg in action["argv"][1:2])
-            for action in receipt["actions"]
-        ):
-            builder.gaps.append(
-                {
-                    "kind": "frozen-accounting-unavailable",
-                    "image": image["id"],
-                    "detail": "The receipt predates frozen payload accounting; recapture the build.",
-                }
-            )
-            return set(), {"status": "unavailable"}
-        return set(), {"status": "none"}
-    if accounting["status"] == "none":
-        return set(), {"status": "none"}
-    counts = {"elements": 0, "bound": 0, "unbound": 0, "inputs": 0}
-    references: set[str] = set()
-    bound_sources: set[tuple[str, str]] = set()
-    failed = False
-
-    def gap(kind: str, path: str, reason: str, binding: tuple[str, str] | None = None) -> None:
-        nonlocal failed
-        failed = True
-        builder.gaps.append(
-            {
-                "kind": kind,
-                "path": path,
-                **({"root": binding[0], "binding-path": binding[1]} if binding else {}),
-                "image": image["id"],
-                "reason": reason,
-            }
-        )
-
-    for payload in accounting["payloads"]:
-        for row in payload["unresolved"]:
-            gap("frozen-payload-unbound", row.get("path", payload["generated"]["path"]), row["reason"])
-        for rows, group, provenance in (
-            (payload["elements"], "frozen-source", "captured-frozen-source"),
-            (payload["inputs"], "generator-input", "captured-generator-input"),
-        ):
-            for row in rows:
-                is_element = group == "frozen-source"
-                counts["elements" if is_element else "inputs"] += 1
-                path = (row.get("source") or row.get("mpy") or {}).get("path") or row.get("path") or row["target"]
-                if row["disposition"] == "unbound":
-                    counts["unbound"] += is_element
-                    gap("frozen-payload-unbound", path, row["reason"])
-                    continue
-                placed = True
-                for item in row["source_bindings"]:
-                    binding = (item["root"], item["path"])
-                    files, reason = _owned_file(builder, scope, boundaries, source_refs, binding, group, provenance)
-                    if files is None:
-                        placed = False
-                        gap("frozen-source-not-in-selected-scope", path, reason, binding)
-                        continue
-                    references.update(files)
-                    if is_element:
-                        bound_sources.add(binding)
-                        for reference in files:
-                            builder.components[reference].properties.update(property_values({"frozen-payload": "bound"}))
-                counts["bound"] += is_element and placed
-                counts["unbound"] += is_element and not placed
-    selected = sorted(
-        {
-            (source["root"], source["path"])
-            for source in builder.sources
-            if source["group"] == FROZEN_GROUP
-        }
-        - bound_sources
-    )
-    return references, {
-        "status": "incomplete" if failed else "attributed",
-        **counts,
-        "selected_not_in_payload": [{"root": root, "path": path} for root, path in selected],
-    }
-
-
 def _attach_firmware_images(
-    receipt: dict[str, Any],
+    evidence: dict[str, Any],
     scope: dict[str, Any],
     builder: _Builder,
     root_dependencies: set[str],
     boundaries: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Add build-bound firmware subjects and their exact selected source dependencies."""
-    validated = receipt
-    configuration = validated["configuration"]
-    for field in ("port", "target", "variant"):
-        if configuration[field] != scope[field]:
-            raise ValueError(
-                f"firmware receipt {field} {configuration[field]!r} does not match "
-                f"SBOM scope {scope[field]!r}"
-            )
-    for repository in validated["source_repositories"]:
-        name = repository["name"]
-        root = scope["roots"].get(name)
-        if not root or Path(root).resolve() != Path(repository["path"]).resolve():
-            raise ValueError(f"firmware receipt source root does not match SBOM root: {name}")
-        revision = _git(Path(root), "rev-parse", "HEAD")
-        if revision and revision != repository["revision"]:
-            raise ValueError(f"firmware receipt source revision is stale: {name}")
-
+    """Add the firmware images of the link evidence and the selected components they link."""
     source_refs: dict[tuple[str, str], set[str]] = {}
     for source in builder.sources:
         source_refs.setdefault((source["root"], source["path"]), set()).add(source["component"])
 
     images = []
-    for image in validated["images"]:
-        link = image["link"]
-        bindings = set()
-        generator_bindings = set()
-
-        def collect(items):
-            for item in items:
-                key = (item["root"], item["path"])
-                bindings.add(key)
-                if item.get("via") == "generator":
-                    generator_bindings.add(key)
-
-        for row in image["object_accounting"]:
-            if row["disposition"] == "contributed":
-                collect(row["source_bindings"])
-        for operand in link["operands"]:
-            if operand["disposition"] != "contributed" or operand["kind"] == "embedded-binary":
-                continue
-            if operand["kind"] == "archive":
-                members = (item for item in operand["members"] if item["disposition"] == "contributed")
-                for member in members:
-                    collect(member["source_bindings"])
-            else:
-                collect(operand.get("source_bindings", []))
+    for image in evidence["images"]:
         mapped, missing = set(), []
-        for binding in sorted(bindings):
-            refs = source_refs.get(binding)
-            if not refs and binding in generator_bindings:
-                reference = _generator_input(builder, binding)
-                if reference:
-                    refs = {reference}
-                    source_refs[binding] = refs
-            if refs:
-                mapped.update(refs)
+        for item in image["sources"]:
+            binding = (item["root"], item["path"])
+            if binding in source_refs:
+                mapped.update(source_refs[binding])
             else:
                 missing.append(binding)
                 builder.gaps.append(
@@ -850,72 +600,59 @@ def _attach_firmware_images(
                         "image": image["id"],
                     }
                 )
-        header_refs, headers = _header_components(builder, scope, boundaries, source_refs, image, validated)
-        embedded_refs, embedded = _embedded_components(builder, scope, boundaries, source_refs, image)
-        frozen_refs, frozen = _frozen_components(builder, scope, boundaries, source_refs, image, validated)
+        for path in image["unbound_sources"]:
+            builder.gaps.append(
+                {"kind": "linked-source-not-in-selected-scope", "path": path, "image": image["id"]}
+            )
+        for row in image["unresolved"]:
+            builder.gaps.append(
+                {"image": image["id"], **{key: value for key, value in row.items() if key != "kind"}, "input-kind": row["kind"], "kind": "unresolved-link-input"}
+            )
+        header_refs, headers = _header_components(builder, scope, boundaries, source_refs, image, evidence)
         link_status = (
             "complete"
-            if validated["status"] == "complete"
-            and link["status"] == "complete"
-            and not missing
+            if not (missing or image["unbound_sources"] or image["unresolved"])
             and headers["status"] == "attributed"
-            and embedded["status"] == "attributed"
-            and frozen["status"] in ("attributed", "none")
             else "incomplete"
         )
         component = Component(
             kind=FIRMWARE,
             name=image["id"],
-            hashes={"sha256": link["elf"]["sha256"]},
+            hashes={"sha256": image["elf"]["sha256"]},
             properties=property_values(
                 {
-                    "build-id": validated["build_id"],
-                    "receipt-id": validated["receipt_id"],
+                    "evidence-id": evidence["evidence_id"],
                     "image-role": image["role"],
-                    "port": configuration["port"],
-                    "target": configuration["target"],
-                    "variant": configuration["variant"],
+                    "port": scope["port"],
+                    "target": scope["target"],
+                    "variant": scope["variant"],
                     "link-closure": link_status,
-                    "frozen-payload": frozen["status"],
-                    "linker-format": link["linker_format"],
-                    "linker-map-sha256": link["map"]["sha256"],
-                    "lto": link["lto"],
+                    "linker-map-sha256": image["map"]["sha256"],
                 }
             ),
         )
-        reference = builder.add(
-            "firmware-image", [validated["build_id"], image["id"]], component
-        )
-        if link["dynamic_needed"]:
-            builder.dynamic_links[reference] = list(link["dynamic_needed"])
-        mapped.update(_runtime_components(builder, link, validated["toolchain"], validated["build_id"]))
+        reference = builder.add("firmware-image", [evidence["evidence_id"], image["id"]], component)
+        if image["dynamic_needed"]:
+            builder.dynamic_links[reference] = list(image["dynamic_needed"])
+        mapped.update(_runtime_components(builder, image["runtime"], evidence["toolchain"], evidence["evidence_id"]))
         mapped.update(header_refs)
-        mapped.update(embedded_refs)
-        mapped.update(frozen_refs)
         builder.depends_on[reference] = mapped
         root_dependencies.add(reference)
         images.append(
             {
                 "id": image["id"],
                 "role": image["role"],
-                "elf_sha256": link["elf"]["sha256"],
+                "elf_sha256": image["elf"]["sha256"],
                 "link_closure": link_status,
                 "linked_components": sorted(mapped),
                 "headers": headers,
-                "embedded_inputs": embedded,
-                "frozen_payload": frozen,
-                "unmapped_source_bindings": [
-                    {"root": root, "path": path} for root, path in missing
-                ],
+                "unmapped_source_bindings": [{"root": root, "path": path} for root, path in missing],
             }
         )
     return {
-        "schema": validated["schema"],
-        "receipt_id": validated["receipt_id"],
-        "build_id": validated["build_id"],
-        "status": "complete"
-        if all(image["link_closure"] == "complete" for image in images)
-        else "incomplete",
+        "schema": evidence["schema"],
+        "evidence_id": evidence["evidence_id"],
+        "status": "complete" if all(image["link_closure"] == "complete" for image in images) else "incomplete",
         "images": images,
     }
 
@@ -948,9 +685,9 @@ def _attach_deployment(
     bound = set()
     for row in evidence["members"]:
         if row["kind"] in IMAGE_KINDS:
-            binding = row["receipt_binding"]
-            if binding and evidence["receipt"]:
-                bound.add(_ref("firmware-image", [evidence["receipt"]["build_id"], binding["image"]]))
+            binding = row["image_binding"]
+            if binding and evidence["link_evidence"]:
+                bound.add(_ref("firmware-image", [evidence["link_evidence"]["evidence_id"], binding["image"]]))
             continue
         if row["digest"] != "match":
             continue
@@ -1071,14 +808,14 @@ def generate_sbom(
     *,
     micropython_root: Path,
     declaration_files: Sequence[Path] = (),
-    build_receipt: Path | dict[str, Any] | None = None,
+    link_evidence: Path | None = None,
     posthoc_link_inventory: Path | None = None,
     link_generation: Path | None = None,
     deployment: Path | None = None,
 ) -> tuple[Model, dict[str, Any]]:
     """Return the neutral SBOM model of the selected dependencies and field-level evidence."""
-    if build_receipt is not None and posthoc_link_inventory is not None:
-        raise ValueError("provide either an actual build receipt or a posthoc link inventory, not both")
+    if link_evidence is not None and posthoc_link_inventory is not None:
+        raise ValueError("provide either link evidence or a posthoc link inventory, not both")
     if link_generation is not None and posthoc_link_inventory is None:
         raise ValueError("--link-generation requires --link-inventory")
     if posthoc_link_inventory is not None:
@@ -1087,14 +824,7 @@ def generate_sbom(
         )
     else:
         posthoc_evidence = None
-    if build_receipt is None:
-        firmware_evidence = None
-    elif isinstance(build_receipt, Path):
-        firmware_evidence = load_firmware_receipt(build_receipt)
-    elif isinstance(build_receipt, dict):
-        firmware_evidence = validate_firmware_receipt(build_receipt)
-    else:
-        raise ValueError("build_receipt must be a path or JSON object")
+    firmware_evidence = load_link_evidence(link_evidence) if link_evidence is not None else None
     scope = parse_scope(scope)
     mpy = Path(micropython_root).resolve(strict=True)
     if not (mpy / "tools/manifestfile.py").is_file():
@@ -1153,7 +883,7 @@ def generate_sbom(
     deployment_evidence = None
     if deployment is not None:
         deployment_evidence = verify_deployment(
-            load_deployment(deployment), target=scope["target"], receipt=firmware_evidence
+            load_deployment(deployment), target=scope["target"], link_evidence=firmware_evidence
         )
         _attach_deployment(builder, deployment_evidence, root_dependencies)
     root = Component(
@@ -1317,9 +1047,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Source-bound CycloneDX 1.6 dependency declarations; repeatable",
     )
     parser.add_argument(
-        "--build-receipt",
+        "--link-evidence",
         type=Path,
-        help="versioned actual-build/link receipt from the selected firmware build",
+        help="mpy-link-evidence/v1 file from mpy_analysis.link_evidence for the selected firmware build",
     )
     parser.add_argument(
         "--deployment",
@@ -1356,7 +1086,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             input_error, data = exc, None
         protected = _protected_inputs(scope_path, data)
         protected.update(path.resolve() for path in args.dependency_metadata)
-        for evidence_path in (args.build_receipt, args.link_inventory, args.link_generation):
+        for evidence_path in (args.link_evidence, args.link_inventory, args.link_generation):
             if evidence_path:
                 protected.add(evidence_path.resolve())
         if args.deployment:
@@ -1369,7 +1099,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             scope,
             micropython_root=args.micropython_root,
             declaration_files=args.dependency_metadata,
-            build_receipt=args.build_receipt,
+            link_evidence=args.link_evidence,
             posthoc_link_inventory=args.link_inventory,
             link_generation=args.link_generation,
             deployment=args.deployment,

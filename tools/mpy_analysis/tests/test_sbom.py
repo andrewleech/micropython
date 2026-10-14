@@ -7,7 +7,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from conftest import fake_elf, generate_cyclonedx
+from conftest import generate_cyclonedx
+from link_fixture import link_evidence
 from mpy_analysis import sbom, scope
 from mpy_analysis.metadata_bom import validate_cyclonedx
 from mpy_analysis.sbom_cyclonedx import to_cyclonedx
@@ -130,129 +131,7 @@ def test_compiler_actions_select_sources_without_repository_sweep(tmp_path):
 
 
 
-def firmware_receipt(inventory, app, build_dir, source_path="selected.c"):
-    from mpy_analysis.firmware_receipt import receipt_id
-
-    build_dir.mkdir()
-    compiler = Path(sys.executable).resolve()
-    obj, elf, map_file = (build_dir / name for name in ("selected.o", "firmware.elf", "firmware.map"))
-    for path, content in (
-        (obj, b"object"),
-        (elf, fake_elf()),
-        (map_file, b"link map"),
-    ):
-        path.write_bytes(content)
-
-    def record(path, role):
-        path = Path(path).resolve()
-        return {
-            "path": str(path),
-            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-            "role": role,
-        }
-
-    build_id = "a" * 64
-    source = app / "selected.c"
-    object_record = record(obj, "object")
-    source_binding = [{"root": "app", "path": source_path}]
-    roots = [
-        {"name": name, "path": inventory["roots"][name]}
-        for name in ("app", "library")
-    ]
-    repositories = [
-        {
-            **root,
-            "revision": git(root["path"], "rev-parse", "HEAD"),
-            "tree_sha256": hashlib.sha256(root["name"].encode()).hexdigest(),
-            "dirty": False,
-        }
-        for root in roots
-    ]
-    actions = [
-        {
-            "id": "compile-selected",
-            "build_id": build_id,
-            "kind": "compile",
-            "image": "application",
-            "argv": [str(compiler), "-c", str(source), "-o", str(obj)],
-            "cwd": str(app),
-            "exit_code": 0,
-            "executable": record(compiler, "compiler"),
-            "inputs": [record(source, "source")],
-            "outputs": [object_record],
-        },
-        {
-            "id": "link-application",
-            "build_id": build_id,
-            "kind": "link",
-            "argv": [str(compiler), str(obj), "-Wl,-Map=firmware.map", "-o", str(elf)],
-            "cwd": str(build_dir),
-            "exit_code": 0,
-            "executable": record(compiler, "compiler"),
-            "inputs": [{**object_record, "role": "link-operand"}],
-            "outputs": [record(elf, "elf"), record(map_file, "map")],
-        },
-    ]
-    receipt = {
-        "schema": "mpy-firmware-build/v1",
-        "build_id": build_id,
-        "configuration": {
-            "port": inventory["port"],
-            "target": inventory["target"],
-            "variant": inventory["variant"],
-            "variables": {"LTO": "0"},
-        },
-        "source_repositories": repositories,
-        "toolchain": [
-            {"role": "compiler", "version": "python-fixture", "executable": record(compiler, "compiler")}
-        ],
-        "actions": actions,
-        "images": [
-            {
-                "id": "application",
-                "build_id": build_id,
-                "role": "application",
-                "link_action": "link-application",
-                "link": {
-                    "adapter": "fixture-map/v1",
-                    "linker_format": "fixture",
-                    "status": "complete",
-                    "elf": record(elf, "elf"),
-                    "map": record(map_file, "map"),
-                    "operands": [
-                        {
-                            "kind": "object",
-                            "input": {**object_record, "role": "link-operand"},
-                            "disposition": "contributed",
-                            "source_bindings": source_binding,
-                            "evidence": "link map allocation",
-                        }
-                    ],
-                    "discarded_sections": [],
-                    "dynamic_needed": [],
-                    "unresolved": [],
-                    "lto": "disabled",
-                },
-                "object_accounting": [
-                    {
-                        "object": object_record,
-                        "disposition": "contributed",
-                        "source_bindings": source_binding,
-                        "evidence": "compiler action and link map",
-                    }
-                ],
-                "header_accounting": [],
-                "embedded_inputs": [],
-                "artifacts": [record(elf, "elf")],
-            }
-        ],
-        "status": "complete",
-    }
-    receipt["receipt_id"] = receipt_id(receipt)
-    return receipt
-
-
-def test_firmware_receipt_adds_linked_image_and_exact_source_dependency(tmp_path):
+def compiled_selection(tmp_path):
     inventory, app, _ = selection(tmp_path)
     database = app / "compile_commands.json"
     database.write_text(
@@ -269,11 +148,14 @@ def test_firmware_receipt_adds_linked_image_and_exact_source_dependency(tmp_path
     inventory["groups"]["native"] = scope.collect_compdb_sources(
         database, roots=inventory["roots"], owners={"app": "application", "library": "external"}
     )
-    evidence = firmware_receipt(inventory, app, tmp_path / "firmware-build")
+    return inventory, app
 
-    document, receipt = generate_cyclonedx(
-        inventory, micropython_root=MPY_ROOT, build_receipt=evidence
-    )
+
+def test_link_evidence_adds_linked_image_and_exact_source_dependency(tmp_path):
+    inventory, app = compiled_selection(tmp_path)
+    evidence = link_evidence(tmp_path / "firmware-build")
+
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT, link_evidence=evidence)
     image = next(component for component in document["components"] if component["type"] == "firmware")
     file_component = next(
         component
@@ -282,34 +164,17 @@ def test_firmware_receipt_adds_linked_image_and_exact_source_dependency(tmp_path
     )
     dependencies = {row["ref"]: row["dependsOn"] for row in document["dependencies"]}
 
-    assert image["hashes"][0]["content"] == evidence["images"][0]["link"]["elf"]["sha256"]
+    assert image["hashes"][0]["content"] == json.loads(evidence.read_text())["images"][0]["elf"]["sha256"]
     assert file_component["bom-ref"] in dependencies[image["bom-ref"]]
     assert receipt["link_closure"]["status"] == "complete"
     assert receipt["firmware_completeness"] == "established"
 
 
 def test_unmatched_linked_source_remains_partial_in_sbom(tmp_path):
-    inventory, app, _ = selection(tmp_path)
-    database = app / "compile_commands.json"
-    database.write_text(
-        json.dumps(
-            [
-                {
-                    "directory": str(app),
-                    "file": "selected.c",
-                    "arguments": ["cc", "-c", "selected.c", "-o", "selected.o"],
-                }
-            ]
-        )
-    )
-    inventory["groups"]["native"] = scope.collect_compdb_sources(
-        database, roots=inventory["roots"], owners={"app": "application", "library": "external"}
-    )
-    evidence = firmware_receipt(inventory, app, tmp_path / "firmware-build", "missing.c")
+    inventory, app = compiled_selection(tmp_path)
+    evidence = link_evidence(tmp_path / "firmware-build", "missing.c")
 
-    document, receipt = generate_cyclonedx(
-        inventory, micropython_root=MPY_ROOT, build_receipt=evidence
-    )
+    document, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT, link_evidence=evidence)
 
     assert receipt["link_closure"]["status"] == "incomplete"
     assert receipt["link_closure"]["images"][0]["unmapped_source_bindings"] == [
@@ -321,30 +186,26 @@ def test_unmatched_linked_source_remains_partial_in_sbom(tmp_path):
     assert receipt["firmware_completeness"] == "not-established"
 
 
-def test_cli_accepts_build_receipt_and_emits_firmware_sbom(tmp_path):
-    inventory, app, _ = selection(tmp_path)
-    database = app / "compile_commands.json"
-    database.write_text(
-        json.dumps(
-            [
-                {
-                    "directory": str(app),
-                    "file": "selected.c",
-                    "arguments": ["cc", "-c", "selected.c", "-o", "selected.o"],
-                }
-            ]
-        )
-    )
-    inventory["groups"]["native"] = scope.collect_compdb_sources(
-        database, roots=inventory["roots"], owners={"app": "application", "library": "external"}
-    )
+def test_unresolved_link_input_blocks_established(tmp_path):
+    inventory, app = compiled_selection(tmp_path)
+    evidence = link_evidence(tmp_path / "firmware-build")
+    body = json.loads(evidence.read_text())
+    body["images"][0]["unresolved"] = [{"kind": "object", "path": "/build/lto.o", "reason": "no compiled source"}]
+    evidence.write_text(json.dumps(body))
+
+    _, receipt = generate_cyclonedx(inventory, micropython_root=MPY_ROOT, link_evidence=evidence)
+
+    assert receipt["link_closure"]["status"] == "incomplete"
+    assert any(gap["kind"] == "unresolved-link-input" for gap in receipt["gaps"])
+    assert receipt["firmware_completeness"] == "not-established"
+
+
+def test_cli_accepts_link_evidence_and_emits_firmware_sbom(tmp_path):
+    inventory, app = compiled_selection(tmp_path)
     scope_path = tmp_path / "scope.json"
-    receipt_path = tmp_path / "build-receipt.json"
     output_dir = tmp_path / "output"
     scope_path.write_text(json.dumps(inventory))
-    receipt_path.write_text(
-        json.dumps(firmware_receipt(inventory, app, tmp_path / "firmware-build"))
-    )
+    evidence = link_evidence(tmp_path / "firmware-build")
 
     result = subprocess.run(
         [
@@ -355,8 +216,8 @@ def test_cli_accepts_build_receipt_and_emits_firmware_sbom(tmp_path):
             str(scope_path),
             "--micropython-root",
             str(MPY_ROOT),
-            "--build-receipt",
-            str(receipt_path),
+            "--link-evidence",
+            str(evidence),
             "--output-dir",
             str(output_dir),
         ],
@@ -372,28 +233,6 @@ def test_cli_accepts_build_receipt_and_emits_firmware_sbom(tmp_path):
     assert summary["link_closure"]["status"] == "complete"
 
 
-def test_firmware_receipt_target_mismatch_is_rejected(tmp_path):
-    from mpy_analysis.firmware_receipt import receipt_id
-
-    inventory, app, _ = selection(tmp_path)
-    evidence = firmware_receipt(inventory, app, tmp_path / "firmware-build")
-    evidence["configuration"]["target"] = "different-target"
-    evidence["receipt_id"] = receipt_id(evidence)
-
-    with pytest.raises(ValueError, match="does not match SBOM scope"):
-        sbom.generate_sbom(inventory, micropython_root=MPY_ROOT, build_receipt=evidence)
-
-
-def test_firmware_receipt_stale_source_revision_is_rejected(tmp_path):
-    from mpy_analysis.firmware_receipt import receipt_id
-
-    inventory, app, _ = selection(tmp_path)
-    evidence = firmware_receipt(inventory, app, tmp_path / "firmware-build")
-    evidence["source_repositories"][0]["revision"] = "0" * 40
-    evidence["receipt_id"] = receipt_id(evidence)
-
-    with pytest.raises(ValueError, match="source revision is stale"):
-        sbom.generate_sbom(inventory, micropython_root=MPY_ROOT, build_receipt=evidence)
 
 def test_parent_repository_status_ignores_unavailable_gitlink(tmp_path):
     inventory, _, library = selection(tmp_path)
@@ -982,6 +821,6 @@ def test_actual_and_posthoc_firmware_evidence_cannot_be_combined(tmp_path):
         sbom.generate_sbom(
             inventory,
             micropython_root=MPY_ROOT,
-            build_receipt={},
+            link_evidence=tmp_path / "evidence.json",
             posthoc_link_inventory=posthoc,
         )

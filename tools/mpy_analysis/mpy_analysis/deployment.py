@@ -1,10 +1,10 @@
 """Deployment manifest (`mpy-deployment/v1`) and its verifier.
 
-A firmware receipt says which sources a captured build linked into its images. It says nothing
+Link evidence says which sources a built firmware linked into its images. It says nothing
 about what the device carries once deployed: which images are flashed, which files sit on the
 filesystem, which packages or native modules are installed, whether anything is fetched at run
 time. The consuming application owns that statement; this module defines its schema and checks
-it against bytes on disk and, when given, the firmware receipt.
+it against bytes on disk and, when given, the link evidence.
 
 The verifier never infers deployment. A file is deployed only when a manifest member names it,
 and a dynamic import or a directory listing never adds one. Each member is hashed from the file
@@ -13,9 +13,9 @@ named by its path (relative paths resolve against the manifest's directory). The
 
 * every member file exists and hashes to its declared SHA-256,
 * the manifest lists at least one `firmware-image` member, every `firmware-image` member is an
-  image of the firmware receipt (named by `receipt_image`, or found by an exact artifact hash
+  image of the link evidence (named by `image`, or found by an exact artifact hash
   match) and its declared hash is that image's ELF hash or one of its deployment artifact hashes,
-* every image of the receipt is either bound by a member or excluded with a stated reason,
+* every image of the link evidence is either bound by a member or excluded with a stated reason,
 * `runtime_fetch` is declared and is `none` or `restricted`.
 
 A `restricted` fetch carries the consumer's `immutable_by` statement (hash-pinning policy name and
@@ -105,7 +105,7 @@ def _check_references(deployment: Deployment) -> None:
         if resolved in paths:
             raise DeploymentError(f"members {paths[resolved]} and {member['id']} name the same file: {resolved}")
         paths[resolved] = member["id"]
-    bound = {member.get("receipt_image") for member in data["members"]} - {None}
+    bound = {member.get("image") for member in data["members"]} - {None}
     for exclusion in data.get("exclusions", []):
         if "path" in exclusion:
             resolved = deployment.resolve(exclusion["path"]).resolve(strict=False)
@@ -115,9 +115,9 @@ def _check_references(deployment: Deployment) -> None:
                 raise DeploymentError(
                     f"exclusion names the {what} {paths[resolved]}; a deployed member cannot be excluded"
                 )
-        elif exclusion["receipt_image"] in bound:
+        elif exclusion["image"] in bound:
             raise DeploymentError(
-                f"exclusion names receipt image {exclusion['receipt_image']!r}, which a member binds"
+                f"exclusion names image {exclusion['image']!r}, which a member binds"
             )
 
 
@@ -134,12 +134,12 @@ def _hash_file(path: Path) -> tuple[str, str]:
     return sha256.hexdigest(), sha1.hexdigest()
 
 
-def _receipt_artifacts(receipt: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
+def _image_artifacts(link_evidence: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
     """Per image id, the artifacts a deployed image file can legitimately be: ELF and deployment files."""
     result: dict[str, list[dict[str, str]]] = {}
-    for image in receipt["images"]:
+    for image in link_evidence["images"]:
         seen = {(artifact["role"], artifact["path"], artifact["sha256"]) for artifact in image["artifacts"]}
-        elf = image["link"]["elf"]
+        elf = image["elf"]
         seen.add(("elf", elf["path"], elf["sha256"]))
         result[image["id"]] = [
             {"role": role, "path": path, "sha256": digest}
@@ -151,30 +151,30 @@ def _receipt_artifacts(receipt: dict[str, Any]) -> dict[str, list[dict[str, str]
 
 def _bind_member(
     member: dict[str, Any],
-    receipt: dict[str, Any] | None,
+    link_evidence: dict[str, Any] | None,
     artifacts: dict[str, list[dict[str, str]]],
     roles: dict[str, str],
 ) -> tuple[dict[str, Any] | None, str, list[dict[str, Any]]]:
-    """The receipt binding of an image member, its status, and the reasons it is not accepted."""
+    """The link evidence binding of an image member, its status, and the reasons it is not accepted."""
     reasons: list[dict[str, Any]] = []
 
     def reject(code: str, detail: str):
         reasons.append({"code": code, "member": member["id"], "detail": detail})
         return None, "rejected", reasons
 
-    named = member.get("receipt_image")
-    if receipt is None:
+    named = member.get("image")
+    if link_evidence is None:
         if named is not None or member["kind"] == "firmware-image":
             return reject(
-                "receipt-required",
-                f"{member['kind']} member {member['id']} cannot be accounted without a firmware receipt",
+                "link-evidence-required",
+                f"{member['kind']} member {member['id']} cannot be accounted without a link evidence",
             )
         return None, "unbound", reasons
     if named is not None:
         if named not in artifacts:
             return reject(
-                "receipt-image-unknown",
-                f"member {member['id']} names receipt image {named!r}, which the receipt does not contain",
+                "image-unknown",
+                f"member {member['id']} names image {named!r}, which the link evidence does not contain",
             )
         candidates = [named]
     else:
@@ -186,36 +186,36 @@ def _bind_member(
         if not candidates:
             if member["kind"] == "firmware-image":
                 return reject(
-                    "firmware-image-not-in-receipt",
-                    f"firmware-image member {member['id']} matches no image or deployment artifact of the receipt",
+                    "firmware-image-not-in-evidence",
+                    f"firmware-image member {member['id']} matches no image or deployment artifact of the link evidence",
                 )
             return None, "unbound", reasons
         if len(candidates) > 1:
             return reject(
-                "receipt-image-ambiguous",
-                f"member {member['id']} hash matches several receipt images: {sorted(candidates)}",
+                "image-ambiguous",
+                f"member {member['id']} hash matches several images: {sorted(candidates)}",
             )
     image_id = candidates[0]
     is_bootloader = roles[image_id] == _BOOTLOADER_ROLE
     if is_bootloader != (member["kind"] == "bootloader-image"):
         return reject(
-            "receipt-image-role-mismatch",
-            f"{member['kind']} member {member['id']} is bound to receipt image {image_id!r} "
+            "image-role-mismatch",
+            f"{member['kind']} member {member['id']} is bound to image {image_id!r} "
             f"with role {roles[image_id]!r}",
         )
     matches = [item for item in artifacts[image_id] if item["sha256"] == member["sha256"]]
     if not matches:
         return reject(
-            "receipt-image-hash-mismatch",
+            "image-hash-mismatch",
             f"member {member['id']} declares {member['sha256']}, which is neither the ELF hash nor a "
-            f"deployment artifact hash of receipt image {image_id!r}",
+            f"deployment artifact hash of image {image_id!r}",
         )
     return (
         {
             "image": image_id,
             "artifact_role": matches[0]["role"],
             "artifact_path": matches[0]["path"],
-            "bound_by": "receipt_image" if named is not None else "hash",
+            "bound_by": "image" if named is not None else "hash",
         },
         "bound",
         reasons,
@@ -260,11 +260,11 @@ def _verify_member(deployment: Deployment, member: dict[str, Any]) -> tuple[dict
 
 
 def verify_deployment(
-    deployment: Deployment, *, target: str, receipt: dict[str, Any] | None = None
+    deployment: Deployment, *, target: str, link_evidence: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    """Return the evidence block for a manifest, checked against the files and the receipt.
+    """Return the evidence block for a manifest, checked against the files and the link evidence.
 
-    `receipt` is a validated `mpy-firmware-build/v1` receipt, or None when none was supplied.
+    `link_evidence` is a loaded `mpy-link-evidence/v1` evidence, or None when none was supplied.
     Raises DeploymentError for a manifest for another target or one that excludes a firmware image.
     """
     data = deployment.data
@@ -272,14 +272,14 @@ def verify_deployment(
         raise DeploymentError(
             f"deployment manifest target {data['target']!r} does not match the SBOM target {target!r}"
         )
-    artifacts = _receipt_artifacts(receipt) if receipt else {}
-    roles = {image["id"]: image["role"] for image in receipt["images"]} if receipt else {}
+    artifacts = _image_artifacts(link_evidence) if link_evidence else {}
+    roles = {image["id"]: image["role"] for image in link_evidence["images"]} if link_evidence else {}
     exclusions = data.get("exclusions", [])
     for exclusion in exclusions:
-        image_id = exclusion.get("receipt_image")
+        image_id = exclusion.get("image")
         if image_id in roles and roles[image_id] != _BOOTLOADER_ROLE:
             raise DeploymentError(
-                f"exclusion of receipt image {image_id!r} (role {roles[image_id]!r}) is rejected: "
+                f"exclusion of image {image_id!r} (role {roles[image_id]!r}) is rejected: "
                 "firmware image bytes cannot be left out of a deployment"
             )
 
@@ -289,9 +289,9 @@ def verify_deployment(
         row, member_reasons = _verify_member(deployment, member)
         reasons.extend(member_reasons)
         if member["kind"] in IMAGE_KINDS:
-            binding, status, binding_reasons = _bind_member(member, receipt, artifacts, roles)
-            row["receipt_image"] = member.get("receipt_image")
-            row["receipt_binding"] = binding
+            binding, status, binding_reasons = _bind_member(member, link_evidence, artifacts, roles)
+            row["image"] = member.get("image")
+            row["image_binding"] = binding
             row["binding"] = status
             reasons.extend(binding_reasons)
         else:
@@ -309,14 +309,14 @@ def verify_deployment(
 
     accounted: dict[str, list[str]] = {image_id: [] for image_id in artifacts}
     for row in members:
-        binding = row.get("receipt_binding")
+        binding = row.get("image_binding")
         if binding:
             accounted[binding["image"]].append(row["id"])
     for exclusion in exclusions:
-        if "receipt_image" in exclusion and accounted.get(exclusion["receipt_image"]):
+        if "image" in exclusion and accounted.get(exclusion["image"]):
             raise DeploymentError(
-                f"exclusion names receipt image {exclusion['receipt_image']!r}, "
-                f"which member {accounted[exclusion['receipt_image']][0]} binds"
+                f"exclusion names image {exclusion['image']!r}, "
+                f"which member {accounted[exclusion['image']][0]} binds"
             )
         if "path" in exclusion:
             resolved = deployment.resolve(exclusion["path"]).resolve(strict=False)
@@ -327,12 +327,12 @@ def verify_deployment(
             ]
             if owners:
                 raise DeploymentError(
-                    f"exclusion path {exclusion['path']!r} is an artifact of receipt image {owners[0]!r}, "
-                    "which no member binds; exclude the image by receipt_image instead"
+                    f"exclusion path {exclusion['path']!r} is an artifact of image {owners[0]!r}, "
+                    "which no member binds; exclude the image by image instead"
                 )
-    excluded = {item["receipt_image"]: item["reason"] for item in exclusions if "receipt_image" in item}
-    receipt_images = []
-    for image in receipt["images"] if receipt else []:
+    excluded = {item["image"]: item["reason"] for item in exclusions if "image" in item}
+    images = []
+    for image in link_evidence["images"] if link_evidence else []:
         image_id = image["id"]
         row = {
             "id": image_id,
@@ -341,21 +341,21 @@ def verify_deployment(
             "excluded": image_id in excluded and not accounted[image_id],
             "exclusion_reason": excluded.get(image_id),
         }
-        receipt_images.append(row)
+        images.append(row)
         if not accounted[image_id] and image_id not in excluded:
             reasons.append(
                 {
-                    "code": "receipt-image-not-in-deployment",
+                    "code": "image-not-in-deployment",
                     "member": None,
-                    "detail": f"receipt image {image_id!r} is neither a deployment member nor excluded with a reason",
+                    "detail": f"image {image_id!r} is neither a deployment member nor excluded with a reason",
                 }
             )
-    for image_id in sorted(set(excluded) - set(roles)) if receipt else []:
+    for image_id in sorted(set(excluded) - set(roles)) if link_evidence else []:
         reasons.append(
             {
                 "code": "exclusion-image-unknown",
                 "member": None,
-                "detail": f"exclusion names receipt image {image_id!r}, which the receipt does not contain",
+                "detail": f"exclusion names image {image_id!r}, which the link evidence does not contain",
             }
         )
 
@@ -393,8 +393,8 @@ def verify_deployment(
         "members": members,
         "runtime_fetch": runtime_fetch,
         "exclusions": [dict(item) for item in exclusions],
-        "receipt": None
-        if receipt is None
-        else {"receipt_id": receipt["receipt_id"], "build_id": receipt["build_id"]},
-        "receipt_images": receipt_images,
+        "link_evidence": None
+        if link_evidence is None
+        else {"evidence_id": link_evidence["evidence_id"]},
+        "images": images,
     }

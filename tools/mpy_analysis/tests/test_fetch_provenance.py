@@ -6,7 +6,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from mpy_analysis import sbom
 from mpy_analysis.sbom import FIRMWARE_BLOCKING_GAPS
 from mpy_analysis.scope import FROZEN_GROUP
@@ -455,9 +454,9 @@ def test_plain_nested_repository_is_not_a_submodule(tmp_path):
 
 
 def firmware_summary(workspace, tmp_path):
-    """SBOM of a linked image whose receipt names the application and the SDK checkout."""
+    """SBOM of a linked image whose evidence names a source of the application."""
+    from link_fixture import link_evidence
     from mpy_analysis import scope as scope_module
-    from test_sbom import firmware_receipt
 
     app = workspace["app"]
     (app / "selected.c").write_text("int selected;\n")
@@ -481,8 +480,8 @@ def firmware_summary(workspace, tmp_path):
         roots=inventory["roots"],
         owners={"app": "application", "library": "external"},
     )
-    evidence = firmware_receipt(inventory, app, tmp_path / "firmware-build")
-    _, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT, build_receipt=evidence)
+    evidence = link_evidence(tmp_path / "firmware-build")
+    _, receipt = sbom.generate_sbom(inventory, micropython_root=MPY_ROOT, link_evidence=evidence)
     return receipt
 
 

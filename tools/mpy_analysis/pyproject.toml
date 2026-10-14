@@ -38,8 +38,7 @@ sast-scope = "mpy_analysis.scope:main"
 sast-check-fixtures = "mpy_analysis.fixtures:main"
 sast-sbom = "mpy_analysis.sbom:main"
 sast-sbom-policy = "mpy_analysis.sbom_policy:main"
-sast-firmware-merge = "mpy_analysis.firmware_capture_receipt:main"
-sast-firmware-capture = "mpy_analysis.firmware_capture:main"
+sast-link-evidence = "mpy_analysis.link_evidence:main"
 
 [tool.setuptools]
 packages = ["mpy_analysis"]

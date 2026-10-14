@@ -31,7 +31,7 @@
           },
           "path": {"type": "string", "pattern": "\\S"},
           "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-          "receipt_image": {"type": "string", "pattern": "\\S"}
+          "image": {"type": "string", "pattern": "\\S"}
         },
         "if": {
           "properties": {
@@ -46,7 +46,7 @@
             }
           }
         },
-        "then": {"not": {"required": ["receipt_image"]}}
+        "then": {"not": {"required": ["image"]}}
       }
     },
     "runtime_fetch": {
@@ -82,10 +82,10 @@
         "required": ["reason"],
         "properties": {
           "path": {"type": "string", "pattern": "\\S"},
-          "receipt_image": {"type": "string", "pattern": "\\S"},
+          "image": {"type": "string", "pattern": "\\S"},
           "reason": {"type": "string", "pattern": "\\S"}
         },
-        "oneOf": [{"required": ["path"]}, {"required": ["receipt_image"]}]
+        "oneOf": [{"required": ["path"]}, {"required": ["image"]}]
       }
     }
   }
