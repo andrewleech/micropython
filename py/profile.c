@@ -24,6 +24,8 @@
  * THE SOFTWARE.
  */
 
+#include <stdio.h>
+
 #include "py/profile.h"
 #include "py/bc0.h"
 #include "py/gc.h"
@@ -85,6 +87,8 @@ static void frame_print(const mp_print_t *print, mp_obj_t o_in, mp_print_kind_t 
         );
 }
 
+static mp_obj_t frame_f_locals(mp_obj_t self_in); // Forward declaration
+
 static void frame_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     mp_obj_frame_t *o = MP_OBJ_TO_PTR(self_in);
 
@@ -125,9 +129,91 @@ static void frame_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             dest[0] = o->f_trace;
             break;
         case MP_QSTR_f_locals:
-            dest[0] = mp_obj_new_dict(0);
+            dest[0] = frame_f_locals(self_in);
             break;
     }
+}
+
+static mp_obj_t frame_f_locals(mp_obj_t self_in) {
+    // This function returns a dictionary of local variables in the current frame.
+    // Variables are exposed with names when available, otherwise by index (e.g., local_00, local_01, etc.)
+    if (gc_is_locked()) {
+        return MP_OBJ_NULL; // Cannot create locals dict when GC is locked
+    }
+    mp_obj_frame_t *frame = MP_OBJ_TO_PTR(self_in);
+    const mp_code_state_t *code_state = frame->code_state;
+
+    // Validate state array
+    if (code_state == NULL) {
+        return MP_OBJ_FROM_PTR(mp_obj_new_dict(0));
+    }
+
+    mp_obj_dict_t *locals_dict = mp_obj_new_dict(code_state->n_state);
+
+    // Local variables occupy the top of the state array in reverse order: local
+    // number `local_num` lives at physical slot `n_state - 1 - local_num` (see
+    // "fastn" addressing in vm.c). The remaining low slots are the value stack.
+    size_t num_locals = 0;
+    #if MICROPY_PY_SYS_SETTRACE_LOCALNAMES || MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
+    const mp_raw_code_t *rc = (code_state->fun_bc != NULL) ? code_state->fun_bc->rc : NULL;
+    if (rc != NULL && rc->local_names != NULL) {
+        num_locals = rc->local_names_len;
+    }
+    #endif
+
+    if (num_locals > 0 && num_locals <= code_state->n_state) {
+        // Real variable names are available: expose only the true local slots.
+        //
+        // mp_raw_code_get_local_name() is only declared when name tracking is
+        // built (LOCALNAMES and/or PERSIST); guard its call site the same way
+        // so a SETTRACE-only build still compiles. num_locals is always 0
+        // there (nothing above ever sets it), so this branch is unreachable
+        // in that build and the guard changes no other build's behaviour.
+        #if MICROPY_PY_SYS_SETTRACE_LOCALNAMES || MICROPY_PY_SYS_SETTRACE_LOCALNAMES_PERSIST
+        for (size_t local_num = 0; local_num < num_locals; ++local_num) {
+            size_t slot = code_state->n_state - 1 - local_num;
+            mp_obj_t state_obj = code_state->state[slot];
+            if (state_obj == MP_OBJ_NULL) {
+                continue;
+            }
+
+            qstr var_name_qstr = mp_raw_code_get_local_name(rc, local_num);
+            if (var_name_qstr == MP_QSTRnull) {
+                char var_name[16];
+                snprintf(var_name, sizeof(var_name), "local_%02d", (int)local_num);
+                var_name_qstr = qstr_from_str(var_name);
+                if (var_name_qstr == MP_QSTRnull) {
+                    continue; // Skip if qstr creation fails
+                }
+            }
+
+            mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), state_obj);
+        }
+        #endif
+    } else {
+        // No name data is available for this code object: either the feature
+        // is compiled out, or this is .mpy-loaded bytecode without persisted
+        // names. Fall back to exposing every occupied slot (locals and any
+        // live value-stack temporaries) by physical index, so occupied slots
+        // are still visible as local_NN placeholders rather than an empty
+        // dict.
+        for (size_t i = 0; i < code_state->n_state; ++i) {
+            mp_obj_t state_obj = code_state->state[i];
+            if (state_obj == MP_OBJ_NULL) {
+                continue;
+            }
+
+            char var_name[16];
+            snprintf(var_name, sizeof(var_name), "local_%02d", (int)i);
+            qstr var_name_qstr = qstr_from_str(var_name);
+            if (var_name_qstr == MP_QSTRnull) {
+                continue; // Skip if qstr creation fails
+            }
+
+            mp_obj_dict_store(locals_dict, MP_OBJ_NEW_QSTR(var_name_qstr), state_obj);
+        }
+    }
+    return MP_OBJ_FROM_PTR(locals_dict);
 }
 
 MP_DEFINE_CONST_OBJ_TYPE(

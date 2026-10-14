@@ -1,0 +1,12 @@
+line:test_simple:30 locals=['a']
+line:test_simple:31 locals=['a', 'b']
+return:test_simple:31 locals=['a', 'b']
+line:test_with_loop:36 locals=['total']
+line:test_with_loop:37 locals=['total']
+line:test_with_loop:36 locals=['total']
+line:test_with_loop:37 locals=['i', 'total']
+line:test_with_loop:36 locals=['i', 'total']
+line:test_with_loop:37 locals=['i', 'total']
+line:test_with_loop:38 locals=['i', 'total']
+return:test_with_loop:38 locals=['i', 'total']
+done
