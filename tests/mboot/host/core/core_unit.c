@@ -40,6 +40,7 @@
 #include "sysflash/sysflash.h"
 #include "mboot_crc32.h"
 #include "mboot_log.h"
+#include "mboot_port.h"
 #include "mboot_request.h"
 #include "mboot_seccnt.h"
 #include "mboot_updatelog.h"
@@ -923,6 +924,138 @@ static void test_seccnt(void) {
     core_flash_fresh();
 }
 
+// Counters of several image ids in one area: the bootloader's own counter beside the
+// application's. Records go only to the unit that holds every image's largest value, and a
+// switch erases the other unit and gives it a copy of every largest value before the new record.
+static uint32_t counter_of(uint32_t image_id) {
+    uint32_t v = UINT32_MAX;
+    return mboot_seccnt_flash_read(image_id, &v) == 0 ? v : UINT32_MAX;
+}
+
+// The kept unit full: the bootloader's value 3 in slot 0, n_ids - 2 more images with value 1,
+// the application's values counting up in the others. The other unit erased, or with both_full a
+// unit that held every largest value before its erase started: full of older application values,
+// with the largest values of every image at its start and again in the middle (for kept unit 1 it
+// lacks its last slot, so that unit 1 stays the fuller one). Returns the application's largest
+// value.
+static uint32_t seccnt_ids_setup(const struct flash_area *sc, uint32_t kept, uint32_t n_ids, bool both_full) {
+    uint32_t per_unit = mboot_area_erase(sc) / seccnt_rec_size();
+    uint32_t top = per_unit - 1;
+    uint32_t mid = per_unit / 2;
+    uint32_t other = 1 - kept;
+    uint8_t bytes[32];
+    core_flash_fresh();
+    // The largest value of each image: the bootloader's, the others', the application's.
+    uint32_t hdr_id[4] = {MBOOT_SECCNT_ID_BOOTLOADER, 2, 3, MBOOT_SECCNT_ID_APP};
+    uint32_t hdr_val[4] = {3, 1, 1, top};
+    hdr_id[n_ids - 1] = MBOOT_SECCNT_ID_APP;
+    hdr_val[n_ids - 1] = top;
+    seccnt_rec_bytes(bytes, MBOOT_SECCNT_ID_BOOTLOADER, 3);
+    seccnt_put(sc, kept, 0, bytes);
+    for (uint32_t slot = 1; slot < per_unit; slot++) {
+        if (slot < n_ids - 1) {
+            seccnt_rec_bytes(bytes, hdr_id[slot], hdr_val[slot]);
+        } else {
+            seccnt_rec_bytes(bytes, MBOOT_SECCNT_ID_APP, slot);
+        }
+        seccnt_put(sc, kept, slot, bytes);
+    }
+    uint32_t slots = both_full ? (kept == 1 ? per_unit - 1 : per_unit) : 0;
+    for (uint32_t slot = 0; slot < slots; slot++) {
+        uint32_t i = slot < n_ids ? slot : slot >= mid && slot < mid + n_ids ? slot - mid : n_ids;
+        if (i < n_ids) {
+            seccnt_rec_bytes(bytes, hdr_id[i], hdr_val[i]);
+        } else {
+            seccnt_rec_bytes(bytes, MBOOT_SECCNT_ID_APP, slot % (top - 1) + 1);
+        }
+        seccnt_put(sc, other, slot, bytes);
+    }
+    return top;
+}
+
+static void test_seccnt_ids(void) {
+    printf("security counter (several image ids)\n");
+    const struct flash_area *sc = area(MBOOT_AREA_SECCNT);
+    uint32_t per_unit = mboot_area_erase(sc) / seccnt_rec_size();
+    const uint32_t app = MBOOT_SECCNT_ID_APP;
+    const uint32_t bl = MBOOT_SECCNT_ID_BOOTLOADER;
+    uint8_t bytes[32];
+
+    core_flash_fresh();
+    CORE_CHECK(mboot_seccnt_init() == 0);
+    CORE_CHECK(mboot_seccnt_flash_write(bl, 3) == 0);
+    CORE_CHECK(mboot_seccnt_flash_write(app, 1) == 0);
+    CORE_CHECK(counter_of(bl) == 3 && counter_of(app) == 1);
+
+    // The application's updates run across the end of unit 0, then across the end of unit 1 and
+    // back into unit 0. The records that fill the units are put by the test.
+    uint32_t v = 1;
+    uint32_t used = 3;      // unit 0: the first record, the bootloader's and the application's
+    for (uint32_t round = 0; round < 3; round++) {
+        uint32_t unit = round % 2;
+        for (uint32_t slot = used; slot < per_unit - 1; slot++) {
+            seccnt_rec_bytes(bytes, app, ++v);
+            seccnt_put(sc, unit, slot, bytes);
+        }
+        CORE_CHECK(counter_of(app) == v);
+        fake_flash_counter_reset();
+        for (uint32_t i = 0; i < 3; i++) {
+            ++v;
+            if (mboot_seccnt_flash_write(app, v) != 0 || counter_of(app) != v || counter_of(bl) != 3) {
+                CORE_CHECK(false);
+                printf("  update to %u in round %u: app %u bl %u\n", (unsigned)v, (unsigned)round,
+                    (unsigned)counter_of(app), (unsigned)counter_of(bl));
+                break;
+            }
+        }
+        // The last slot, then the switch (an erase, two copies and the record), then one more.
+        CORE_CHECK(fake_flash_stats()->erases == 1 && fake_flash_stats()->writes == 5);
+        used = 4;
+    }
+    CORE_CHECK(counter_of(bl) == 3 && counter_of(app) == v);
+    CORE_CHECK(mboot_seccnt_flash_write(bl, 4) == 0 && counter_of(bl) == 4 && counter_of(app) == v);
+    CORE_CHECK(fake_flash_stats()->overprograms == 0 && fake_flash_stats()->violations == 0);
+
+    // A power cut after the copies of a switch: both units hold every largest value. The next
+    // update starts with a switch that keeps the fuller unit 0 and erases unit 1 again.
+    uint32_t top = seccnt_ids_setup(sc, 0, 2, false);
+    seccnt_rec_bytes(bytes, bl, 3);
+    seccnt_put(sc, 1, 0, bytes);
+    seccnt_rec_bytes(bytes, app, top);
+    seccnt_put(sc, 1, 1, bytes);
+    fake_flash_counter_reset();
+    CORE_CHECK(mboot_seccnt_flash_write(app, top + 1) == 0);
+    CORE_CHECK(fake_flash_stats()->erases == 1 && fake_flash_stats()->writes == 3);
+    CORE_CHECK(counter_of(bl) == 3 && counter_of(app) == top + 1);
+    // Unit 1 is now the only complete unit and takes the next record.
+    fake_flash_counter_reset();
+    CORE_CHECK(mboot_seccnt_flash_write(bl, 4) == 0);
+    CORE_CHECK(fake_flash_stats()->erases == 0 && fake_flash_stats()->writes == 1);
+    CORE_CHECK(counter_of(bl) == 4 && counter_of(app) == top + 1);
+
+    // A cut inside the copies: unit 1 holds the bootloader's copy only and is erased again.
+    top = seccnt_ids_setup(sc, 0, 2, false);
+    seccnt_rec_bytes(bytes, bl, 3);
+    seccnt_put(sc, 1, 0, bytes);
+    fake_flash_counter_reset();
+    CORE_CHECK(mboot_seccnt_flash_write(app, top + 1) == 0);
+    CORE_CHECK(fake_flash_stats()->erases == 1 && fake_flash_stats()->writes == 3);
+    CORE_CHECK(counter_of(bl) == 3 && counter_of(app) == top + 1);
+
+    // The area keeps four images with a non-zero value. The first record (image 0, value 0) does
+    // not take one of them.
+    core_flash_fresh();
+    CORE_CHECK(mboot_seccnt_init() == 0);
+    CORE_CHECK(mboot_seccnt_flash_write(bl, 1) == 0 && mboot_seccnt_flash_write(2, 1) == 0);
+    CORE_CHECK(mboot_seccnt_flash_write(3, 1) == 0 && mboot_seccnt_flash_write(4, 1) == 0);
+    CORE_CHECK(!mboot_seccnt_flash_can_update(app, 1));
+    CORE_CHECK(mboot_seccnt_flash_write(app, 1) == -ENOSPC);
+    CORE_CHECK(mboot_seccnt_flash_can_update(app, 0) && mboot_seccnt_flash_write(app, 0) == 0);
+    CORE_CHECK(mboot_seccnt_flash_can_update(3, 2) && mboot_seccnt_flash_write(3, 2) == 0);
+    CORE_CHECK(counter_of(app) == 0 && counter_of(3) == 2 && counter_of(bl) == 1);
+    core_flash_fresh();
+}
+
 // ---- security counter: corrupted area and torn first record ----
 
 static int run_in_child(void (*fn)(void));
@@ -1228,6 +1361,154 @@ static void test_seccnt_corrupt(void) {
     }
     core_flash_fresh();
 }
+
+// ---- security counter: power cuts inside a unit switch with two images ----
+
+static uint32_t child_image;
+
+static void child_seccnt_write(void) {
+    mboot_seccnt_flash_write(child_image, child_value);
+}
+
+// After a cut inside the update of the application from app_old: no counter is lower than
+// before, and init and further updates of all images work. With erased < 2, the cut came before
+// the erase of that unit completed, and nothing is written in it before a complete erase of it.
+static void seccnt_ids_check(const char *name, const struct flash_area *sc, uint32_t n_ids, uint32_t app_old, uint32_t erased) {
+    const uint32_t app = MBOOT_SECCNT_ID_APP;
+    const uint32_t bl = MBOOT_SECCNT_ID_BOOTLOADER;
+    uint32_t a = counter_of(app);
+    CASE_CHECK(name, counter_of(bl) == 3);
+    for (uint32_t id = 2; id < n_ids; id++) {
+        CASE_CHECK(name, counter_of(id) == 1);
+    }
+    CASE_CHECK(name, a == app_old || a == app_old + 1);
+    fake_flash_counter_reset();
+    CASE_CHECK(name, mboot_seccnt_init() == 0);
+    CASE_CHECK(name, mboot_seccnt_flash_write(app, app_old + 2) == 0);
+    CASE_CHECK(name, counter_of(app) == app_old + 2 && counter_of(bl) == 3);
+    CASE_CHECK(name, mboot_seccnt_flash_write(bl, 4) == 0);
+    CASE_CHECK(name, counter_of(app) == app_old + 2 && counter_of(bl) == 4);
+    CASE_CHECK(name, mboot_seccnt_flash_write(app, app_old + 3) == 0);
+    CASE_CHECK(name, counter_of(app) == app_old + 3 && counter_of(bl) == 4);
+    for (uint32_t id = 2; id < n_ids; id++) {
+        CASE_CHECK(name, counter_of(id) == 1);
+    }
+    CASE_CHECK(name, fake_flash_stats()->overprograms == 0 && fake_flash_stats()->violations == 0);
+    uint32_t eu = mboot_area_erase(sc);
+    uint32_t lo = sc->fa_off + erased * eu;
+    const fake_flash_op_t *op = fake_flash_trace();
+    for (size_t i = 0; erased < 2 && i < fake_flash_trace_count(); i++) {
+        if (op[i].dev == 0 && op[i].off < lo + eu && op[i].off + op[i].len > lo) {
+            CASE_CHECK(name, op[i].kind == FAKE_FLASH_OP_ERASE && op[i].off == lo && op[i].len == eu);
+            break;
+        }
+    }
+}
+
+static void test_seccnt_ids_cut(void) {
+    printf("security counter (power cuts in a unit switch with several images)\n");
+    const struct flash_area *sc = area(MBOOT_AREA_SECCNT);
+    uint32_t rec = seccnt_rec_size();
+    uint32_t per_unit = mboot_area_erase(sc) / rec;
+    uint32_t mid = per_unit / 2;
+    unsigned runs = 0;
+    static const struct {
+        uint32_t kept;      // the unit that holds every largest value
+        uint32_t n_ids;     // images with a non-zero value
+    } configs[] = {
+        {0, 2}, {0, 4}, {1, 2}, {1, 4},
+    };
+    // Every tear point and seed for the first configuration, a subset for the others (the erase
+    // of a unit makes a state cost as much as the unit's size).
+    static const uint32_t few_tears[] = {0, 128, 255};
+    static const uint32_t few_seeds[] = {1, 2};
+
+    for (unsigned c = 0; c < sizeof(configs) / sizeof(configs[0]); c++) {
+        uint32_t kept = configs[c].kept;
+        uint32_t n_ids = configs[c].n_ids;
+        uint32_t other = 1 - kept;
+        uint32_t other_off = sc->fa_off + other * mboot_area_erase(sc);
+        char cfg[48];
+        snprintf(cfg, sizeof(cfg), "keep unit %u, %u ids", (unsigned)kept, (unsigned)n_ids);
+
+        // A cut at each operation of the switch (the erase of the other unit, a copy per image
+        // and the record), every cut model, tear point and seed, from an erased other unit and
+        // from one that held every largest value. BEFORE and AFTER do not depend on the tear
+        // point or the seed.
+        for (int both_full = 0; both_full < 2; both_full++) {
+            uint32_t top = seccnt_ids_setup(sc, kept, n_ids, both_full);
+            fake_flash_snapshot_t *snap = fake_flash_snapshot();
+            for (uint32_t target = 1; target <= n_ids + 2; target++) {
+                for (int mode = FAKE_FLASH_CUT_BEFORE; mode <= FAKE_FLASH_CUT_WEAK; mode++) {
+                    bool partial = mode != FAKE_FLASH_CUT_BEFORE && mode != FAKE_FLASH_CUT_AFTER;
+                    unsigned n_tears = !partial ? 1 : c == 0 ? sizeof(cut_tears) / sizeof(cut_tears[0]) : sizeof(few_tears) / sizeof(few_tears[0]);
+                    unsigned n_seeds = !partial ? 1 : c == 0 ? sizeof(cut_seeds) / sizeof(cut_seeds[0]) : sizeof(few_seeds) / sizeof(few_seeds[0]);
+                    for (unsigned t = 0; t < n_tears; t++) {
+                        uint32_t tear = c == 0 ? cut_tears[t] : few_tears[t];
+                        for (unsigned s = 0; s < n_seeds; s++) {
+                            uint32_t seed = c == 0 ? cut_seeds[s] : few_seeds[s];
+                            char name[128];
+                            snprintf(name, sizeof(name), "%s%s op %u cut mode %d tear %u seed %u", cfg,
+                                both_full ? " from a full unit" : "", (unsigned)target, mode,
+                                (unsigned)tear, (unsigned)seed);
+                            fake_flash_restore(snap);
+                            fake_flash_arm(target, (fake_flash_cut_mode_t)mode, tear, seed);
+                            child_image = MBOOT_SECCNT_ID_APP;
+                            child_value = top + 1;
+                            run_in_child(child_seccnt_write);
+                            fake_flash_disarm();
+                            CASE_CHECK(name, fake_flash_cut_fired());
+                            seccnt_ids_check(name, sc, n_ids, top, target == 1 && mode != FAKE_FLASH_CUT_AFTER ? other : 2);
+                            runs++;
+                        }
+                    }
+                }
+            }
+            fake_flash_snapshot_free(snap);
+        }
+
+        // The fake flash erases a unit from its start, so a cut inside the erase leaves its last
+        // part programmed. An erase that stops elsewhere can leave its first part or a slot in the
+        // middle programmed: the other unit then holds some or all of the largest values with
+        // free slots behind them. Its first record can also be torn.
+        static const struct {
+            uint32_t start;     // first slot left programmed, -1 for the middle, -2 for the last
+            uint32_t count;     // 0: slot 0 holds only the first half of its record
+        } keeps[] = {
+            {0, 0}, {0, 1}, {0, 2}, {0, 3}, {1, 1}, {1, 2}, {(uint32_t)-1, 1}, {(uint32_t)-1, 2}, {(uint32_t)-2, 1},
+        };
+        for (unsigned k = 0; k < sizeof(keeps) / sizeof(keeps[0]); k++) {
+            uint32_t start = keeps[k].start == (uint32_t)-1 ? mid : keeps[k].start == (uint32_t)-2 ? per_unit - 1 : keeps[k].start;
+            uint32_t end = start + keeps[k].count;
+            if (start == per_unit - 1 && other == 0) {
+                continue;   // the other unit has no programmed last slot to leave
+            }
+            char name[128];
+            if (keeps[k].count == 0) {
+                snprintf(name, sizeof(name), "%s, erase of the other unit left a torn slot 0", cfg);
+            } else {
+                snprintf(name, sizeof(name), "%s, erase of the other unit left slots %u to %u", cfg, (unsigned)start, (unsigned)end - 1);
+            }
+            uint32_t top = seccnt_ids_setup(sc, kept, n_ids, true);
+            uint8_t first[32];
+            fake_flash_peek(0, other_off, first, rec);
+            if (start > 0 || keeps[k].count == 0) {
+                fake_flash_erase_raw(0, other_off, start * rec + (keeps[k].count == 0 ? rec : 0));
+            }
+            if (keeps[k].count == 0) {
+                fake_flash_poke(0, other_off, first, 8);
+                end = 1;
+            }
+            if (end < per_unit) {
+                fake_flash_erase_raw(0, other_off + end * rec, (per_unit - end) * rec);
+            }
+            seccnt_ids_check(name, sc, n_ids, top, other);
+            runs++;
+        }
+    }
+    printf("  %u cut states\n", runs);
+    core_flash_fresh();
+}
 #endif
 
 // ---- request handoff ----
@@ -1403,6 +1684,8 @@ int core_unit_run(void) {
     test_updatelog();
     #if defined(MBOOT_SECCNT_FLASH)
     test_seccnt();
+    test_seccnt_ids();
+    test_seccnt_ids_cut();
     test_seccnt_corrupt();
     #endif
     test_request();
