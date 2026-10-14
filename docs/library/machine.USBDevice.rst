@@ -69,7 +69,7 @@ Constructors
 Methods
 -------
 
-.. method:: USBDevice.config(desc_dev, desc_cfg, desc_strs=None, open_itf_cb=None, reset_cb=None, control_xfer_cb=None, xfer_cb=None)
+.. method:: USBDevice.config(desc_dev, desc_cfg, desc_strs=None, open_itf_cb=None, reset_cb=None, control_xfer_cb=None, xfer_cb=None, desc_bos=None)
 
     Configures the ``USBDevice`` singleton object with the USB runtime device
     state and callback functions:
@@ -166,6 +166,12 @@ Methods
       .. note:: If a bus reset occurs (see :func:`USBDevice.reset`),
                 ``xfer_cb`` is not called for any transfers that have not
                 already completed.
+
+    - ``desc_bos`` - Optional bytes-like object containing a USB BOS
+      (Binary Device Object Store) descriptor. If not set, the device has no BOS
+      descriptor and the host's request for one is stalled, which is
+      correct for a device that advertises a USB version below 2.1 and
+      therefore does not promise a BOS in the first place.
 
 .. method:: USBDevice.active(self, [value] /)
 
