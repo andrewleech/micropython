@@ -29,6 +29,7 @@
 #include <stdbool.h>
 #include "extmod/machine_can_port.h"
 #include "can.h"
+#include "irq.h"
 #include "py/runtime.h"
 #include "py/mperrno.h"
 #include "py/mphal.h"
@@ -49,11 +50,45 @@
 
 #define TX_EMPTY UINT32_MAX
 
+// A single frame buffered in the software receive ring (struct machine_can_port
+// below). Fixed size so the ring can be indexed arithmetically and the receive
+// interrupt handler never allocates. flags and len are narrower than the
+// mp_uint_t/size_t types used elsewhere for the same values, since a CAN_MSG_FLAG_*
+// combination fits in a handful of bits and a frame is at most MP_CAN_MAX_LEN
+// bytes: 8 on classic bxCAN, 64 with FDCAN. On an FDCAN build a ring entry is
+// 72 bytes, so a large rxbuf is a correspondingly sized one-off allocation at
+// CAN.init() time (rxbuf=256 is 18 KB); on classic bxCAN it is 16 bytes per
+// entry, 4 KB at the same rxbuf.
+typedef struct _can_rx_ring_entry_t {
+    mp_uint_t id;
+    uint16_t flags;
+    uint8_t len;
+    uint8_t data[MP_CAN_MAX_LEN];
+} can_rx_ring_entry_t;
+
 struct machine_can_port {
     CAN_HandleTypeDef h;
     uint32_t tx[CAN_TX_QUEUE_LEN];  // ID stored in each hardware tx buffer, or TX_EMPTY if empty
     bool irq_state_pending;
     bool error_passive;
+
+    // Software receive ring, allocated once by machine_can_port_init() when
+    // self->rxbuf_len is non-zero, and freed by machine_can_port_deinit().
+    // NULL and zero length when rxbuf is 0 (the default), in which case
+    // recv() reads directly from the hardware FIFO.
+    //
+    // head and tail are each written from more than one context:
+    // machine_can_irq_handler() advances head from the ISR, and
+    // machine_can_port_recv() both advances tail and, via can_rx_ring_fill(),
+    // advances head, from ordinary (non-ISR) context with the CAN interrupt
+    // masked for the duration (see IRQ_PRI_CAN in machine_can_port_recv()
+    // and machine_can_port_restart()). machine_can_port_update_counters() and
+    // machine_can_port_irq_flags() only read the pair to report an
+    // approximate pending count and are not synchronised against the ISR.
+    can_rx_ring_entry_t *rx_ring;
+    mp_uint_t rx_ring_len;   // Ring capacity in frames, 0 if disabled
+    mp_uint_t rx_ring_head;  // Count of frames ever pushed
+    mp_uint_t rx_ring_tail;  // Count of frames ever popped
 };
 
 // Convert the port agnostic CAN mode to the ST mode
@@ -101,6 +136,18 @@ static void machine_can_port_init(machine_can_obj_t *self) {
         self->port->tx[i] = TX_EMPTY;
     }
 
+    if (self->rxbuf_len > 0) {
+        // rxbuf is only range-checked against 0 by the shared extmod layer,
+        // which has no visibility into this port's entry size; a large
+        // enough value overflows the byte-count multiply m_new expands to
+        // and silently under-allocates. Reject rather than wrap.
+        if (self->rxbuf_len > SIZE_MAX / sizeof(can_rx_ring_entry_t)) {
+            mp_raise_ValueError(MP_ERROR_TEXT("rxbuf too large"));
+        }
+        self->port->rx_ring = m_new(can_rx_ring_entry_t, self->rxbuf_len);
+        self->port->rx_ring_len = self->rxbuf_len;
+    }
+
     bool res = can_init(&self->port->h,
         self->can_idx + 1, // Convert 0-based index to 1-based 'can_id' for lower layer
         CAN_TX_QUEUE,
@@ -113,6 +160,17 @@ static void machine_can_port_init(machine_can_obj_t *self) {
 
     if (!res) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("CAN init failed"));
+    }
+
+    if (self->port->rx_ring_len > 0) {
+        // The ring is drained by the receive interrupt (can_rx_ring_fill(),
+        // called from machine_can_irq_handler()), not by can_receive()
+        // calls from Python. That interrupt is otherwise off until the user
+        // requests IRQ_RX callbacks via CAN.irq(), so without this the ring
+        // never receives anything: enable it unconditionally here.
+        for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
+            can_enable_rx_interrupts(&self->port->h, fifo, true);
+        }
     }
 }
 
@@ -128,6 +186,11 @@ static void machine_can_port_cancel_all_tx(machine_can_obj_t *self) {
 static void machine_can_port_deinit(machine_can_obj_t *self) {
     machine_can_port_cancel_all_tx(self);
     can_deinit(&self->port->h);
+    if (self->port->rx_ring != NULL) {
+        m_del(can_rx_ring_entry_t, self->port->rx_ring, self->port->rx_ring_len);
+        self->port->rx_ring = NULL;
+        self->port->rx_ring_len = 0;
+    }
 }
 
 static mp_int_t machine_can_port_send(machine_can_obj_t *self, mp_uint_t id, const byte *data, size_t data_len, mp_uint_t flags) {
@@ -201,42 +264,140 @@ static bool machine_can_port_cancel_send(machine_can_obj_t *self, mp_uint_t idx)
     return can_cancel_transmit(&self->port->h, idx);
 }
 
-static bool machine_can_port_recv(machine_can_obj_t *self, void *data, size_t *dlen, mp_uint_t *id, mp_uint_t *flags, mp_uint_t *errors) {
-    CAN_HandleTypeDef *can = &self->port->h;
-    CanRxMsgTypeDef msg;
+// Decode a received frame header into the port-agnostic id/flags/len fields.
+// CanRxMsgTypeDef is different for Classic CAN vs FDCAN.
+static void can_decode_rx_msg(const CanRxMsgTypeDef *msg, mp_uint_t *id, mp_uint_t *flags, size_t *dlen) {
+    #if MICROPY_HW_ENABLE_FDCAN
+    *flags = ((msg->IdType == FDCAN_EXTENDED_ID) ? CAN_MSG_FLAG_EXT_ID : 0) |
+        ((msg->RxFrameType == FDCAN_REMOTE_FRAME) ? CAN_MSG_FLAG_RTR : 0);
+    *id = msg->Identifier;
+    *dlen = msg->DataLength; // Lower layer has converted to bytes already
+    #else
+    *flags = (msg->IDE ? CAN_MSG_FLAG_EXT_ID : 0) |
+        (msg->RTR ? CAN_MSG_FLAG_RTR : 0);
+    *id = msg->IDE ? msg->ExtId : msg->StdId;
+    // bxCAN's DLC field is 4 bits and a conforming remote node can send 9..15;
+    // the CAN spec requires those to be read back as 8 data bytes. Every
+    // caller of this function copies *dlen bytes into a fixed MP_CAN_MAX_LEN
+    // (8, without FDCAN) buffer, so an unclamped value here is a buffer
+    // overflow at every one of them.
+    *dlen = msg->DLC > 8 ? 8 : msg->DLC;
+    #endif
+}
+
+// Drain both hardware RX FIFOs into the software receive ring, stopping once a
+// FIFO is empty or the ring is full. Called from the receive interrupt handler
+// (to move frames out of the hardware FIFO before it overflows) and
+// from machine_can_port_recv() (to refill the ring after a consumer pop frees
+// space). Never allocates.
+//
+// Each iteration checks can_is_rx_pending() before calling can_receive(), so
+// can_receive() is only ever called when a frame is already known to be
+// waiting. This is required for correctness, not just an optimisation:
+// can_receive(..., timeout_ms=0) on an empty FIFO enters a wait loop that
+// calls mp_event_wait_ms(), which runs the scheduler, on ports using the
+// classic bxCAN driver (can.c); doing that from this function's ISR caller
+// would run arbitrary Python from inside a hardware interrupt. The FDCAN
+// driver (fdcan.c) does not have this problem, but the pending check avoids
+// relying on that difference between the two lower layers.
+//
+// A FIFO whose interrupt is left masked here (because the ring filled up
+// while frames were still pending) is re-armed on the next call, once
+// machine_can_port_recv() has popped an entry.
+static void can_rx_ring_fill(machine_can_obj_t *self) {
+    struct machine_can_port *port = self->port;
+    CAN_HandleTypeDef *can = &port->h;
 
     for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
-        if (can_receive(can, fifo, &msg, data, 0) == 0) {
-            // CanRxMsgTypeDef is different for Classic vs FD
-            #if MICROPY_HW_ENABLE_FDCAN
-            *flags = ((msg.IdType == FDCAN_EXTENDED_ID) ? CAN_MSG_FLAG_EXT_ID : 0) |
-                ((msg.RxFrameType == FDCAN_REMOTE_FRAME) ? CAN_MSG_FLAG_RTR : 0);
-            *id = msg.Identifier;
-            *dlen = msg.DataLength; // Lower layer has converted to bytes already
-            #else
-            *flags = (msg.IDE ? CAN_MSG_FLAG_EXT_ID : 0) |
-                (msg.RTR ? CAN_MSG_FLAG_RTR : 0);
-            *id = msg.IDE ? msg.ExtId : msg.StdId;
-            *dlen = msg.DLC;
-            #endif
-
-            *errors = self->rx_error_flags;
-            self->rx_error_flags = 0;
-
-            // Re-enable any interrupts that were disabled in RX IRQ handlers
-            can_enable_rx_interrupts(can, fifo, self->mp_irq_trigger & MP_CAN_IRQ_RX);
-
-            return true;
+        while (port->rx_ring_head - port->rx_ring_tail < port->rx_ring_len
+               && can_is_rx_pending(can, fifo)) {
+            can_rx_ring_entry_t *entry = &port->rx_ring[port->rx_ring_head % port->rx_ring_len];
+            CanRxMsgTypeDef msg;
+            int res = can_receive(can, fifo, &msg, entry->data, 0);
+            assert(res == 0); // A frame is known to be pending, so this cannot time out
+            (void)res;
+            mp_uint_t flags;
+            size_t len;
+            can_decode_rx_msg(&msg, &entry->id, &flags, &len);
+            entry->flags = (uint16_t)flags;
+            entry->len = (uint8_t)len;
+            port->rx_ring_head++;
+        }
+        if (!can_is_rx_pending(can, fifo)) {
+            // Re-enable the interrupt this function itself depends on: it is
+            // only ever called with the ring active, so this is unconditional
+            // regardless of whether the user also wants IRQ_RX callbacks.
+            can_enable_rx_interrupts(can, fifo, true);
         }
     }
-    return false;
+}
+
+static bool machine_can_port_recv(machine_can_obj_t *self, void *data, size_t *dlen, mp_uint_t *id, mp_uint_t *flags, mp_uint_t *errors) {
+    struct machine_can_port *port = self->port;
+
+    if (port->rx_ring_len == 0) {
+        // No software ring requested: read directly from the hardware FIFO.
+        CAN_HandleTypeDef *can = &port->h;
+        CanRxMsgTypeDef msg;
+
+        for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
+            if (can_receive(can, fifo, &msg, data, 0) == 0) {
+                can_decode_rx_msg(&msg, id, flags, dlen);
+
+                *errors = self->rx_error_flags;
+                self->rx_error_flags = 0;
+
+                // Re-enable any interrupts that were disabled in RX IRQ handlers
+                can_enable_rx_interrupts(can, fifo, self->mp_irq_trigger & MP_CAN_IRQ_RX);
+
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // machine_can_irq_handler() also advances rx_ring_head, from the CAN
+    // controller's interrupt, and can preempt this function at any point,
+    // because this function runs from ordinary (non-ISR) context. Raising
+    // the IRQ priority ceiling for the pop and the refill excludes that
+    // interrupt for the duration, so head, tail and the popped entry are
+    // each touched by one context at a time.
+    uint32_t basepri = raise_irq_pri(IRQ_PRI_CAN);
+
+    if (port->rx_ring_head == port->rx_ring_tail) {
+        restore_irq_pri(basepri);
+        return false; // Ring empty
+    }
+
+    can_rx_ring_entry_t *entry = &port->rx_ring[port->rx_ring_tail % port->rx_ring_len];
+    *id = entry->id;
+    *flags = entry->flags;
+    *dlen = entry->len;
+    memcpy(data, entry->data, entry->len);
+    port->rx_ring_tail++;
+
+    // Popping an entry frees ring space: refill from the hardware FIFOs and
+    // re-enable any receive interrupts that were masked because the ring was full.
+    can_rx_ring_fill(self);
+
+    restore_irq_pri(basepri);
+
+    *errors = self->rx_error_flags;
+    self->rx_error_flags = 0;
+
+    return true;
 }
 
 static void machine_can_update_irqs(machine_can_obj_t *self) {
     uint16_t triggers = self->mp_irq_trigger;
 
+    // The receive interrupt also drives the software ring (can_rx_ring_fill()),
+    // so it stays enabled whenever the ring is active even if the user has no
+    // IRQ_RX callback registered.
+    bool want_rx_notify = (triggers & MP_CAN_IRQ_RX) || self->port->rx_ring_len > 0;
+
     for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
-        if (triggers & MP_CAN_IRQ_RX) {
+        if (want_rx_notify) {
             can_enable_rx_interrupts(&self->port->h, fifo, true);
         } else {
             can_disable_rx_interrupts(&self->port->h, fifo);
@@ -361,6 +522,12 @@ static void machine_can_port_update_counters(machine_can_obj_t *self) {
     counters->rec = hw_counters.rec;
     counters->tx_pending = hw_counters.tx_pending;
     counters->rx_pending = hw_counters.rx_fifo0_pending + hw_counters.rx_fifo1_pending;
+    if (port->rx_ring_len > 0) {
+        // Include frames already moved out of the hardware FIFOs and into the
+        // software receive ring, so rx_pending still reflects the total number
+        // of frames waiting to be read by recv().
+        counters->rx_pending += port->rx_ring_head - port->rx_ring_tail;
+    }
 
     // Other fields in 'counters' are updated from ISR directly
 }
@@ -375,6 +542,33 @@ static void machine_can_port_restart(machine_can_obj_t *self) {
     machine_can_port_cancel_all_tx(self);
     can_restart(&port->h);
     port->irq_state_pending = false;
+
+    // Masked against machine_can_irq_handler(), which also writes rx_ring_head
+    // via can_rx_ring_fill(): otherwise a frame delivered by the controller
+    // between these two writes could be counted as pending against a ring
+    // that this function is resetting to empty.
+    uint32_t basepri = raise_irq_pri(IRQ_PRI_CAN);
+    port->rx_ring_head = 0;
+    port->rx_ring_tail = 0;
+    restore_irq_pri(basepri);
+
+    if (port->rx_ring_len > 0) {
+        // A ring that filled before this restart left one or both FIFOs'
+        // receive interrupt masked (can_rx_ring_fill() only re-enables once a
+        // FIFO drains empty), and can_restart()'s Stop()/Start() does not
+        // touch IE. Emptying the ring above does not on its own re-arm
+        // anything: the next place that would have done it,
+        // can_rx_ring_fill() being called again, only runs from an interrupt
+        // or from machine_can_port_recv(), and recv() returns immediately on
+        // head == tail without reaching it. Left unarmed here, reception
+        // would stay dead until something else happens to touch IE.
+        //
+        // Unconditional true, matching can_rx_ring_fill()'s own re-arm: the
+        // ring's refill mechanism depends on this interrupt regardless of
+        // whether the user has asked for IRQ_RX callbacks.
+        can_enable_rx_interrupts(&port->h, CAN_RX_FIFO0, true);
+        can_enable_rx_interrupts(&port->h, CAN_RX_FIFO1, true);
+    }
 }
 
 static bool clear_complete_transfer(machine_can_obj_t *self, int *index, bool *is_success) {
@@ -398,9 +592,17 @@ static mp_uint_t machine_can_port_irq_flags(machine_can_obj_t *self) {
 
     // Check for RX
     if (self->mp_irq_trigger & MP_CAN_IRQ_RX) {
-        for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
-            if (can_is_rx_pending(can, fifo)) {
+        if (self->port->rx_ring_len > 0) {
+            // Frames already moved into the software ring no longer show up as
+            // pending in the hardware FIFOs, so check the ring instead.
+            if (self->port->rx_ring_head != self->port->rx_ring_tail) {
                 flags |= MP_CAN_IRQ_RX;
+            }
+        } else {
+            for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
+                if (can_is_rx_pending(can, fifo)) {
+                    flags |= MP_CAN_IRQ_RX;
+                }
             }
         }
     }
@@ -423,8 +625,13 @@ static mp_uint_t machine_can_port_irq_flags(machine_can_obj_t *self) {
 void machine_can_irq_handler(uint can_id,  can_int_t interrupt) {
     assert(can_id > 0);
     machine_can_obj_t *self = MP_STATE_PORT(machine_can_objs)[can_id - 1];
-    if (self == NULL) {
-        return; // Should only hit this code path if pyb.CAN has enabled interrupt
+    if (self == NULL || self->port == NULL) {
+        // Either pyb.CAN has enabled the interrupt with no machine.CAN ever
+        // constructed on this peripheral, or a machine.CAN that was
+        // constructed has since been deinitialised. Either way, self->port
+        // (dereferenced below for every case except CAN_INT_FIFO_FULL and
+        // CAN_INT_FIFO_OVERFLOW) is not available.
+        return;
     }
     struct machine_can_port *port = self->port;
     machine_can_counters_t *counters = &self->counters;
@@ -441,7 +648,21 @@ void machine_can_irq_handler(uint can_id,  can_int_t interrupt) {
             counters->rx_overruns++;
             break;
         case CAN_INT_MESSAGE_RECEIVED:
-            call_irq = call_irq || (self->mp_irq_trigger & MP_CAN_IRQ_RX);
+            if (port->rx_ring_len > 0) {
+                // Drain the hardware FIFOs into the software ring here, so the
+                // ISR re-enables the RX interrupt itself instead of waiting for
+                // Python to call recv(). Only schedule the .irq() callback on
+                // the ring's empty-to-non-empty transition: further frames
+                // arriving before the callback runs are coalesced into the
+                // same wakeup.
+                bool ring_was_empty = (port->rx_ring_head == port->rx_ring_tail);
+                can_rx_ring_fill(self);
+                if (ring_was_empty && port->rx_ring_head != port->rx_ring_tail) {
+                    call_irq = call_irq || (self->mp_irq_trigger & MP_CAN_IRQ_RX);
+                }
+            } else {
+                call_irq = call_irq || (self->mp_irq_trigger & MP_CAN_IRQ_RX);
+            }
             break;
 
         // Error states
