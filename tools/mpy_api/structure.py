@@ -25,6 +25,7 @@ def deep_copy(value):
     are returned as they are; a value of any other type is copied by copy.deepcopy with the same memo.
     """
     memo = {}
+    atomic = _ATOMIC_TYPES
     # Frame: [original, copy under construction (an item list for a tuple or set), child iterator, copied dict
     # value waiting for its key].
     stack = []
@@ -35,15 +36,24 @@ def deep_copy(value):
         if copied is not _MISSING:
             return copied
         kind = type(item)
-        if kind in _ATOMIC_TYPES:
+        if kind in atomic:
             return item
+        # A container of atoms only is copied whole; a tuple of atoms is its own copy.
         if kind is dict:
+            if atomic.issuperset(map(type, item)) and atomic.issuperset(map(type, item.values())):
+                copied = memo[id(item)] = item.copy()
+                return copied
             copied = memo[id(item)] = {}
             stack.append([item, copied, _dict_slots(item), _MISSING])
         elif kind is list:
+            if atomic.issuperset(map(type, item)):
+                copied = memo[id(item)] = item.copy()
+                return copied
             copied = memo[id(item)] = []
             stack.append([item, copied, iter(item), _MISSING])
         elif kind is tuple or kind is set:
+            if kind is tuple and atomic.issuperset(map(type, item)):
+                return item
             stack.append([item, [], iter(item), _MISSING])
         else:
             return deepcopy(item, memo)
@@ -53,16 +63,29 @@ def deep_copy(value):
     while stack:
         frame = stack[-1]
         original, target, children, held = frame
+        is_dict = type(original) is dict
         if copied is not _MISSING:
-            if type(original) is dict:
+            if is_dict:
                 if held is _MISSING:
-                    frame[3] = copied
+                    held = frame[3] = copied
                 else:
                     target[copied] = held
-                    frame[3] = _MISSING
+                    held = frame[3] = _MISSING
             else:
                 target.append(copied)
         child = next(children, _MISSING)
+        # An atomic child is its own copy (no memo entry names one), so it is placed without opening a frame.
+        while child is not _MISSING and type(child) in atomic:
+            if is_dict:
+                if held is _MISSING:
+                    held = child
+                else:
+                    target[child] = held
+                    held = _MISSING
+            else:
+                target.append(child)
+            child = next(children, _MISSING)
+        frame[3] = held
         if child is not _MISSING:
             copied = enter(child)
             continue

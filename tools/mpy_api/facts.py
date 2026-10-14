@@ -265,9 +265,14 @@ class FactStore:
         self._functions = {}
         # Sections loaded by kind, bytes read, and how composition obtained each selected function's
         # linked semantics (``inventory._normal_surface``); ``unit_semantics_demanded`` counts the
-        # unit semantics the link stage computed itself (``semantics.demand_semantics``).
+        # unit semantics the link stage computed itself (``semantics.demand_semantics``), and the
+        # ``*_prefetched`` counts those of them, and the linked runs, that processes forked by the link
+        # stage computed before they were read (``prefetch``).
         self.counts = {'function': 0, 'unit': 0, 'shared': 0, 'bytes': 0, 'unit_semantics_demanded': 0,
-                       'unit_semantics_reused': 0, 'linked_semantics_runs': 0}
+                       'unit_semantics_reused': 0, 'linked_semantics_runs': 0,
+                       'unit_semantics_prefetched': 0, 'linked_semantics_prefetched': 0}
+        # The index records whose unit semantics were prefetched and not yet read.
+        self.prefetched = set()
 
     def path(self, ordinal):
         """The path of the fact object for the unit at ``ordinal`` in record order."""
@@ -359,7 +364,8 @@ class FactStore:
     def report(self):
         """Sizes and load counts of the run's fact objects."""
         return {'units': len(self._units), 'bytes': sum(unit.location['bytes'] for unit in self._units.values()),
-                'compression': self.compression, 'counts': dict(self.counts)}
+                'compression': self.compression,
+                'counts': {**self.counts, 'unit_semantics_prefetch_unread': len(self.prefetched)}}
 
 
 class UnitFunctions:

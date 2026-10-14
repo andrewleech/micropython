@@ -1557,6 +1557,23 @@ def unit_semantics(function, functions, errors, contracts):
     return result, None if any(found for *_, found in lookups) else [lookup[:3] for lookup in lookups]
 
 
+def _compute_unit_semantics(store, record, complete):
+    """``unit_semantics`` of the complete record ``complete`` of the index record ``record``, as the
+    unit's worker would have run it."""
+    unit = store.unit_index(record['translation_unit'])
+    try:
+        return unit_semantics(complete, UnitFunctions(store, unit['functions']), unit['errors'], unit['contracts'])
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise RuntimeError(f'API extraction failed for compiled TU {unit["translation_unit"]}; '
+                           f'physical source {unit["source"]}: {exc}') from exc
+
+
+def _install_unit_semantics(record, complete, semantics, lookups):
+    complete['semantics'] = semantics
+    complete['semantic_helper_lookups'] = record['semantic_helper_lookups'] = lookups
+    record['frontend_unresolved'] = semantics.get('frontend_unresolved', [])
+
+
 def demand_semantics(store, function):
     """The complete record of ``function`` (an index record or a complete record) with its unit
     semantics, computed here on the first demand when its worker did not compute them.
@@ -1568,18 +1585,34 @@ def demand_semantics(store, function):
     record = store.index_record(function)
     complete = store.function(record)
     if isinstance(complete['semantics'], Unloaded):
-        unit = store.unit_index(record['translation_unit'])
-        try:
-            summary, lookups = unit_semantics(complete, UnitFunctions(store, unit['functions']),
-                                              unit['errors'], unit['contracts'])
-        except (OSError, ValueError, RuntimeError) as exc:
-            raise RuntimeError(f'API extraction failed for compiled TU {unit["translation_unit"]}; '
-                               f'physical source {unit["source"]}: {exc}') from exc
+        summary, lookups = _compute_unit_semantics(store, record, complete)
         store.counts['unit_semantics_demanded'] += 1
-        complete['semantics'] = {**summary, 'diagnostic_stage': 'translation-unit-extraction'}
-        complete['semantic_helper_lookups'] = record['semantic_helper_lookups'] = lookups
-        record['frontend_unresolved'] = summary.get('frontend_unresolved', [])
+        _install_unit_semantics(record, complete, {**summary, 'diagnostic_stage': 'translation-unit-extraction'}, lookups)
+    else:
+        store.prefetched.discard(id(record))
     return complete
+
+
+def computed_unit_semantics(store, function):
+    """The unit semantics of ``function`` and its helper lookups, as ``demand_semantics`` leaves them
+    in its complete record, computed here when they are not there yet. A process that computes
+    them for the link stage returns them to it, which installs them (``install_unit_semantics``)."""
+    complete = demand_semantics(store, function)
+    return complete['semantics'], complete['semantic_helper_lookups']
+
+
+def install_unit_semantics(store, function, semantics, lookups):
+    """Give ``function`` the unit semantics ``semantics`` and helper lookups ``lookups`` that another
+    process computed (``computed_unit_semantics``), unless it has its semantics already. The function
+    is then as after ``demand_semantics``; a later demand finds the semantics and computes nothing."""
+    record = store.index_record(function)
+    complete = store.function(record)
+    if not isinstance(complete['semantics'], Unloaded):
+        return
+    store.counts['unit_semantics_demanded'] += 1
+    store.counts['unit_semantics_prefetched'] += 1
+    store.prefetched.add(id(record))
+    _install_unit_semantics(record, complete, semantics, lookups)
 
 
 def frontend_unresolved(store, function):
@@ -1593,6 +1626,23 @@ def linked_semantics_unchanged(lookups, linked_functions):
     return lookups is not None and not any(
         helper_candidates({'callee': callee}, name, {}, linked_functions, {'translation_unit': translation_unit})
         for name, callee, translation_unit in lookups)
+
+
+def linked_semantics_result(store, facts, function, linked_functions):
+    """The linked semantics of the index function ``function`` of the unit index ``facts``, and
+    whether they are its unit semantics.
+
+    The unit semantics are demanded from ``store`` (``demand_semantics``). They are the result, copied,
+    when no helper lookup they made finds a linked helper (``linked_semantics_unchanged``); otherwise
+    the function runs again with ``linked_functions``."""
+    unit = demand_semantics(store, function)
+    if linked_semantics_unchanged(function['semantic_helper_lookups'], linked_functions):
+        return deep_copy(unit['semantics']), True
+    functions = {}
+    for item in facts['functions']:
+        functions.setdefault(item['name'], []).append(item)
+    return semantics(unit, functions, facts.get('errors', []), facts.get('contracts', {}),
+                     linked_functions=linked_functions), False
 
 
 def _reference_key(reference):

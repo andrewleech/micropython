@@ -29,12 +29,12 @@ SOURCES = (('helper.c', '#include "shared.h"\nstatic mp_obj_t backend_alias(mp_o
                         'int main(void) { return selected(0) != plain(0); }\n'))
 
 
-def extracted(tmp_path):
-    """The two fixture units extracted twice, with every unit semantics (``full``) and with none
+def extracted(tmp_path, sources=SOURCES):
+    """The two fixture units (or ``sources``) extracted twice, with every unit semantics (``full``) and with none
     (``lazy``), and their link ownership."""
     (tmp_path / 'shared.h').write_text(SHARED)
     full, lazy, records = [], [], []
-    for filename, source in SOURCES:
+    for filename, source in sources:
         physical, obj = tmp_path / filename, tmp_path / (filename + '.o')
         physical.write_text(source)
         args = ['gcc', '-std=gnu99', '-O0', '-ffunction-sections', '-I', str(tmp_path), '-c', str(physical), '-o', str(obj)]

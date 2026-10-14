@@ -38,6 +38,15 @@ def _comment(value: Any) -> str:
     return canonical_json(value).replace("\n", " ").replace("\r", " ")
 
 
+def _distinct(group: list[dict]) -> list[dict]:
+    """The symbols of ``group`` that differ in canonical JSON, one per distinct value, in order of first
+    occurrence and each the last of its equal ones. A group of one symbol has no other to differ from,
+    so its canonical JSON is not computed."""
+    if len(group) == 1:
+        return group
+    return list({canonical_json(symbol): symbol for symbol in group}.values())
+
+
 def _gaps(record: dict) -> list[str]:
     gaps = list(record.get("unresolved", []))
     for field, resolution in record.get("resolution", {}).items():
@@ -62,11 +71,11 @@ def _policy_lines(policy: dict, indent: str, *, module: bool, names: set[str], a
 
 
 class _Renderer:
-    def __init__(self, inventory: dict, module: dict):
+    def __init__(self, inventory: dict, module: dict, types: dict[str, dict]):
         self.inventory = inventory
         self.module = module
         self.typevars: dict[str, str] = {}
-        self.types = {canonical_json(item.get("identity")): item for item in inventory.get("types", [])}
+        self.types = types
         self.names: set[str] = set()
 
         pending = list(reversed(list(module.get("exports", []))))
@@ -432,7 +441,7 @@ class _Renderer:
     def _group_lines(self, frame: dict, name: str, group: list[dict]) -> tuple[list[str], dict | None]:
         """Return the lines for one name of a member list and, for a class, its definition."""
         indent, in_class, grouped = frame["indent"], frame["in_class"], frame["grouped"]
-        unique = {canonical_json(symbol): symbol for symbol in group}
+        unique = _distinct(group)
         if len(unique) > 1:
             for candidate in group:
                 self.representation_gap(candidate, "conflicting export definitions cannot be expressed as one qualified declaration")
@@ -441,7 +450,7 @@ class _Renderer:
                                          (not in_class or candidate.get("attribute_scope") != "class") for candidate in group):
                 lines.append(f"{indent}{name}: {self.any_name}")
             return lines, None
-        symbol = next(iter(unique.values()))
+        symbol = unique[0]
         alias = symbol.get("alias_of")
         if (_identifier(alias) and alias != name and alias in grouped and
                 "alias_target_identity" not in symbol and any(_available(target) for target in grouped[alias])):
@@ -472,6 +481,8 @@ def render_declarations(inventory: dict) -> dict[str, str]:
     """
     if inventory.get("schema_version") != 1:
         raise ValueError("declaration rendering requires inventory schema_version=1")
+    # The shared types by canonical identity; rendering adds gaps to symbol and member resolutions, never to a type's identity.
+    types = {canonical_json(item.get("identity")): item for item in inventory.get("types", [])}
     result: dict[str, str] = {}
     for module in sorted(inventory.get("modules", []), key=lambda m: (m.get("name", ""), canonical_json(m.get("identity")))):
         name = module.get("name")
@@ -485,8 +496,8 @@ def render_declarations(inventory: dict) -> dict[str, str]:
             path = "modules/" + name.replace(".", "/") + ("/__init__.pyi" if package else ".pyi")
         if path in result:
             raise ValueError(f"multiple selected module identities would overwrite {path}")
-        _Renderer(inventory, module).render()
-        result[path] = _Renderer(inventory, module).render()
+        _Renderer(inventory, module, types).render()
+        result[path] = _Renderer(inventory, module, types).render()
     paths = set(result)
     for path in paths:
         if path.endswith(".pyi") and not path.endswith("/__init__.pyi"):

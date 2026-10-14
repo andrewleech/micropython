@@ -14,12 +14,13 @@ import traceback
 
 from . import compiler
 from . import facts as factobjects
-from .facts import UNIT_INDEX, LinkedFunctions
+from .facts import UNIT_INDEX, LinkedFunctions, Unloaded
 from .frontend import syntax_adapter, constant, clear_run_tables, share_run_tables
 from .bindings import definitions, registration_records, call_parts, scalar_field, strip_outer, constant_value
-from .semantics import (semantics, unit_semantics, demand_semantics, linked_semantics_unchanged, direct_parameter,
-                        bind_public_contracts, checked_receiver_authority, input_helper_authority, lexical_constant,
-                        event_applicability)
+from .semantics import (unit_semantics, demand_semantics, linked_semantics_unchanged, linked_semantics_result,
+                        direct_parameter, bind_public_contracts, checked_receiver_authority, input_helper_authority,
+                        lexical_constant, event_applicability)
+from .prefetch import prefetch_linked_semantics
 from .link import collect_ownership, join
 from .frozen_payload import collect_frozen_payload
 from .structure import JSONStream, deep_copy
@@ -1096,11 +1097,12 @@ def _native_receiver_contract(owner, shape, wrapper_definition, receiver_check, 
     return contract
 
 
-def _normal_surface(raw, inputs, resolve, present, root, store):
+def _normal_surface(raw, inputs, resolve, present, root, store, jobs=1):
     """Compose the public modules and types from the link join.
 
     ``inputs`` are unit indexes; every function body, semantics result and frontend table composition
-    reads is loaded from ``store`` where it is read."""
+    reads is loaded from ``store`` where it is read. With ``jobs`` above 1, the linked semantics the
+    exports need are first computed in that many forked processes (``prefetch``)."""
     containers = {c['id']: c for c in raw['containers']}
     facts_by_tu = {f['translation_unit']: f for f in inputs}
     bindings_by_container = {}
@@ -1111,23 +1113,21 @@ def _normal_surface(raw, inputs, resolve, present, root, store):
     constructing = set()
     linked_functions = _linked_functions(inputs, present, store)
     semantic_cache = {}
+    # Linked semantics computed ahead (``prefetch``), by function id.
+    prefetched = {}
 
     def selected_semantics(facts, function):
         """The linked semantics of the index function ``function``: its unit semantics, demanded
         from the store (``demand_semantics``), when no helper lookup it made finds a linked helper
-        (``linked_semantics_unchanged``), else a linked run."""
+        (``linked_semantics_unchanged``), else a linked run, taken from ``prefetched`` when it is there."""
         if function['id'] not in semantic_cache:
-            unit = demand_semantics(store, function)
-            if linked_semantics_unchanged(function['semantic_helper_lookups'], linked_functions):
-                store.counts['unit_semantics_reused'] += 1
-                result = deep_copy(unit['semantics'])
-            else:
+            result = prefetched.pop(function['id'], None)
+            if result is not None:
                 store.counts['linked_semantics_runs'] += 1
-                functions = {}
-                for item in facts['functions']:
-                    functions.setdefault(item['name'], []).append(item)
-                result = semantics(unit, functions, facts.get('errors', []), facts.get('contracts', {}),
-                                   linked_functions=linked_functions)
+                store.counts['linked_semantics_prefetched'] += 1
+            else:
+                result, reused = linked_semantics_result(store, facts, function, linked_functions)
+                store.counts['unit_semantics_reused' if reused else 'linked_semantics_runs'] += 1
             semantic_cache[function['id']] = {**result, 'diagnostic_stage': 'selected-linked-semantics'}
         return semantic_cache[function['id']]
 
@@ -1581,6 +1581,22 @@ def _normal_surface(raw, inputs, resolve, present, root, store):
         constructing.remove(identity)
         return result
 
+    if jobs > 1:
+        # The bindings of callable exports read the linked semantics of their function (``symbol``). Those
+        # that need a linked run, rather than a copy of their unit semantics, are computed ahead.
+        items, seen = [], set()
+        for binding in raw['bindings']:
+            reference = binding.get('semantics')
+            if not binding.get('callshape') or not reference:
+                continue
+            semantic_facts, function = function_owners.get(reference.function['id'], (None, None))
+            if (function is not None and function['id'] not in seen
+                    and not isinstance(function['frontend_unresolved'], Unloaded)
+                    and not linked_semantics_unchanged(function['semantic_helper_lookups'], linked_functions)):
+                seen.add(function['id'])
+                items.append((semantic_facts, function))
+        prefetched = prefetch_linked_semantics(store, linked_functions, items, jobs)
+
     for container in raw['containers']:
         if container['kind'] == 'type': complete(class_symbol(container))
     modules = []
@@ -1959,9 +1975,9 @@ def collect_inventory(selection: dict, *, port: str, target: str, variant: str, 
             raise conflict
     consumed.add('selected linked inputs', ownership['input_snapshots'])
     consumed_inputs = consumed.records
-    raw, resolve, present = join(inputs, ownership, store)
+    raw, resolve, present = join(inputs, ownership, store, jobs)
     frozen_payload = collect_frozen_payload(inputs, present, store)
-    modules, types, diagnostics = _normal_surface(raw, inputs, resolve, present, root, store)
+    modules, types, diagnostics = _normal_surface(raw, inputs, resolve, present, root, store, jobs=jobs)
     if not any(module['name'] == 'builtins' for module in modules):
         raise RuntimeError('selected linked build has no qualified builtin singleton; inspect modbuiltins compiler and allocated owner evidence')
     unassessed = [f['translation_unit'] for f in inputs if f['coverage']['status'] not in ('processed', 'processed-empty')]
