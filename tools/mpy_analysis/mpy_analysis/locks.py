@@ -510,3 +510,24 @@ def enclosing_idf_component(path: Path, stop: Path) -> tuple[Path, dict[str, str
         if identity:
             return directory, identity
     return None
+
+
+def idf_sbom_manifest(directory: Path) -> dict[str, str] | None:
+    """Name, version and description from the ``sbom.yml`` ESP-IDF keeps in a vendored component.
+
+    The file is the component owner's own declaration. It is used only when it is a readable
+    mapping with a nonempty ``name`` and ``version``.
+    """
+    path = directory / "sbom.yml"
+    if not path.is_file():
+        return None
+    try:
+        top = _mapping(_yaml_tree(path.read_text(encoding="utf-8-sig")), "sbom.yml")
+        values = {
+            key: _string(top[key], key).strip()
+            for key in ("name", "version", "description")
+            if key in top
+        }
+    except (OSError, UnicodeError, UnsupportedLockFormat):
+        return None
+    return values if values.get("name") and values.get("version") else None

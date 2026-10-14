@@ -874,6 +874,31 @@ class _Collector:
             if field in identity:
                 self.add(field, identity[field], path, parser)
 
+    def parse_idf_sbom(self, path: Path) -> None:
+        from .locks import idf_sbom_manifest
+
+        manifest = idf_sbom_manifest(path.parent)
+        if manifest is None:
+            return
+        for field in ("name", "version", "description"):
+            if field in manifest:
+                self.add(field, manifest[field], path, "idf-sbom-manifest-1")
+
+    def parse_idf_version(self, path: Path) -> None:
+        """The release of an ESP-IDF tree, from the version macros its own header defines."""
+        text = self.text(path)
+        parts = [
+            re.search(rf"^#define\s+ESP_IDF_VERSION_{part}\s+(\d+)\s*$", text, re.MULTILINE)
+            for part in ("MAJOR", "MINOR", "PATCH")
+        ]
+        if all(parts):
+            self.add(
+                "version",
+                ".".join(match.group(1) for match in parts),
+                path,
+                "esp-idf-version-header-1",
+            )
+
     def parse_bom(self, path: Path) -> None:
         from .metadata_bom import parse_json, read_bom, schema_paths
 
@@ -1240,6 +1265,10 @@ class _Collector:
                     for value in values[1:]
                     if not LICENSING.is_equivalent(representative, value)
                 ]
+            if field == "name" and values:
+                values = [values[0]] + [
+                    value for value in values[1:] if value.casefold() != values[0].casefold()
+                ]
             conflicts = [
                 issue
                 for issue in self.result["issues"]
@@ -1391,6 +1420,8 @@ def collect_metadata(
         "meson.build": collector.parse_native,
         "library.json": collector.parse_library_json,
         "idf_component.yml": collector.parse_idf_component,
+        "sbom.yml": collector.parse_idf_sbom,
+        "components/esp_common/include/esp_idf_version.h": collector.parse_idf_version,
     }
     for name, parse in dispatch.items():
         path = collector.directory / name

@@ -20,7 +20,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping, Sequence
 
 from .declarations import revision_matches_selected, selected_digest, source_binding
-from .locks import LOCK_FILES, idf_component_identity, inspect_lock
+from .locks import LOCK_FILES, idf_component_identity, idf_sbom_manifest, inspect_lock
 from .metadata_bom import UnsupportedBomError, parse_json, read_bom
 from .metadata_native import parse_library_json, parse_native
 from .scope import SELECTED_GROUPS, source_path
@@ -262,6 +262,11 @@ def _markers(directory: Path, root: Path, scope: dict[str, Any]) -> list[dict[st
             try:
                 fields, issues = parse_native(path.read_text(encoding="utf-8"), name)
                 kind = "native-project" if fields.get("name") else "candidate-native-project"
+                if kind == "native-project" and not fields.get("version"):
+                    # A versionless project() below its checkout root is a build entry
+                    # point of the enclosing checkout, not a separately versioned distribution.
+                    if _repository_root(directory) not in (None, directory):
+                        kind = "enclosed-native-project"
                 item = {"kind": kind, "path": str(path)}
                 if issues:
                     item["parser_issues"] = issues
@@ -279,6 +284,9 @@ def _markers(directory: Path, root: Path, scope: dict[str, Any]) -> list[dict[st
             result.append(inspect_lock(path, name))
     path = _marker(directory, "idf_component.yml", root)
     if path is not None and idf_component_identity(directory):
+        result.append({"kind": "package-metadata", "path": str(path)})
+    path = _marker(directory, "sbom.yml", root)
+    if path is not None and idf_sbom_manifest(directory):
         result.append({"kind": "package-metadata", "path": str(path)})
     result.extend(_generated_markers(scope, directory, root))
     return result

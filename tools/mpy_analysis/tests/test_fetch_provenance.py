@@ -78,7 +78,9 @@ def scope(roots, rows):
 @pytest.fixture
 def workspace(tmp_path):
     """An application repository with an initialised SDK submodule and an unused one."""
-    sdk = make_repository(tmp_path / "upstream/sdk", {"sdk.py": "value = 1\n", "other.py": "x = 1\n"})
+    sdk = make_repository(
+        tmp_path / "upstream/sdk", {"sdk.py": "value = 1\n", "other.py": "x = 1\n"}
+    )
     unused = make_repository(tmp_path / "upstream/unused", {"unused.py": "value = 2\n"})
     app = make_repository(tmp_path / "app", {"main.py": "value = 0\n"})
     add_submodule(app, sdk, "libs/sdk")
@@ -237,7 +239,14 @@ def test_local_override_is_reported_against_the_declared_url(workspace):
 
 
 def test_same_location_over_another_transport_is_not_an_override(workspace):
-    git(workspace["app"], "config", "-f", ".gitmodules", "submodule.libs/sdk.url", "https://example.invalid/org/sdk.git")
+    git(
+        workspace["app"],
+        "config",
+        "-f",
+        ".gitmodules",
+        "submodule.libs/sdk.url",
+        "https://example.invalid/org/sdk.git",
+    )
     git(workspace["sdk"], "remote", "set-url", "origin", "git@example.invalid:org/sdk")
     _, receipt = generate(workspace)
     record = submodule_records(receipt)["libs/sdk"]
@@ -250,7 +259,14 @@ def test_url_rewrite_configuration_applies_to_both_sides(workspace, tmp_path, mo
     rewrite = tmp_path / "gitconfig"
     rewrite.write_text('[url "https://mirror.invalid/"]\n\tinsteadOf = https://example.invalid/\n')
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(rewrite))
-    git(workspace["app"], "config", "-f", ".gitmodules", "submodule.libs/sdk.url", "https://example.invalid/org/sdk.git")
+    git(
+        workspace["app"],
+        "config",
+        "-f",
+        ".gitmodules",
+        "submodule.libs/sdk.url",
+        "https://example.invalid/org/sdk.git",
+    )
     git(workspace["sdk"], "remote", "set-url", "origin", "https://example.invalid/org/sdk.git")
     _, receipt = generate(workspace)
     record = submodule_records(receipt)["libs/sdk"]
@@ -304,7 +320,10 @@ def test_dirty_tracked_file_is_reported_as_a_patch_against_the_pin(workspace):
     # A different patch has a different identity.
     (workspace["sdk"] / "sdk.py").write_text("value = 'patched again'\n")
     _, other = generate(workspace)
-    assert gaps(other, "dirty-selected-repository")[0]["tracked_changes"]["patch_sha256"] != changes["patch_sha256"]
+    assert (
+        gaps(other, "dirty-selected-repository")[0]["tracked_changes"]["patch_sha256"]
+        != changes["patch_sha256"]
+    )
 
 
 def test_untracked_file_in_a_submodule_is_not_a_tracked_patch(workspace):
@@ -360,7 +379,9 @@ def test_nested_submodule_chain_covers_every_level(nested):
     model, receipt = generate_nested(nested)
     inner_pin = git(nested["sdk"], "rev-parse", "HEAD:vendor/inner")
     entry = next(item for item in receipt["metadata"] if item["root"] == "inner")
-    assert [(item["path"], item["depth"], item["owns_root"]) for item in entry["fetch_provenance"]] == [
+    assert [
+        (item["path"], item["depth"], item["owns_root"]) for item in entry["fetch_provenance"]
+    ] == [
         ("libs/sdk", 0, False),
         ("vendor/inner", 1, True),
     ]
@@ -505,7 +526,9 @@ def test_local_override_prevents_firmware_completeness(workspace, tmp_path):
     assert receipt["firmware_completeness"] == "not-established"
 
 
-def managed_component(app, hash_text="a" * 64, manifest="version: 1.3.2\nurl: https://example.invalid/mdns\n"):
+def managed_component(
+    app, hash_text="a" * 64, manifest="version: 1.3.2\nurl: https://example.invalid/mdns\n"
+):
     directory = app / "managed_components/espressif__mdns"
     directory.mkdir(parents=True)
     (directory / "mdns.c").write_text("int mdns;\n")
@@ -516,7 +539,9 @@ def managed_component(app, hash_text="a" * 64, manifest="version: 1.3.2\nurl: ht
 
 def test_registry_fetched_component_is_identified_by_its_manifest_and_hash(workspace):
     managed_component(workspace["app"])
-    model, receipt = generate(workspace, rows=(("app", "main.py"), ("app", "managed_components/espressif__mdns/mdns.c")))
+    model, receipt = generate(
+        workspace, rows=(("app", "main.py"), ("app", "managed_components/espressif__mdns/mdns.c"))
+    )
     assert gaps(receipt, "selected-source-not-tracked") == []
     [source] = [c for c in model.components.values() if c.properties.get("registry-component")]
     assert source.properties["registry-component"] == "espressif/mdns@1.3.2"
@@ -531,5 +556,56 @@ def test_registry_fetched_component_is_identified_by_its_manifest_and_hash(works
 )
 def test_untracked_component_without_registry_identity_is_a_gap(workspace, hash_text, manifest):
     managed_component(workspace["app"], hash_text, manifest)
-    _, receipt = generate(workspace, rows=(("app", "main.py"), ("app", "managed_components/espressif__mdns/mdns.c")))
+    _, receipt = generate(
+        workspace, rows=(("app", "main.py"), ("app", "managed_components/espressif__mdns/mdns.c"))
+    )
     assert len(gaps(receipt, "selected-source-not-tracked")) == 1
+
+
+def commit_tree(repo, files):
+    for name, content in files.items():
+        target = repo / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+    git(repo, "add", ".")
+    git(repo, "commit", "--quiet", "-m", "Add files")
+
+
+def versions(model):
+    return {c.name: c.version for c in model.components.values() if c.version}
+
+
+def test_sbom_manifest_gives_version_and_names_differing_by_case_agree(workspace):
+    commit_tree(
+        workspace["app"],
+        {
+            "vendored/lwip/sbom.yml": "name: 'lwip'\nversion: '2.2.0'\n",
+            "vendored/lwip/CMakeLists.txt": "project(LwIP)\n",
+            "vendored/lwip/api.c": "int api;\n",
+        },
+    )
+    model, receipt = generate(workspace, rows=(("app", "main.py"), ("app", "vendored/lwip/api.c")))
+    assert versions(model).get("LwIP") == "2.2.0"
+    unresolved = gaps(receipt, "dependency-metadata-unresolved")
+    assert {g["field"] for g in unresolved if g["boundary"] == "app/vendored/lwip"} <= {
+        "license",
+        "license_applicability",
+    }
+
+
+def test_idf_tree_version_is_read_from_its_version_header(workspace):
+    header = "".join(
+        f"#define ESP_IDF_VERSION_{p} {n}\n" for p, n in (("MAJOR", 5), ("MINOR", 4), ("PATCH", 1))
+    )
+    commit_tree(workspace["app"], {"components/esp_common/include/esp_idf_version.h": header})
+    model, _ = generate(workspace)
+    assert "5.4.1" in versions(model).values()
+
+
+def test_versionless_cmake_project_below_checkout_root_is_not_a_boundary(workspace):
+    commit_tree(
+        workspace["app"],
+        {"port/CMakeLists.txt": "project(port)\n", "port/code.c": "int code;\n"},
+    )
+    _, receipt = generate(workspace, rows=(("app", "main.py"), ("app", "port/code.c")))
+    assert {m["boundary"] for m in receipt["metadata"]} == {"app/."}
