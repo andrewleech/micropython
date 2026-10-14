@@ -79,6 +79,14 @@
 #define MICROPY_TIME_SUPPORT_Y1969_AND_BEFORE (1)
 #define MICROPY_USE_INTERNAL_ERRNO  (1)
 #define MICROPY_SCHEDULER_STATIC_NODES (1)
+// Wake the processor out of the __WFE() in MICROPY_INTERNAL_WFE(). The event
+// register is sticky, so this also covers work queued just before the sleep.
+//
+// mp_sched_exception() has no equivalent hook, but every caller on this port
+// (UART and USB CDC RX, both delivering Ctrl-C) runs from the ISR whose own
+// entry already woke the core, so the WFE it needs to clear has already
+// cleared by the time execution returns to the sleeping mainline code.
+#define MICROPY_SCHED_HOOK_SCHEDULED __SEV()
 #define MICROPY_SCHEDULER_DEPTH     (8)
 #define MICROPY_VFS                 (1)
 #define MICROPY_VFS_BLOCKDEV_NATIVE (1)
