@@ -1,27 +1,25 @@
-import sys
+from typing_extensions import ParamSpec
 from collections.abc import Callable
-from typing import Any, Literal, TypeVar
+from typing import Any
+from typing import Literal
+from typing import TypeVar
 
 import _typeshed
 from _typeshed import SupportsWrite
-from typing_extensions import Concatenate, ParamSpec, deprecated
-
+from typing_extensions import Concatenate
+from typing_extensions import deprecated
 _T = TypeVar("_T")
 _R_co = TypeVar("_R_co", covariant=True)
-_FuncT = TypeVar("_FuncT", bound=Callable[..., Any])
 _P = ParamSpec("_P")
+
+_FuncT = TypeVar("_FuncT", bound=Callable[..., Any])
 
 # These definitions have special processing in mypy
 class ABCMeta(type):
     __abstractmethods__: frozenset[str]
-    if sys.version_info >= (3, 11):
-        def __new__(
-            mcls: type[_typeshed.Self], name: str, bases: tuple[type, ...], namespace: dict[str, Any], /, **kwargs: Any
-        ) -> _typeshed.Self: ...
-    else:
-        def __new__(
-            mcls: type[_typeshed.Self], name: str, bases: tuple[type, ...], namespace: dict[str, Any], **kwargs: Any
-        ) -> _typeshed.Self: ...
+    def __new__(
+        mcls: type[_typeshed.Self], name: str, bases: tuple[type, ...], namespace: dict[str, Any], /, **kwargs: Any
+    ) -> _typeshed.Self: ...
 
     def __instancecheck__(cls: ABCMeta, instance: Any) -> bool: ...
     def __subclasscheck__(cls: ABCMeta, subclass: type) -> bool: ...
@@ -46,7 +44,3 @@ class abstractproperty(property):
 class ABC(metaclass=ABCMeta):
     __slots__ = ()
 
-def get_cache_token() -> object: ...
-
-if sys.version_info >= (3, 10):
-    def update_abstractmethods(cls: type[_T]) -> type[_T]: ...
