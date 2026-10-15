@@ -23,6 +23,9 @@ _DATA = Path(__file__).parent / "data" / "licenses"
 _NS = "{http://www.spdx.org/license}"
 _DROPPED = {"copyrightText", "titleText", "bullet"}
 _SLOT_LIMIT = 300
+# Longest text compared with a template (Apache-2.0 is about 11 kB); a longer file
+# is several licences or something else, and is not worth a backtracking search.
+_MAX_TEXT = 40_000
 # An open-ended slot holds names, not obligations, so it may not contain a word that
 # negates or restricts ("THE AUTHOR NOT BE LIABLE").
 _RESTRICTING = r"\b(?:not|no|never|except|unless|only|without|non)\b"
@@ -121,6 +124,8 @@ def _templates() -> dict[str, re.Pattern[str]]:
 
 
 def _whole(text: str) -> str | None:
+    if len(text) > _MAX_TEXT:
+        return None
     folded = _BULLET.sub("", _fold(text).strip())
     found = [name for name, pattern in _templates().items() if pattern.fullmatch(folded)]
     return found[0] if len(found) == 1 else None
