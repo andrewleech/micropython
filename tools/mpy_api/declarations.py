@@ -145,6 +145,15 @@ def _closed(policy: dict, names: set[str], open_modules: str) -> bool:
     return "__getattr__" not in names and not _opens(policy, names, open_modules)
 
 
+def _constructor_gap(definition: dict) -> bool:
+    """Whether the class has a constructor record but no ``__new__`` or ``__init__`` member declares it."""
+    if not definition.get("constructor"):
+        return False
+    return not any(member.get("name") in ("__new__", "__init__") and member.get("kind") == "function" and
+                   _status(member.get("resolution", {}).get("availability", "resolved")) in _RESOLVED
+                   for member in definition.get("members", []))
+
+
 class _Renderer:
     def __init__(self, inventory: dict, module: dict, types: dict[str, dict], open_modules: str):
         self.inventory = inventory
@@ -458,14 +467,8 @@ class _Renderer:
         elif kind == "class":
             shared = self.types.get(canonical_json(symbol.get("type_identity")), {})
             definition = {**shared, **symbol}
-            represented_constructor = any(
-                member.get("name") in ("__new__", "__init__") and member.get("kind") == "function" and
-                _status(member.get("resolution", {}).get("availability", "resolved")) in _RESOLVED
-                for member in definition.get("members", []))
-            if definition.get("constructor") and not represented_constructor:
+            if _constructor_gap(definition):
                 self.representation_gap(symbol, "class constructor callshape has no source-qualified __new__/__init__ declaration representation")
-                reasons = "; ".join(_reasons(definition["constructor"]))
-                lines.append(f"{indent}# Constructor declaration gap" + (f": {reasons}" if reasons else ""))
             bases = definition.get("bases", [])
             if any(not _qualified(base) for base in bases):
                 raise ValueError(f"unsafe normalized base for {name}: {bases!r}")
@@ -478,7 +481,14 @@ class _Renderer:
         return lines, None
 
     def class_lines(self, lines: list[str], definition: dict, indent: str, members: list[str]) -> list[str]:
-        """Complete a class declaration from ``symbol`` with its rendered member lines."""
+        """Complete a class declaration from ``symbol`` with its rendered member lines.
+
+        A class the build can construct whose constructor has no declaration gets ``__init__(self, *args, **kwargs)``
+        after the reasons of its constructor record: the evidence says the call is accepted, not with what arguments."""
+        if _constructor_gap(definition) and definition["constructor"].get("callable") is True:
+            inner = indent + "    "
+            members[:0] = ([f"{inner}# unresolved: {reason}" for reason in _reasons(definition["constructor"])] +
+                           [f"{inner}def __init__(self: {self.any_name}, *args: {self.any_name}, **kwargs: {self.any_name}) -> None: ..."])
         members += _policy_lines(definition.get("attribute_policy", {}), indent + "    ",
                                  module=False, names=_class_names(definition),
                                  any_name=self.any_name, open_modules=self.open_modules)
