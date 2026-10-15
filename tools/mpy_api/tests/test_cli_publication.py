@@ -350,3 +350,49 @@ def test_moving_the_checkout_changes_nothing(tmp_path):
     assert first == second
     assert str(tmp_path) not in first["generation.json"].decode()
     assert json.loads(first["generation.json"])["build"]["root"] == "micropython"
+
+
+EXTENSIBLE_BUILTINS = BUILTINS + """
+#define MP_REGISTER_EXTENSIBLE_MODULE(name, obj) extern const int mp_extensible_##obj
+MP_REGISTER_EXTENSIBLE_MODULE(MP_QSTR_builtins, mp_module_builtins);
+"""
+
+
+def test_open_modules_defaults_to_proven_and_accepts_only_its_choices():
+    parser = argument_parser()
+    required = ["--compdb", "c", "--micropython-root", "r", "--build-dir", "b", "--port", "p", "--target", "t",
+                "--variant", "v", "--elf", "e", "--map", "m", "--link-command", "l", "--output", "o"]
+    assert parser.parse_args(required).open_modules == "proven"
+    assert parser.parse_args(required + ["--open-modules", "all"]).open_modules == "all"
+    with pytest.raises(SystemExit):
+        parser.parse_args(required + ["--open-modules", "none"])
+
+
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs the selected C compiler")
+def test_open_modules_selects_the_catch_all_of_an_unproven_module_and_is_recorded(tmp_path, monkeypatch):
+    monkeypatch.setitem(globals(), "BUILTINS", EXTENSIBLE_BUILTINS)
+    runs = {}
+    for jobs in (1, 2):
+        base = tmp_path / f"jobs{jobs}"
+        base.mkdir()
+        common = linked_build(base) + ["--source-root", f"fixture={base}", "--jobs", str(jobs)]
+        for label, extra in (("default", []), ("proven", ["--open-modules", "proven"]), ("all", ["--open-modules", "all"])):
+            output = tmp_path / "out" / f"{label}-{jobs}"
+            generate(argument_parser().parse_args(common + ["--output", str(output), *extra]))
+            runs[label, jobs] = published(output)
+    # Every published file, the receipt and its generation_id included, is the same for any --jobs.
+    for label in ("default", "proven", "all"):
+        assert runs[label, 1] == runs[label, 2], label
+    runs = {label: files for (label, jobs), files in runs.items() if jobs == 1}
+    stub = "typeshed/stdlib/builtins.pyi"
+    assert runs["default"] == runs["proven"]
+    assert "__getattr__" not in runs["proven"][stub].decode()
+    opened = runs["all"][stub].decode()
+    assert "# unresolved: extensible import contributors unassessed" in opened and "def __getattr__(" in opened
+    # The unproven module's declarations are otherwise the same.
+    assert [line for line in opened.splitlines() if not line.startswith("# unresolved:") and "__getattr__" not in line] == \
+        runs["proven"][stub].decode().splitlines()
+    receipts = {label: json.loads(files["generation.json"]) for label, files in runs.items()}
+    assert receipts["proven"]["inputs"]["declaration_options"] == {"open_modules": "proven"}
+    assert receipts["all"]["inputs"]["declaration_options"] == {"open_modules": "all"}
+    assert receipts["all"]["generation_id"] != receipts["proven"]["generation_id"]

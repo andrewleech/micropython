@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 
+from .declarations import OPEN_MODULES
 from .paths import SYSTEM_PREFIXES, PathNames, argument_paths, is_host_path
 from .structure import json_pieces
 
@@ -453,6 +454,9 @@ def argument_parser():
     parser.add_argument("--source-owner", action="append", default=[], metavar="NAME=OWNER")
     parser.add_argument("--enrichment", type=Path, help="optional schema-v1 manifest pinning a .pyi enrichment tree and its source/licence inputs")
     parser.add_argument("--jobs", type=int, default=1)
+    parser.add_argument("--open-modules", choices=OPEN_MODULES, default="proven",
+                        help="which modules and classes with dynamic attribute evidence get a catch-all __getattr__: "
+                             "'proven' only where a provider was found, 'all' also where the declared names are merely unproven")
     parser.add_argument("--inventory", action="store_true",
                         help="also publish inventory.json, a diagnostic projection of the collected facts")
     parser.add_argument("--output", required=True, type=Path)
@@ -522,7 +526,7 @@ def generate(args):
                                          "records": [module["provenance"] for module in frozen]}
         identities = {**inputs, "tool_version": __version__, "python": sys.version,
                       "tools": tools, "parser": parser, "frozen": frozen_inputs,
-                      "enrichment": None}
+                      "enrichment": None, "declaration_options": {"open_modules": args.open_modules}}
         surface["provenance"]["producer_inputs"] = identities
         if enrichment:
             merge_enrichment(surface, enrichment)
@@ -537,7 +541,7 @@ def generate(args):
                                         for role in _PATH_BEARING])
         surface = paths.value(surface)
         identities = paths.value(identities)
-        declarations = render_declarations(surface)
+        declarations = render_declarations(surface, args.open_modules)
         if "typeshed/stdlib/builtins.pyi" not in declarations:
             raise ValueError("selected inventory has no generated builtin replacement")
         def verify_publication_inputs():
