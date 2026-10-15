@@ -612,9 +612,9 @@ def test_versionless_cmake_project_below_checkout_root_is_not_a_boundary(workspa
 
 
 def test_licence_file_identified_by_text_gives_the_boundary_licence(workspace):
-    from mpy_analysis import license_text
+    from test_license_text import default_text
 
-    text = (Path(license_text.__file__).parent / "data/licenses/MIT.txt").read_text()
+    text = default_text("MIT")
     commit_tree(workspace["app"], {"LICENSE": "Copyright 2024 X\n\n" + text})
     _, receipt = generate(workspace)
     assert any(

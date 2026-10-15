@@ -44,4 +44,4 @@ sast-link-evidence = "mpy_analysis.link_evidence:main"
 packages = ["mpy_analysis"]
 
 [tool.setuptools.package-data]
-mpy_analysis = ["data/*", "data/licenses/*.txt", "data/pysa/*/*.pysa", "data/pysa/*/*.json", "data/fixtures/*.py"]
+mpy_analysis = ["data/*", "data/licenses/*.xml", "data/pysa/*/*.pysa", "data/pysa/*/*.json", "data/fixtures/*.py"]
