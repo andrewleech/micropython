@@ -647,9 +647,255 @@ def test_gaps_render_as_one_line_reasons_without_evidence_blocks():
         "# unresolved: class constructor callshape has no source-qualified __new__/__init__ declaration representation",
         "# Constructor declaration gap: constructor count/parser/control-flow contract unassessed",
         "# unresolved: object value/type family contract unassessed",
-        "# unresolved: unsupported exported object family object"]
+        "# unresolved: unsupported exported object family object",
+        "# unresolved: attribute provider names are not enumerated"]
     for evidence in ("evidence-path", "evidence-slot", "evidence-provider", "omitted"):
         assert evidence not in text
     tree = ast.parse(text)
     any_annotation(declaration(tree, "__getattr__").returns, tree)
     assert omitted["resolution"]["declaration"]["status"] == "unresolved"
+
+
+def unproven_policy():
+    """A table that is merely unproven: no handler or provider was found, only an extensible import gap."""
+    return {"kind": "closed-table-with-coverage-gap", "unresolved": ["extensible import contributors unassessed"],
+            "dynamic_providers": [{"kind": "extensible-contributor-gap", "provider": "fixture:extensible"}]}
+
+
+def has_getattr(text):
+    return any(isinstance(node, ast.FunctionDef) and node.name == "__getattr__" for node in ast.parse(text).body)
+
+
+def class_with_policy(name, policy):
+    return {"name": name, "kind": "class", "identity": "fixture:" + name, "attribute_policy": policy,
+            "resolution": {"availability": {"status": "resolved"}},
+            "members": [function("method")]}
+
+
+def class_body_has_getattr(text, name):
+    klass = declaration(ast.parse(text), name)
+    return any(isinstance(node, ast.FunctionDef) and node.name == "__getattr__" for node in klass.body)
+
+
+def test_an_unproven_module_is_closed_under_proven_and_open_under_all_with_its_reason():
+    data = inventory(module("fixture", [function("f")], attribute_policy=unproven_policy()))
+    closed = render_declarations(data)["modules/fixture.pyi"]
+    assert not has_getattr(closed) and "extensible" not in closed
+    assert closed == render_declarations(data, "proven")["modules/fixture.pyi"]
+    opened = render_declarations(data, "all")["modules/fixture.pyi"]
+    assert has_getattr(opened)
+    lines = opened.splitlines()
+    assert lines[-2] == "# unresolved: extensible import contributors unassessed"
+    assert lines[-1].startswith("def __getattr__(name: ")
+    assert "def f(" in closed and "def f(" in opened
+
+
+def potential_provider_policy(**fields):
+    return {"kind": "potential-dynamic-provider-unassessed", "provider": "mp_module_attr",
+            "unresolved": ["dynamic provider feature/callability/domain/results unassessed"],
+            "dynamic_providers": [{"kind": "potential-dynamic-provider-unassessed", "provider": "mp_module_attr"}], **fields}
+
+
+@pytest.mark.parametrize("fields", [
+    {}, {"getattr_feature": {"value": 1}}, {"getattr_feature": {"value": None}}, {"getattr_feature": {"value": "0"}},
+    {"getattr_feature": {"value": False}}, {"getattr_feature": "disabled"}])
+def test_a_potential_provider_stays_open_unless_its_feature_gate_is_zero(fields):
+    data = inventory(module("fixture", attribute_policy=potential_provider_policy(**fields)))
+    for option in ("proven", "all"):
+        text = render_declarations(data, option)["modules/fixture.pyi"]
+        assert has_getattr(text)
+        assert "# unresolved: dynamic provider feature/callability/domain/results unassessed" in text
+
+
+def test_a_potential_provider_whose_feature_gate_is_zero_is_closed_under_proven():
+    data = inventory(module("fixture", attribute_policy=potential_provider_policy(getattr_feature={"value": 0})))
+    assert not has_getattr(render_declarations(data)["modules/fixture.pyi"])
+    opened = render_declarations(data, "all")["modules/fixture.pyi"]
+    assert has_getattr(opened) and "# unresolved: dynamic provider feature/callability/domain/results unassessed" in opened
+
+
+def test_a_zero_feature_gate_does_not_close_a_policy_with_another_found_provider():
+    policy = potential_provider_policy(getattr_feature={"value": 0})
+    policy["dynamic_providers"].append({"kind": "registered-delegation-selection-unassessed", "provider": "handler"})
+    assert has_getattr(render_declarations(inventory(module("fixture", attribute_policy=policy)))["modules/fixture.pyi"])
+
+
+def table_row(name, index, availability="unresolved", **fields):
+    return {"name": name, "kind": "unknown", "identity": {"container": "fixture", "entry_index": index, "export": name},
+            "dictionary_window": {"status": "resolved"},
+            "resolution": {"availability": {"status": availability}, "reasons": ["unsupported constant expression"],
+                           "status": "unresolved"}, **fields}
+
+
+def handler_attribute(name):
+    return {"name": name, "kind": "constant", "identity": {"attribute": name, "provider": "fixture:handler"},
+            "resolution": {"availability": None, "reasons": ["framework attribute result type unassessed"],
+                           "status": "unresolved"}}
+
+
+def test_a_closed_module_declares_unqualified_table_rows_as_any_after_their_reasons():
+    exports = [function("f"), table_row("POLLIN", 1), table_row("errorcode", 2)]
+    data = inventory(module("fixture", exports, attribute_policy=unproven_policy()))
+    text = render_declarations(data)["modules/fixture.pyi"]
+    assert not has_getattr(text)
+    lines = text.splitlines()
+    for name in ("POLLIN", "errorcode"):
+        position = next(i for i, line in enumerate(lines) if line.startswith(name + ":"))
+        assert lines[position] == f"{name}: _mpy_Any"
+        assert lines[position - 1] == "# unresolved: unsupported constant expression"
+    assert "def f(" in text
+
+
+def test_a_module_with_no_dynamic_evidence_declares_its_unqualified_table_rows_under_both_options():
+    for policy in ({}, {"kind": "closed-table", "dynamic_providers": []}):
+        for option in ("proven", "all"):
+            text = render_declarations(inventory(module("fixture", [table_row("POLLIN", 1)], attribute_policy=policy)), option)["modules/fixture.pyi"]
+            assert "POLLIN: _mpy_Any" in text and not has_getattr(text)
+
+
+def test_handler_attributes_are_not_declared_in_a_closed_module():
+    exports = [table_row("POLLIN", 1), handler_attribute("__class__"), handler_attribute("__dict__")]
+    text = render_declarations(inventory(module("fixture", exports, attribute_policy=unproven_policy())))["modules/fixture.pyi"]
+    assert "POLLIN: _mpy_Any" in text
+    assert "__class__" not in text and "__dict__" not in text
+
+
+def test_a_module_with_a_catch_all_does_not_declare_unqualified_rows_under_either_option():
+    exports = [table_row("POLLIN", 1)]
+    closed = inventory(module("fixture", exports, attribute_policy=unproven_policy()))
+    assert "POLLIN" not in render_declarations(closed, "all")["modules/fixture.pyi"]
+    open_policy = {"kind": "dynamic-provider", "dynamic_providers": [{"kind": "dynamic-provider", "provider": "handler"}]}
+    for option in ("proven", "all"):
+        text = render_declarations(inventory(module("fixture", exports, attribute_policy=open_policy)), option)["modules/fixture.pyi"]
+        assert "POLLIN" not in text and has_getattr(text)
+
+
+def test_conflicting_unqualified_table_rows_of_a_closed_module_are_declared_as_any():
+    exports = [table_row("POLLIN", 1), table_row("POLLIN", 2)]
+    text = render_declarations(inventory(module("fixture", exports, attribute_policy=unproven_policy())))["modules/fixture.pyi"]
+    assert "POLLIN: _mpy_Any" in text
+    assert "POLLIN" not in render_declarations(inventory(module("fixture", exports, attribute_policy=unproven_policy())), "all")["modules/fixture.pyi"]
+
+
+def test_a_closed_class_declares_unqualified_table_rows_and_not_handler_attributes():
+    closed = class_with_policy("Closed", {"kind": "closed-table", "unresolved": []})
+    closed["members"] = [function("method"), table_row("MSG_PEEK", 1), handler_attribute("__class__")]
+    opened = class_with_policy("Opened", {"kind": "type-specific-handler",
+                                          "dynamic_providers": [{"kind": "type-specific-handler", "provider": "handler"}]})
+    opened["members"] = [table_row("MSG_PEEK", 1)]
+    for option in ("proven", "all"):
+        text = render_declarations(inventory(module("fixture", [closed, opened])), option)["modules/fixture.pyi"]
+        tree = ast.parse(text)
+        names = {node.target.id for node in declaration(tree, "Closed").body if isinstance(node, ast.AnnAssign)}
+        assert names == {"MSG_PEEK"}
+        assert not [node for node in declaration(tree, "Opened").body if isinstance(node, ast.AnnAssign)]
+        assert "__class__" not in text
+        assert not class_body_has_getattr(text, "Closed") and class_body_has_getattr(text, "Opened")
+        assert "    # unresolved: unsupported constant expression\n    MSG_PEEK: _mpy_Any" in text
+
+
+def test_rendering_under_both_options_in_turn_gives_each_its_own_output():
+    data = inventory(module("fixture", [table_row("POLLIN", 1)], attribute_policy=unproven_policy()))
+    first = [render_declarations(data, option) for option in ("all", "proven", "all", "proven")]
+    assert first[0] == first[2] and first[1] == first[3] and first[0] != first[1]
+
+
+@pytest.mark.parametrize("policy, reason", [
+    ({"kind": "dynamic-provider", "unresolved": ["dynamic attribute domain and results unassessed"],
+      "dynamic_providers": [{"kind": "dynamic-provider", "provider": "handler"}]},
+     "dynamic attribute domain and results unassessed"),
+    ({"kind": "registered-delegation-selection-unassessed", "provider": "mp_module_sys_attr",
+      "unresolved": ["registered delegation dispatch selection and returned attributes unassessed"],
+      "dynamic_providers": [{"kind": "registered-delegation-selection-unassessed", "provider": "mp_module_sys_attr"}]},
+     "registered delegation dispatch selection and returned attributes unassessed"),
+    ({"kind": "selected-registered-delegation", "unresolved": ["delegated attribute read/write/result contracts and mutable value types unassessed"],
+      "dynamic_providers": [{"kind": "selected-registered-delegation", "provider": "handler"}]},
+     "delegated attribute read/write/result contracts and mutable value types unassessed"),
+    ({"kind": "source-module-with-framework-gap", "unresolved": [],
+      "dynamic_providers": [{"kind": "source-module-getattr", "reason": "target dispatch support/domain is unassessed"}]},
+     "target dispatch support/domain is unassessed"),
+    ({"kind": "source-module-with-framework-gap", "unresolved": [],
+      "dynamic_providers": [{"construct": "Assert", "reason": "current namespace mutation/exposure is unassessed"}]},
+     "current namespace mutation/exposure is unassessed"),
+])
+def test_a_found_provider_keeps_the_catch_all_under_both_options_with_its_reason(policy, reason):
+    data = inventory(module("fixture", attribute_policy=policy))
+    for option in ("proven", "all"):
+        text = render_declarations(data, option)["modules/fixture.pyi"]
+        assert has_getattr(text)
+        assert text.splitlines()[-2] == "# unresolved: " + reason
+
+
+def test_unproven_evidence_next_to_a_found_provider_does_not_close_the_module():
+    policy = unproven_policy()
+    policy["dynamic_providers"].append({"kind": "type-specific-handler", "provider": "handler"})
+    assert has_getattr(render_declarations(inventory(module("fixture", attribute_policy=policy)))["modules/fixture.pyi"])
+
+
+@pytest.mark.parametrize("policy", [
+    {"kind": "closed-table-with-coverage-gap", "dynamic_providers": [{"kind": "an-unknown-provider-kind"}]},
+    {"kind": "closed-table-with-coverage-gap", "dynamic_providers": [{"provider": "no kind recorded"}]},
+    {"kind": "closed-table-with-coverage-gap", "dynamic_providers": ["not a record"]},
+    {"kind": "closed-table-with-coverage-gap", "dynamic_providers": "not a list"},
+    {"kind": "open"},
+    {"kind": "dynamic"},
+])
+def test_evidence_that_is_not_known_to_be_unproven_is_open_under_proven(policy):
+    text = render_declarations(inventory(module("fixture", attribute_policy=policy)))["modules/fixture.pyi"]
+    assert has_getattr(text)
+    assert text.splitlines()[-2] == "# unresolved: attribute provider names are not enumerated"
+
+
+def test_a_policy_without_dynamic_evidence_never_gets_a_catch_all():
+    for policy in ({}, {"kind": "closed-table", "dynamic_providers": []},
+                   {"kind": "closed-table-with-coverage-gap", "unresolved": ["framework gap"]}):
+        data = inventory(module("fixture", attribute_policy=policy))
+        for option in ("proven", "all"):
+            assert not has_getattr(render_declarations(data, option)["modules/fixture.pyi"])
+
+
+def test_classes_follow_the_same_option_with_an_indented_reason():
+    unproven = class_with_policy("Unproven", {**unproven_policy(), "unresolved": ["extensible import contributors unassessed"]})
+    found = class_with_policy("Found", {"kind": "type-specific-handler", "unresolved": ["handler assignment/result contracts unassessed"],
+                                         "dynamic_providers": [{"kind": "type-specific-handler", "provider": "handler"}]})
+    data = inventory(module("fixture", [unproven, found]))
+    text = render_declarations(data)["modules/fixture.pyi"]
+    assert not class_body_has_getattr(text, "Unproven")
+    assert class_body_has_getattr(text, "Found")
+    assert "    # unresolved: handler assignment/result contracts unassessed\n    def __getattr__(self, name: " in text
+    assert class_body_has_getattr(render_declarations(data, "all")["modules/fixture.pyi"], "Unproven")
+    assert not has_getattr(text)
+
+
+def test_a_declared_getattr_is_not_duplicated_under_either_option():
+    policy = {"kind": "dynamic-provider", "dynamic_providers": [{"kind": "source-module-getattr", "reason": "domain unassessed"}]}
+    declared = function("__getattr__", 1, 1)
+    data = inventory(module("fixture", [declared], attribute_policy=policy))
+    for option in ("proven", "all"):
+        text = render_declarations(data, option)["modules/fixture.pyi"]
+        assert sum(isinstance(node, ast.FunctionDef) and node.name == "__getattr__" for node in ast.parse(text).body) == 1
+        assert "domain unassessed" not in text
+
+
+def test_an_unknown_open_modules_option_is_rejected():
+    with pytest.raises(ValueError, match="open_modules"):
+        render_declarations(inventory(module("fixture")), "none")
+
+
+def test_the_option_does_not_change_modules_without_a_policy_difference():
+    data = inventory(module("fixture", [function("f")]))
+    assert render_declarations(data, "all") == render_declarations(data, "proven")
+
+
+@pytest.mark.parametrize("source, option, opened", [
+    ('x = 1\nassert globals().pop("x")\n', "proven", True),
+    ('x = 1\nassert globals().pop("x")\n', "all", True),
+    ('x = 1\n', "proven", False),
+    ('x = 1\n', "all", False),
+])
+def test_frozen_namespace_mutation_is_a_found_provider_and_plain_source_is_not(tmp_path, source, option, opened):
+    modules = collect_frozen_modules(selected(tmp_path, source))
+    text = render_declarations(inventory(*modules), option)["modules/renamed.pyi"]
+    assert has_getattr(text) is opened
+    if opened:
+        assert "# unresolved: current namespace mutation/exposure is unassessed" in text.splitlines()

@@ -99,6 +99,23 @@ Call shapes compose actual wrapper bounds, receiver/class/static binding and qua
 
 Protocol slots describe runtime behaviour. They do not invent public C-named methods or `__new__`, `__init__` or metaclass calls absent from the runtime. Native class lookup and native instance lookup are not assumed equivalent. Genuine dynamic providers retain their own uncertainty, they do not make every omitted name valid.
 
+### Open modules and classes
+
+A module or class with a catch-all `def __getattr__(name) -> Any` accepts every attribute name in a type checker. `--open-modules {all,proven}` (default `proven`) selects which ones get it, and the choice is recorded in the receipt as `inputs.declaration_options.open_modules`, so it is part of `generation_id`.
+
+| Option | Modules and classes with a catch-all |
+|---|---|
+| `proven` | Those whose policy records a found provider: a native module `__getattr__` table entry (unless its feature gate is recorded as 0), a registered module delegation handler (selected or not), a type attribute handler, or a frozen source construct that supplies names the declarations do not list (a module or class `__getattr__`, namespace mutation, an unresolved star import). Every other module and class is declared by its named exports alone, with the static table rows described below. |
+| `all` | Every module and class with dynamic evidence of any kind, including those where the generator only could not prove the declared names complete. |
+
+Evidence that only records an unproven table is `closed-table-with-coverage-gap` and `extensible-contributor-gap` (a module registered as extensible, whose filesystem or frozen contributors are not part of the build). A `potential-dynamic-provider-unassessed` policy (a module table `__getattr__` entry whose callability and domain are not proven) is a found provider and is closed only when its recorded `getattr_feature` value is 0. A policy is open under `proven` when any of its evidence, its own kind or the kind of any of its dynamic providers, is not one of these. A kind this generator does not know, a provider record without a kind and a malformed provider list therefore stay open: classification fails closed.
+
+A native type attribute handler stays open because the generator records only the names the handler tests, not that the handler supplies no others. A registered delegation handler stays open even when its dispatch selection is unassessed, because the handler is a found provider and the names it supplies (for example `sys.argv`) are not enumerated.
+
+Each emitted `__getattr__` is preceded by `# unresolved: <reason>` lines: the unresolved reasons of the policy and the reasons its dynamic providers state, or `attribute provider names are not enumerated` when it states none.
+
+A module or class without a catch-all, under either option, is an allowlist, so it must contain every name the build has. Each of its static table rows whose name availability the generator cannot qualify is declared `NAME: Any` after its `# unresolved: <reason>` lines (for example `errno.errorcode`, `select.POLLIN`, `socket.socket`). Only table rows are declared: framework attributes a handler tests for (`__class__`, `__dict__`) have no table entry and are not. A module or class that has a catch-all does not declare them, the catch-all covers them. `all` therefore differs from `proven` only in which containers have a catch-all (and its comment lines).
+
 ### Bounded native semantic inference
 
 Input acceptance, storage conversion and result identity are separate source contracts. Selected helper bodies can qualify truth testing, integer conversion and buffer access; a helper name or prototype alone cannot. Parser-table types require the selected parser protocol and its forwarding/storage path, not just an `MP_ARG_*` spelling.
