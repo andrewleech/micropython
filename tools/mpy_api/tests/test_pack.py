@@ -33,7 +33,8 @@ DECLARATIONS = {
     "typeshed/stdlib/builtins.pyi": (HEAD + "class int:\n    def extra(self) -> _mpy_Any: ...\nclass object: ...\nclass str: ...\n"
                                      "class bytes: ...\nclass tuple: ...\n"),
     "modules/time.pyi": HEAD + "def sleep_ms(arg0: _mpy_Any, /) -> None: ...\n",
-    "modules/io.pyi": HEAD + "# Constructor declaration gap: unresolved\nclass BytesIO:\n    def getvalue(self) -> _mpy_Any: ...\n",
+    "modules/io.pyi": HEAD + ("class BytesIO:\n    # unresolved: constructor count/parser/control-flow contract unassessed\n"
+                              "    def __init__(self, *args: _mpy_Any, **kwargs: _mpy_Any) -> None: ...\n    def getvalue(self) -> _mpy_Any: ...\n"),
     "modules/frozen/__init__.pyi": HEAD + "import nonexistent_module\n",
     "modules/frozen/member.pyi": HEAD + "x: int\n",
 }
@@ -133,10 +134,10 @@ def test_collided_module_is_the_template_filtered_by_the_generated_names(support
     assert "namedtuple" not in collections
 
 
-def test_generated_class_with_an_unresolved_constructor_gets_the_template_constructor(pack):
+def test_generated_fallback_constructor_gives_way_to_the_template_constructor(pack):
     text = stdlib_modules(pack)["io"]
-    assert "# Constructor declaration gap" in text
     assert "def __init__(self, string: bytes" in text and "def getvalue" in text
+    assert "*args" not in text
 
 
 def test_builtins_the_checkers_need_by_name_are_bare_classes_when_the_build_lacks_them(pack):

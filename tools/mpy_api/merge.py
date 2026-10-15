@@ -23,6 +23,7 @@ ANY = "_mpy_Any"
 _ANY_IMPORT = f"from typing import Any as {ANY}"
 _OBJECT_TYPES = ("object",)
 _FUTURE = "__future__"
+_CONSTRUCTORS = frozenset(("__init__", "__new__"))
 _BANNER = "# Declarations of the selected MicroPython build merged into the vendored template."
 
 
@@ -162,7 +163,7 @@ class _Merger:
         self.report: dict[str, list[str]] = {key: [] for key in (
             "dropped", "dropped_members", "kept_dunders", "generated_wins", "template_wins", "return_overrides",
             "return_conflicts", "generated_only", "generated_only_members", "base_provided_members", "open_classes",
-            "kept_kind_mismatch", "bare")}
+            "kept_kind_mismatch", "bare", "template_constructor")}
 
     def generated_block(self, node: ast.stmt, indent: int) -> list[str]:
         """A generated declaration with the comment lines the generator wrote above it."""
@@ -335,7 +336,9 @@ class _Merger:
         for member, nodes in members.items():
             if member in template_members:
                 continue
-            if member == "__getattr__" or not self.provided_by_base(node, member):
+            if member in _CONSTRUCTORS and _CONSTRUCTORS & template_members.keys():
+                self.report["template_constructor"].append(f"{qualified}.{member}")
+            elif member == "__getattr__" or not self.provided_by_base(node, member):
                 for item in nodes:
                     out += self.generated_block(item, indent + 4)
                 self.report["generated_only_members"].append(f"{qualified}.{member}")
@@ -516,7 +519,9 @@ def merge_template(generated: str, template: str, *, what: str, keep: Collection
       the template's declaration stays and a proven generated return replaces a template return that does not
       share its head (a single declaration only);
     - names and members only the generated module declares are appended, except members a template base class
-      from ``typing`` already defines (they would shadow the base with weaker signatures);
+      from ``typing`` already defines (they would shadow the base with weaker signatures) and a constructor
+      when the template class declares ``__init__`` or ``__new__`` (a generated ``__init__`` would override a
+      template ``__new__`` in the checkers);
     - ``__all__`` is dropped, a class whose abstract base members are no longer implemented is rebased
       (see ``_demote_abstract``) and imports that nothing reads are pruned.
 

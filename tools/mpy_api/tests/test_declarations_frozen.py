@@ -645,7 +645,7 @@ def test_gaps_render_as_one_line_reasons_without_evidence_blocks():
     assert comments == [
         "# Generated from the selected MicroPython build; not a CPython runtime overlay.",
         "# unresolved: class constructor callshape has no source-qualified __new__/__init__ declaration representation",
-        "# Constructor declaration gap: constructor count/parser/control-flow contract unassessed",
+        "# unresolved: constructor count/parser/control-flow contract unassessed",
         "# unresolved: object value/type family contract unassessed",
         "# unresolved: unsupported exported object family object",
         "# unresolved: attribute provider names are not enumerated"]
@@ -899,3 +899,52 @@ def test_frozen_namespace_mutation_is_a_found_provider_and_plain_source_is_not(t
     assert has_getattr(text) is opened
     if opened:
         assert "# unresolved: current namespace mutation/exposure is unassessed" in text.splitlines()
+
+
+def constructible(name, constructor, members=()):
+    return {"name": name, "kind": "class", "identity": "fixture:" + name, "members": list(members),
+            "resolution": {"availability": {"status": "resolved"}}, "constructor": constructor}
+
+
+UNASSESSED = {"callable": True, "resolution": {"reasons": ["constructor count/parser/control-flow contract unassessed"],
+                                               "status": "unresolved"}}
+
+
+def init_of(tree, cls):
+    klass = declaration(tree, cls)
+    return [node for node in klass.body if isinstance(node, ast.FunctionDef) and node.name == "__init__"]
+
+
+def test_constructible_class_with_an_unresolved_constructor_accepts_any_call_and_says_why():
+    text = render_declarations(inventory(module("fixture", [constructible("Hash", UNASSESSED)])))["modules/fixture.pyi"]
+    tree = ast.parse(text)
+    (init,) = init_of(tree, "Hash")
+    assert init.returns.value is None
+    assert [arg.arg for arg in init.args.args] == ["self"] and init.args.vararg.arg == "args" and init.args.kwarg.arg == "kwargs"
+    assert "    # unresolved: constructor count/parser/control-flow contract unassessed\n    def __init__(" in text
+    assert "Constructor declaration gap" not in text
+
+
+def test_a_constructor_record_that_does_not_say_callable_gets_no_constructor():
+    tree = ast.parse(render_declarations(inventory(module("fixture", [constructible("Vague", {"resolution": "unresolved"})])))["modules/fixture.pyi"])
+    assert init_of(tree, "Vague") == []
+
+
+def test_a_class_that_cannot_be_called_gets_no_constructor():
+    uncallable = {"callable": False, "resolution": {"reasons": [], "status": "non-callable"}}
+    tree = ast.parse(render_declarations(inventory(module("fixture", [constructible("Opaque", uncallable)])))["modules/fixture.pyi"])
+    assert init_of(tree, "Opaque") == []
+
+
+def test_a_class_with_a_declared_constructor_keeps_it_and_gains_no_fallback():
+    init = function("__init__", minimum=2, maximum=2)
+    tree = ast.parse(render_declarations(inventory(module("fixture", [constructible("Declared", UNASSESSED, [init])])))["modules/fixture.pyi"])
+    (declared,) = init_of(tree, "Declared")
+    assert declared.args.vararg is None and declared.args.kwarg is None
+
+
+def test_the_constructor_fallback_is_deterministic_and_closed_classes_keep_their_names():
+    data = inventory(module("fixture", [constructible("Hash", UNASSESSED)]))
+    assert render_declarations(copy.deepcopy(data)) == render_declarations(copy.deepcopy(data))
+    text = render_declarations(data)["modules/fixture.pyi"]
+    assert "__getattr__" not in text

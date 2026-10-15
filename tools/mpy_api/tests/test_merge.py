@@ -194,3 +194,15 @@ def test_bare_does_not_apply_when_the_build_has_the_class():
 def test_bare_class_the_template_lacks_is_an_empty_class():
     result = merged("class int: ...\n", "class int: ...\n", bare=["complex"], builtin_names=None)
     assert "class complex: ..." in result.text and result.report["bare"] == ["complex"]
+
+
+def test_generated_constructor_is_not_added_to_a_class_whose_template_declares_one():
+    template = "class int: ...\nclass zip:\n    def __new__(cls, a: int) -> zip: ...\nclass dict:\n    def __init__(self, a: int) -> None: ...\nclass plain: ...\n"
+    generated = ("class int: ...\nclass zip:\n    def __init__(self: _mpy_Any, *args: _mpy_Any, **kwargs: _mpy_Any) -> None: ...\n"
+                 "class dict:\n    def __new__(cls, *args: _mpy_Any) -> _mpy_Any: ...\n"
+                 "class plain:\n    def __init__(self: _mpy_Any, *args: _mpy_Any, **kwargs: _mpy_Any) -> None: ...\n")
+    result = merged(generated, template, builtin_names=None)
+    assert "def __new__(cls, a: int)" in result.text and "def __init__(self, a: int)" in result.text
+    assert "def __init__" not in result.text.split("class dict")[0] and "def __new__(cls, *args" not in result.text
+    assert "class plain:\n    def __init__(self, *args: _mpy_Any, **kwargs: _mpy_Any)" in result.text
+    assert result.report["template_constructor"] == ["dict.__new__", "zip.__init__"]
