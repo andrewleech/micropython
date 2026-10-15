@@ -29,15 +29,28 @@ _RESTRICTING = r"\b(?:not|no|never|except|unless|only|without|non)\b"
 _SLOT_CHAR = rf"(?:(?!{_RESTRICTING}).)"
 _BLANKS = re.compile(r"(?:\\s[*+])+")
 _COPYRIGHT_LINE = r"[^\n]*(?:copyright|\(c\)|\u00a9|all rights reserved)[^\n]*(?:\n|$)"
+# Text that may precede the body: copyright lines, a "License" heading with its
+# underline, and one sentence ending in a colon that names a licence ("... under
+# the terms of BSD license:") without restricting words.
+_LEAD = "|".join(
+    [
+        _COPYRIGHT_LINE,
+        r"[-=~*#_]{3,}[ ]*(?:\n|$)",
+        r"licen[cs]es?[ :]*(?:\n|$)",
+        rf"(?=[^:]*licen[cs]e)(?:(?!{_RESTRICTING})[^:]){{1,200}}?:[ ]*(?:\n|$)",
+        r"\s",
+    ]
+)
 _BULLET = re.compile(r"^[ ]*(?:\(?\d{1,2}[.)]|\(?[a-z][.)]|[-*\u2022])[ ]+", re.MULTILINE)
 
 
 def _fold(text: str) -> str:
-    """Lower case, one kind of quote and dash, runs of blanks collapsed, line ends kept."""
+    """Lower case, one kind of quote and dash, no "(s)" plural marker, blank runs collapsed."""
     text = text.lower().replace("``", '"').replace("''", '"')
     text = text.replace("\u2018", "'").replace("\u2019", "'")
     text = text.replace("\u201c", '"').replace("\u201d", '"')
     text = re.sub(r"[\u2010-\u2015]", "-", text)
+    text = re.sub(r"(?<=\w)\(s\)", "", text)
     text = re.sub(r"[ \t\r\f\v\u00a0]+", " ", text)
     return "\n".join(line.strip() for line in text.split("\n"))
 
@@ -96,8 +109,8 @@ def _compile(path: Path) -> re.Pattern[str]:
     )
     tail = r"(?:\s.*)?" if trailing else ""
     return re.compile(
-        rf"(?:{_COPYRIGHT_LINE}|\s)*(?:(?:the\s+)?(?:{heading})(?:\s*\([^)\n]*\))?\s*)?"
-        rf"(?:{_COPYRIGHT_LINE}|\s)*{body}{tail}\s*",
+        rf"(?:{_LEAD})*(?:(?:the\s+)?(?:{heading})(?:\s*\([^)\n]*\))?\s*)?"
+        rf"(?:{_LEAD})*{body}{tail}\s*",
         re.DOTALL,
     )
 
@@ -107,8 +120,26 @@ def _templates() -> dict[str, re.Pattern[str]]:
     return {path.stem: _compile(path) for path in sorted(_DATA.glob("*.xml"))}
 
 
-def identify(text: str) -> str | None:
-    """The SPDX identifier of the one template ``text`` matches in full, if any."""
+def _whole(text: str) -> str | None:
     folded = _BULLET.sub("", _fold(text).strip())
     found = [name for name, pattern in _templates().items() if pattern.fullmatch(folded)]
     return found[0] if len(found) == 1 else None
+
+
+def identify(text: str) -> str | None:
+    """The SPDX identifier of the one template ``text`` matches in full, if any.
+
+    Failing that, a "License" heading (underlined, or marked with ``#``) that runs to
+    the end of the file is matched on its own, as in a README whose last section holds
+    the licence terms. Exactly one such heading may identify a licence.
+    """
+    found = _whole(text)
+    if found:
+        return found
+    sections = {
+        _whole(text[match.end() :])
+        for match in re.finditer(
+            r"^(?:#+[ ]*)?licen[cs]es?[ ]*\n(?:[-=~]{3,}[ ]*\n)?", text, re.M | re.I
+        )
+    } - {None}
+    return sections.pop() if len(sections) == 1 else None

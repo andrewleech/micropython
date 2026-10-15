@@ -104,3 +104,11 @@ def test_text_that_only_quotes_a_licence_is_not_identified():
     assert (
         license_text.identify("See the license text in README for the BSD terms.\n" + LWIP) is None
     )
+
+
+def test_licence_section_running_to_the_end_of_a_readme_is_identified():
+    body = LWIP.split("\n\n", 1)[1]
+    readme = "project\n=======\n\nCopyright (c) 2002 X\n\nLicense\n-------\n\nUsed under the terms of\nBSD license:\n\n"
+    assert license_text.identify(readme + body) == "BSD-3-Clause"
+    assert license_text.identify(readme + body.replace("must retain", "may retain")) is None
+    assert license_text.identify(readme + body + "\nOther\n-----\nmore text\n") is None

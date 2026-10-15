@@ -622,3 +622,38 @@ def test_licence_file_identified_by_text_gives_the_boundary_licence(workspace):
         for entry in receipt["metadata"]
         for row in entry["evidence"]
     )
+
+
+def test_licence_file_pointing_to_a_readme_takes_the_licence_from_it(workspace):
+    from test_license_text import LWIP
+
+    commit_tree(
+        workspace["app"],
+        {
+            "COPYING": "Copyright (c) 2002 X\n\nSee the README file for the current license terms.\n",
+            "README": "License\n-------\n\nThis software may be distributed under the terms of\nBSD license:\n\n"
+            + LWIP.split("\n\n", 1)[1],
+        },
+    )
+    _, receipt = generate(workspace)
+    assert any(
+        row["parser"] == "license-pointer-match-1" and row["value"] == "BSD-3-Clause"
+        for entry in receipt["metadata"]
+        for row in entry["evidence"]
+    )
+
+
+def test_licence_pointer_to_an_unrecognised_file_gives_no_licence(workspace):
+    commit_tree(
+        workspace["app"],
+        {
+            "COPYING": "See the README file for the current license terms.\n",
+            "README": "Use it freely but never commercially.\n",
+        },
+    )
+    _, receipt = generate(workspace)
+    assert not any(
+        row["parser"] in ("license-text-match-1", "license-pointer-match-1")
+        for entry in receipt["metadata"]
+        for row in entry["evidence"]
+    )

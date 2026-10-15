@@ -921,7 +921,7 @@ class _Collector:
         self.license_is_default = "license" in found
 
     def parse_license_files(self) -> None:
-        """A licence file in the boundary root whose text is exactly a canonical SPDX text."""
+        """A licence file in the boundary root, or the file it points to, matching an SPDX template."""
         for path in sorted(self.directory.iterdir()):
             if (
                 path.is_file()
@@ -930,10 +930,23 @@ class _Collector:
                     r"(?:LICENSE|LICENCE|COPYING)(?:\.(?:md|txt))?", path.name, re.IGNORECASE
                 )
             ):
-                identifier = license_text.identify(self.text(path))
+                text = self.text(path)
+                identifier = license_text.identify(text)
                 if identifier:
                     self.add("license", identifier, path, "license-text-match-1")
                     self.license_is_default = True
+                    continue
+                pointer = re.search(
+                    r"\bsee\s+(?:the\s+)?([\w.-]+)\s+file\s+for\s+(?:the\s+)?(?:current\s+)?licen[cs]e",
+                    text,
+                    re.IGNORECASE,
+                )
+                target = self.directory / pointer.group(1) if pointer else None
+                if target and target.is_file() and target.resolve().is_relative_to(self.directory):
+                    identifier = license_text.identify(self.text(target))
+                    if identifier:
+                        self.add("license", identifier, target, "license-pointer-match-1")
+                        self.license_is_default = True
 
     def _root_license(self, root: Path, declared: tuple[str, Path]) -> tuple[str, Path]:
         """The root licence AND the licences the LICENSE tree gives selected files it lists."""
