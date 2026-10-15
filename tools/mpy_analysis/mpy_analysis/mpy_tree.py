@@ -12,6 +12,7 @@ producing a stale or missing value.
 
 from __future__ import annotations
 
+import ast
 import fnmatch
 import re
 import subprocess
@@ -299,6 +300,22 @@ def library_version(
     return None
 
 
+def _index_default_licence(script: Path) -> str | None:
+    """The string literal in ``<x>.license or "<default>"`` in an index build script."""
+    for node in ast.walk(ast.parse(script.read_text())):
+        if (
+            isinstance(node, ast.BoolOp)
+            and isinstance(node.op, ast.Or)
+            and len(node.values) == 2
+            and isinstance(node.values[0], ast.Attribute)
+            and node.values[0].attr == "license"
+            and isinstance(node.values[1], ast.Constant)
+            and isinstance(node.values[1].value, str)
+        ):
+            return node.values[1].value
+    return None
+
+
 def _package_index_licence(directory: Path, root: Path) -> tuple[str, Path] | None:
     """The licence a package index build gives a manifest package that declares none.
 
@@ -309,15 +326,25 @@ def _package_index_licence(directory: Path, root: Path) -> tuple[str, Path] | No
     keeps its own value.
     """
     manifest = directory / "manifest.py"
-    if not manifest.is_file() or re.search(r"\blicense\s*=", manifest.read_text(errors="replace")):
+    if not manifest.is_file():
+        return None
+    try:
+        calls = [
+            node
+            for node in ast.walk(ast.parse(manifest.read_text(errors="replace")))
+            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "metadata"
+        ]
+    except SyntaxError:
+        return None
+    if any(keyword.arg == "license" for call in calls for keyword in call.keywords):
         return None
     for ancestor in directory.parents:
         script = ancestor / "tools" / "build.py"
         if script.is_file():
-            found = re.search(r'metadata\.license\s+or\s+"([^"]+)"', script.read_text())
-            if not found:
+            default = _index_default_licence(script)
+            if default is None:
                 raise ValueError(f"{script}: no default package licence in the index build")
-            return found.group(1), script
+            return default, script
         if ancestor == root:
             return None
     return None

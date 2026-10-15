@@ -120,6 +120,8 @@ Dependency discovery starts from selected records and walks their ancestors with
 
 Declared metadata dependencies are retained separately from observed selected require edges, a declared dependency does not prove firmware inclusion. The generic design takes lessons from [Matt Trentini's MicroPython SBOM work](https://github.com/mattytrentini/micropython/blob/efbf88cd35b778ea4d56dedb020bf310fe5c9b88/tools/sbom.py); its original adaptation attribution remains in the licence and commit history. Vendored validation schemas have separate [source/licence notices](mpy_analysis/data/schema-sources.md).
 
+The per-library version checks skip a submodule that is not checked out; set `MPY_REQUIRE_SUBMODULES=1` in CI so a missing checkout fails instead. A micropython-lib package's default licence is read with `ast` from the index build's `metadata.license or "<default>"`.
+
 ### Deployment manifest
 
 Link evidence covers what a built firmware linked into its images. It does not say what a device carries once deployed. The consuming application owns that statement as an `mpy-deployment/v1` manifest (schema: `mpy_analysis/data/deployment-v1.schema.json`, verifier: `mpy_analysis/deployment.py`), and `sast-sbom --deployment manifest.json` checks it:

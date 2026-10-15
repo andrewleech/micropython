@@ -1,3 +1,4 @@
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -107,10 +108,18 @@ def test_every_carried_library_has_a_version_source_or_a_documented_reason():
     assert stale == []
 
 
+def _not_checked_out(library):
+    """Skip, or fail when MPY_REQUIRE_SUBMODULES is set so a CI run cannot skip the drift checks."""
+    message = f"{library} is not checked out"
+    if os.environ.get("MPY_REQUIRE_SUBMODULES"):
+        pytest.fail(message)
+    pytest.skip(message)
+
+
 @pytest.mark.parametrize("library", sorted(mpy_tree.VERSION_SOURCES))
 def test_checked_out_library_version_parses(library):
     if not populated(library):
-        pytest.skip(f"{library} is not checked out")
+        _not_checked_out(library)
     version, path = mpy_tree.library_version(REPO, library)
     assert re.search(r"\d", version) and path.is_file()
 
@@ -124,7 +133,7 @@ def test_library_whose_marker_moved_is_an_error(tmp_path):
 
 def test_family_collection_version_comes_from_the_one_selected_family():
     if not populated("lib/stm32lib"):
-        pytest.skip("lib/stm32lib is not checked out")
+        _not_checked_out("lib/stm32lib")
     one = tuple((REPO / "lib/stm32lib").glob("CMSIS/STM32H5xx/Include/*.h"))[:1]
     version, path = mpy_tree.library_version(REPO, "lib/stm32lib", one)
     assert re.fullmatch(r"\d+\.\d+\.\d+", version) and path.name == "stm32h5xx.h"
@@ -138,7 +147,7 @@ def test_littlefs_generations_are_versioned_and_split_into_boundaries(tmp_path):
 
     lfs = REPO / "lib/littlefs"
     if not populated("lib/littlefs"):
-        pytest.skip("lib/littlefs is not carried")
+        _not_checked_out("lib/littlefs")
     assert mpy_tree.library_version(REPO, "lib/littlefs", (lfs / "lfs1.c",))[0] == "1.7"
     assert mpy_tree.library_version(REPO, "lib/littlefs", (lfs / "lfs2_util.c",))[0] == "2.11"
     assert mpy_tree.identity(lfs, (lfs / "lfs2.c",))["name"][0] == "littlefs-lfs2"
@@ -185,3 +194,9 @@ def test_index_build_without_a_default_licence_is_an_error(tmp_path):
     package = _index_checkout(tmp_path, "pass\n", 'metadata(version="1.0")\n')
     with pytest.raises(ValueError, match="default package licence"):
         mpy_tree.identity(package)
+
+
+def test_licence_keyword_in_a_comment_does_not_count_as_declared(tmp_path):
+    build = 'index["license"] = metadata.license or "MIT"\n'
+    package = _index_checkout(tmp_path, build, '# license="GPL"\nmetadata(version="1.0")\n')
+    assert mpy_tree.identity(package)["license"][0] == "MIT"
