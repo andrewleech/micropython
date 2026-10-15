@@ -623,3 +623,33 @@ def test_assertion_namespace_mutation_is_a_tracked_dynamic_region(tmp_path):
     with pytest.raises(AssertionError):
         declaration(tree, "x")
     assert isinstance(declaration(tree, "__getattr__"), ast.FunctionDef)
+
+
+def test_gaps_render_as_one_line_reasons_without_evidence_blocks():
+    value = {"name": "v", "kind": "unknown", "identity": "fixture:v",
+             "resolution": {"availability": {"status": "resolved"},
+                            "reasons": ["object value/type family contract unassessed", "unsupported exported object family object"],
+                            "status": "unresolved", "authority": "metadata only", "types": {"inputs": "unresolved"}}}
+    omitted = {"name": "omitted", "kind": "unknown", "identity": "fixture:omitted",
+               "resolution": {"availability": {"status": "unresolved", "container_object": {"path": "evidence-path"}},
+                              "reasons": ["a reason of a name that is not declared"], "status": "unresolved"}}
+    klass = {"name": "C", "kind": "class", "identity": "fixture:C", "members": [],
+             "resolution": {"availability": {"status": "resolved"}},
+             "constructor": {"callable": True, "source": {"source": "evidence-path"},
+                             "resolution": {"reasons": ["constructor count/parser/control-flow contract unassessed"],
+                                            "status": "unresolved"}},
+             "slots": [{"expression": "evidence-slot"}]}
+    text = render_declarations(inventory(module(
+        "fixture", [value, omitted, klass], attribute_policy={"kind": "dynamic-provider", "provider": "evidence-provider"})))["modules/fixture.pyi"]
+    comments = [line.strip() for line in text.splitlines() if line.lstrip().startswith("#")]
+    assert comments == [
+        "# Generated from the selected MicroPython build; not a CPython runtime overlay.",
+        "# unresolved: class constructor callshape has no source-qualified __new__/__init__ declaration representation",
+        "# Constructor declaration gap: constructor count/parser/control-flow contract unassessed",
+        "# unresolved: object value/type family contract unassessed",
+        "# unresolved: unsupported exported object family object"]
+    for evidence in ("evidence-path", "evidence-slot", "evidence-provider", "omitted"):
+        assert evidence not in text
+    tree = ast.parse(text)
+    any_annotation(declaration(tree, "__getattr__").returns, tree)
+    assert omitted["resolution"]["declaration"]["status"] == "unresolved"

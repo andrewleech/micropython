@@ -54,7 +54,7 @@ def test_rendering_equals_the_always_keyed_rendering(monkeypatch):
     assert render_declarations(actual_input) == expected
     # Both renderings leave the same gaps in the inventory.
     assert canonical_json(actual_input) == canonical_json(expected_input)
-    assert any("Conflicting export definitions" in text for text in expected.values())
+    assert any("conflicting export definitions" in text for text in expected.values())
 
 
 def test_canonical_json_is_not_computed_for_singleton_symbols_or_per_module_types(monkeypatch):
