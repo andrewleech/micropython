@@ -17,3 +17,6 @@ mpy-api = "mpy_api.cli:main"
 [tool.setuptools]
 packages = ["mpy_api"]
 package-dir = {mpy_api = "."}
+
+[tool.setuptools.package-data]
+mpy_api = ["vendor/**", "overlay/**"]

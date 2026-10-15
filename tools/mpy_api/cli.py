@@ -386,19 +386,22 @@ def host_names(surface, names, arguments):
     return names.extended(rules.items())
 
 
-def write_generation(output, surface, declarations, identities, *, notices, verify, inventory=None):
+def write_generation(output, surface, declarations, identities, *, notices, verify, inventory=None, pack=None):
     """Publish the declarations and notices with their ``generation.json`` receipt, and ``inventory``
-    as ``inventory.json`` when it is given."""
+    as ``inventory.json`` when it is given. ``declarations`` maps output paths to text or bytes. With a
+    ``pack`` (see ``pack.assemble_pack``) they are its files: its records add to the receipt entry of each
+    file, and its ``pack`` section joins the receipt."""
     if output.exists() or output.is_symlink():
         raise FileExistsError(f"output already exists; use a fresh generation directory: {output}")
+    extra = pack.records if pack is not None else {}
     artifacts = {}
     for name, content in declarations.items():
         path = Path(name)
         if path.is_absolute() or not path.parts or any(part in ("", ".", "..") for part in path.parts):
             raise ValueError(f"unsafe declaration output path: {name}")
-        if path.suffix != ".pyi" or name in artifacts:
+        if (path.suffix != ".pyi" and name not in extra) or name in artifacts:
             raise ValueError(f"invalid or duplicate declaration output path: {name}")
-        artifacts[name] = content.encode("utf-8")
+        artifacts[name] = content.encode("utf-8") if isinstance(content, str) else content
     for name, data in sorted(notices.items()):
         path = Path(name)
         if (not isinstance(data, bytes) or path.is_absolute() or
@@ -422,10 +425,12 @@ def write_generation(output, surface, declarations, identities, *, notices, veri
             destination.write_bytes(data)
             records[name] = {"path": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
                              "role": "enrichment-license-notice" if name.startswith("enrichment-notices/") else
-                             "runtime-builtins" if name == "typeshed/stdlib/builtins.pyi" else "runtime-module"}
+                             "runtime-builtins" if name == "typeshed/stdlib/builtins.pyi" else "runtime-module",
+                             **extra.get(name, {})}
         body = {"schema_version": 1, "producer": "mpy-api", "build": surface["build"],
                 "inputs": identities, "artifacts": [records[name] for name in sorted(records)],
                 "coverage": surface["coverage"],
+                **({"pack": pack.receipt} if pack is not None else {}),
                 "typing_compatibility": {"status": "unverified", "reason": "generation is not supported builtin-aware checker approval"}}
         body["generation_id"] = hashlib.sha256(canonical_bytes(body)).hexdigest()
         (staging / "generation.json").write_bytes(canonical_bytes(body))
@@ -503,6 +508,7 @@ def generate(args):
     frozen, frozen_inputs = collect_frozen(args, root, scope)
     from .declarations import render_declarations
     from .facts import FactStore
+    from .pack import assemble_pack
     from . import __version__
     # Fact objects live beside the output for the run; they are inputs to publication, not part of it.
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -544,6 +550,10 @@ def generate(args):
         declarations = render_declarations(surface, args.open_modules)
         if "typeshed/stdlib/builtins.pyi" not in declarations:
             raise ValueError("selected inventory has no generated builtin replacement")
+        # The published tree is the generated declarations assembled with the support layer; the support
+        # inputs are part of what generation_id identifies.
+        pack = assemble_pack(declarations)
+        identities = {**identities, "support": pack.inputs}
         def verify_publication_inputs():
             verify_identities([*inputs.values(), *frozen_inputs["manifests"],
                                *frozen_inputs["sources"]])
@@ -559,7 +569,7 @@ def generate(args):
             if enrichment:
                 verify_enrichment(enrichment)
 
-        receipt = write_generation(output, surface, declarations, identities,
+        receipt = write_generation(output, surface, pack.files, identities, pack=pack,
                                    notices=enrichment["notice_artifacts"] if enrichment else {},
                                    verify=verify_publication_inputs,
                                    inventory=document.value(surface, paths) if document else None)

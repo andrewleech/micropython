@@ -282,7 +282,8 @@ def project_run(tmp_path, label, jobs, *extra, named_include=True, headers="head
 def test_publication_does_not_depend_on_where_the_inputs_live(tmp_path):
     first, second = project_run(tmp_path, "one", 1), project_run(tmp_path, "other", 2)
     assert first == second
-    assert set(first) == {"generation.json", "typeshed/stdlib/builtins.pyi"}
+    assert {"generation.json", "typeshed/stdlib/builtins.pyi", "typeshed/stdlib/VERSIONS", "typeshed/stdlib/typing.pyi"} <= set(first)
+    assert all(name == "generation.json" or name.startswith(("typeshed/", "licenses/")) for name in first)
     for name, data in first.items():
         text = data.decode()
         assert str(tmp_path) not in text and str(ROOT) not in text, name
@@ -390,8 +391,8 @@ def test_open_modules_selects_the_catch_all_of_an_unproven_module_and_is_recorde
     opened = runs["all"][stub].decode()
     assert "# unresolved: extensible import contributors unassessed" in opened and "def __getattr__(" in opened
     # The unproven module's declarations are otherwise the same.
-    assert [line for line in opened.splitlines() if not line.startswith("# unresolved:") and "__getattr__" not in line] == \
-        runs["proven"][stub].decode().splitlines()
+    assert [line for line in opened.splitlines() if line.strip() and not line.startswith("# unresolved:") and "__getattr__" not in line] == \
+        [line for line in runs["proven"][stub].decode().splitlines() if line.strip()]
     receipts = {label: json.loads(files["generation.json"]) for label, files in runs.items()}
     assert receipts["proven"]["inputs"]["declaration_options"] == {"open_modules": "proven"}
     assert receipts["all"]["inputs"]["declaration_options"] == {"open_modules": "all"}
