@@ -298,7 +298,7 @@ def _digest(data: bytes) -> str:
 
 # Report entries that are listed by name in the receipt; the others are counted.
 _LISTED = frozenset(("generated_wins", "return_overrides", "return_conflicts", "abstract_demoted", "abstract_unresolved",
-                     "rescued_imports", "bare", "dropped_readers", "dangling"))
+                     "rescued_imports", "bare", "dropped_readers", "dangling", "template_constructor"))
 
 
 def assemble_pack(declarations: dict[str, str], sources: Sources | None = None) -> Pack:
