@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -203,13 +204,14 @@ int main(void) { return mp_builtin_module_table[0].value == 0; }
 """
 
 
-def linked_build(tmp_path):
+def linked_build(tmp_path, include=None, root=ROOT):
+    """A linked fixture build under ``tmp_path``; ``include`` is a directory the compile arguments name."""
     source, build_dir = tmp_path / "py" / "modbuiltins.c", tmp_path / "build"
     source.parent.mkdir(parents=True)
     build_dir.mkdir()
     source.write_text(BUILTINS)
     obj = build_dir / "modbuiltins.o"
-    arguments = ["gcc", "-std=gnu99", "-O0", "-c", str(source), "-o", str(obj)]
+    arguments = ["gcc", "-std=gnu99", "-O0", *([f"-I{include}"] if include else []), "-c", str(source), "-o", str(obj)]
     subprocess.run(arguments, cwd=build_dir, check=True)
     database = tmp_path / "compile_commands.json"
     database.write_text(json.dumps([{"directory": str(build_dir), "arguments": arguments,
@@ -219,7 +221,7 @@ def linked_build(tmp_path):
     subprocess.run(argv, cwd=build_dir, check=True)
     command = tmp_path / "link.json"
     command.write_text(json.dumps({"argv": argv, "directory": str(build_dir), "exit": 0}))
-    return ["--micropython-root", str(ROOT), "--build-dir", str(build_dir), "--compdb", str(database),
+    return ["--micropython-root", str(root), "--build-dir", str(build_dir), "--compdb", str(database),
             "--port", "unix", "--target", "fixture", "--variant", "minimal",
             "--elf", str(elf), "--map", str(map_path), "--link-command", str(command)]
 
@@ -232,7 +234,7 @@ def published(output):
 @pytest.mark.skipif(shutil.which("gcc") is None, reason="needs the selected C compiler")
 @pytest.mark.parametrize("jobs", [1, 2])
 def test_requesting_the_inventory_changes_no_stub_and_only_its_artifact_in_the_receipt(tmp_path, jobs):
-    common = linked_build(tmp_path) + ["--jobs", str(jobs)]
+    common = linked_build(tmp_path) + ["--source-root", f"fixture={tmp_path}", "--jobs", str(jobs)]
     outputs = {}
     for requested in (False, True):
         output = tmp_path / "out" / ("inventory" if requested else "default")
@@ -256,3 +258,95 @@ def test_requesting_the_inventory_changes_no_stub_and_only_its_artifact_in_the_r
     assert [module["name"] for module in inventory["modules"]] == ["builtins"]
     # The fact objects lived beside the outputs for the run only.
     assert not list((tmp_path / "out").glob(".mpy-api-*"))
+
+
+ABSOLUTE_PATH = re.compile(r"(?<![\w.:/+~-])/[\w.+~-]+(?:/[\w.+~-]+)+")
+
+
+def project_run(tmp_path, label, jobs, *extra, named_include=True, headers="headers"):
+    """Generate from a copy of the fixture build that lives under its own parent directory, with an include
+    directory beside it that ``--source-root`` names unless ``named_include`` is false."""
+    parent = tmp_path / label / "a longer differently named parent"
+    base, include = parent / "project", parent / headers / label
+    base.mkdir(parents=True)
+    include.mkdir(parents=True)
+    common = linked_build(base, include) + ["--source-root", f"fixture={base}", "--jobs", str(jobs)]
+    if named_include:
+        common += ["--source-root", f"headers={include}"]
+    output = tmp_path / "out" / label
+    generate(argument_parser().parse_args(common + ["--output", str(output), *extra]))
+    return published(output)
+
+
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs the selected C compiler")
+def test_publication_does_not_depend_on_where_the_inputs_live(tmp_path):
+    first, second = project_run(tmp_path, "one", 1), project_run(tmp_path, "other", 2)
+    assert first == second
+    assert set(first) == {"generation.json", "typeshed/stdlib/builtins.pyi"}
+    for name, data in first.items():
+        text = data.decode()
+        assert str(tmp_path) not in text and str(ROOT) not in text, name
+        assert not ABSOLUTE_PATH.search(text), (name, ABSOLUTE_PATH.search(text).group())
+    receipt = json.loads(first["generation.json"])
+    assert receipt["build"]["root"] == "micropython"
+    assert receipt["build"]["build_dir"] == "build"
+    assert receipt["inputs"]["compdb"]["path"] == "fixture/compile_commands.json"
+    # The records that hold host paths are identified by their text as published, never by file digests.
+    for role in ("compdb", "link_command", "map"):
+        assert set(receipt["inputs"][role]) == {"path", "named_bytes", "named_sha256"}
+    assert receipt["inputs"]["elf"]["path"] == "build/fixture.elf"
+    assert {tool["path"] for tool in receipt["inputs"]["tools"]} >= {"mpy_api/cli.py", "micropython/tools/manifestfile.py"}
+
+
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs the selected C compiler")
+def test_inventory_names_the_checkout_and_build_paths(tmp_path):
+    inventory = project_run(tmp_path, "inventory", 1, "--inventory")["inventory.json"].decode()
+    assert str(tmp_path) not in inventory and str(ROOT) not in inventory
+    document = json.loads(inventory)
+    assert document["build"]["root"] == "micropython" and document["build"]["build_dir"] == "build"
+    assert [unit["translation_unit"].split("::")[0] for unit in document["translation_units"]] == ["fixture/py/modbuiltins.c"]
+
+
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs the selected C compiler")
+def test_a_host_directory_no_root_names_is_an_error(tmp_path):
+    with pytest.raises(ValueError, match=r"no root covers: .*/unnamed/.*--source-root NAME=DIR"):
+        project_run(tmp_path, "unnamed", 1, named_include=False)
+    assert not (tmp_path / "out" / "unnamed").exists()
+
+
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs the selected C compiler")
+def test_a_named_directory_with_non_ascii_characters_is_named_and_not_reported(tmp_path):
+    first = project_run(tmp_path, "one", 1, headers="h\u00e9aders-\u65e5\u672c")
+    second = project_run(tmp_path, "two", 1, headers="h\u00e9aders-\u65e5\u672c")
+    assert first == second
+    with pytest.raises(ValueError, match="no root covers"):
+        project_run(tmp_path, "three", 1, named_include=False, headers="h\u00e9aders-\u65e5\u672c")
+
+
+def checkout_copy(destination):
+    """The parts of the MicroPython checkout the generator reads, without git metadata."""
+    shutil.copytree(ROOT / "tools" / "mpy_analysis" / "mpy_analysis", destination / "tools" / "mpy_analysis" / "mpy_analysis",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copy(ROOT / "tools" / "manifestfile.py", destination / "tools" / "manifestfile.py")
+    return destination
+
+
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs the selected C compiler")
+def test_moving_the_checkout_changes_nothing(tmp_path):
+    published_runs = []
+    for label in ("here", "somewhere else entirely"):
+        checkout = checkout_copy(tmp_path / label / "checkout")
+        base = tmp_path / label / "project"
+        base.mkdir(parents=True)
+        output = tmp_path / "out" / label.split()[0]
+        command = [sys.executable, "-c", "from mpy_api.cli import main; raise SystemExit(main())",
+                   *linked_build(base, root=checkout), "--source-root", f"fixture={base}", "--output", str(output)]
+        environment = {**os.environ, "PYTHONPATH": os.pathsep.join([
+            str(Path(__file__).resolve().parents[2]), os.environ.get("PYTHONPATH", "")])}
+        result = subprocess.run(command, text=True, capture_output=True, env=environment)
+        assert result.returncode == 0, result.stderr
+        published_runs.append(published(output))
+    first, second = published_runs
+    assert first == second
+    assert str(tmp_path) not in first["generation.json"].decode()
+    assert json.loads(first["generation.json"])["build"]["root"] == "micropython"

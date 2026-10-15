@@ -11,10 +11,12 @@ import importlib.metadata
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
 
+from .paths import SYSTEM_PREFIXES, PathNames, argument_paths, is_host_path
 from .structure import json_pieces
 
 
@@ -232,6 +234,157 @@ def qualify_frozen_payload(inventory, modules):
             "status": "resolved", "sha256": source["sha256"], "source": source["source"]}
 
 
+# Names the generation gives its directories and files in everything it publishes. A --source-root name
+# may not be one of them.
+_RESERVED_NAMES = frozenset(("build", "compdb", "elf", "enrichment", "link-command", "manifest", "map",
+                             "mpy_api", "path-var", "python-packages", "system"))
+
+
+def _forms(path):
+    """The spellings of ``path`` the collected records can use: lexical and symlink-resolved."""
+    path = Path(path)
+    return {str(path.absolute()), str(path.resolve())}
+
+
+def _relocated(build_forms, directories):
+    """Rules for the directories whose absolute path a build repeats below its build directory (the object
+    of a source outside the build is ``<build>/<absolute source directory>``, with or without a doubled slash)."""
+    rules = []
+    for build in build_forms:
+        for path, name in directories:
+            rules.append((build + path, "build/" + name))
+            rules.append((build + "/" + path, "build/" + name))
+    return rules
+
+
+def path_names(args, root, build_dir):
+    """The names under which the generation publishes the paths of its inputs: the ``--source-root``
+    names, ``micropython`` for the selected checkout when no source root is that directory, ``build``
+    for the build directory, and a role name for every other input given on the command line."""
+    claims = {}
+    rules = []
+    owners = {}
+
+    def claim(name, path):
+        for form in _forms(path):
+            if claims.setdefault(form, name) != name:
+                raise ValueError(f"{form} would be published as both {claims[form]} and {name}")
+            rules.append((form, name))
+        if owners.setdefault(name, path) != path:
+            raise ValueError(f"{path} and {owners[name]} would both be published as {name}; give one a --source-root name")
+
+    def named_directory(path):
+        return any(path == directory or path.startswith(directory + "/") for directory in claims)
+
+    def named_under(path, directory):
+        return any(path == form or path.startswith(form + "/") for form in _forms(directory))
+
+    for name, path in assignments(args.source_root, "source root").items():
+        if name in _RESERVED_NAMES or "/" in name:
+            raise ValueError(f"source root name {name!r} is reserved or not a single path component")
+        claim(name, Path(path).resolve(strict=True))
+    if str(root) not in claims:
+        if any(name == "micropython" for name in claims.values()):
+            raise ValueError("--source-root micropython names a directory other than --micropython-root")
+        claim("micropython", root)
+    if str(build_dir) not in claims:
+        claim("build", build_dir)
+    for name, path in assignments(args.path_var, "manifest path variable").items():
+        if not named_directory(str(Path(path).resolve())):
+            claim("path-var/" + name, Path(path).resolve(strict=True))
+    if args.enrichment and not named_directory(str(args.enrichment.resolve())):
+        claim("enrichment", args.enrichment.resolve(strict=True).parent)
+    for role, paths in (("compdb", [args.compdb]), ("elf", [args.elf]), ("map", [args.map_path]),
+                        ("link-command", [args.link_command]), ("manifest", args.manifest)):
+        for path in paths:
+            path = Path(path).resolve(strict=True)
+            if not named_directory(str(path)):
+                claim(f"{role}/{path.name}", path)
+    claim("mpy_api", Path(__file__).resolve().parent)
+    rules += _relocated(_forms(build_dir), [(form, name) for form, name in claims.items()
+                                            if not named_under(form, build_dir)])
+    for name in ("tree-sitter", "tree-sitter-c"):
+        packages = Path(importlib.metadata.distribution(name).locate_file("")).resolve()
+        for form in _forms(packages):
+            rules.append((form, "python-packages"))
+    return PathNames(rules)
+
+
+# An absolute path that is a whole string or follows a flag such as -L or an assignment such as -Map=.
+_OPTION_PATH = re.compile(r"(?:^(?:-[A-Za-z]+)?|[=,])(/[\w.+~/-]+)$")
+
+
+def _host_paths(surface, arguments):
+    """The absolute paths of the build record that name files of the host: the compiler and link tools,
+    the headers and libraries the compiler and linker consumed, and the paths in the compile ``arguments``."""
+    build, coverage = surface["build"], surface["coverage"]
+    link = build["link"]
+    strings = [*build["consumed_inputs"], *build["source_inputs"], *(compiler for compiler, _ in build["compilers"]),
+               *(link[key] for key in ("linker", "nm", "objdump")), *link["link_inputs"],
+               *link["argv"], *link["expanded_argv"], *link["linker_arguments"],
+               *coverage["unassessed_link_objects"], *arguments]
+    for record in build["consumed_inputs"].values():
+        strings.extend((record["path"], record["resolved"]))
+    for text in strings:
+        match = _OPTION_PATH.search(text.partition("(")[0])
+        if match:
+            yield match.group(1)
+
+
+# The inputs that record the host paths of the build. Their published identity is that of their text
+# with the host paths named.
+_PATH_BEARING = ("compdb", "link_command", "map")
+
+
+def path_bearing_texts(inputs):
+    """The text of each path-bearing input, verified against its captured identity, as (role, text) pairs.
+    A JSON input is given in its canonical form with its strings unescaped, so a path with non-ASCII
+    characters is found whichever way the file wrote it."""
+    result = []
+    for role in _PATH_BEARING:
+        identity = inputs[role]
+        data = Path(identity["path"]).read_bytes()
+        if hashlib.sha256(data).hexdigest() != identity["sha256"]:
+            raise RuntimeError(f"consumed input changed during generation: {identity['path']}")
+        if role == "map":
+            result.append((role, data.decode("utf-8", "surrogateescape")))
+        else:
+            result.append((role, json.dumps(json.loads(data), ensure_ascii=False, sort_keys=True, separators=(",", ":"))))
+    return result
+
+
+def require_covered(texts, inputs, names):
+    """Raise when the text of a path-bearing input holds a host path on this machine that no root covers."""
+    for role, text in texts:
+        names.require(names.unnamed(text, existing=True), f"{role} {inputs[role]['path']}")
+
+
+def named_identities(texts, inputs, names):
+    """The published identity of each path-bearing input: the size and sha256 of its text with the host paths
+    named, under ``named_*`` keys, since they are not the digests of the file."""
+    result = {}
+    for role, text in texts:
+        named = names.text(text).encode("utf-8", "surrogatepass")
+        result[role] = {"path": inputs[role]["path"], "named_bytes": len(named),
+                        "named_sha256": hashlib.sha256(named).hexdigest()}
+    return result
+
+
+def host_names(surface, names, arguments):
+    """``names`` extended with ``system/<path>`` for each toolchain and library path of the build record and
+    of the compile ``arguments``. Any other host path that no name covers is an error."""
+    rules, unnamed = {}, []
+    for path in sorted(set(_host_paths(surface, arguments))):
+        if names.text(path) != path:
+            continue
+        if path.startswith(SYSTEM_PREFIXES):
+            rules[path] = "system" + path
+        elif is_host_path(path):
+            unnamed.append(path)
+    names.require(unnamed, "the build record")
+    return names.extended(rules.items())
+
+
 def write_generation(output, surface, declarations, identities, *, notices, verify, inventory=None):
     """Publish the declarations and notices with their ``generation.json`` receipt, and ``inventory``
     as ``inventory.json`` when it is given."""
@@ -329,9 +482,13 @@ def generate(args):
               "map": file_identity(args.map_path), "link_command": file_identity(args.link_command)}
     parser = parser_identity()
     revision = source_revision(root)
+    paths = path_names(args, root, build_dir)
+    # A missing root fails here, before any extraction.
+    texts = path_bearing_texts(inputs)
+    require_covered(texts, inputs, paths)
     _, scope = authority_modules(root)
     from .inventory import collect_inventory, select_records
-    selection = select_records(database=args.compdb.resolve(strict=True), root=root, build_dir=build_dir)
+    selection = select_records(database=args.compdb.resolve(strict=True), root=root, build_dir=build_dir, names=paths)
     entries, completeness = selection["entries"], selection["completeness"]
     has_frozen = any(Path(selection["compdb"].entry_file(entry)).name == "frozen_content.c" for entry in entries)
     if has_frozen and not args.manifest:
@@ -369,6 +526,17 @@ def generate(args):
         surface["provenance"]["producer_inputs"] = identities
         if enrichment:
             merge_enrichment(surface, enrichment)
+        # Everything from here on is published: the host paths of the records become names, so the
+        # declarations (typing variable names derive from identities) and the receipt do not depend on
+        # where the inputs live.
+        paths = host_names(surface, paths,
+                           list(chain.from_iterable(argument_paths(record["_expanded_arguments"]) for record in selection["records"])))
+        published = named_identities(texts, inputs, paths)
+        identities.update(published)
+        paths = paths.extended(digests=[(inputs[role]["sha256"], "named-sha256:" + published[role]["named_sha256"])
+                                        for role in _PATH_BEARING])
+        surface = paths.value(surface)
+        identities = paths.value(identities)
         declarations = render_declarations(surface)
         if "typeshed/stdlib/builtins.pyi" not in declarations:
             raise ValueError("selected inventory has no generated builtin replacement")
@@ -390,7 +558,7 @@ def generate(args):
         receipt = write_generation(output, surface, declarations, identities,
                                    notices=enrichment["notice_artifacts"] if enrichment else {},
                                    verify=verify_publication_inputs,
-                                   inventory=document.value(surface) if document else None)
+                                   inventory=document.value(surface, paths) if document else None)
         return output, receipt, store.report()
 
 

@@ -34,10 +34,6 @@ def _status(value: Any) -> str:
 _END = object()
 
 
-def _comment(value: Any) -> str:
-    return canonical_json(value).replace("\n", " ").replace("\r", " ")
-
-
 def _distinct(group: list[dict]) -> list[dict]:
     """The symbols of ``group`` that differ in canonical JSON, one per distinct value, in order of first
     occurrence and each the last of its equal ones. A group of one symbol has no other to differ from,
@@ -47,12 +43,24 @@ def _distinct(group: list[dict]) -> list[dict]:
     return list({canonical_json(symbol): symbol for symbol in group}.values())
 
 
-def _gaps(record: dict) -> list[str]:
-    gaps = list(record.get("unresolved", []))
-    for field, resolution in record.get("resolution", {}).items():
-        if _status(resolution) not in _RESOLVED:
-            gaps.append(f"{field}: {_comment(resolution)}")
-    return sorted(set(str(gap).replace("\n", "\\n").replace("\r", "\\r") for gap in gaps))
+def _reasons(record: dict) -> list[str]:
+    """The reasons ``record`` gives for being unresolved, each once and in text order: its own list of
+    unresolved reasons and the reasons its resolution and the unresolved fields of its resolution give."""
+    reasons = list(record.get("unresolved", []))
+    resolution = record.get("resolution")
+    if not isinstance(resolution, dict):
+        resolution = {}
+    reasons.extend(resolution.get("reasons", []))
+    for field in resolution.values():
+        if isinstance(field, dict) and _status(field) not in _RESOLVED:
+            reasons.extend(field.get("reasons", []))
+            if "reason" in field:
+                reasons.append(field["reason"])
+    return sorted(set(str(reason).replace("\n", "\\n").replace("\r", "\\r") for reason in reasons))
+
+
+def _unresolved_lines(record: dict, indent: str) -> list[str]:
+    return [f"{indent}# unresolved: {reason}" for reason in _reasons(record)]
 
 
 def _available(symbol: dict) -> bool:
@@ -61,8 +69,6 @@ def _available(symbol: dict) -> bool:
 
 def _policy_lines(policy: dict, indent: str, *, module: bool, names: set[str], any_name: str) -> list[str]:
     lines = []
-    if policy:
-        lines.append(f"{indent}# Attribute coverage: {_comment(policy)}")
     actual_dynamic = policy.get("kind") in _DYNAMIC or bool(policy.get("dynamic_providers"))
     if actual_dynamic and "__getattr__" not in names:
         args = f"name: {any_name}" if module else f"self, name: {any_name}"
@@ -211,7 +217,7 @@ class _Renderer:
             return self.contract(contract)
         return self.any_name
 
-    def signature(self, symbol: dict, in_class: bool) -> tuple[str, list[str], dict[str, str]]:
+    def signature(self, symbol: dict, in_class: bool) -> tuple[str, dict[str, str]]:
         shape = symbol.get("callshape") or {}
         descriptor = shape.get("descriptor", "function")
         implicit = shape.get("implicit_argument_offset")
@@ -257,11 +263,11 @@ class _Renderer:
                 fallback = [f"*args: {self.any_name}"]
                 if shape.get("keywords") is not False:
                     fallback.append(f"**kwargs: {self.any_name}")
-                return ", ".join(prefix + fallback), gaps, {}
+                return ", ".join(prefix + fallback), {}
             if any(not _identifier(p.get("name")) for p in parameters):
                 gaps.append("callshape: a runtime keyword name is not a Python declaration identifier")
                 self.representation_gap(symbol, gaps[-1])
-                return ", ".join(prefix + [f"*args: {self.any_name}", f"**kwargs: {self.any_name}"]), gaps, {}
+                return ", ".join(prefix + [f"*args: {self.any_name}", f"**kwargs: {self.any_name}"]), {}
             relations = self.relations(symbol, parameters)
             parts = list(prefix)
             positional_only = [p for p in parameters if p.get("kind") == "positional_only"]
@@ -288,7 +294,7 @@ class _Renderer:
                 parts.append(text)
                 if positional_only and parameter is positional_only[-1]:
                     parts.append("/")
-            return ", ".join(parts), gaps, relations
+            return ", ".join(parts), relations
         minimum, maximum = shape.get("minimum"), shape.get("maximum")
         valid_bounds = (type(minimum) is int and minimum >= 0 and
                         (maximum is None or type(maximum) is int and maximum >= minimum))
@@ -298,13 +304,13 @@ class _Renderer:
             variadic = [f"*args: {self.any_name}"]
             if shape.get("keywords") is not False:
                 variadic.append(f"**kwargs: {self.any_name}")
-            return ", ".join(prefix + variadic), gaps, {}
+            return ", ".join(prefix + variadic), {}
         minimum -= implicit
         maximum = None if maximum is None else maximum - implicit
         if shape.get("keywords") is not False:
             gaps.append("callshape: keyword parser names/defaults unresolved; wrapper bounds retained in inventory")
             self.representation_gap(symbol, gaps[-1])
-            return ", ".join(prefix + [f"*args: {self.any_name}", f"**kwargs: {self.any_name}"]), gaps, {}
+            return ", ".join(prefix + [f"*args: {self.any_name}", f"**kwargs: {self.any_name}"]), {}
         # A bounded wrapper is positional-only even when its C arguments have names.
         parts = list(prefix)
         count = minimum if maximum is None else maximum
@@ -315,7 +321,7 @@ class _Renderer:
             if parts:
                 parts.append("/")
             parts.append(f"*args: {self.any_name}")
-            return ", ".join(parts), gaps, {}
+            return ", ".join(parts), {}
         for index in range(count):
             text = f"arg{index}: {self.any_name}"
             if index >= minimum:
@@ -325,7 +331,7 @@ class _Renderer:
             parts.append("/")
         if maximum is None:
             parts.append(f"*args: {self.any_name}")
-        return ", ".join(parts), gaps, {}
+        return ", ".join(parts), {}
 
     def result(self, symbol: dict, relations: dict[str, str]) -> str:
         semantics = symbol.get("semantics") or {}
@@ -346,15 +352,15 @@ class _Renderer:
         name = symbol.get("name")
         if not _identifier(name):
             self.representation_gap(symbol, "runtime export name is not a Python declaration identifier")
-            return [f"{indent}# Unrenderable runtime name: {_comment(symbol)}"], None
-        lines = [f"{indent}# Resolution gap: {gap}" for gap in _gaps(symbol)]
+            return [f"{indent}# unresolved: runtime export name {canonical_json(name)} is not a Python declaration identifier"], None
+        lines = _unresolved_lines(symbol, indent)
         kind = symbol.get("kind", "unknown")
         if in_class and symbol.get("attribute_scope") == "class":
             self.representation_gap(symbol, "metaclass-only attribute lookup cannot be expressed as an ordinary instance field")
-            return [f"{indent}# Class-only attribute declaration gap: {_comment(symbol)}"], None
+            return [], None
         if not _available(symbol):
             self.representation_gap(symbol, "runtime name availability is unqualified; no named declaration is emitted")
-            return lines + [f"{indent}# Unqualified availability candidate: {_comment(symbol)}"], None
+            return [], None
         alias = symbol.get("alias_binding") or {}
         if _status(alias) in _RESOLVED and _identifier(alias.get("target_name")):
             return lines + [f"{indent}{name} = {alias['target_name']}"], None
@@ -368,10 +374,9 @@ class _Renderer:
                     return lines + [f"from {'.' * level}{imported} import {imported_name} as {name}"], None
                 if imported and not level:
                     return lines + [f"import {imported} as {name}"], None
-            return lines + [f"{indent}# Import binding is unresolved: {_comment(binding)}", f"{indent}{name}: {self.any_name}"], None
+            return lines + [f"{indent}# unresolved: import binding is unresolved", f"{indent}{name}: {self.any_name}"], None
         if kind == "function" and (symbol.get("callshape") or {}).get("callable") is not False:
-            signature, gaps, relations = self.signature(symbol, in_class)
-            lines.extend(f"{indent}# Resolution gap: {gap}" for gap in gaps)
+            signature, relations = self.signature(symbol, in_class)
             descriptor = (symbol.get("callshape") or {}).get("descriptor")
             if in_class and descriptor in ("classmethod", "staticmethod"):
                 lines.append(f"{indent}@{descriptor}")
@@ -385,7 +390,8 @@ class _Renderer:
                 for member in definition.get("members", []))
             if definition.get("constructor") and not represented_constructor:
                 self.representation_gap(symbol, "class constructor callshape has no source-qualified __new__/__init__ declaration representation")
-                lines.append(f"{indent}# Constructor declaration gap: {_comment(definition['constructor'])}")
+                reasons = "; ".join(_reasons(definition["constructor"]))
+                lines.append(f"{indent}# Constructor declaration gap" + (f": {reasons}" if reasons else ""))
             bases = definition.get("bases", [])
             if any(not _qualified(base) for base in bases):
                 raise ValueError(f"unsafe normalized base for {name}: {bases!r}")
@@ -402,8 +408,6 @@ class _Renderer:
         members += _policy_lines(definition.get("attribute_policy", {}), indent + "    ",
                                  module=False, names={m.get("name") for m in definition.get("members", [])
                                                       if _available(m) and m.get("attribute_scope") != "class"}, any_name=self.any_name)
-        if definition.get("slots"):
-            members.append(f"{indent}    # Protocol slot evidence: {_comment(definition['slots'])}")
         lines.extend(members + [indent + "    ..."])
         return lines
 
@@ -445,11 +449,11 @@ class _Renderer:
         if len(unique) > 1:
             for candidate in group:
                 self.representation_gap(candidate, "conflicting export definitions cannot be expressed as one qualified declaration")
-            lines = [f"{indent}# Conflicting export definitions: {_comment(group)}"]
             if _identifier(name) and any(_available(candidate) and
                                          (not in_class or candidate.get("attribute_scope") != "class") for candidate in group):
-                lines.append(f"{indent}{name}: {self.any_name}")
-            return lines, None
+                return [f"{indent}# unresolved: conflicting export definitions cannot be expressed as one qualified declaration",
+                        f"{indent}{name}: {self.any_name}"], None
+            return [], None
         symbol = unique[0]
         alias = symbol.get("alias_of")
         if (_identifier(alias) and alias != name and alias in grouped and
@@ -461,9 +465,8 @@ class _Renderer:
         body = self.symbols(self.module.get("exports", []))
         body += _policy_lines(self.module.get("attribute_policy", {}), "", module=True,
                               names={s.get("name") for s in self.module.get("exports", []) if _available(s)}, any_name=self.any_name)
-        headers = ["# Generated from the selected MicroPython build; not a CPython runtime overlay.",
-                   f"# Module identity: {_comment(self.module.get('identity'))}"]
-        headers.extend(f"# Resolution gap: {gap}" for gap in _gaps(self.module))
+        headers = ["# Generated from the selected MicroPython build; not a CPython runtime overlay."]
+        headers.extend(_unresolved_lines(self.module, ""))
         headers.append(f"from typing import Any as {self.any_name}" +
                        (f", TypeVar as {self.typevar_name}" if self.typevars else ""))
         headers.extend(f'{name} = {self.typevar_name}("{name}")' for name in sorted(self.typevars))
@@ -474,8 +477,9 @@ def render_declarations(inventory: dict) -> dict[str, str]:
     """Return deterministic safe relative paths and UTF-8 declaration content.
 
     Annotation imports are support syntax, not assertions that the target exports
-    the corresponding CPython modules. Coverage comments preserve gaps without
-    opening static objects that have no selected dynamic contributor.
+    the corresponding CPython modules. Gap comments are one line per reason of an
+    unresolved declaration; the evidence behind them stays in the inventory. A
+    name without a qualified availability has no declaration and no comment.
     The input inventory gains per-symbol ``resolution.declaration`` gaps where
     pyi syntax cannot represent a qualified runtime fact. Serialize it afterwards.
     """

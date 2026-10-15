@@ -22,6 +22,7 @@ from .semantics import (unit_semantics, demand_semantics, linked_semantics_uncha
                         lexical_constant, event_applicability)
 from .prefetch import prefetch_linked_semantics
 from .link import collect_ownership, join
+from .paths import PathNames, argument_paths
 from .frozen_payload import collect_frozen_payload
 from .structure import JSONStream, deep_copy
 
@@ -1717,11 +1718,13 @@ class InventoryDocument:
         _publish_initializers(self._provenance)
         self._inputs, self._store = inputs, store
 
-    def value(self, surface):
-        """The document for ``surface`` as published, its streamed parts as ``JSONStream`` values."""
-        return {**surface, 'translation_units': JSONStream(self._units()),
-                'provenance': {**surface['provenance'], **self._provenance,
-                               'raw_bindings': JSONStream(self._bindings())}}
+    def value(self, surface, names):
+        """The document for ``surface`` as published, its streamed parts as ``JSONStream`` values. ``surface``
+        is already in published form; the rest is rewritten with ``names``, the streamed items one at a time."""
+        provenance = {key: value for key, value in self._provenance.items() if key != 'raw_bindings'}
+        return {**surface, 'translation_units': JSONStream(map(names.value, self._units())),
+                'provenance': {**surface['provenance'], **names.value(provenance),
+                               'raw_bindings': JSONStream(map(names.value, self._bindings()))}}
 
     def _units(self):
         for facts in self._inputs:
@@ -1848,10 +1851,12 @@ def _predicted_inputs(directory, obj, compdb):
     return []
 
 
-def select_records(*, database: Path, root: Path, build_dir: Path) -> dict:
+def select_records(*, database: Path, root: Path, build_dir: Path, names: PathNames) -> dict:
     """Read and validate the selected compiler database once: one record per entry, with every
     source, response operand and object output captured, and the database's completeness for the
-    selected build. Captures start a new input table for the run."""
+    selected build. Captures start a new input table for the run. ``names`` gives the published form of
+    host paths; the argument identity of every record is taken from that form, so record identities do
+    not depend on where the build and sources live."""
     compiler.clear_resolution_cache()
     compiler.clear_replay_cache()
     compiler.clear_input_table()
@@ -1864,7 +1869,7 @@ def select_records(*, database: Path, root: Path, build_dir: Path) -> dict:
     entries = json.loads(database_content)
     if not isinstance(entries, list) or not entries:
         raise ValueError('selected compiler database must be a nonempty list')
-    records, outputs = [], set()
+    records, outputs, unnamed = [], set(), []
     for index, entry in enumerate(entries):
         compdb.validate_entry(entry, f'compiler database entry {index}')
         obj = compdb.output_of(entry)
@@ -1887,16 +1892,24 @@ def select_records(*, database: Path, root: Path, build_dir: Path) -> dict:
         arguments = compdb.arguments_of(entry)
         response_snapshots = {}
         expanded_arguments, response_inputs = compiler.expand_arguments(arguments, entry['directory'], snapshots=response_snapshots)
-        argv_identity = hashlib.sha256(json.dumps({'arguments': expanded_arguments, 'directory': entry['directory'],
-                                                   'response_inputs': response_inputs}, sort_keys=True).encode()).hexdigest()
+        for text in (physical, obj, entry['directory'], json.dumps(response_inputs, ensure_ascii=False)):
+            unnamed.extend(names.unnamed(text))
+        for path in argument_paths(expanded_arguments):
+            unnamed.extend(names.unnamed(path))
+        # Joined options (-MF/x, -Wp,-MD,/x, -isysroot/x) and response file contents included.
+        for argument in expanded_arguments:
+            unnamed.extend(names.unnamed(argument, existing=True))
+        argv_identity = hashlib.sha256(json.dumps(names.value({'arguments': expanded_arguments, 'directory': entry['directory'],
+                                                               'response_inputs': response_inputs}), sort_keys=True).encode()).hexdigest()
         records.append({**entry, 'object': obj, 'physical': physical, 'arguments_sha256': argv_identity,
                         'identity': physical + '::object:' + obj + '::argv:' + argv_identity,
                         '_source_snapshot': source_snapshot, '_response_snapshots': response_snapshots,
                         '_expanded_arguments': expanded_arguments, '_response_inputs': response_inputs})
+    names.require(unnamed, 'the selected compiler database')
     completeness = compdb.completeness(entries, build_dir)
     if not completeness['complete']:
         raise ValueError('selected compiler database is incomplete: ' + json.dumps(completeness, sort_keys=True))
-    records.sort(key=lambda record: record['identity'])
+    records.sort(key=lambda record: names.text(record['identity']))
     inputs = compiler.reconcile_inputs([
         ('selected compiler database', {database_snapshot['path']: database_snapshot}),
         ('compiler database authority', {compdb.__mpy_api_input__['path']: compdb.__mpy_api_input__}),
@@ -1906,7 +1919,7 @@ def select_records(*, database: Path, root: Path, build_dir: Path) -> dict:
         *[(record['identity'] + ' response operands', record['_response_snapshots']) for record in records]])
     return {'database': database, 'database_sha256': database_snapshot['sha256'], 'root': root,
             'build_dir': build_dir, 'compdb': compdb, 'entries': entries, 'records': records,
-            'completeness': completeness, 'inputs': inputs}
+            'completeness': completeness, 'inputs': inputs, 'names': names}
 
 
 @_gc_paused
@@ -1928,7 +1941,7 @@ def collect_inventory(selection: dict, *, port: str, target: str, variant: str, 
         raise ValueError('inventory jobs must be a positive integer')
     for key, value in (('port', port), ('target', target), ('variant', variant)):
         if not isinstance(value, str) or not value.strip(): raise ValueError(f'{key} must be a nonempty build identity')
-    root, build_dir, database = selection['root'], selection['build_dir'], selection['database']
+    root, build_dir, database, names = selection['root'], selection['build_dir'], selection['database'], selection['names']
     compdb, records, completeness = selection['compdb'], selection['records'], selection['completeness']
     for package in ('tree-sitter', 'tree-sitter-c'):
         try: importlib.metadata.version(package)
@@ -2016,7 +2029,10 @@ def collect_inventory(selection: dict, *, port: str, target: str, variant: str, 
                          if field != 'qstr_identifiers' and isinstance(item, (list, dict)))
     normalize_names(modules)
     normalize_names(types)
-    modules.sort(key=lambda module: (module['name'], module['identity']))
+    # Published order follows the published form of the identities, not where the inputs live.
+    modules.sort(key=lambda module: (module['name'], names.text(module['identity'])))
+    types.sort(key=lambda item: names.text(item['identity']))
+    ownership['unassessed_objects'].sort(key=names.text)
     revision = subprocess.run(['git', '-C', str(root), 'rev-parse', '--verify', 'HEAD'],
                               capture_output=True, text=True)
     source_revision = revision.stdout.strip() if revision.returncode == 0 else None
@@ -2025,7 +2041,8 @@ def collect_inventory(selection: dict, *, port: str, target: str, variant: str, 
                       'source_revision': source_revision,
                       'compiler_database': {'path': str(database), 'sha256': selection['database_sha256']},
                       'compdb_authority': {'path': str(Path(compdb.__file__).resolve()), 'sha256': compdb.__mpy_api_input__['sha256']},
-                      'compilers': sorted({(f['input']['compiler'], f['input']['compiler_sha256']) for f in inputs}),
+                      'compilers': sorted({(f['input']['compiler'], f['input']['compiler_sha256']) for f in inputs},
+                                          key=lambda compiler: (names.text(compiler[0]), compiler[1])),
                       'source_inputs': dependencies, 'qstr_strings': qstrs,
                       'consumed_inputs': compiler.public_inputs(consumed_inputs),
                       'frozen_payload': frozen_payload, 'link': ownership['selected_link_authority']},

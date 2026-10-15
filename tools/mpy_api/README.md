@@ -64,6 +64,31 @@ Pass 1 runs a second time when it read an input, searched a directory, or tested
 | `generation.json` | Schema-v1 producer/input identities, artifact sizes/hashes/roles, coverage and generation ID |
 | `enrichment-notices/**` | Captured third-party licence notices, when an enrichment manifest is supplied |
 
+### Published paths
+
+The stubs and `generation.json` name no absolute host path. The generator works with absolute paths and publishes each as a name, so those files and the typing variable names in the stubs depend on the content of the inputs and the names given to their roots, not on where a checkout, build or tool lives. The names are:
+
+| Path | Published as |
+|---|---|
+| Each `--source-root NAME=PATH` | `NAME/<relative path>` |
+| The `--micropython-root` checkout, when no source root is that directory | `micropython/<relative path>` |
+| The `--build-dir` | `build/<relative path>` |
+| A `--path-var` directory outside the named roots | `path-var/NAME/<relative path>` |
+| The directory of the `--enrichment` manifest | `enrichment/<relative path>` |
+| `--compdb`, `--elf`, `--map`, `--link-command` or `--manifest` outside the named roots | `compdb/`, `elf/`, `map/`, `link-command/` or `manifest/` and the file name |
+| The generator's own modules | `mpy_api/<file>` |
+| The directory the tree-sitter packages are installed in | `python-packages/<relative path>` |
+| Compiler, linker, headers, libraries and objects the build record names, under `/usr`, `/opt`, `/lib`, `/lib32`, `/lib64`, `/libx32`, `/bin`, `/sbin`, `/etc` or `/nix` | `system/<path without the leading slash>` |
+| `/dev`, `/proc`, `/sys` | unchanged |
+
+Every other host path is an error, not a name, and generation stops before extraction and lists the paths. This covers the sources, objects, working directory and path operands of every compiler database entry, every compiler argument (response file contents and joined options such as `-MF/x` or `-isysroot/x` included) that names a path existing on the host, the paths the build record and linker inputs name, and, for the compiler database, link command and linker map, any path in their text that exists on the host. A toolchain, SDK or library outside the system directories above (a home-directory ARM toolchain, `~/.espressif`, a vendored SDK) is not a system path: name it with `--source-root`. Name the directory of each with `--source-root NAME=DIR` (generated sources, include directories, out-of-tree modules and the directories holding build receipts included). A `--source-root` name must be a single path component and not one of the role names above; two directories cannot share a name.
+
+A compilation database, link command and linker map record the absolute paths of the build, so their file digests depend on where the build ran. The receipt records them as `{path, named_bytes, named_sha256}`: the size and sha256 of their text after the host paths in it are named (a JSON file as its canonical form: sorted keys, compact separators, unescaped strings), not of the file bytes, which `sha256sum` does not reproduce without the naming rules. Wherever else the raw digest of one of these files would appear in published records it is written `named-sha256:<hex>`. The raw digest is never published. Every other consumed file, objects and the ELF included, is identified by its bytes as they are. Record identities keep their form (`<source>::object:<object>::argv:<digest>`); the digest is taken from the compile arguments in published form. Lists that follow identity order are ordered independently of where the inputs live. An enrichment manifest whose `target.inputs` pins absolute paths holds them in its own bytes, so its digest depends on those paths.
+
+`inventory.json` (`--inventory`) is a diagnostic and does not carry this guarantee. Paths in its strings are named, but it still holds the raw compiler text (`gcc -v` search lists and configuration lines such as `/usr/libexec/gcc/...`), and the hashes taken of compiler output before naming (`stdout_sha256`, `stdin_sha256`, `compiler_expanded_sha256`, `compiler_directives_sha256`, `original_sha256`, `transformed_sha256`) depend on location. Its artifact record is part of `generation.json`, so `generation_id` of a run with `--inventory` is not independent of location.
+
+Stub comments are limited to what a user of the declarations can act on. Each module and symbol that is not fully resolved carries one `# unresolved: <reason>` line per distinct reason that its resolution records, and a class whose constructor has no declaration carries `# Constructor declaration gap: <reasons>`. Evidence (provider and source records, attribute coverage, protocol slots, availability candidates) is not written to the stubs; `inventory.json` holds it.
+
 `inventory.json` and `generation.json` are canonical JSON: key-sorted, compact separators, ASCII-only, one trailing newline, so they are not formatted for reading (`python -m json.tool` or `jq` pretty-print them). `inventory.json` is encoded in bounded pieces and streamed to disk while its size and sha256 are computed, so no whole-document copy is held and the receipt needs no second read; per-unit overviews are read from the fact objects one unit at a time while it is written. The artifact hash is the hash of the file bytes. `generation_id` hashes the canonical receipt before adding its own ID. Artifact hashes cover the declarations, notices and, when requested, the inventory, not the receipt itself. Without `--inventory` the receipt records the same build, input and coverage identities and lists no inventory artifact. Consumers should verify the receipt and all artifact hashes before using a generation, and retain its build/input identity alongside checker results.
 
 `translation_units` retains every selected unit's inputs, definitions, frontend/projection evidence and function extraction overview. Function summaries include compiled identities, spans, parameter contracts, event counts, semantic resolutions and all gap/barrier reasons. `diagnostic_stage` distinguishes translation-unit extraction from selected-linked composition. Detailed internal branch graphs for unselected functions are not a published API; selected module/type/member fields retain their own branch/value evidence.

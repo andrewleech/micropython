@@ -8,6 +8,7 @@ import pytest
 
 from mpy_api import inventory
 from mpy_api.facts import FactStore
+from mpy_api.paths import PathNames
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -38,7 +39,7 @@ def build(tmp_path, sources):
 def failure(project, jobs):
     database, build_dir = project
     with pytest.raises(RuntimeError) as raised:
-        selection = inventory.select_records(database=database, root=ROOT, build_dir=build_dir)
+        selection = inventory.select_records(database=database, root=ROOT, build_dir=build_dir, names=PathNames([(str(database.parent.resolve()), 'project')]))
         store = FactStore(tempfile.mkdtemp(dir=database.parent))
         inventory.collect_inventory(selection, port='test', target='test', variant='test', link={},
                                     store=store, jobs=jobs)
@@ -89,7 +90,7 @@ def planned_failure(monkeypatch, tmp_path, jobs, plan):
     monkeypatch.setattr(inventory, 'collect_ownership', lambda records, link: {'input_snapshots': {}})
     records = [{'identity': f'tu{index}', 'physical': f'/tu{index}.c'} for index in range(len(plan))]
     selection = {'root': tmp_path, 'build_dir': tmp_path, 'database': tmp_path / 'db', 'compdb': None,
-                 'records': records, 'completeness': {}, 'inputs': {}}
+                 'records': records, 'completeness': {}, 'inputs': {}, 'names': PathNames()}
     with pytest.raises(RuntimeError) as raised:
         inventory.collect_inventory(selection, port='p', target='t', variant='v', link={},
                                     store=FactStore(tempfile.mkdtemp(dir=tmp_path)), jobs=jobs)
@@ -122,7 +123,7 @@ def test_a_later_extraction_failure_wins_over_earlier_conflicts(monkeypatch, tmp
 def test_parallel_extraction_refuses_a_runs_directory_that_is_not_new(tmp_path):
     project = build(tmp_path, {'a_valid.c': VALID, 'b_valid.c': VALID})
     database, build_dir = project
-    selection = inventory.select_records(database=database, root=ROOT, build_dir=build_dir)
+    selection = inventory.select_records(database=database, root=ROOT, build_dir=build_dir, names=PathNames([(str(database.parent.resolve()), 'project')]))
     store = FactStore(tempfile.mkdtemp(dir=database.parent))
     (Path(store.directory) / 'runs').mkdir()
     with pytest.raises(FileExistsError):
