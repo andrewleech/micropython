@@ -27,12 +27,18 @@
 #include "systick.h"
 #include "pendsv.h"
 #include "shared/runtime/softtimer.h"
+#if defined(MICROPY_HW_ENABLE_MBOOT) && MICROPY_HW_ENABLE_MBOOT
+#include "mphalport.h"
+#endif
 
 volatile uint32_t systick_ms = 0;
 
 systick_dispatch_t systick_dispatch_table[SYSTICK_DISPATCH_NUM_SLOTS];
 
 void SysTick_Handler(void) {
+    #if defined(MICROPY_HW_ENABLE_MBOOT) && MICROPY_HW_ENABLE_MBOOT
+    mimxrt_wdt_feed_aux();
+    #endif
     // Increment the systick millisecond counter.
     uint32_t uw_tick = systick_ms + 1;
     systick_ms = uw_tick;

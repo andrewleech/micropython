@@ -177,6 +177,17 @@ Reset_Handler:
     strlt   r0, [r1], #4
     blt    .LC5
 #endif /* __STARTUP_CLEAR_BSS */
+#if MICROPY_HW_ENABLE_MBOOT
+    /* Maintain inherited auxiliary watchdogs before the application enables interrupts. */
+    bl      mimxrt_wdt_feed_aux
+    /* Exception vector fetches must remain available while XIP NOR is busy. */
+    ldr     r0, =VTOR
+    ldr     r1, =__Vectors_RAM
+    str     r1, [r0]
+    dsb
+    isb
+#endif
+
 
     cpsie   i               /* Unmask interrupts */
 #ifndef __START

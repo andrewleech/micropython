@@ -196,3 +196,18 @@
 // LPGPR[3] is used by the TinyUF2 bootloader for double-tap entry detection;
 // exclude it from machine.mem_backup() to prevent accidental corruption.
 #define MICROPY_HW_SNVS_LPGPR_SAFE_COUNT (3)
+
+// Mboot uses a dedicated signed XIP image and relocates the writable filesystem.
+#if MICROPY_HW_ENABLE_MBOOT
+#define MICROPY_HW_MBOOT_PRIMARY_ADDR (0x60040000u)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (0x200000u)
+#define MICROPY_HW_MBOOT_SECONDARY_ADDR (0x60240000u)
+#define MICROPY_HW_MBOOT_SECCNT_ADDR (0x60441000u)
+#define MICROPY_HW_MBOOT_FS_ADDR (0x60443000u)
+#define MICROPY_HW_MBOOT_FS_SIZE (MICROPY_HW_FLASH_SIZE - 0x443000u)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (1)
+#define MICROPY_MBOOT_UPDATE_MODE (MICROPY_MBOOT_UPDATE_MODE_SWAP)
+#define MICROPY_MBOOT_SWAP_MODE (MICROPY_MBOOT_SWAP_MODE_OFFSET)
+#define MICROPY_MBOOT_DFU (1)
+#define MICROPY_MBOOT_FSLOAD_RAW (1)
+#endif

@@ -41,6 +41,10 @@
 #if FSL_FEATURE_BOOT_ROM_HAS_ROMAPI
 #include "fsl_romapi.h"
 #endif
+#if defined(MICROPY_HW_ENABLE_MBOOT) && MICROPY_HW_ENABLE_MBOOT
+#include "mboot_app.h"
+#endif
+
 
 #include CPU_HEADER_H
 
@@ -106,6 +110,31 @@ void machine_init(void) {
         woke_from_deepsleep = true;
     }
 
+    #if defined(MICROPY_HW_ENABLE_MBOOT) && MICROPY_HW_ENABLE_MBOOT
+    // mboot snapshots SRC status in the low half and WDOG reset status in the high half.
+    uint32_t reset_flags = mboot_app_reset_flags(SRC->SRSR);
+    uint32_t src_reset_flags = reset_flags & 0xffffu;
+    uint16_t wdog_reset_flags = (uint16_t)(reset_flags >> 16);
+    #ifdef MIMXRT117x_SERIES
+    const uint32_t src_soft_reset = kSRC_M7CoreM7RequestResetFlag | kSRC_M7CoreM7LockUpResetFlag | kSRC_M7CoreJtagSWResetFlag;
+    const uint32_t src_wdog_reset = kSRC_M7CoreWdogResetFlag | kSRC_M7CoreWdog3ResetFlag | kSRC_M7CoreWdog4ResetFlag;
+    bool wdog_software = (wdog_reset_flags & kWDOG_SoftwareResetFlag) && (src_reset_flags & kSRC_M7CoreWdogResetFlag);
+    #else
+    const uint32_t src_soft_reset = SRC_SRSR_LOCKUP_SYSRESETREQ_MASK;
+    const uint32_t src_wdog_reset = SRC_SRSR_WDOG_RST_B_MASK;
+    bool wdog_software = false;
+    #endif
+    // The WDOG power-on bit survives software resets; use the SRC and WDOG software flags.
+    if (woke_from_deepsleep || (src_reset_flags & user_reset_flag)) {
+        reset_cause = MP_DEEPSLEEP_RESET;
+    } else if ((wdog_reset_flags & kWDOG_PowerOnResetFlag) && !(src_reset_flags & src_soft_reset) && !wdog_software) {
+        reset_cause = MP_PWRON_RESET;
+    } else if ((src_reset_flags & src_wdog_reset) && !wdog_software) {
+        reset_cause = MP_WDT_RESET;
+    } else {
+        reset_cause = MP_HARD_RESET;
+    }
+    #else
     // Determine the current reset cause.
     if (woke_from_deepsleep || (SRC->SRSR & user_reset_flag)) {
         reset_cause = MP_DEEPSLEEP_RESET;
@@ -120,6 +149,7 @@ void machine_init(void) {
             reset_cause = MP_HARD_RESET;
         }
     }
+    #endif
 }
 
 void machine_set_soft_reset(void) {
@@ -133,10 +163,14 @@ static mp_obj_t mp_machine_unique_id(void) {
 }
 
 MP_NORETURN static void mp_machine_reset(void) {
+    #if defined(MICROPY_HW_ENABLE_MBOOT) && MICROPY_HW_ENABLE_MBOOT
+    mboot_app_reset();
+    #else
     WDOG_TriggerSystemSoftwareReset(WDOG1);
     while (true) {
         ;
     }
+    #endif
 }
 
 static mp_int_t mp_machine_reset_cause(void) {
@@ -202,6 +236,8 @@ MP_NORETURN void mp_machine_bootloader(size_t n_args, const mp_obj_t *args) {
     #if defined(MICROPY_BOARD_ENTER_BOOTLOADER)
     // If a board has a custom bootloader, call it first.
     MICROPY_BOARD_ENTER_BOOTLOADER(n_args, args);
+    #elif defined(MICROPY_HW_ENABLE_MBOOT) && MICROPY_HW_ENABLE_MBOOT
+    mboot_app_request_dfu();
     #elif FSL_ROM_HAS_RUNBOOTLOADER_API && !MICROPY_MACHINE_UF2_BOOTLOADER
     // If not, enter ROM bootloader in serial downloader / USB mode.
     // Skip that in case of the UF2 bootloader being available.

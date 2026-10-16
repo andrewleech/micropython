@@ -54,5 +54,6 @@ status_t flash_erase_sector(uint32_t erase_addr);
 status_t flash_erase_block(uint32_t erase_addr);
 void flash_read_block(uint32_t src_addr, uint8_t *dest, uint32_t length);
 status_t flash_write_block(uint32_t dest_addr, const uint8_t *src, uint32_t length);
+void flash_wait_for_idle(void);
 
 #endif // MICROPY_INCLUDED_MIMXRT_FLASH_H
