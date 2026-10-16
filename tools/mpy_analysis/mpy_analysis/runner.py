@@ -15,7 +15,8 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
-from .scope import load_scope, source_identity, source_path
+from mpy_build_inputs.scope import load_scope, source_identity, source_path
+
 from .typing_environment import load_typing_environment
 
 SCANNERS = (

@@ -11,9 +11,10 @@ import subprocess
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
+from mpy_build_inputs.scope import SELECTED_GROUPS, source_path
+
 from .metadata import LICENSEREF, LICENSING, validate_license
 from .metadata_bom import parse_json, validate_cyclonedx
-from .scope import SELECTED_GROUPS, source_path
 
 PREFIX = "mpy:source:"
 STRING_FIELDS = ("name", "version", "description", "author", "copyright")

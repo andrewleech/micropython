@@ -31,7 +31,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from .compdb import (
+from mpy_build_inputs.compdb import (
     DepfileError,
     arguments_of,
     assembly_source,
@@ -371,7 +371,7 @@ def build_evidence(
     link_dir: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Return the evidence for the images, with its identity digest, and the compilation database
-    entries of the objects that contribute to them (the selection for `mpy_analysis.scope`)."""
+    entries of the objects that contribute to them (the selection for `mpy_build_inputs.scope`)."""
     entries = [entry for path in compile_databases for entry in json.loads(Path(path).read_text(encoding="utf-8"))]
     if not entries:
         raise ValueError("the compilation databases are empty")
@@ -415,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--link-dir", help="directory the link ran in, for relative map paths; default: the directory of the image's compiles")
     parser.add_argument("--artifact", action="append", default=[], metavar="IMAGE_ID=PATH", help="a deployment file derived from the image's ELF (.bin, .hex, .dfu)")
     parser.add_argument("--output", required=True, help="the link evidence file")
-    parser.add_argument("--selected-database", required=True, help="compilation database of the contributing objects, for mpy_analysis.scope")
+    parser.add_argument("--selected-database", required=True, help="compilation database of the contributing objects, for mpy_build_inputs.scope")
     args = parser.parse_args(argv)
     try:
         images = []

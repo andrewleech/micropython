@@ -2,8 +2,7 @@
 
 This package supplies compiler-analysis checks, explicit MicroPython source inventories, scanner execution and positive/negative fixture checks for firmware projects built on MicroPython.
 
-- `sast-compdb` proves a compilation database covers the build it came from, against the
-  build's own object files.
+- `mpy-compdb-check` from the neutral `mpy-build-inputs` dependency proves a compilation database covers the build it came from, against the build's own object files.
 - `sast-cppcheck-inputs` derives the predefines, `__has_*` answers, limit macros and platform
   file cppcheck needs from the build's own compiler, per compiler-flag group.
 - `sast-cppcheck-coverage` and `sast-codechecker-coverage` fail a run that did not analyse every required unit/build action, unless the gap is in the project's accepted list. CodeChecker failure archives must match recorded build actions rather than masking other actions on the same source.
@@ -12,7 +11,7 @@ This package supplies compiler-analysis checks, explicit MicroPython source inve
 - `sast-install-tools` installs the pinned analysers (cppcheck, the Arm GNU Toolchain for
   `-fanalyzer`, CodeChecker and the clang it drives) into a prefix, in the project's own
   build image.
-- `sast-scope` collects manifest-selected frozen sources and optional compilation-database inputs using explicit roots and build variables.
+- `mpy-build-scope` from `mpy-build-inputs` collects manifest-selected frozen sources and optional compilation-database inputs using explicit roots and build variables.
 - `sast-run` invokes a selected external scanner with consumer-owned policy, records findings separately from operational and coverage failures, and rebases staged source locations.
 - `sast-check-fixtures` checks external positive/negative expectations using the same runner and coverage receipts.
 - `sast-sbom` generates an SPDX 2.3 (default) or CycloneDX 1.6 (`--format cyclonedx`) selected-source inventory and provenance/coverage receipt from the same manifest/compiler scope as SAST.
@@ -22,7 +21,9 @@ A project installs it from its MicroPython checkout, like mpremote:
 
 The package requires Python 3.10 or newer, matching its pinned REUSE dependency.
 
-    python3 -m pip install --target build/analysis-tools tools/mpy_analysis
+    python3 -m pip install --target build/analysis-tools ./tools/mpy_build_inputs ./tools/mpy_analysis
+
+The build-input package owns `mpy_build_inputs.compdb` and `mpy_build_inputs.scope`; analysis and SBOM consumers import those modules directly. For source-tree use, set `PYTHONPATH=tools/mpy_analysis:tools`. For a `--target` installation, use `PYTHONPATH=build/analysis-tools` and add `build/analysis-tools/bin` to `PATH`. `sast-install-tools` installs external analysers only, not these Python packages.
 
 Projects call these entry points from their build systems and own their scanner policy, dependencies, suppressions and accepted coverage gaps. Scanner findings retain their rule/message content; staged source locations are rebased to physical files before SARIF or JSON is consumed by CI.
 
@@ -31,7 +32,7 @@ Projects call these entry points from their build systems and own their scanner 
 `sast-run` invokes one external scanner over a schema-v1 source inventory. It does not discover a consumer checkout, select a build target, capture compiler commands, install scanner tools or import a consumer resolver. The six choices are `opengrep-stable`, `opengrep-interfile-alpha`, `semgrep-ce`, `ruff-s`, `pyrefly` and `pysa`.
 
 ```sh
-python3 -m pip install tools/mpy_analysis
+python3 -m pip install ./tools/mpy_build_inputs ./tools/mpy_analysis
 sast-run --scope /absolute/path/inventory.json --policy-dir /absolute/path/policy \
     --scanner opengrep-stable --output-dir build/analysis \
     --executable /absolute/path/opengrep
@@ -63,7 +64,7 @@ The scope helpers can generate frozen records with MicroPython's manifest author
 For a plain MicroPython Unix checkout, generate the selected manifest inventory with explicit roots and manifest variables, then pass the resulting JSON to the runner:
 
 ```sh
-sast-scope --micropython-root "$MPY" \
+mpy-build-scope --micropython-root "$MPY" \
     --manifest "$MPY/ports/unix/variants/standard/manifest.py" \
     --root "micropython=$MPY" --root "micropython-lib=$MPY_LIB" \
     --owner micropython=micropython --owner micropython-lib=micropython-lib \
@@ -71,13 +72,13 @@ sast-scope --micropython-root "$MPY" \
     --target unix --variant standard --port unix --output scope.json
 ```
 
-In manifest mode, `sast-scope --manifest ... --compile-database DB` appends native records using the same explicit roots and owners. A firmware with no frozen modules (the Zephyr port by default) omits `--manifest` and gets its whole selection from `--compile-database`. `--compile-database` is not combined with `--scope`. Python interfaces are `load_scope(path)`, `parse_scope(data)`, `collect_manifest_scope(...)` and `collect_compdb_sources(database, roots=..., owners=...)`; consumers can add their externally selected groups before serializing the validated scope. The CLI does not infer application files or port/target matrices.
+In manifest mode, `mpy-build-scope --manifest ... --compile-database DB` appends native records using the same explicit roots and owners. A firmware with no frozen modules (the Zephyr port by default) omits `--manifest` and gets its whole selection from `--compile-database`. `--compile-database` is not combined with `--scope`. Python interfaces in `mpy_build_inputs.scope` are `load_scope(path)`, `parse_scope(data)`, `collect_manifest_scope(...)` and `collect_compdb_sources(database, roots=..., owners=...)`; consumers can add their externally selected groups before serializing the validated scope. The CLI does not infer application files or port/target matrices.
 
 The manifest collector additionally retains `packages` (physical selected-manifest identity, actual required name, explicit root/path, requested library alias, declared metadata and dependencies) and `package_requirements` (observed direct/transitive/repeated edges). Frozen `provenance.package_id` identifies the authority metadata owner; an ordinary include does not invent a new package and a transitive requirement's files remain attributed to that requirement. Physical aliases share package identity. Existing schema-v1 consumer scopes without package fields remain valid for scanners; SBOM generation explicitly reports their missing package inventory.
 
 ## Selected-source SBOM
 
-Generate the inventory with `sast-scope`, adding `--compile-database /absolute/path/compile_commands.json` for the recorded build when native component selection is required. Pass the same inventory to both scanners and SBOM generation:
+Generate the inventory with `mpy-build-scope`, adding `--compile-database /absolute/path/compile_commands.json` for the recorded build when native component selection is required. Pass the same inventory to both scanners and SBOM generation:
 
 ```sh
 sast-sbom --scope scope.json --micropython-root "$MPY" --output-dir build/sbom
@@ -154,7 +155,7 @@ Without `--link-evidence` members are still verified by hash, but every image me
 
 A member whose file matches its hash and whose kind is not an image becomes a `file` component with SHA-1 and SHA-256 (SPDX file element, CycloneDX file component) nested under a deployment component named by the manifest (`application` kind, role `deployment`), with the property `role` set to `deployed-<kind>`. The root component depends on the deployment component, and the deployment component depends on the firmware components of the evidence images its members bind. Files that no member names, including the manifest's exclusions, never appear; a dynamic import never adds a file. Image members are represented by the evidence's firmware components, not by a second component. A member that does not verify is not added as a component.
 
-`tools/mpy_analysis/examples/deployment-nucleo-h563zi.example.json` is a worked example for the NUCLEO_H563ZI application and mboot raw binaries of this repository's build. It shows the shape only: the real deployment manifest, its filesystem content and its runtime fetch policy are owned by the consuming application, and the example's `runtime_fetch` of `none` is not a statement about any device. Its paths point at a build directory that exists only where that build was captured.
+`tools/mpy_analysis/examples/deployment-nucleo-h563zi.example.json` is a worked example for the NUCLEO_H563ZI application and mboot raw binaries of this repository's build. It shows the shape only: the real deployment manifest, its filesystem content and its runtime fetch policy are owned by the consuming application, and the example's `runtime_fetch` of `none` is not a statement about any device. Its `app/` and `mboot/` paths resolve relative to the manifest directory; regenerate the hashes from the actual deployment artifacts.
 
 ### Repository context
 
@@ -200,7 +201,7 @@ An intentional correction uses `mpy:metadata:corrections`, whose value is a JSON
 
 The receipt has separate `source_accounting`, `boundary_resolution`, `metadata_completeness` and `firmware_completeness` results. Each dependency's field matrix records `known`, `missing`, `unsupported`, `conflicting`, `stale` or `not-applicable`, with parser/path/hash/assertion evidence and issues. Required selected-dependency facts are name, release version, licence and licence applicability. Optional descriptive fields remain visible without invented values. Required gaps, stale declarations/corrections and conflicts prevent complete metadata, even when all source rows are accounted for.
 
-Tracked source state and content are separate evidence. Generated, ignored or untracked inputs retain hashes with provenance gaps; dirty repositories retain their base revision rather than claiming those bytes are committed. `coverage_status` remains incomplete when gaps or unassessed groups exist. Compilation records do not prove link/header closure, fetched SDK inclusion or runtime-loaded dependencies, `firmware_completeness` remains `not-established`. Use `sast-compdb` separately to qualify the build capture.
+Tracked source state and content are separate evidence. Generated, ignored or untracked inputs retain hashes with provenance gaps; dirty repositories retain their base revision rather than claiming those bytes are committed. `coverage_status` remains incomplete when gaps or unassessed groups exist. Compilation records do not prove link/header closure, fetched SDK inclusion or runtime-loaded dependencies, `firmware_completeness` remains `not-established`. Use `mpy-compdb-check` separately to qualify the build capture.
 
 The CLI returns 0 for valid generated output, including an explicitly partial SBOM, and 2 for invalid inputs, schema failures or I/O/operational failures. Consumer CI owns completeness acceptance. Before replacing owned output names it protects selected sources, manifests, declarations, metadata references and licensing inputs, including physical aliases/hardlinks. Output symlinks and input collisions fail without deleting the input; safe stale outputs are invalidated even on early scope/profile failure. Use a separate artifact directory, stored scopes describe recorded selections rather than a fresh build.
 
@@ -284,7 +285,7 @@ The checker writes its own `fixture-summary.json` with matched findings, failure
 Run the package regressions:
 
 ```sh
-python3 -m pytest tools/mpy_analysis/tests
+PYTHONPATH=tools/mpy_analysis:tools python3 -m pytest tools/mpy_analysis/tests tools/mpy_build_inputs/tests
 ```
 
 Runner behavioral tests use controlled executable responses to cover report-only findings, operational failures, missing/partial reports, exact rebasing, explicit external roots, duplicate import identities, staging collisions/escapes, stale cleanup, unknown-group accounting and fail-closed typing receipts. They do not replace a real installed-scanner smoke. For that smoke, supply a manifest-selected positive fixture with an imported companion, a matching negative fixture, explicit policy and executable paths; check source accounting, actual reports and rebased source URIs for each selected scanner. Run missing-executable/report/prerequisite cases separately. Type/Pysa acceptance remains blocked until the external builtin environment and supported tool combination have been verified.

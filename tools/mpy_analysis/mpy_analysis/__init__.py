@@ -5,4 +5,4 @@ project. A project installs this package from its MicroPython checkout and calls
 points; it holds its own analysis policy and nothing else.
 """
 
-__all__ = ["codechecker_coverage", "compdb", "coverage", "cppcheck_inputs", "fanalyzer", "install"]
+__all__ = ["codechecker_coverage", "coverage", "cppcheck_inputs", "fanalyzer", "install"]

@@ -22,7 +22,7 @@ python -m mpy_analysis.link_evidence \
 
 `-S` keeps entries for generated sources that do not exist yet. Use the default build directory of a port: a `BUILD=` override on the command line is passed to the nested `mpy-cross` build, which then writes its objects into the same directory. `--image ID:ROLE:ELF:MAP` is repeated for an application and a bootloader built by separate make runs, each with its own `--compile-database`. `--artifact IMAGE_ID=PATH` names a deployment file (`.bin`, `.hex`, `.dfu`) derived from an image's ELF so a deployment manifest can bind it by hash.
 
-`--selected-database` is the compilation database of the objects that contribute to the images. Pass it to `mpy_analysis.scope --compile-database` so the scope selects what was linked and not every file the build compiled (a compile of `mpy-cross`, or of a feature the board leaves out, is not firmware). Then run `sast-sbom --scope ... --link-evidence out/evidence.json` and `sast-sbom-policy`.
+`--selected-database` is the compilation database of the objects that contribute to the images. Pass it to `mpy-build-scope --compile-database` (or `python -m mpy_build_inputs.scope --compile-database`) so the scope selects what was linked and not every file the build compiled (a compile of `mpy-cross`, or of a feature the board leaves out, is not firmware). Then run `sast-sbom --scope ... --link-evidence out/evidence.json` and `sast-sbom-policy`.
 
 ## What the evidence records
 
@@ -59,4 +59,4 @@ sast-sbom --scope scope.json --micropython-root "$MPY" --link-inventory inventor
 
 ## Not checked
 
-The evidence is derived after the build, from files on disk. It does not prove that the files are the ones the build used, and it does not detect an input changed during the build. A stale compilation database or map describing another build is not detected beyond the object and member lookups failing. The make wrapper, per-action hashing and frozen-payload accounting of earlier revisions are removed: a frozen manifest is an explicit input (`manifest.py`, handled by `mpy_analysis.scope`), and generated files are not components.
+The evidence is derived after the build, from files on disk. It does not prove that the files are the ones the build used, and it does not detect an input changed during the build. A stale compilation database or map describing another build is not detected beyond the object and member lookups failing. A frozen manifest is an explicit input (`manifest.py`, handled by `mpy_build_inputs.scope`), and generated files are not components.

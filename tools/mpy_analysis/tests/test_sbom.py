@@ -9,7 +9,8 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from conftest import generate_cyclonedx
 from link_fixture import link_evidence
-from mpy_analysis import sbom, scope
+from mpy_analysis import sbom
+from mpy_build_inputs import scope
 from mpy_analysis.metadata_bom import validate_cyclonedx
 from mpy_analysis.sbom_cyclonedx import to_cyclonedx
 from mpy_analysis.sbom_model import ExternalReference
@@ -221,7 +222,15 @@ def test_cli_accepts_link_evidence_and_emits_firmware_sbom(tmp_path):
             "--output-dir",
             str(output_dir),
         ],
-        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])},
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join(
+                str(path) for path in (
+                    Path(__file__).resolve().parents[1],
+                    Path(__file__).resolve().parents[2],
+                )
+            ),
+        },
         capture_output=True,
         text=True,
     )
@@ -528,7 +537,11 @@ def test_cli_preserves_referenced_license_output_and_hardlink(
     scope_path.write_text(json.dumps(inventory))
     environment = dict(os.environ)
     environment["PYTHONPATH"] = os.pathsep.join(
-        filter(None, [str(Path(sbom.__file__).parents[1]), environment.get("PYTHONPATH")])
+        filter(None, [
+            str(Path(sbom.__file__).parents[1]),
+            str(Path(scope.__file__).parents[1]),
+            environment.get("PYTHONPATH"),
+        ])
     )
     result = subprocess.run(
         [

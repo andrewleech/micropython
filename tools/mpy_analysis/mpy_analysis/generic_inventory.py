@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from jsonschema import FormatChecker
+from mpy_build_inputs.scope import HEADER_GROUP, SELECTED_GROUPS, source_path
 
 from .boundaries import discover_boundaries, metadata_context, uncovered_headers
 from .declarations import load_declarations, merge_declaration, revision_matches_selected
@@ -21,7 +22,6 @@ from .sbom_model import (
     Party,
     property_values,
 )
-from .scope import HEADER_GROUP, SELECTED_GROUPS, source_path
 
 REQUIRED = ("name", "version", "license", "license_applicability")
 OPTIONAL = ("description", "author", "url", "copyright", "dependencies")

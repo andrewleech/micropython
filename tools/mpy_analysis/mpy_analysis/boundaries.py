@@ -19,12 +19,13 @@ except ModuleNotFoundError:
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Iterable, Mapping, Sequence
 
+from mpy_build_inputs.scope import SELECTED_GROUPS, source_path
+
 from . import mpy_tree
 from .declarations import revision_matches_selected, selected_digest, source_binding
 from .locks import LOCK_FILES, idf_component_identity, idf_sbom_manifest, inspect_lock
 from .metadata_bom import UnsupportedBomError, parse_json, read_bom
 from .metadata_native import parse_library_json, parse_native
-from .scope import SELECTED_GROUPS, source_path
 from .submodules import SubmoduleInspector
 
 _PACKAGE_MARKERS = ("metadata.txt", "setup.py")

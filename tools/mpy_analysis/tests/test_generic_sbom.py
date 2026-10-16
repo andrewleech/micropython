@@ -5,7 +5,7 @@ import pytest
 from conftest import generate_cyclonedx
 from mpy_analysis import sbom
 from mpy_analysis.declarations import validate_document
-from mpy_analysis.scope import FROZEN_GROUP
+from mpy_build_inputs.scope import FROZEN_GROUP
 from test_sbom import MPY_ROOT, git, repository, selection
 
 

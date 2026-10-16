@@ -14,6 +14,7 @@ requires-python = ">=3.10"
 # Its charset-normalizer extra gives it an encoding detector that needs no system library: without
 # one, reuse finds libmagic or refuses to start, and the build image has no libmagic.
 dependencies = [
+    "mpy-build-inputs==0.1.0",
     "compiledb==0.10.7",
     "reuse[charset-normalizer]==6.2.0",
     "license-expression>=30.4,<31",
@@ -32,9 +33,7 @@ sast-cppcheck-inputs = "mpy_analysis.cppcheck_inputs:main"
 sast-cppcheck-coverage = "mpy_analysis.coverage:main"
 sast-codechecker-coverage = "mpy_analysis.codechecker_coverage:main"
 sast-fanalyzer = "mpy_analysis.fanalyzer:main"
-sast-compdb = "mpy_analysis.compdb:main"
 sast-run = "mpy_analysis.runner:main"
-sast-scope = "mpy_analysis.scope:main"
 sast-check-fixtures = "mpy_analysis.fixtures:main"
 sast-sbom = "mpy_analysis.sbom:main"
 sast-sbom-policy = "mpy_analysis.sbom_policy:main"

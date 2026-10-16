@@ -18,7 +18,9 @@ from pathlib import Path
 from typing import Any, Sequence
 from urllib.parse import quote, urlparse
 
-from .compdb import arguments_of, entry_file, validate_entry
+from mpy_build_inputs.compdb import arguments_of, entry_file, validate_entry
+from mpy_build_inputs.scope import FROZEN_GROUP, parse_scope, source_path
+
 from .deployment import IMAGE_KINDS, NOT_DECLARED, load_deployment, verify_deployment
 from .firmware_inventory import load_posthoc_link_inventory
 from .generic_inventory import assemble
@@ -38,7 +40,6 @@ from .sbom_model import (
     property_values,
 )
 from .sbom_spdx import serialize_spdx, to_spdx
-from .scope import FROZEN_GROUP, parse_scope, source_path
 from .submodules import SubmoduleInspector
 
 

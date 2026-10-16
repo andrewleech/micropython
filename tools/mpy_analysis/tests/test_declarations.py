@@ -6,7 +6,7 @@ import pytest
 from conftest import generate_cyclonedx
 from mpy_analysis.declarations import load_declarations, merge_declaration, selected_digest
 from mpy_analysis.metadata import collect_metadata
-from mpy_analysis.scope import FROZEN_GROUP
+from mpy_build_inputs.scope import FROZEN_GROUP
 from test_sbom import MPY_ROOT
 
 

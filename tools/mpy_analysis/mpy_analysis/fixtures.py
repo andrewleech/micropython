@@ -9,8 +9,9 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
+from mpy_build_inputs.scope import load_scope, source_identity, source_path
+
 from .runner import OWNED_ARTIFACTS, SCANNERS, run
-from .scope import load_scope, source_identity, source_path
 
 
 FIXTURE_SUMMARY = "fixture-summary.json"

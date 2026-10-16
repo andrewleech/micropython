@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from mpy_analysis import sbom
 from mpy_analysis.sbom import FIRMWARE_BLOCKING_GAPS
-from mpy_analysis.scope import FROZEN_GROUP
+from mpy_build_inputs.scope import FROZEN_GROUP
 from mpy_analysis.submodules import SubmoduleInspector, url_relation
 
 MPY_ROOT = Path(__file__).resolve().parents[3]
@@ -477,7 +477,7 @@ def test_plain_nested_repository_is_not_a_submodule(tmp_path):
 def firmware_summary(workspace, tmp_path):
     """SBOM of a linked image whose evidence names a source of the application."""
     from link_fixture import link_evidence
-    from mpy_analysis import scope as scope_module
+    from mpy_build_inputs import scope as scope_module
 
     app = workspace["app"]
     (app / "selected.c").write_text("int selected;\n")

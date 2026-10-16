@@ -8,7 +8,7 @@ import pytest
 from mpy_analysis import boundaries
 from mpy_analysis.declarations import selected_digest
 from mpy_analysis.metadata import collect_metadata, selected_digest as metadata_digest
-from mpy_analysis.scope import FROZEN_GROUP, parse_scope, source_path
+from mpy_build_inputs.scope import FROZEN_GROUP, parse_scope, source_path
 
 
 _REAL_REPOSITORY_ROOT = boundaries._repository_root
