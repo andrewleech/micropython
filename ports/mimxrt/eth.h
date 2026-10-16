@@ -46,6 +46,9 @@ int eth_start(eth_t *self);
 int eth_stop(eth_t *self);
 void eth_low_power_mode(eth_t *self, bool enable);
 
+// Called with IRQs masked before XIP is unavailable. Unknown DMA rings are unsafe.
+bool eth_flash_access_safe(ENET_Type *base);
+
 enum {
     PHY_KSZ8081 = 0,
     PHY_DP83825,

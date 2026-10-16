@@ -17,7 +17,7 @@ ifeq ($(wildcard $(BOARD_DIR)/.),)
     $(error Invalid BOARD specified: $(BOARD_DIR))
 endif
 
-BUILD ?= build-$(BOARD)
+BUILD ?= build-$(BOARD)$(if $(filter 1,$(MBOOT)),-mboot-app)
 PORT ?= /dev/ttyACM0
 CROSS_COMPILE ?= arm-none-eabi-
 GIT_SUBMODULES += lib/CMSIS_6 lib/tinyusb lib/nxp_driver
@@ -40,6 +40,15 @@ include ../../py/mkenv.mk
 
 # Include micropython configuration board makefile
 include $(BOARD_DIR)/mpconfigboard.mk
+
+ifeq ($(MBOOT),1)
+override USE_UF2_BOOTLOADER = 0
+ifeq ($(BOARD),MIMXRT1170_EVK)
+# The current Mboot images authenticate only the M7 application.
+override MICROPY_PY_OPENAMP = 0
+override MICROPY_PY_OPENAMP_REMOTEPROC = 0
+endif
+endif
 
 # MicroPython feature configurations
 MICROPY_ROM_TEXT_COMPRESSION ?= 1
@@ -432,7 +441,7 @@ CFLAGS += \
 	-DMICROPY_HW_SDRAM_AVAIL=$(MICROPY_HW_SDRAM_AVAIL) \
 	-DMICROPY_HW_SDRAM_SIZE=$(MICROPY_HW_SDRAM_SIZE) \
 	-DMICROPY_PY_MACHINE_CAN=$(MICROPY_PY_MACHINE_CAN) \
-	-DXIP_BOOT_HEADER_ENABLE=1 \
+	-DXIP_BOOT_HEADER_ENABLE=$(if $(filter 1,$(MBOOT)),0,1) \
 	-DXIP_EXTERNAL_FLASH=1 \
 	-fdata-sections \
 	-ffunction-sections \
@@ -495,6 +504,9 @@ endif
 
 CFLAGS += $(CFLAGS_EXTRA)
 
+# The signed application layout is selected explicitly; the default board build remains unchanged.
+include $(TOP)/ports/mimxrt/mboot_app.mk
+
 MPY_CROSS_FLAGS += -march=armv7m
 
 # =============================================================================
@@ -554,10 +566,14 @@ $(BUILD)/lib/tinyusb/src/device/usbd.o: CFLAGS += -Wno-missing-braces
 # Build targets
 # =============================================================================
 
+ifeq ($(MBOOT),1)
+all: $(BUILD)/firmware.bin
+else
 ifeq ($(USE_UF2_BOOTLOADER),1)
 all: $(BUILD)/firmware.hex $(BUILD)/firmware.bin $(BUILD)/firmware.uf2
 else
 all: $(BUILD)/firmware.hex $(BUILD)/firmware.bin
+endif
 endif
 
 # Process linker scripts with C preprocessor to exchange LDDEFINES and
@@ -590,7 +606,7 @@ $(OBJ): | $(GEN_PINS_HDR)
 # options change.
 $(HEADER_BUILD)/qstrdefs.generated.h: $(BOARD_DIR)/mpconfigboard.h
 
-$(GEN_FLEXRAM_CONFIG_SRC): $(HEADER_BUILD)
+$(GEN_FLEXRAM_CONFIG_SRC): $(HEADER_BUILD) $(MAKE_FLEXRAM_LD) $(LD_FILES)
 	$(ECHO) "Create $@"
 	$(Q)$(PYTHON) $(MAKE_FLEXRAM_LD) -d $(TOP)/$(MCU_DIR)/$(MCU_SERIES)$(MCU_CORE).h \
 		-f $(TOP)/$(MCU_DIR)/$(MCU_SERIES)$(MCU_CORE)_features.h $(addprefix -l,$(LD_FILES)) -c $(MCU_SERIES) > $@

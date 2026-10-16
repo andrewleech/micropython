@@ -35,8 +35,10 @@ reserved_size = DEFINED(reserved_size) ? reserved_size : 0k;
 /* Specify the memory areas */
 MEMORY
 {
+#if !MICROPY_HW_ENABLE_MBOOT
   m_flash_config (RX) : ORIGIN = flash_config_start,    LENGTH = flash_config_size
   m_ivt          (RX) : ORIGIN = ivt_start,             LENGTH = ivt_size
+#endif
   m_interrupts   (RX) : ORIGIN = interrupts_start,      LENGTH = interrupts_size
   m_text         (RX) : ORIGIN = text_start,            LENGTH = text_size
   m_vfs          (RX) : ORIGIN = vfs_start,             LENGTH = vfs_size
@@ -45,7 +47,12 @@ MEMORY
   m_isr          (RX) : ORIGIN = itcm_start,            LENGTH = 0x400
   m_itcm         (RX) : ORIGIN = itcm_start + 0x400,    LENGTH = itcm_size - 0x400
   m_dtcm         (RW) : ORIGIN = dtcm_start,            LENGTH = dtcm_size
+#if MICROPY_HW_ENABLE_MBOOT
+  m_ocrm         (RW) : ORIGIN = ocrm_start,            LENGTH = MBOOT_BACKUP_START - ocrm_start
+  m_mboot_retained (RW) : ORIGIN = MBOOT_BACKUP_START, LENGTH = 0x800
+#else
   m_ocrm         (RW) : ORIGIN = ocrm_start,            LENGTH = ocrm_size
+#endif
 
   #if MICROPY_HW_SDRAM_AVAIL
   m_sdram        (RX) : ORIGIN = sdram_start,           LENGTH = sdram_size
@@ -62,6 +69,9 @@ SECTIONS
   __vfs_start = ORIGIN(m_vfs);
   __vfs_end = __vfs_start + LENGTH(m_vfs);
 
+#if MICROPY_HW_ENABLE_MBOOT
+  __FLASH_BASE = flash_start;
+#else
   .flash_config :
   {
     . = ALIGN(4);
@@ -80,7 +90,7 @@ SECTIONS
     KEEP(* (.boot_hdr.dcd_data))      /* dcd section */
     . = ALIGN(4);
   } > m_ivt
-
+#endif
   /* ISR Vector table in flash. Copied to ITCM by ResetHandler(). */
 
   .interrupts :
@@ -98,9 +108,14 @@ SECTIONS
   .text :
   {
     . = ALIGN(4);
-    *(EXCLUDE_FILE(*fsl_flexspi.o *gc.o *vm.o *runtime*.o *map.o *mpirq.o *machine_i2c_target.o *fsl_lpi2c.o) .text*) /* .text* sections (code) */
-    *(.rodata)               /* .rodata sections (constants, strings, etc.) */
-    *(.rodata*)              /* .rodata* sections (constants, strings, etc.) */
+#if MICROPY_HW_ENABLE_MBOOT
+    *(EXCLUDE_FILE(*fsl_flexspi.o *flexspi_nor_flash.o *flash.o *mboot_port.o *fault.o *log.o *printf_lite.o *string0.o *gc.o *vm.o *runtime*.o *map.o *mpirq.o *machine_i2c_target.o *fsl_lpi2c.o) .text*)
+    *(EXCLUDE_FILE(*fsl_flexspi.o *flexspi_nor_flash.o *flash.o *mboot_port.o *fault.o *log.o *printf_lite.o *string0.o) .rodata*)
+#else
+    *(EXCLUDE_FILE(*fsl_flexspi.o *gc.o *vm.o *runtime*.o *map.o *mpirq.o *machine_i2c_target.o *fsl_lpi2c.o) .text*)
+    *(.rodata)
+    *(.rodata*)
+#endif
     *(.glue_7)               /* glue arm to thumb code */
     *(.glue_7t)              /* glue thumb to arm code */
     *(.eh_frame)
@@ -203,7 +218,19 @@ SECTIONS
     . = ALIGN(4);
     __ram_function_start__ = .;
     *(.ram_functions*)
-    /* remaining .text and .rodata; i.e. stuff we exclude above because we want it in RAM */
+    *(.ramfunc*)
+#if MICROPY_HW_ENABLE_MBOOT
+    *backup_words.o(.text* .rodata*)
+    *flash.o(.text* .rodata*)
+    *fsl_flexspi.o(.text* .rodata*)
+    *flexspi_nor_flash.o(.text* .rodata*)
+    *mboot_port.o(.text* .rodata*)
+    *fault.o(.text* .rodata*)
+    *log.o(.text* .rodata*)
+    *printf_lite.o(.text* .rodata*)
+    *string0.o(.text* .rodata*)
+#endif
+    /* Remaining code and constants excluded from XIP execute from internal RAM. */
     *(.text*)
     . = ALIGN(4);
     __ram_function_end__ = .;
@@ -265,6 +292,26 @@ SECTIONS
     . += STACK_SIZE;
   } > m_dtcm
 
+#if MICROPY_HW_ENABLE_MBOOT
+  .mboot_romfs _micropy_hw_romfs_part0_start :
+  {
+    __mboot_romfs_start = .;
+    KEEP(*(.mboot_romfs))
+    __mboot_romfs_end = .;
+  }
+
+  .mboot_retained (NOLOAD) :
+  {
+    __mboot_retained_start = .;
+    . += 0x800;
+    __mboot_retained_end = .;
+  } > m_mboot_retained
+  ASSERT(SIZEOF(.mboot_romfs) == MICROPY_HW_ROMFS_BYTES, "signed ROMFS has the wrong reserved size")
+  ASSERT((__mboot_romfs_start & 0xfff) == 0, "signed ROMFS is not sector aligned")
+  ASSERT(__mboot_romfs_end <= MBOOT_APP_START + MBOOT_APP_LEN, "signed ROMFS exceeds the authenticated payload")
+  ASSERT(ORIGIN(m_mboot_retained) == MBOOT_BACKUP_START, "retained OCRAM reservation moved")
+
+#endif
   _flashimagelen = __FLASH_DATA_END - flash_start;
 
   /* Initializes stack on the end of block */

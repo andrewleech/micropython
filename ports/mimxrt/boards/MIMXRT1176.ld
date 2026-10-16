@@ -16,6 +16,16 @@ flash_start         = 0x30000000;
 #endif
 flash_size      = MICROPY_HW_FLASH_SIZE;
 flash_end           = DEFINED(reserved_size) ? ((flash_start) + (flash_size - reserved_size)) : ((flash_start) + (flash_size));
+#if MICROPY_HW_ENABLE_MBOOT
+flash_config_start  = flash_start;
+flash_config_size   = 0;
+ivt_start           = flash_start;
+ivt_size            = 0;
+interrupts_start    = MBOOT_APP_START;
+interrupts_size     = 0x00000400;
+text_start          = interrupts_start + interrupts_size;
+vfs_start           = MBOOT_FS_START;
+#else
 flash_config_start  = flash_start + 0x400;  /* TODO: check why config_start is on 0x400 instead of 0x0 offset */
 flash_config_size   = 0x00000C00;
 ivt_start           = flash_start + 0x00001000;
@@ -24,6 +34,7 @@ interrupts_start    = flash_start + 0x00002000;
 interrupts_size     = 0x00000400;
 text_start          = flash_start + 0x00002400;
 vfs_start           = flash_start + 0x00200000;
+#endif
 
 #if defined MULTI_CORE
 m_core1_image_start = vfs_start - 0x00040000;
@@ -31,7 +42,11 @@ m_core1_image_size  = 0x00040000;
 #endif
 
 vfs_size            = ((flash_end) - (vfs_start));
+#if MICROPY_HW_ENABLE_MBOOT
+_micropy_hw_romfs_part0_start = ((MBOOT_APP_START + MBOOT_APP_LEN - MICROPY_HW_ROMFS_BYTES) & ~0xfff);
+#else
 _micropy_hw_romfs_part0_start = ((vfs_start) - MICROPY_HW_ROMFS_BYTES);
+#endif
 _micropy_hw_romfs_part0_size = MICROPY_HW_ROMFS_BYTES;
 text_size           = ((_micropy_hw_romfs_part0_start) - (text_start));
 itcm_start          = 0x00000000;

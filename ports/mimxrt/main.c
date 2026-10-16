@@ -41,6 +41,10 @@
 #include "modmachine.h"
 #include "modmimxrt.h"
 
+#if MICROPY_HW_MBOOT_APP
+#include "mboot_app.h"
+#endif
+
 #if MICROPY_PY_LWIP
 #include "lwip/init.h"
 #include "lwip/apps/mdns.h"
@@ -161,6 +165,10 @@ int main(void) {
         if (ret & PYEXEC_FORCED_EXIT) {
             goto soft_reset_exit;
         }
+        #if MICROPY_HW_MBOOT_APP && MICROPY_MBOOT_CONFIRM_AUTO
+        // boot.py completed without requesting a reset, so confirm a test image.
+        mboot_app_confirm_if_pending();
+        #endif
         // Do not execute main.py if boot.py failed
         if (pyexec_mode_kind == PYEXEC_MODE_FRIENDLY_REPL && ret != 0) {
             ret = pyexec_file_if_exists("main.py");

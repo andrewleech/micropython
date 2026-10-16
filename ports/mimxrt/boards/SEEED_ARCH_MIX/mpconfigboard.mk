@@ -1,10 +1,17 @@
 MCU_SERIES = MIMXRT1052
 MCU_VARIANT = MIMXRT1052DVL6B
 
+# The fitted DVL5B device uses a 498 MHz core clock at a 1.2 V supply target.
+# Both MicroPython and standalone Mboot compile the shared RT1052 clock setup.
+CFLAGS += -DBOARD_BOOTCLOCKRUN_CORE_CLOCK=498000000U \
+          -DBOARD_BOOTCLOCKRUN_ARM_PLL_LOOP_DIVIDER=83U \
+          -DBOARD_BOOTCLOCKRUN_DCDC_TRG=0x10U
+
 MICROPY_FLOAT_IMPL = double
 MICROPY_HW_FLASH_TYPE = qspi_nor_flash
 MICROPY_HW_FLASH_SIZE = 0x800000  # 8MB
-MICROPY_HW_FLASH_CLK = kFlexSpiSerialClk_133MHz
+# The IS25WP064A supports EBh with six dummy clocks only up to 104 MHz.
+MICROPY_HW_FLASH_CLK = kFlexSpiSerialClk_100MHz
 MICROPY_HW_FLASH_QE_CMD = 0x01
 MICROPY_HW_FLASH_QE_ARG = 0x40
 MICROPY_HW_ROMFS_BYTES = 0x80000  # 512kB

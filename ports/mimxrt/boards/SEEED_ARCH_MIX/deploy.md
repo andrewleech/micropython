@@ -1,3 +1,7 @@
+## Existing TinyUF2 deployment
+
+The instructions below describe the ordinary TinyUF2 configuration only. Do not use them to install or recover an Mboot build: the sdphost commands write a different boot image, and the UF2 drive workflow is disabled in Mboot builds.
+
 The Seeed Arch Mix board is delivered without firmware. The best option to
 install MicroPython is installing a UF2 bootstrap loader first, which then can be
 used to install and update MicroPython. The bootloader has to be installed
@@ -50,3 +54,17 @@ MicroPython is already installed, the bootloader can as well be invoked by calli
 `machine.bootloader()` or switching the USB baud rate at the PC to 1200 baud and back.
 
 If at any time the flash content is corrupted you can always start over from the beginning.
+
+## Mboot build support
+
+Mboot is a separate, opt-in build. Its map reserves flash offsets 0x000000-0x040000 for the bootloader, 0x040000-0x240000 for the primary slot, 0x240000-0x441000 for the offset-swap secondary slot, and 0x441000-0x443000 for the security counter. The application VFS starts at 0x443000. This replaces the ordinary VFS at 0x200000, so back up all needed files before migrating the layout.
+
+Build commands, which do not program the board:
+
+```
+make -C ports/mimxrt -f Makefile.mboot BOARD=SEEED_ARCH_MIX MBOOT_PUBKEY=<public-key.pem>
+make -C ports/mimxrt BOARD=SEEED_ARCH_MIX MBOOT=1 MBOOT_ROMFS=<romfs-image> MBOOT_PUBKEY=<public-key.pem> MBOOT_SIGN_KEY=<private-key.pem>
+make -C ports/mimxrt BOARD=SEEED_ARCH_MIX MBOOT=1 MBOOT_ROMFS=<romfs-image> MBOOT_PUBKEY=<public-key.pem> MBOOT_SIGN_KEY=<private-key.pem> initial
+```
+
+The signed application includes a padded 512 KiB ROMFS image; changes to ROMFS require rebuilding and signing the application, not writing ROMFS in place. Do not use the UF2, sdphost or TinyUF2 recovery instructions above for Mboot. Before installation, make a complete flash backup, verify an independent recovery and restore path, and review the binary, map and programmer commands against the flash layout. Check that the signed application fits the configured slot, including the image header, validation metadata and swap trailer. The build commands do not provide a deployment or restore procedure.
