@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mpy-build-inputs"
+version = "0.1.0"
+description = "Selected compilation inputs and frozen-source scope for MicroPython builds"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+
+[project.scripts]
+mpy-compdb-check = "mpy_build_inputs.compdb:main"
+mpy-build-scope = "mpy_build_inputs.scope:main"
+
+[tool.setuptools]
+packages = ["mpy_build_inputs"]
+package-dir = {mpy_build_inputs = "."}
