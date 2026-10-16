@@ -293,3 +293,26 @@ def test_an_overlay_file_without_attribution_is_refused(support):
     declarations["modules/uses_overlay.pyi"] = HEAD + "import _mpy_pack._hidden\n"
     with pytest.raises(PackError, match="no attribution"):
         assemble_pack(declarations, Sources(vendor, provenance, sources.overlay))
+
+
+def ancestors(text, name):
+    """The classes ``name`` derives from in a stub, through the bases declared in it."""
+    bases = {node.name: [ast.unparse(base) for base in node.bases] for node in ast.parse(text).body if isinstance(node, ast.ClassDef)}
+    found, todo = set(), list(bases.get(name, []))
+    while todo:
+        base = todo.pop()
+        if base not in found:
+            found.add(base)
+            todo += bases.get(base, [])
+    return found
+
+
+def test_exception_classes_the_build_declares_with_a_parent_slot_derive_from_base_exception(support):
+    """A class the template lacks is generated; the generated hierarchy must still let ``except X`` accept it."""
+    declarations = dict(DECLARATIONS)
+    declarations["typeshed/stdlib/builtins.pyi"] += (
+        "class BaseException: ...\nclass Exception(BaseException): ...\nclass LookupError(Exception): ...\n"
+        "class IndexError(LookupError): ...\nclass OverflowError(ArithmeticError): ...\nclass ArithmeticError(Exception): ...\n")
+    builtins = stdlib_modules(assemble_pack(declarations, support[0]))["builtins"]
+    assert ancestors(builtins, "IndexError") == {"LookupError", "Exception", "BaseException"}
+    assert ancestors(builtins, "OverflowError") == {"ArithmeticError", "Exception", "BaseException"}

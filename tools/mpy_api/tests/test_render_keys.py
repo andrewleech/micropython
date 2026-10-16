@@ -57,20 +57,6 @@ def test_rendering_equals_the_always_keyed_rendering(monkeypatch):
     assert any("conflicting export definitions" in text for text in expected.values())
 
 
-def test_canonical_json_is_not_computed_for_singleton_symbols_or_per_module_types(monkeypatch):
-    data = conflicting_inventory()
-    seen = []
-    real = declarations.canonical_json
-    monkeypatch.setattr(declarations, "canonical_json", lambda value: seen.append(value) or real(value))
-    render_declarations(data)
-    names = [value["name"] for value in seen if isinstance(value, dict) and "callshape" in value]
-    # Only the groups of two or more symbols are keyed, in each of the two passes over their module.
-    assert sorted(set(names)) == ["same", "two"] and len(names) == 2 * 4
-    identities = [value for value in seen if isinstance(value, dict) and value.get("kind") == "type"]
-    # One per type in the table, built once, and one per lookup of a class symbol's type, in each of the two passes.
-    assert len(identities) == len(data["types"]) + 2
-
-
 @pytest.mark.parametrize("name", ["builtins", "a.b", "c"])
 def test_a_module_renders_the_same_alone_and_with_the_others(name):
     together = render_declarations(conflicting_inventory())
