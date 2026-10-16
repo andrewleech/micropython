@@ -753,7 +753,7 @@ def collect_frozen_modules(scope: dict) -> list[dict]:
     physical files frozen under distinct target names remain distinct modules.
     Parsing or missing physical inputs are operational errors, not empty modules.
     """
-    from mpy_analysis.scope import FROZEN_GROUP, source_path
+    from mpy_build_inputs.scope import FROZEN_GROUP, source_path
 
     if scope.get("schema_version") != 1:
         raise ValueError("frozen collection requires scope schema_version=1")

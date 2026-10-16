@@ -326,10 +326,59 @@ def test_a_named_directory_with_non_ascii_characters_is_named_and_not_reported(t
 
 def checkout_copy(destination):
     """The parts of the MicroPython checkout the generator reads, without git metadata."""
-    shutil.copytree(ROOT / "tools" / "mpy_analysis" / "mpy_analysis", destination / "tools" / "mpy_analysis" / "mpy_analysis",
+    shutil.copytree(ROOT / "tools" / "mpy_build_inputs", destination / "tools" / "mpy_build_inputs",
                     ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy(ROOT / "tools" / "manifestfile.py", destination / "tools" / "manifestfile.py")
     return destination
+
+
+def test_authorities_and_provenance_use_the_selected_checkout(tmp_path):
+    checkout = checkout_copy(tmp_path / "checkout")
+    code = """
+import sys
+from pathlib import Path
+from mpy_api.cli import authority_modules, producer_tools
+from mpy_api.compiler import authority
+root = Path(sys.argv[1])
+compdb, scope = authority_modules(root)
+for module in (compdb, scope):
+    assert Path(module.__file__).resolve().parent == root / "tools/mpy_build_inputs"
+loaded = authority(root)
+assert Path(loaded.__file__).resolve() == Path(compdb.__file__).resolve()
+paths = {item["path"] for item in producer_tools(root)}
+for name in ("__init__", "compdb", "scope"):
+    assert str(root / "tools/mpy_build_inputs" / (name + ".py")) in paths
+"""
+    result = subprocess.run([sys.executable, "-c", code, str(checkout)], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_authorities_from_a_different_checkout_are_rejected(tmp_path):
+    checkout = checkout_copy(tmp_path / "checkout")
+    code = """
+import sys
+from pathlib import Path
+from mpy_api.cli import authority_modules
+authority_modules(Path(sys.argv[1]))
+try:
+    authority_modules(Path(sys.argv[2]))
+except ValueError as exc:
+    assert "different checkout" in str(exc)
+else:
+    raise AssertionError("foreign compiler-input authority accepted")
+"""
+    result = subprocess.run([sys.executable, "-c", code, str(ROOT), str(checkout)], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_checkout_without_neutral_authorities_is_rejected(tmp_path):
+    from mpy_api.cli import authority_modules
+    from mpy_api.compiler import authority
+
+    with pytest.raises(ValueError, match="no shared compiler-input authority"):
+        authority_modules(tmp_path)
+    with pytest.raises(ValueError, match="lacks compiler database authority"):
+        authority(tmp_path)
 
 
 @pytest.mark.skipif(shutil.which("gcc") is None, reason="needs the selected C compiler")

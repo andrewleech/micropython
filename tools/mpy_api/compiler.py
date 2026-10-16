@@ -302,7 +302,7 @@ def public_inputs(records):
 
 
 def authority(root):
-    path = Path(root).resolve() / 'tools/mpy_analysis/mpy_analysis/compdb.py'
+    path = Path(root).resolve() / 'tools/mpy_build_inputs/compdb.py'
     if not path.is_file():
         raise ValueError(f'MicroPython root lacks compiler database authority: {path}')
     spec = importlib.util.spec_from_file_location('_mpy_api_compdb_authority', path)

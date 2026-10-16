@@ -85,7 +85,7 @@ def verify_identities(identities):
 
 def producer_tools(root):
     tools = [file_identity(path) for path in sorted(Path(__file__).parent.glob("*.py"))]
-    tools.extend(file_identity(root / "tools" / "mpy_analysis" / "mpy_analysis" / (name + ".py"))
+    tools.extend(file_identity(root / "tools" / "mpy_build_inputs" / (name + ".py"))
                  for name in ("__init__", "compdb", "scope"))
     tools.append(file_identity(root / "tools" / "manifestfile.py"))
     return tools
@@ -102,14 +102,14 @@ def assignments(values, label):
 
 
 def authority_modules(root):
-    authority = root / "tools" / "mpy_analysis"
-    if not (authority / "mpy_analysis" / "compdb.py").is_file():
+    authority = root / "tools"
+    if not (authority / "mpy_build_inputs" / "compdb.py").is_file():
         raise ValueError(f"selected checkout has no shared compiler-input authority: {root}")
     sys.path.insert(0, str(authority))
     result = []
     for name in ("compdb", "scope"):
-        module = importlib.import_module("mpy_analysis." + name)
-        expected = authority / "mpy_analysis" / (name + ".py")
+        module = importlib.import_module("mpy_build_inputs." + name)
+        expected = authority / "mpy_build_inputs" / (name + ".py")
         if Path(module.__file__).resolve() != expected.resolve():
             raise ValueError(f"loaded {name} authority belongs to a different checkout")
         result.append(module)

@@ -2,14 +2,14 @@
 
 `mpy-api` produces a compiler-derived API inventory and a `.pyi` tree for one linked MicroPython build. It uses the build's compiler expansion, selected objects, ELF/map and frozen manifests, not a source-directory scan or a union of port configurations.
 
-The package requires Python 3.10 or newer. Its parser dependencies are pinned in `pyproject.toml`. It reads the selected checkout's compilation-database and manifest helpers without importing scanner or consumer tooling.
+The package requires Python 3.10 or newer. Its parser dependencies are pinned in `pyproject.toml`. It depends on the neutral `mpy-build-inputs` package and reads the selected checkout's `tools/mpy_build_inputs` compilation-database and manifest helpers without importing scanner or consumer tooling. The measured checkout must contain these helpers. Authorities already imported from a different checkout are rejected, and the selected helper files are recorded in producer provenance.
 
 ```sh
-python3 -m pip install "$MPY/tools/mpy_api"
+python3 -m pip install "$MPY/tools/mpy_build_inputs" "$MPY/tools/mpy_api"
 mpy-api --help
 ```
 
-The checkout also provides `python3 "$MPY/tools/mpy_api.py"` with the same interface, using the installed parser dependencies.
+The checkout also provides `python3 "$MPY/tools/mpy_api.py"` with the same interface, using the installed parser dependencies. Source imports use `PYTHONPATH="$MPY/tools"`.
 
 ## Build inputs
 
@@ -240,7 +240,7 @@ The tool licence applies to the generator, not to third-party source material re
 Install pytest separately from the runtime package, then run the behavioural regressions with the selected checkout's shared scope helpers importable:
 
 ```sh
-PYTHONPATH="$MPY/tools/mpy_analysis" \
+PYTHONPATH="$MPY/tools" \
     python3 -m pytest "$MPY/tools/mpy_api/tests"
 ```
 
