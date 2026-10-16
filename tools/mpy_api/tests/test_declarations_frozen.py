@@ -948,3 +948,53 @@ def test_the_constructor_fallback_is_deterministic_and_closed_classes_keep_their
     assert render_declarations(copy.deepcopy(data)) == render_declarations(copy.deepcopy(data))
     text = render_declarations(data)["modules/fixture.pyi"]
     assert "__getattr__" not in text
+
+
+def hierarchy_class(name, declared, status="class-object-only", bases=()):
+    return {**constructible(name, {"callable": False}), "type_identity": "fixture:" + name,
+            "declared_bases": list(declared), "bases": list(bases),
+            "base_identities": ["fixture:" + base for base in declared],
+            "base_resolution": {"status": status, "reasons": [], "authority": "fixture"}}
+
+
+def class_bases(text, name):
+    return [ast.unparse(base) for base in declaration(ast.parse(text), name).bases]
+
+
+def test_parent_slot_makes_the_class_a_subclass_when_the_parent_is_declared_in_the_module():
+    exports = [hierarchy_class("BaseError", []), hierarchy_class("LookupFailure", ["BaseError"]),
+               hierarchy_class("IndexFailure", ["LookupFailure"])]
+    text = render_declarations(inventory(module("fixture", exports)))["modules/fixture.pyi"]
+    assert class_bases(text, "LookupFailure") == ["BaseError"] and class_bases(text, "IndexFailure") == ["LookupFailure"]
+    assert class_bases(text, "BaseError") == []
+
+
+def test_parent_slot_hierarchy_is_declared_without_copying_parent_members():
+    parent = {**hierarchy_class("Parent", []), "members": [function("only_on_parent")]}
+    child = hierarchy_class("Child", ["Parent"])
+    tree = ast.parse(render_declarations(inventory(module("fixture", [parent, child])))["modules/fixture.pyi"])
+    assert [ast.unparse(base) for base in declaration(tree, "Child").bases] == ["Parent"]
+    assert not [node for node in declaration(tree, "Child").body if isinstance(node, ast.FunctionDef) and node.name == "only_on_parent"]
+
+
+@pytest.mark.parametrize("declared", [["Elsewhere"], ["Child"], ["Parent", "Other"], ["not an identifier"]])
+def test_a_parent_the_module_does_not_declare_or_cannot_name_leaves_the_class_without_bases(declared):
+    exports = [hierarchy_class("Parent", []), hierarchy_class("Child", declared)]
+    text = render_declarations(inventory(module("fixture", exports)))["modules/fixture.pyi"]
+    assert class_bases(text, "Child") == []
+
+
+def test_only_a_parent_slot_hierarchy_is_declared_and_inherited_bases_are_unchanged():
+    exports = [hierarchy_class("Parent", []), hierarchy_class("Unresolved", ["Parent"], status="unresolved"),
+               hierarchy_class("Object", ["object"]), hierarchy_class("Inherited", ["Parent"], status="resolved", bases=["Parent"])]
+    text = render_declarations(inventory(module("fixture", exports)))["modules/fixture.pyi"]
+    assert class_bases(text, "Unresolved") == [] and class_bases(text, "Object") == []
+    assert class_bases(text, "Inherited") == ["Parent"]
+
+
+@pytest.mark.parametrize("identities", [[], [None], ["fixture:UnexportedParent"]])
+def test_parent_slot_does_not_bind_an_unproven_or_different_same_named_type(identities):
+    parent = hierarchy_class("Parent", [])
+    child = {**hierarchy_class("Child", ["Parent"]), "base_identities": identities}
+    text = render_declarations(inventory(module("fixture", [parent, child])))["modules/fixture.pyi"]
+    assert class_bases(text, "Child") == []

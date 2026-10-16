@@ -168,6 +168,17 @@ class _Renderer:
             symbol = pending.pop()
             self.names.add(str(symbol.get("name")))
             pending.extend(reversed(list(symbol.get("members", []))))
+        class_exports: dict[str, list[dict]] = {}
+        for symbol in module.get("exports", []):
+            class_exports.setdefault(str(symbol.get("name")), []).append(symbol)
+        self.classes = {
+            name: canonical_json(symbol["type_identity"])
+            for name, group in class_exports.items() if len(group) == 1
+            for symbol in group
+            if _identifier(name) and symbol.get("kind") == "class" and _available(symbol)
+            and symbol.get("type_identity") is not None and not symbol.get("import_binding")
+            and not symbol.get("alias_binding")
+        }
         self.any_name = self.support_name("_mpy_Any")
         self.typevar_name = self.support_name("_mpy_TypeVar")
 
@@ -474,11 +485,33 @@ class _Renderer:
                 raise ValueError(f"unsafe normalized base for {name}: {bases!r}")
             if _status(definition.get("resolution", {}).get("bases", "resolved")) not in _RESOLVED:
                 bases = []
+            elif not bases:
+                bases = self.declared_bases(name, definition)
             lines.append(f"{indent}class {name}{'(' + ', '.join(bases) + ')' if bases else ''}:")
             return lines, definition
         else:
             lines.append(f"{indent}{name}: {self.contract(symbol.get('value_contract'))}")
         return lines, None
+
+    def declared_bases(self, name: str, definition: dict) -> list[str]:
+        """The parent classes of a class whose inheritance is known from its parent slot only.
+
+        The parent slot is what the runtime walks for ``issubclass`` and ``except`` matching, so it makes the class a
+        subclass whether or not native instance dispatch inherits the parent's members (``base_resolution`` is then
+        ``class-object-only`` and the generator copies no members). Each named parent must match the identity of a
+        class this module declares; an unavailable or differently bound parent leaves the class without bases.
+        ``object`` is every class's implicit base."""
+        if _status(definition.get("base_resolution")) != "class-object-only":
+            return []
+        declared = definition.get("declared_bases", [])
+        identities = definition.get("base_identities", [])
+        if not declared or len(declared) != len(identities):
+            return []
+        for base, identity in zip(declared, identities):
+            if (not _qualified(base) or base == name or
+                    (base != "object" and (identity is None or self.classes.get(base) != canonical_json(identity)))):
+                return []
+        return [base for base in declared if base != "object"]
 
     def class_lines(self, lines: list[str], definition: dict, indent: str, members: list[str]) -> list[str]:
         """Complete a class declaration from ``symbol`` with its rendered member lines.
