@@ -1,0 +1,274 @@
+Metadata-Version: 2.5
+Name: micropython-stubber
+Version: 1.29.0
+Summary: Tooling to create and maintain stubs for MicroPython
+Project-URL: Documentation, https://micropython-stubber.readthedocs.io/
+Project-URL: Homepage, https://github.com/Josverl/micropython-stubber#readme
+Project-URL: Repository, https://github.com/Josverl/micropython-stubber
+Author-email: Jos Verlinde <jos_verlinde@hotmail.com>
+License-Expression: MIT
+License-File: LICENSE
+Keywords: MicroPython,linting,pyright,static type check,stubs,vscode
+Classifier: Programming Language :: Python :: Implementation :: CPython
+Classifier: Programming Language :: Python :: Implementation :: MicroPython
+Classifier: Topic :: Software Development :: Build Tools
+Classifier: Topic :: Text Editors :: Integrated Development Environments (IDE)
+Requires-Python: <4.0,>=3.10
+Requires-Dist: autoflake<3.0,>=1.7
+Requires-Dist: cachetools<6.0.0,>=5.3.0
+Requires-Dist: click<9.0.0,>=8.1.3
+Requires-Dist: diskcache<6.0.0,>=5.6.0
+Requires-Dist: executing<3.0.0,>=2.0.1
+Requires-Dist: greenlet<3.2.5,>=3.2.4
+Requires-Dist: importlib-metadata<9,>=1; python_version < '3.8'
+Requires-Dist: keyring<26.0.0,>=25.0.0
+Requires-Dist: libcst<2.0.0,>=1.1.0
+Requires-Dist: loguru<0.8,>=0.6
+Requires-Dist: mpflash==1.29.0
+Requires-Dist: mpremote==1.29.0
+Requires-Dist: mpy-cross>=1.29.0
+Requires-Dist: mypy-gitlab-code-quality<2.0.0,>=1.1.0
+Requires-Dist: mypy>=1.10
+Requires-Dist: packaging<25.0.0,>=24.2
+Requires-Dist: pydeps==3.0.1
+Requires-Dist: pygithub<3.0.0,>=2.1.1
+Requires-Dist: pypi-simple<2.0.0,>=1.0.0
+Requires-Dist: pyright>=1.1.341
+Requires-Dist: pyserial>=3.5
+Requires-Dist: python-minifier<3.0.0,>=2.7.0
+Requires-Dist: requests<3.0.0,>=2.32.3
+Requires-Dist: rich-click<2.0.0,>=1.8.3
+Requires-Dist: ruff<0.13.0,>=0.12.11
+Requires-Dist: tenacity<10.0.0,>=9.0.0
+Requires-Dist: tomli-w<2.0.0,>=1.0.0
+Requires-Dist: tomli<3.0.0,>=2.0.1; python_version < '3.11'
+Requires-Dist: typed-config<2.0.0,>=1.3.0
+Requires-Dist: urllib3<3.0.0,>=2.2.2
+Description-Content-Type: text/markdown
+
+# Boost MicroPython productivity in VSCode
+ 
+  [![pypi version](https://badgen.net/pypi/v/micropython-stubber)](https://pypi.org/project/micropython-stubber/)
+  [![python versions](https://badgen.net/pypi/python/micropython-stubber)](https://badgen.net/pypi/python/micropython-stubber)
+  [![Ruff](https://img.shields.io/badge/code%20style-ruff-d7ff64.svg)](https://docs.astral.sh/ruff/ "Ruff badge")
+  [![Star on GitHub](https://img.shields.io/github/stars/josverl/micropython-stubber.svg?style=social)](https://github.com/josverl/micropython-stubber/stargazers)
+  [![All Contributors](https://img.shields.io/badge/all_contributors-19-green.svg?style=flat-square)](#Contributions)
+  <!-- break -->
+  [![pytest stubber](https://github.com/Josverl/micropython-stubber/actions/workflows/pytest.yml/badge.svg)](https://github.com/Josverl/micropython-stubber/actions/workflows/pytest.yml)
+  [![Documentation Status](https://readthedocs.org/projects/micropython-stubber/badge/?version=latest)](https://micropython-stubber.readthedocs.io/en/latest/?badge=latest "Document build status badge")
+  <!-- break -->
+  [![Open in VSCode](https://img.shields.io/static/v1?logo=visualstudiocode&label=&message=Open%20in%20Visual%20Studio%20Code&labelColor=2c2c32&color=007acc&logoColor=007acc
+)](https://open.vscode.dev/josverl/micropython-stubber)
+  
+The IntelliSense and code linting that is so prevalent in modern editors, does not work out-of-the-gate for MicroPython projects.
+While the language is Python, the modules used are different from CPython, and also different ports have different modules and classes, or the same class with different parameters.
+
+Writing MicroPython code in a modern editor should not need to involve keeping a browser open to check for the exact parameters to read a sensor, light-up a LED or send a network request.
+
+Fortunately with some additional configuration and data, it is possible to make the editors understand your flavor of MicroPython, whether you use one of the pre-compiled firmwares, but also if you run a one-off custom firmware version.
+
+
+![demo][]]
+
+In order to achieve this a few things are needed:
+1) Stub files for the native / enabled modules in the firmware using PEP 484 Type Hints
+2) Specific configuration of the VS Code Python extensions 
+3) Specific configuration of Pylint [ Optional ]
+4) Suppression of warnings that collide with the MicroPython principles or code optimization.
+
+Please review the documentation on [https://micropython-stubber.readthedocs.io]  
+
+With that in place, VSCode will understand MicroPython for the most part, and help you to write code, and catch more errors before deploying it to your board. 
+
+Note that the above is not limited to VSCode and pylint, but it happens to be the combination that I use. 
+
+A lot of subs have already been generated and are shared on PyPi, github or pre-installed by a tool, so it is quite likely that you can just grab a copy be be productive in a few minutes.
+
+## To install pre-built stubs from PyPI
+This section describes how to install the stubs from PyPI, and how to use them in your project.
+If you want to create or maintain stub - please see the next section.
+
+- Install in a typings folder (recommended) 
+  `pip install -U micropython-<port>[-<board>]stubs --no-user --target ./typings`
+- Install in a venv (after activating) 
+  `pip install -U micropython-<port>[-<board>]stubs --no-user`
+
+Examples:
+``` bash
+pip install -U micropython-stm32-stubs
+
+# Install stubs for a specific version.
+pip install -U micropython-esp32-stubs==1.20.0.*
+
+# Install stubs for a specific board.
+pip install -U micropython-rp2-pico_w-stubs
+```
+
+For more details how to use the stubs please refer to [the documentation on RTD](https://micropython-stubs.readthedocs.io/en/latest/20_using.html)
+
+
+1. The sister-repo [**MicroPython-stubs**][stubs-repo] contains [all stubs][all-stubs] I have collected with the help of others, and which can be used directly.
+That repo also contains examples configuration files that can be easily adopted to your setup.
+
+2. Micropython-stubber uses [MPFlash](https://github.com/Josverl/mpflash?tab=readme-ov-file) in some of its operations.
+   mpflash was formerly hosted in this repo, but has been moved to its own repo.
+
+## Quick start to build stubs
+
+```bash
+pip install micropython-stubber
+
+cd my_stub_workspace
+mkdir all-stubs
+
+# pick a firmware version (tag, stable, preview)
+stubber switch stable
+
+# generate doc-based stdlib stubs for the selected version
+stubber docstubs --enrich
+
+# capture frozen modules from reference firmware downloads
+stubber frozen --version stable --enrich
+
+# merge the pieces for one or more targets
+stubber merge --port esp32 --board ESP32_GENERIC --version stable
+stubber merge --port rp2 --board RPI_PICO_W --version stable
+
+# build final wheel-style outputs in all-stubs/<port>/<board>
+stubber build --port esp32 --board ESP32_GENERIC --version stable
+```
+
+- `switch` locks the workspace to a MicroPython release before running other commands.
+- `docstubs` pulls documentation-based stubs; `frozen` adds board-specific frozen modules.
+- `merge` and `build` combine everything into installable stubs under `all-stubs/`.
+
+## Common commands
+
+- List available firmware tags: `stubber switch --list`
+- Create merged stubs for every board of a port: `stubber merge --port esp32 --board all --version stable`
+- Rebuild already downloaded artifacts: `stubber build --port esp32 --board ESP32_GENERIC --version stable`
+- Enrich an existing stub set with docstrings/parameter hints: `stubber docstubs --enrich`
+
+## Outputs and where to use them
+
+- Generated wheels and folders end up under `all-stubs/<port>/<board>/<version>`.
+- Point your editor type checker (Pyright/Pylance/Mypy) to the `all-stubs` path or install the produced wheels into your project virtual environment.
+- For a full worked example, see the notebook [Manual stub build chain.ipynb](Manual%20stub%20build%20chain.ipynb) which mirrors the CLI workflow used above.
+
+### Working with Custom MicroPython Builds
+
+If you're working with a fork, branch, or custom build of MicroPython (such as a custom RPi Pico W firmware), see the [Custom MicroPython Guide](docs/25_custom_micropython.md) for detailed instructions on how to generate stubs for your specific build.
+
+
+## Developing & testing 
+
+This is described in more detail in the [developing](docs/developing.md) and [testing](docs/testing.md)  documents in the docs folder.
+
+## Branch Main
+The name of the default branch has been changed to `main`.
+If you have cloned this repo before you main need to adjust the local repro to be aware of this, or create a fresh clone.
+
+To update run the below command:  
+``` bash
+git branch -m master main                    
+git fetch origin
+git branch -u origin/main main                      
+git remote set-head origin -a
+```
+
+for more info see [**Renaming a branch**](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-branches-in-your-repository/renaming-a-branch#updating-a-local-clone-after-a-branch-name-changes)
+
+## Licensing 
+
+`MicroPython-Stubber` is licensed under the MIT license, and all contributions should follow this [LICENSE](LICENSE).
+
+
+# Contributions
+<!-- spell-checker: disable -->
+<!-- 
+To add via the cli run the following command:
+npx all-contributors-cli add user things
+npx all-contributors-cli generate
+
+ - bug
+ - tool
+ - stubs
+ - test
+ - doc
+ - code
+ - research
+ - ideas
+ - content
+ - mpflash
+ -->
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Josverl"><img src="https://avatars2.githubusercontent.com/u/981654?v=4?s=100" width="100px;" alt="Jos Verlinde"/><br /><sub><b>Jos Verlinde</b></sub></a><br /><a href="https://github.com/Josverl/micropython-stubber/commits?author=josverl" title="Code">💻</a> <a href="#research-josverl" title="Research">🔬</a> <a href="#ideas-josverl" title="Ideas, Planning, & Feedback">🤔</a> <a href="#content-josverl" title="Content">🖋</a> <a href="#stubs-josverl" title="MicroPython stubs">🖍️</a> <a href="#test-josverl" title="Test">✅</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://thonny.org/"><img src="https://avatars1.githubusercontent.com/u/46202078?v=4?s=100" width="100px;" alt="Thonny, Python IDE for beginners"/><br /><sub><b>Thonny, Python IDE for beginners</b></sub></a><br /><a href="#ideas-thonny" title="Ideas, Planning, & Feedback">🤔</a> <a href="#research-thonny" title="Research">🔬</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://micropython.org/"><img src="https://avatars1.githubusercontent.com/u/6298560?v=4?s=100" width="100px;" alt="MicroPython"/><br /><sub><b>MicroPython</b></sub></a><br /><a href="#data-micropython" title="Data">🔣</a> <a href="#stubs-micropython" title="MicroPython stubs">🖍️</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/microsoft/pyright"><img src="https://avatars.githubusercontent.com/u/6154722?v=4?s=100" width="100px;" alt="pyright"/><br /><sub><b>pyright</b></sub></a><br /><a href="#tool-pyright" title="Tools">🔧</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/loboris"><img src="https://avatars3.githubusercontent.com/u/6280349?v=4?s=100" width="100px;" alt="Boris Lovosevic"/><br /><sub><b>Boris Lovosevic</b></sub></a><br /><a href="#data-loboris" title="Data">🔣</a> <a href="#stubs-loboris" title="MicroPython stubs">🖍️</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/pfalcon"><img src="https://avatars3.githubusercontent.com/u/500451?v=4?s=100" width="100px;" alt="Paul Sokolovsky"/><br /><sub><b>Paul Sokolovsky</b></sub></a><br /><a href="#data-pfalcon" title="Data">🔣</a> <a href="#stubs-pfalcon" title="MicroPython stubs">🖍️</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/pycopy"><img src="https://avatars0.githubusercontent.com/u/67273174?v=4?s=100" width="100px;" alt="pycopy"/><br /><sub><b>pycopy</b></sub></a><br /><a href="#data-pycopy" title="Data">🔣</a> <a href="#stubs-pycopy" title="MicroPython stubs">🖍️</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/pycom"><img src="https://avatars2.githubusercontent.com/u/16415153?v=4?s=100" width="100px;" alt="Pycom"/><br /><sub><b>Pycom</b></sub></a><br /><a href="#infra-pycom" title="Infrastructure (Hosting, Build-Tools, etc)">🚇</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/BradenM"><img src="https://avatars1.githubusercontent.com/u/5913808?v=4?s=100" width="100px;" alt="Braden Mars"/><br /><sub><b>Braden Mars</b></sub></a><br /><a href="https://github.com/Josverl/micropython-stubber/issues?q=author%3ABradenM" title="Bug reports">🐛</a> <a href="https://github.com/Josverl/micropython-stubber/commits?author=BradenM" title="Code">💻</a> <a href="#stubs-BradenM" title="MicroPython stubs">🖍️</a> <a href="#platform-BradenM" title="Packaging/porting to new platform">📦</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://binary.com.au/"><img src="https://avatars2.githubusercontent.com/u/175909?v=4?s=100" width="100px;" alt="James Manners"/><br /><sub><b>James Manners</b></sub></a><br /><a href="https://github.com/Josverl/micropython-stubber/commits?author=jmannau" title="Code">💻</a> <a href="https://github.com/Josverl/micropython-stubber/issues?q=author%3Ajmannau" title="Bug reports">🐛</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://patrickwalters.us/"><img src="https://avatars0.githubusercontent.com/u/4002194?v=4?s=100" width="100px;" alt="Patrick"/><br /><sub><b>Patrick</b></sub></a><br /><a href="https://github.com/Josverl/micropython-stubber/issues?q=author%3Aaskpatrickw" title="Bug reports">🐛</a> <a href="https://github.com/Josverl/micropython-stubber/commits?author=askpatrickw" title="Code">💻</a> <a href="#stubs-askpatrickw" title="MicroPython stubs">🖍️</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://opencollective.com/pythonseverywhere"><img src="https://avatars3.githubusercontent.com/u/16009100?v=4?s=100" width="100px;" alt="Paul m. p. P."/><br /><sub><b>Paul m. p. P.</b></sub></a><br /><a href="#ideas-pmp-p" title="Ideas, Planning, & Feedback">🤔</a> <a href="#research-pmp-p" title="Research">🔬</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/edreamleo"><img src="https://avatars0.githubusercontent.com/u/592928?v=4?s=100" width="100px;" alt="Edward K. Ream"/><br /><sub><b>Edward K. Ream</b></sub></a><br /><a href="#plugin-edreamleo" title="Plugin/utility libraries">🔌</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/dastultz"><img src="https://avatars3.githubusercontent.com/u/4334042?v=4?s=100" width="100px;" alt="Daryl Stultz"/><br /><sub><b>Daryl Stultz</b></sub></a><br /><a href="#stubs-dastultz" title="MicroPython stubs">🖍️</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/cabletie"><img src="https://avatars1.githubusercontent.com/u/2356734?v=4?s=100" width="100px;" alt="Keeping things together"/><br /><sub><b>Keeping things together</b></sub></a><br /><a href="https://github.com/Josverl/micropython-stubber/issues?q=author%3Acabletie" title="Bug reports">🐛</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/vbolshakov"><img src="https://avatars2.githubusercontent.com/u/2453324?v=4?s=100" width="100px;" alt="vbolshakov"/><br /><sub><b>vbolshakov</b></sub></a><br /><a href="https://github.com/Josverl/micropython-stubber/issues?q=author%3Avbolshakov" title="Bug reports">🐛</a> <a href="#stubs-vbolshakov" title="MicroPython stubs">🖍️</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://lemariva.com/"><img src="https://avatars2.githubusercontent.com/u/15173329?v=4?s=100" width="100px;" alt="Mauro Riva"/><br /><sub><b>Mauro Riva</b></sub></a><br /><a href="#blog-lemariva" title="Blogposts">📝</a> <a href="https://github.com/Josverl/micropython-stubber/issues?q=author%3Alemariva" title="Bug reports">🐛</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/MathijsNL"><img src="https://avatars0.githubusercontent.com/u/1612886?v=4?s=100" width="100px;" alt="MathijsNL"/><br /><sub><b>MathijsNL</b></sub></a><br /><a href="https://github.com/Josverl/micropython-stubber/issues?q=author%3AMathijsNL" title="Bug reports">🐛</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://comingsoon.tm/"><img src="https://avatars0.githubusercontent.com/u/13251689?v=4?s=100" width="100px;" alt="Callum Jacob Hays"/><br /><sub><b>Callum Jacob Hays</b></sub></a><br /><a href="https://github.com/Josverl/micropython-stubber/issues?q=author%3ACallumJHays" title="Bug reports">🐛</a> <a href="#test-CallumJHays" title="Test">✅</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/v923z"><img src="https://avatars0.githubusercontent.com/u/1310472?v=4?s=100" width="100px;" alt="Zoltán Vörös"/><br /><sub><b>Zoltán Vörös</b></sub></a><br /><a href="#data-v923z" title="Data">🔣</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/vincent-l-j"><img src="https://avatars.githubusercontent.com/u/20021376?v=4?s=100" width="100px;" alt="vincent-l-j"/><br /><sub><b>vincent-l-j</b></sub></a><br /><a href="https://github.com/Josverl/micropython-stubber/commits?author=vincent-l-j" title="Documentation">📖</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/yegorLitvinov"><img src="https://avatars.githubusercontent.com/u/20367310?v=4?s=100" width="100px;" alt="Egor Litvinov"/><br /><sub><b>Egor Litvinov</b></sub></a><br /><a href="https://github.com/Josverl/micropython-stubber/issues?q=author%3AyegorLitvinov" title="Bug reports">🐛</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/samskiter"><img src="https://avatars.githubusercontent.com/u/1271643?v=4?s=100" width="100px;" alt="Sam Duke"/><br /><sub><b>Sam Duke</b></sub></a><br /><a href="https://github.com/Josverl/micropython-stubber/commits?author=samskiter" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/hlovatt"><img src="https://avatars.githubusercontent.com/u/8424169?v=4?s=100" width="100px;" alt="Howard Lovatt"/><br /><sub><b>Howard Lovatt</b></sub></a><br /><a href="#stubs-hlovatt" title="MicroPython stubs">🖍️</a> <a href="#research-hlovatt" title="Research">🔬</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://virtualwolf.org/"><img src="https://avatars.githubusercontent.com/u/1644623?v=4?s=100" width="100px;" alt="VirtualWolf"/><br /><sub><b>VirtualWolf</b></sub></a><br /><a href="#test-VirtualWolf" title="Test">✅</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/lukaskremla"><img src="https://avatars.githubusercontent.com/u/155779787?v=4?s=100" width="100px;" alt="Lukas Kremla"/><br /><sub><b>Lukas Kremla</b></sub></a><br /><a href="#test-lukaskremla" title="Test">✅</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!
+
+----------------------------
+
+--------------------------------
+
+
+
+[stubs-repo]:   https://github.com/Josverl/micropython-stubs
+[stubs-repo2]:  https://github.com/BradenM/micropy-stubs
+[micropython-stubber]: https://github.com/Josverl/micropython-stubber
+[micropython-stubs]: https://github.com/Josverl/micropython-stubs#micropython-stubs
+[micropy-cli]: https://github.com/BradenM/micropy-cli
+[using-the-stubs]: https://github.com/Josverl/micropython-stubs#using-the-stubs
+[demo]:         https://github.com/Josverl/micropython-stubber/blob/main/docs/img/demo.gif?raw=true	"demo of writing code using the stubs"
+[stub processing order]: https://github.com/Josverl/micropython-stubber/blob/main/docs/img/stuborder_pylance.png?raw=true	"recommended stub processing order"
+[naming-convention]: #naming-convention-and-stub-folder-structure
+[all-stubs]: https://github.com/Josverl/micropython-stubs/blob/main/firmwares.md
+[micropython]: https://github.com/micropython/micropython
+[micropython-lib]:  https://github.com/micropython/micropython-lib
+[pycopy]: https://github.com/pfalcon/pycopy
+[pycopy-lib]: https://github.com/pfalcon/pycopy-lib
+
