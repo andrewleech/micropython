@@ -15,6 +15,8 @@ The checkout also provides `python3 "$MPY/tools/mpy_api.py"` with the same inter
 
 Start with a fresh matching build and retain its complete compilation database, objects, unstripped ELF, linker map and actual successful link command. Do not change the sources, headers, manifests, compiler, parser installation or linked inputs while generating declarations. The generator does not build firmware or recover stripped symbols.
 
+Set `--micropython-root` to the checkout used to compile that firmware, not a separate checkout containing the tooling. Additional `--source-root` entries name inputs but do not make another checkout's headers the selected framework. A mismatched root leaves runtime-helper evidence unresolved and can let general documentation supply an annotation that is wrong for the build.
+
 The link-command JSON contains the real argument vector and its absolute working directory. Record `exit: 0` from the successful invocation. This is an input contract, not a command to replay:
 
 ```json
