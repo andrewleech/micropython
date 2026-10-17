@@ -540,6 +540,7 @@ def load_enrichment(manifest_path):
     files = _list(manifest["files"], "files", nonempty=True)
     paths, modules = set(), set()
     candidates = []
+    declaration_texts = {}
     for row in files:
         _object(row, ("path", "module", "bytes", "sha256", "source_ids", "license_ids"), ("symbol_lineage",), label="file")
         relative = _relative(row["path"], "declaration path")
@@ -565,6 +566,7 @@ def load_enrichment(manifest_path):
             _references(item["license_ids"], licenses, "symbol.license_ids")
         _, data = _capture(tree / relative, snapshots, {key: row[key] for key in ("path", "bytes", "sha256")})
         candidates.extend(_candidates(data, row, sources, licenses))
+        declaration_texts[row["module"]] = data.decode("utf-8")
     members = _tree_members(tree)
     if members != sorted(paths):
         _fail(f"tree membership differs from pinned declarations: pinned={sorted(paths)} actual={members}")
@@ -583,17 +585,13 @@ def load_enrichment(manifest_path):
             target_paths.add(pin["path"])
             _capture(path, snapshots, pin)
     tree_records = sorted(deep_copy(files), key=lambda row: row["path"])
-    for row in tree_records:
-        row["lineage"] = _lineage(row, sources, licenses)
-        for symbol in row.get("symbol_lineage", []):
-            symbol["lineage"] = _lineage(symbol, sources, licenses)
     tree_identity = {"path": str(tree), "sha256": hashlib.sha256(canonical_json(tree_records).encode()).hexdigest(), "files": tree_records}
     inputs = sorted((deep_copy(snapshot["identity"]) for snapshot in snapshots.values()), key=lambda row: row["path"])
     provenance = {"schema_version": 1, "manifest": manifest_identity, "tree": tree_identity,
                   "producer": deep_copy(producer), "sources": deep_copy(manifest["sources"]),
                   "licenses": deep_copy(manifest["licenses"]), "target": deep_copy(target)}
     bundle = {"provenance": provenance, "inputs": inputs, "candidates": candidates,
-              "manifest": deep_copy(manifest),
+              "manifest": deep_copy(manifest), "declaration_texts": declaration_texts,
               "notice_artifacts": notice_artifacts, "_snapshots": snapshots,
               "_tree": str(tree), "_members": members}
     verify_enrichment(bundle)
@@ -880,9 +878,13 @@ def _source_default(contract):
     return None
 
 
-def merge_enrichment(inventory, bundle):
-    """Attach attributed comparison evidence, never mutate authoritative symbol facts."""
+def merge_enrichment(inventory, bundle, *, compare=True):
+    """Attach reference provenance and optional comparisons without changing source facts."""
     target_match = _target_match(inventory, bundle)
+    inventory.setdefault("provenance", {}).setdefault("producer_inputs", {})["enrichment"] = {
+        "provenance": deep_copy(bundle["provenance"]), "inputs": deep_copy(bundle["inputs"])}
+    if not compare:
+        return {"target_match": target_match}
     records = []
     source_lineage = {"source_revision": inventory.get("build", {}).get("source_revision"),
                       "root": inventory.get("build", {}).get("root"),
@@ -944,6 +946,4 @@ def merge_enrichment(inventory, bundle):
               "source_lineage": source_lineage,
               "summary": dict(sorted(Counter(row["outcome"] for row in records).items())), "records": records}
     inventory["enrichment"] = report
-    inventory.setdefault("provenance", {}).setdefault("producer_inputs", {})["enrichment"] = {
-        "provenance": deep_copy(bundle["provenance"]), "inputs": deep_copy(bundle["inputs"])}
     return report

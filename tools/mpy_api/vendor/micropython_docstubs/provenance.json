@@ -1,0 +1,1756 @@
+{
+  "schema_version": 1,
+  "upstream": {
+    "repository": "https://github.com/Josverl/micropython-stubs",
+    "revision": "b7428e135a09d7a563b2d58d1c9664961e06c8e3",
+    "documentation_path": "stubs/micropython-v1_30_0_preview-docstubs",
+    "documentation_git_tree": "20c926c4e78097b08a636ac27ee771c2401dd0d0"
+  },
+  "firmware_documentation": {
+    "version": "v1.30.0-preview",
+    "release": "v1.30.0-preview-147-g9e348d293",
+    "repository": "https://github.com/micropython/micropython",
+    "revision": "9e348d293c58ee6d2b8a581be3a199c2b7e2f145",
+    "exact_selected_build_claim": false
+  },
+  "producer": {
+    "name": "micropython-stubber",
+    "version": "1.29.0",
+    "repository": "https://github.com/Josverl/micropython-stubber",
+    "revision": "65cf4c1f5716c0effbc448bd3930030cb34e76bc",
+    "wheel_url": "https://files.pythonhosted.org/packages/57/29/90ac7452ad3ea5e09cca9aeea5ab337dd081c945816a6c6feb57c201e227/micropython_stubber-1.29.0-py3-none-any.whl",
+    "wheel_sha256": "0b243b92751573859df2c714c6442d0b6dd8dbccc8ecb8a5e6224150fccf2118",
+    "wheel_contains_generated_documentation": false,
+    "wheel_members": [
+      "stubber/__init__.py",
+      "stubber/downloader.py",
+      "stubber/get_lobo.py",
+      "stubber/merge_config.py",
+      "stubber/minify.py",
+      "stubber/modcat.py",
+      "stubber/stubber.py",
+      "stubber/stubs_from_docs.py",
+      "stubber/typing_collector.py",
+      "stubber/update_module_list.py",
+      "stubber/variants.py",
+      "stubber/board/board_info.csv",
+      "stubber/board/boot.py",
+      "stubber/board/createstubs.py",
+      "stubber/board/createstubs_db.py",
+      "stubber/board/createstubs_db_min.py",
+      "stubber/board/createstubs_db_mpy.mpy",
+      "stubber/board/createstubs_lvgl.py",
+      "stubber/board/createstubs_lvgl_min.py",
+      "stubber/board/createstubs_lvgl_mpy.mpy",
+      "stubber/board/createstubs_mem.py",
+      "stubber/board/createstubs_mem_min.py",
+      "stubber/board/createstubs_mem_mpy.mpy",
+      "stubber/board/createstubs_min.py",
+      "stubber/board/createstubs_mpy.mpy",
+      "stubber/board/fw_info.py",
+      "stubber/board/info.py",
+      "stubber/board/main.py",
+      "stubber/board/modulelist.txt",
+      "stubber/board/pkg_full.json",
+      "stubber/board/pkg_minified.json",
+      "stubber/board/pkg_mpy.json",
+      "stubber/board/pyrightconfig.json",
+      "stubber/bulk/mcu_stubber.py",
+      "stubber/codemod/__init__.py",
+      "stubber/codemod/add_comment.py",
+      "stubber/codemod/add_method.py",
+      "stubber/codemod/board.py",
+      "stubber/codemod/enrich.py",
+      "stubber/codemod/merge_docstub.py",
+      "stubber/codemod/modify_list.py",
+      "stubber/codemod/utils.py",
+      "stubber/codemod/_partials/__init__.py",
+      "stubber/codemod/_partials/db_main.py",
+      "stubber/codemod/_partials/lvgl_main.py",
+      "stubber/codemod/_partials/modules_reader.py",
+      "stubber/codemod/visitors/type_helpers.py",
+      "stubber/commands/__init__.py",
+      "stubber/commands/build_cmd.py",
+      "stubber/commands/cli.py",
+      "stubber/commands/clone_cmd.py",
+      "stubber/commands/config_cmd.py",
+      "stubber/commands/enrich_folder_cmd.py",
+      "stubber/commands/get_docstubs_cmd.py",
+      "stubber/commands/get_frozen_cmd.py",
+      "stubber/commands/get_mcu_cmd.py",
+      "stubber/commands/init_cmd.py",
+      "stubber/commands/merge_cmd.py",
+      "stubber/commands/publish_cmd.py",
+      "stubber/commands/stub_cmd.py",
+      "stubber/commands/switch_cmd.py",
+      "stubber/commands/variants_cmd.py",
+      "stubber/data/board_info.csv",
+      "stubber/data/board_info.json",
+      "stubber/data/micropython_tags.csv",
+      "stubber/freeze/__init__.py",
+      "stubber/freeze/common.py",
+      "stubber/freeze/freeze_folder.py",
+      "stubber/freeze/freeze_manifest_2.py",
+      "stubber/freeze/get_frozen.py",
+      "stubber/publish/__init__.py",
+      "stubber/publish/bump.py",
+      "stubber/publish/candidates.py",
+      "stubber/publish/database.py",
+      "stubber/publish/defaults.py",
+      "stubber/publish/enums.py",
+      "stubber/publish/helpers.py",
+      "stubber/publish/merge_docstubs.py",
+      "stubber/publish/package.py",
+      "stubber/publish/pathnames.py",
+      "stubber/publish/publish.py",
+      "stubber/publish/pypi.py",
+      "stubber/publish/stubpackage.py",
+      "stubber/rst/__init__.py",
+      "stubber/rst/classsort.py",
+      "stubber/rst/lookup.py",
+      "stubber/rst/output_dict.py",
+      "stubber/rst/reader.py",
+      "stubber/rst/report_return.py",
+      "stubber/rst/rst_utils.py",
+      "stubber/tools/__init__.py",
+      "stubber/tools/manifestfile.py",
+      "stubber/tools/readme.md",
+      "stubber/utils/__init__.py",
+      "stubber/utils/cache.py",
+      "stubber/utils/config.py",
+      "stubber/utils/makeversionhdr.py",
+      "stubber/utils/manifest.py",
+      "stubber/utils/post.py",
+      "stubber/utils/repos.py",
+      "stubber/utils/stubmaker.py",
+      "stubber/utils/typed_config_toml.py",
+      "micropython_stubber-1.29.0.dist-info/METADATA",
+      "micropython_stubber-1.29.0.dist-info/WHEEL",
+      "micropython_stubber-1.29.0.dist-info/entry_points.txt",
+      "micropython_stubber-1.29.0.dist-info/licenses/LICENSE",
+      "micropython_stubber-1.29.0.dist-info/RECORD"
+    ]
+  },
+  "processing": {
+    "upstream_command": "stubber get-docstubs --enrich",
+    "upstream_pipeline": "Parse MicroPython docs/library RST; enrich parameters and returns from reference/micropython without replacing documentation; copy curated aioespnow, asyncio and rp2 assembler reference modules; post-process with upstream formatter/import cleanup.",
+    "local_processing": "No stub text transformation. Import every file from the versioned published docstubs tree, supplementary reference/micropython .pyi modules absent from that tree, complete reference/_mpy_shed helper tree, and the published stdlib _typeshed helper.",
+    "module_mapping": "Remove .pyi and final /__init__, convert / to .; docstubs and reference directory prefixes identify original upstream trees and do not form part of module names.",
+    "curated_reference_versions": "Curated reference headers retain their upstream versions, often v1.24.0; they are not relabelled as generated v1.30.0 documentation.",
+    "not_copied": "Board-generated stubs, distribution build scripts, duplicate curated files already incorporated into docstubs, unrelated CPython stdlib stubs, and reference/micropython/samd/__init__.py (not a declaration file).",
+    "support_scope": "_mpy_shed contains MicroPython-specific helpers and typeshed-derived definitions. The pristine published _typeshed helper is typing support, not MicroPython API documentation. Existing separately vendored micropython-stdlib-stubs 1.29.0.post2 remains unchanged.",
+    "limitations": "Upstream skip policy omits some documentation modules including builtins and re; reference coverage and signatures are upstream material, not compiler authority. Imported runtime dependencies may be absent in the selected build and must not be added by reference application.",
+    "refresh": "Select a fixed micropython-stubs revision and its versioned *-docstubs tree; retain complete generated output and upstream notices, validate downloaded bytes against Git blob identities, regenerate schema-v1 byte pins and this provenance. Do not substitute the unversioned micropython-preview-docstubs alias."
+  },
+  "files": [
+    {
+      "path": "docstubs/_thread/__init__.pyi",
+      "bytes": 711,
+      "sha256": "c4b0673d2a5fce9f27095b066c155e83b501d8d8f81332aa3ceec55b19915668",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/_thread/__init__.pyi",
+      "upstream_git_blob": "d38f901cc8d5e4d1cd706e11215024495e1d586d",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/aioespnow/__init__.pyi",
+      "bytes": 1622,
+      "sha256": "aca45749bcf9eccbfa98bc03ac6df04fc7ff061b93d54ce82aac73dc6ab15493",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/aioespnow/__init__.pyi",
+      "upstream_git_blob": "13e83ba620d308f48e39eb60e3b5da9a38406251",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/array/__init__.pyi",
+      "bytes": 7910,
+      "sha256": "64234d1453120625af347374c8369381d64049aa8037ca5ddbb95483c5c41ded",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/array/__init__.pyi",
+      "upstream_git_blob": "da819a081ed12c74f00ec425800f961ada395e66",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/asyncio/__init__.pyi",
+      "bytes": 1208,
+      "sha256": "7a65db9739b94cc56e172aadc643cf1c7d38958823770bb85c9c6925dd623680",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/asyncio/__init__.pyi",
+      "upstream_git_blob": "dd26bf7533d648b807d8c38623f7fc99e1f1b493",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/asyncio/core.pyi",
+      "bytes": 4150,
+      "sha256": "f95ce83179b271837121e64fc184fab20bcdfb5b7290736de4580010b5cc97b7",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/asyncio/core.pyi",
+      "upstream_git_blob": "b8033ae2ea099350473f7478430148fc5d547d09",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/asyncio/event.pyi",
+      "bytes": 2450,
+      "sha256": "3745568873fc1b44d732e15de55a43f838c4216f3118e717957c943a7e869eb8",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/asyncio/event.pyi",
+      "upstream_git_blob": "cb72cc6d9bb1b77dfba8f86f4af74f547f263027",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/asyncio/funcs.pyi",
+      "bytes": 1481,
+      "sha256": "7f3e87f72975b5e635a35c462ef8ea5d5ec18f8a7df851e2b03b129cadf2aff4",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/asyncio/funcs.pyi",
+      "upstream_git_blob": "c3a7f9c2936e61528e9c8daf87a80897741c04f9",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/asyncio/lock.pyi",
+      "bytes": 1559,
+      "sha256": "cf1116900a8a25d41d3aed95a45d6c19bcca342ea88f754f6251318468b78bfc",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/asyncio/lock.pyi",
+      "upstream_git_blob": "c9f26b13f59b24cf8674407cd7014e698261e4ff",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/asyncio/stream.pyi",
+      "bytes": 10248,
+      "sha256": "6c1d771cb55fe49114df9d1b14749d8ea9de6e05a2e953e913286cccd7f312b5",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/asyncio/stream.pyi",
+      "upstream_git_blob": "407b418c5b727429bd8cdcbbae956349e351e1d1",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/asyncio/task.pyi",
+      "bytes": 87,
+      "sha256": "c8fcdb7c41f8573885ff6a71ca8eefacda771e1ebf38f2cb51ce45915dc42f75",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/asyncio/task.pyi",
+      "upstream_git_blob": "6fb17084f6b35ea6a94ebf0d4ac5215759160afb",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/binascii/__init__.pyi",
+      "bytes": 1893,
+      "sha256": "1fe3e2c815c44dc399a15c61a56a9397c5e40ccb72c2b334ce6b4d5a04f10891",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/binascii/__init__.pyi",
+      "upstream_git_blob": "1232a83efac19617bad67b29fffa0e58a20953f8",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/bluetooth/__init__.pyi",
+      "bytes": 46968,
+      "sha256": "4727bf2b69c1dce8a8d6aaf5cc92426325da310108c0008a1c7265477e121ef3",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/bluetooth/__init__.pyi",
+      "upstream_git_blob": "202e469c6f73b8a3c6a0fe845b93e960173db7e9",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/btree/__init__.pyi",
+      "bytes": 9006,
+      "sha256": "1b4cc7315eacb97863a26b0582f17c1b126f29e52fe4f68edca327f9a85a307c",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/btree/__init__.pyi",
+      "upstream_git_blob": "0c3540643dcf9e28af815866f6b230b95d3a0e43",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/cmath/__init__.pyi",
+      "bytes": 1966,
+      "sha256": "64a14f32c7567e425b4864651f49f137f1455ee908b43b99f2ad743e32932a30",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/cmath/__init__.pyi",
+      "upstream_git_blob": "577f0d170c92f796ec9ceb90af604a387608600d",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/collections/__init__.pyi",
+      "bytes": 4784,
+      "sha256": "3881d27b30cbea7cb71ae52e1732d17ea1815f2d5d396dbf002790cc9d9b6da2",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/collections/__init__.pyi",
+      "upstream_git_blob": "ee96e3ce91f3ecd299f9f0cf57ca99fd275e628c",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/cryptolib/__init__.pyi",
+      "bytes": 3582,
+      "sha256": "3dab038825782201f72ba9831230c7f1b8a8eeaea54b97ac12bf43a723d71796",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/cryptolib/__init__.pyi",
+      "upstream_git_blob": "f1cca6ec84cc80953ae21e5fcac56186a52b0db5",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/deflate/__init__.pyi",
+      "bytes": 3402,
+      "sha256": "ce1209723c7a716bd1db39b99cfce7deba460b9d519fa2395057b903934e9ad4",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/deflate/__init__.pyi",
+      "upstream_git_blob": "58ff55d7a6c4b1995d26920c1347245e26e3b09c",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/errno/__init__.pyi",
+      "bytes": 2689,
+      "sha256": "dd04939a00dc95c2e2deeb2d8663024d271a1a876d89d485ce982e9c0b93f43f",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/errno/__init__.pyi",
+      "upstream_git_blob": "96bd24860850f93333c992320f4f5a2445a8bd18",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/esp/__init__.pyi",
+      "bytes": 12220,
+      "sha256": "28029bca62f76881fe70af89215c549a638c06357f93927f8919b9f152d1ec0d",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/esp/__init__.pyi",
+      "upstream_git_blob": "9242f080b935aa868749de568eabe621c036f3ac",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/esp32/__init__.pyi",
+      "bytes": 35950,
+      "sha256": "9899bc40c92e1f690b0219a5f685a0f27accac52a19fbf9a4ffd6707cff2f5cf",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/esp32/__init__.pyi",
+      "upstream_git_blob": "954134957807f4c67327b46fea0e1abcfcd3e082",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/espnow/__init__.pyi",
+      "bytes": 27740,
+      "sha256": "805944810c40a7e9e6848554b0c6ef8ec21d69a549e07ba163eef4f4eab52e48",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/espnow/__init__.pyi",
+      "upstream_git_blob": "001a801f9d5383cce3fc96d7a25f2a3268c19dbf",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/framebuf/__init__.pyi",
+      "bytes": 9949,
+      "sha256": "8ee1e4d5a575b5b7bf409625714a581d3180d4e9b073de3ad68447562f9d426a",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/framebuf/__init__.pyi",
+      "upstream_git_blob": "612a2d47589ee5a6164d15bdd6d0d4e02f647176",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/gc/__init__.pyi",
+      "bytes": 4677,
+      "sha256": "c07efe3fe452fa39de854f2eae8bc9138f19de012c5fc9276d441d48c7627c41",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/gc/__init__.pyi",
+      "upstream_git_blob": "c308ea0e306c0281648840a5e9478c471d75785b",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/gzip/__init__.pyi",
+      "bytes": 2015,
+      "sha256": "e246c8becb2d4be72231bdbe260f09e906f17a529fc1e297e156928ed86c4894",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/gzip/__init__.pyi",
+      "upstream_git_blob": "ae1a1b855ae20b1f92d7381226fc1a4f29f4d228",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/hashlib/__init__.pyi",
+      "bytes": 3620,
+      "sha256": "9cf9dc547ec5de9f07f54b9a4ef6e4eb88a53584773df00434d812799e92bf70",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/hashlib/__init__.pyi",
+      "upstream_git_blob": "cbcdc48187badee6156d398fa7abe800b752aad2",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/heapq/__init__.pyi",
+      "bytes": 1195,
+      "sha256": "038e1b61151c6db4e5a04ebadbe6d893e9bac20fa822c11e1d828734b70912a4",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/heapq/__init__.pyi",
+      "upstream_git_blob": "15e6b17d3e5376fd5fe1eb699abb19f7b7b00358",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/io/__init__.pyi",
+      "bytes": 12654,
+      "sha256": "c3a35ac5def251042439bc9a7c63f96e1a7bc163a21dbd6b3b19a9505d11621b",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/io/__init__.pyi",
+      "upstream_git_blob": "66580ff66d9050f065c98703ba6973298dad57c1",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/json/__init__.pyi",
+      "bytes": 2308,
+      "sha256": "8990882eb700ab408c6b12f806a1fe75b73902b97462da6d063f2269ef6bf34d",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/json/__init__.pyi",
+      "upstream_git_blob": "223477c31455a6f3952f682589646a940dfc45e7",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/lcd160cr/__init__.pyi",
+      "bytes": 21658,
+      "sha256": "d2244f6f44ce3fdef3e4b318cd4b692abd3a103430ff7fa04dd4bbbbe52c5017",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/lcd160cr/__init__.pyi",
+      "upstream_git_blob": "64db987d6f1437454d727d3d75cd87f96cda0cee",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/ADC.pyi",
+      "bytes": 4143,
+      "sha256": "d8034bad063e45912a6e922fa0d86cae123c5e07d5450bc3b6182dde29f900f8",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/ADC.pyi",
+      "upstream_git_blob": "92e8facbf57628d3e4d4fad5d0fe353359964031",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/ADCBlock.pyi",
+      "bytes": 1831,
+      "sha256": "6d5923cf25007583078882b3cf37c8b449dddccaa0b1b5f40b64f7c6cc48ddbd",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/ADCBlock.pyi",
+      "upstream_git_blob": "7bc1701485299cd16637a56a9e32c562473d76b7",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/ADCWiPy.pyi",
+      "bytes": 1816,
+      "sha256": "3b1c2bb3e875430d366e748bb257b701f19c35e6ee82f6b5c2a688ce8c37d4a1",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/ADCWiPy.pyi",
+      "upstream_git_blob": "f4b20a14d901fb96a7a5b7750e9391601447c4d3",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/CAN.pyi",
+      "bytes": 23720,
+      "sha256": "400bd2b1acde5474bea357fea4ffa50336dee6ad58d9958fd4ec95958cbd747f",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/CAN.pyi",
+      "upstream_git_blob": "a8e5c3e66a7d2906b37064377293ec99abc4bf69",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/Counter.pyi",
+      "bytes": 8907,
+      "sha256": "83862b66399b29a4e23de0375e73ccedd8bbe1716aba32ad46f04c5b70222a59",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/Counter.pyi",
+      "upstream_git_blob": "a370dbc8616560148e5745604974e5e3a4a427a8",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/DAC.pyi",
+      "bytes": 1422,
+      "sha256": "1b750b168f7a3a8ad45ee9a45c7e5242563cbdaa60ae4337159f472c33e13fb1",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/DAC.pyi",
+      "upstream_git_blob": "75463e25ec42385dbd6730c960528db673fbb405",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/Encoder.pyi",
+      "bytes": 7871,
+      "sha256": "6e4e4ac94e6ecf9258edac4e3ff879071d1de73ef436027608a97f791b13dd6e",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/Encoder.pyi",
+      "upstream_git_blob": "e7ee4bcdceb7bb002e056b89095086fab26e6f29",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/I2C.pyi",
+      "bytes": 11137,
+      "sha256": "3493a03e3e00e2a6cf1c3239bc56f8bb34ff14974b3149df03bf955278d9694e",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/I2C.pyi",
+      "upstream_git_blob": "a77aa041b3651e4e5e719d5ea2acd46edf4aa68a",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/I2CTarget.pyi",
+      "bytes": 4889,
+      "sha256": "c42013a64c5089adaa513141f16011f262bd24cec4c0a7a1b0490a2a06e611db",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/I2CTarget.pyi",
+      "upstream_git_blob": "b6c233792f117f13aa8c654cea121b69c644b333",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/I2S.pyi",
+      "bytes": 6833,
+      "sha256": "ee371e20e2158b1776c66cd4583760bfca666c1e1c86a2249f64d322a6eeae3a",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/I2S.pyi",
+      "upstream_git_blob": "fc023e250ee2b1947fac5982a02b28e3225deea6",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/PWM.pyi",
+      "bytes": 5813,
+      "sha256": "95c4f4882a6a43251f13de34902fccc2364a26b5e3c5f2a82bd93690e8943d76",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/PWM.pyi",
+      "upstream_git_blob": "f87b188dd699185ba3da7850b85485f03318edc6",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/Pin.pyi",
+      "bytes": 18973,
+      "sha256": "744e240438dfca1e39e2364a8a6a08f857d0c764d30142dd0f4ff688a1afc110",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/Pin.pyi",
+      "upstream_git_blob": "3ac70b1c47e1b911370020ac14f0a08cbffc8ca2",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/RTC.pyi",
+      "bytes": 12717,
+      "sha256": "dc87d07e6e1a900d6108b4b8b8252fdb894bd9381ef5688eabbd755270d2cf6e",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/RTC.pyi",
+      "upstream_git_blob": "7512e904bd325c44e1f82c1170743b6b869753ee",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/SD.pyi",
+      "bytes": 1776,
+      "sha256": "40f82e3807ac1ba2007b30fd28c4c597c12a928e83c7a07c48cb0ddf080f35a4",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/SD.pyi",
+      "upstream_git_blob": "d21227ba06bbfc098c260ea567813227a3f5f8d6",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/SDCard.pyi",
+      "bytes": 8026,
+      "sha256": "7a38b71d18e1b8ca518e1a4dadc4bd007dfcf17485e4747aee243f261886fbe9",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/SDCard.pyi",
+      "upstream_git_blob": "30a1d90b98f5ff33b8f71cbe66419f1b7af8c6d5",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/SPI.pyi",
+      "bytes": 10717,
+      "sha256": "1ba2f66b7d773a84f94598da875e9a6329b1fe077ee0d47ef5910239f2c81817",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/SPI.pyi",
+      "upstream_git_blob": "f6ae09536ceae9556dfd27f07c9f8383f54367f5",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/Signal.pyi",
+      "bytes": 7459,
+      "sha256": "79ea53cc0d39400a0010040ae49ad54a2b41f940199d4e721293568ed1d7eba3",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/Signal.pyi",
+      "upstream_git_blob": "addf590acb05626bee1f34f5317c4c7beca67867",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/Timer.pyi",
+      "bytes": 6068,
+      "sha256": "66ded2d629668882bb2a55dd95d911e73bc2755a0ad82d25052472035d715711",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/Timer.pyi",
+      "upstream_git_blob": "ab9977945fc32d54d1b3016335944b14dbe1fd5e",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/TimerWiPy.pyi",
+      "bytes": 5599,
+      "sha256": "5413169b4f597b2dc92edff713b2be22ed04fe25ab16cab609b2adbc46e72a28",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/TimerWiPy.pyi",
+      "upstream_git_blob": "898953ce5ba34f2b462edf5d71e989b2b8574a51",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/UART.pyi",
+      "bytes": 20603,
+      "sha256": "48aa7c4468520f447ecbc2975503d807e3b2664e38f11d8cb42e0fbefd1c9942",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/UART.pyi",
+      "upstream_git_blob": "595002a35081d7725c7cccc22d7009b058cde57f",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/USBDevice.pyi",
+      "bytes": 10616,
+      "sha256": "fcaa684d3821d26c66de6df32c161408e084de89134b690104ba206d3732268a",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/USBDevice.pyi",
+      "upstream_git_blob": "971991c2ff7fdd3656cc495323874e17c2a04c59",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/WDT.pyi",
+      "bytes": 1405,
+      "sha256": "5bc195b93c157ef4eba862b67aa20618978ddd3ec5d67e7b30937db9ef571135",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/WDT.pyi",
+      "upstream_git_blob": "a2c4ca3e19dfe57710448700f4d1cc8fe758aab3",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/machine/__init__.pyi",
+      "bytes": 18441,
+      "sha256": "a8d49e0eeda1edba47fcb26b5b645f16d9b09b8b85d6b0eedebdd9b4c69fb289",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/machine/__init__.pyi",
+      "upstream_git_blob": "19e5f2567db28521564bae323526fa54c3c4a58b",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/marshal/__init__.pyi",
+      "bytes": 1213,
+      "sha256": "785ba3347dd9e73259bf3e397065e1f291c0d062655a861c96b1c8ece7a01f97",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/marshal/__init__.pyi",
+      "upstream_git_blob": "d27042469d039d09789a4c7de56141f3fc23bb44",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/math/__init__.pyi",
+      "bytes": 5755,
+      "sha256": "9e20996fec43b21429eff4f45a77befb242c3d2737b16be0b5dded7a0a8aa2fc",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/math/__init__.pyi",
+      "upstream_git_blob": "fd731d14c773fb07924700c5eaa8ef424fc796dd",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/micropython/__init__.pyi",
+      "bytes": 19049,
+      "sha256": "625d48c5ff7dacea131802460fdf0a454ab1c635c8f47942733f510b4166dc93",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/micropython/__init__.pyi",
+      "upstream_git_blob": "73ae4e4459b382066e98b9d9c82159c297e69028",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/mimxrt/Flash.pyi",
+      "bytes": 911,
+      "sha256": "e823ba86a7751d946e37c188a093ab8ce2c0cf8d0d7c13816acc96e390f83bb8",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/mimxrt/Flash.pyi",
+      "upstream_git_blob": "ac7ab2826322f74bda1978d4568d0d70798023f1",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/mimxrt/__init__.pyi",
+      "bytes": 490,
+      "sha256": "a0fc0279a3953d07f69e2a746a04d3bd2cac6c231f85ec9fb82c669478e52b76",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/mimxrt/__init__.pyi",
+      "upstream_git_blob": "6fe75aabbd64a418988909e4ee75ef7c138f88df",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/neopixel/__init__.pyi",
+      "bytes": 2549,
+      "sha256": "e11faa38c6c7d5981091c096025ceefcda93eeefadc7df22d8fb100ba5a3c546",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/neopixel/__init__.pyi",
+      "upstream_git_blob": "f798defb17ad2be707714f7d6bc0b6cd9014436c",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/network/LAN.pyi",
+      "bytes": 3149,
+      "sha256": "2cbd16a3e784709f265e49c9618c30ecdb83af832db500b0335471f05decd676",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/network/LAN.pyi",
+      "upstream_git_blob": "1c7a05eeadbff1eb7b0045256f5d70e53280e2b9",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/network/PPP.pyi",
+      "bytes": 3028,
+      "sha256": "ae10182490098b2e4c0ea80483d0890562880512fb78cfe4421426a55cf734b4",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/network/PPP.pyi",
+      "upstream_git_blob": "dc951e3d83bf8b17bb5943165c42fdb34e00c292",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/network/USBD_NCM.pyi",
+      "bytes": 1562,
+      "sha256": "9b0fc6be26b7c04645a3d5b5b75caa0cd0ae9edb93410e4f1d1c656a72208b99",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/network/USBD_NCM.pyi",
+      "upstream_git_blob": "e209ee1cf72aebcacc681975105ca9783181f35d",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/network/WIZNET5K.pyi",
+      "bytes": 1935,
+      "sha256": "c8eda40243cefcb5e79e8f2a3ac3e34ba3331421ca8dfee507a6879f97f8bd7f",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/network/WIZNET5K.pyi",
+      "upstream_git_blob": "7a2ce8a995c9de8877840b999a2d9ac4c29c9885",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/network/WLAN.pyi",
+      "bytes": 19860,
+      "sha256": "89cd15f0eccade767dbd718ae8b821474c5a8223ce9e6fa4726aa13886053b79",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/network/WLAN.pyi",
+      "upstream_git_blob": "121e46d64a9d70289d28a0536abb642202c192f6",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/network/WLANWiPy.pyi",
+      "bytes": 7661,
+      "sha256": "1dfc400e1a8bceecf703cdeca77930b33ee0ef89347bbdf0fda977a4dfa1b66b",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/network/WLANWiPy.pyi",
+      "upstream_git_blob": "578ba6f9fc29e45f5386a619dd0ea390387d6fe5",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/network/__init__.pyi",
+      "bytes": 14448,
+      "sha256": "dead12cfef8d2c81acb4f8c4a355ed58c831b6bbe87d98ff45e8e1eaf403e525",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/network/__init__.pyi",
+      "upstream_git_blob": "d0dd27e699978a1c07845c566911873931052885",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/openamp/__init__.pyi",
+      "bytes": 5484,
+      "sha256": "904624c7ab64c1083c27ca8d4282b5b944081922361bd7d7d8121df735a6478e",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/openamp/__init__.pyi",
+      "upstream_git_blob": "3b23bec2bf71172cc933f8adc2fe5fc1a0b52f3d",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/os/__init__.pyi",
+      "bytes": 8120,
+      "sha256": "6388342cdc6c8ec7f512ff144515bd2f679a154d22c9592b2f19e6d63666e05c",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/os/__init__.pyi",
+      "upstream_git_blob": "b5cdb8f1b48c48b1c2d96287619dd9f703b3d3a1",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/platform/__init__.pyi",
+      "bytes": 1882,
+      "sha256": "5f58d240cffed780a47007cbb6524ad830313597b6c3925b43a3c4cefac8de16",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/platform/__init__.pyi",
+      "upstream_git_blob": "3634f05101364e66c0d25ec221efb96de403bf29",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/ADC.pyi",
+      "bytes": 6141,
+      "sha256": "23dc5d61624220788bd5a4ea8f8816a2037e86e269926892d09db91b4c5698e0",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/ADC.pyi",
+      "upstream_git_blob": "8bafd8ad17120edda888e1bba096cb72cb10c249",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/Accel.pyi",
+      "bytes": 1327,
+      "sha256": "1ec79b0dd377da9319ad07bea743a7de2737b02cbda3253c2fef6c79128df3b7",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/Accel.pyi",
+      "upstream_git_blob": "d030446841e029b4ad8495cb51d170699e06682b",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/CAN.pyi",
+      "bytes": 28377,
+      "sha256": "f7084f85e6cf2a875b53afd116fb584bf7360dfcea44b381cf3a5c7af829e7d1",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/CAN.pyi",
+      "upstream_git_blob": "cbd6c0d9eb97c5e473f225358566d9e9118f4b9c",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/DAC.pyi",
+      "bytes": 5343,
+      "sha256": "93342bafdacc5370d7f08fc7674155c3ccb8ba7f4566b417793194aa93a8b6df",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/DAC.pyi",
+      "upstream_git_blob": "fc3468acad58307762fb085903883fa59ad92b5c",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/ExtInt.pyi",
+      "bytes": 4049,
+      "sha256": "deabc6825d2977a03c1894c2886a950cf712e6c40f578446ef09bef735e290a3",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/ExtInt.pyi",
+      "upstream_git_blob": "2af6fb44a3734f863e5f8467fe82a1043168c7f0",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/Flash.pyi",
+      "bytes": 4043,
+      "sha256": "a24eafe9f45cd5d5e845423e9f31aacbdb8a0a92af27ba283a15194e8f0cab28",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/Flash.pyi",
+      "upstream_git_blob": "a4306a98d300e45e15194271572d6eeb7666aaa6",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/I2C.pyi",
+      "bytes": 9362,
+      "sha256": "07456ef29bb3e9ca2a5ea74b0fda869fb5b061db88b7231aad8d1c3ca6c809c3",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/I2C.pyi",
+      "upstream_git_blob": "a333c5dad91f15af9bb37fc342ecd0e10fd7d40a",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/LCD.pyi",
+      "bytes": 3471,
+      "sha256": "4ff63a1380931d0874cdb26b0f517bb983ce4ab327b1a6d53c120948e5936fe8",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/LCD.pyi",
+      "upstream_git_blob": "39ce8138609ea11090bf8a02032a0e0d6cf9569f",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/LED.pyi",
+      "bytes": 2217,
+      "sha256": "bccf4f4540d3d2224d039794ff627abf241d3a008aca954c6c8793c7d4780fd4",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/LED.pyi",
+      "upstream_git_blob": "44d0a951f9e7427e61a45d4b04f462f31be66ac0",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/Pin.pyi",
+      "bytes": 10407,
+      "sha256": "5d8f23fdc002bd8177d80a62e3f58eaba41de20a29f8ec5e99379a7d9417208e",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/Pin.pyi",
+      "upstream_git_blob": "56a74041942b4d56266b1f76f0277cba79111240",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/RTC.pyi",
+      "bytes": 4867,
+      "sha256": "ce5b2c4f66616f8c317195c6431d87654a8bb853d56b4a7523510186515c3294",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/RTC.pyi",
+      "upstream_git_blob": "911dacbcf580c59fb2be237916330aaa20dd4bad",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/SPI.pyi",
+      "bytes": 10990,
+      "sha256": "ea8652cc8a05be9816797cd0d6bfce164883a61ab5ac9d1f4c8a42df5997878d",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/SPI.pyi",
+      "upstream_git_blob": "7c1e17f33cf536bb3843abd2db3eda3976cb109e",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/Servo.pyi",
+      "bytes": 5042,
+      "sha256": "034a5e0178d395d7d12649b2a2b5afe354d66a7a182fdcedde1239afe111e214",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/Servo.pyi",
+      "upstream_git_blob": "d107b8a00b45ed550e94f6a13b130d4d6b121517",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/Switch.pyi",
+      "bytes": 1488,
+      "sha256": "bbc8fd65a619cb20e118cf9b6bad26c92145c8ac559184165f9580803160cc11",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/Switch.pyi",
+      "upstream_git_blob": "80a1423d40dc2da56b872d3dfc619fb983523be4",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/Timer.pyi",
+      "bytes": 46815,
+      "sha256": "c3b31ff28b8c659873f8542d96cd5a85852d734b05f56cb7e180c129158231fb",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/Timer.pyi",
+      "upstream_git_blob": "fac7ec701071d38e6e43e89e57a4263958434d44",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/UART.pyi",
+      "bytes": 11542,
+      "sha256": "d84044b1cf6814306930a39f020bc1efd1cccae2e3c89c2b56cc2243502bf13c",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/UART.pyi",
+      "upstream_git_blob": "011cbf44a01ea7f576f45a7ffe76076daf5ab7c6",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/USB_HID.pyi",
+      "bytes": 2005,
+      "sha256": "25f1a100f02bba8040a03bb2fefdd0ff73c24dc4a76c0544cf9adddd3c8ad15b",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/USB_HID.pyi",
+      "upstream_git_blob": "a57fc5212f5aa7db125c2599bd9c7b74c301758d",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/USB_VCP.pyi",
+      "bytes": 6583,
+      "sha256": "159d82423d2da5c4d5e2b8b662bb53165bd5fa96b2b6aa95c136a1cc043a970d",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/USB_VCP.pyi",
+      "upstream_git_blob": "40d05158936e8babd222f3ddcb3709f783a91551",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/pyb/__init__.pyi",
+      "bytes": 25111,
+      "sha256": "a5e378f1ea9c3e17d206f3dfca8c8cc7e8fd7e8a96be2cecd9e727532794117d",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/pyb/__init__.pyi",
+      "upstream_git_blob": "1d7e838147995d360211b29a1ff7a758dd927afa",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/random/__init__.pyi",
+      "bytes": 3729,
+      "sha256": "c0632be622b97f3f69058b8afb75d80b173ea5a331f06d1570bc0ea6243228b4",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/random/__init__.pyi",
+      "upstream_git_blob": "d54e50a475e7415ea4e3c49ca57d3ffd13de636c",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/rp2/DMA.pyi",
+      "bytes": 7712,
+      "sha256": "f8805a3c48b4bd9f208605029d5ac502a28358ed4fa34cd0d637f81ac9c9e317",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/rp2/DMA.pyi",
+      "upstream_git_blob": "0e47aa11ce1f06d2a15d3cdac69e162f03b03241",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/rp2/Flash.pyi",
+      "bytes": 2934,
+      "sha256": "c0cca339119e7b7088abeb1cb219fdbe4f20d08108bc719907b823428117a6d5",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/rp2/Flash.pyi",
+      "upstream_git_blob": "9aae403545b967057a7808b496739fec7b9e9d1b",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/rp2/PIO.pyi",
+      "bytes": 4259,
+      "sha256": "d9486ebd05048f15c43f8bd292f28fbd46c5b97f6bb8ba466f6cd93fc243f19e",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/rp2/PIO.pyi",
+      "upstream_git_blob": "eef28e8715abe44c9415d14ef97eadad202f7bb8",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/rp2/StateMachine.pyi",
+      "bytes": 6509,
+      "sha256": "33508dec1ab63f9814915317bb901f17153510c3e074b1cc5b86722cdc01172c",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/rp2/StateMachine.pyi",
+      "upstream_git_blob": "dd50a94bd91eb44764ee6c7e187219bf5d2e0057",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/rp2/__init__.pyi",
+      "bytes": 7853,
+      "sha256": "91dab4c126a146ffb1d5339dadfcb17884f3f1186ab3c35e5ea4ea64f0623c0a",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/rp2/__init__.pyi",
+      "upstream_git_blob": "fcd9810e832e2af33b11b08b6482cd20ee74925c",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/rp2/asm_pio.pyi",
+      "bytes": 1321,
+      "sha256": "e5c31c1df5e47c2b416c6680c2d43341746738189f0def3626010e39027d176d",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/rp2/asm_pio.pyi",
+      "upstream_git_blob": "7e7350aac1acdd2ac709ad524f38406b8c1a072d",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/rp2/asm_pio_rp2040.pyi",
+      "bytes": 23535,
+      "sha256": "3952c313392459bf011a8e3e36062ce3cd45ef1fd93dd47d50f224c53dde13eb",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/rp2/asm_pio_rp2040.pyi",
+      "upstream_git_blob": "3ad502d5ae2ce8a1de488ae2d3f3aaf2c6204c56",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/rp2/asm_pio_rp2350.pyi",
+      "bytes": 3736,
+      "sha256": "e205f9261ff936265e8512e6c18c4994891d2b61db92518f34451b0eaed505a9",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/rp2/asm_pio_rp2350.pyi",
+      "upstream_git_blob": "ff59c780aa59b3024dc28593b5a885f67f9feadd",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/select/__init__.pyi",
+      "bytes": 4544,
+      "sha256": "b97682f1b54f0e405685575e6b810721d6d0d2c02f3ce19b908255c600a88841",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/select/__init__.pyi",
+      "upstream_git_blob": "4e96b90bba2236959654c1f18e9c2ef66ef40106",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/socket/__init__.pyi",
+      "bytes": 18716,
+      "sha256": "75895560e719deca2ff075948b2e4b2eaa4843d0b23b7ae0d4e424b560cd1228",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/socket/__init__.pyi",
+      "upstream_git_blob": "42ce2f786d32838ac9518377c3004555a0cd41d6",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/ssl/__init__.pyi",
+      "bytes": 8861,
+      "sha256": "6cb91e7bbcce097a79485f6ffa58c2d0300442612f7b16213c33e6aab93eb59e",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/ssl/__init__.pyi",
+      "upstream_git_blob": "51fc6162aaef50631b07041613d45270782f08bf",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/stm/__init__.pyi",
+      "bytes": 3872,
+      "sha256": "f2441fea32c2042656f7654fc69928a9af20eac33bb365557e6b4e9861496e10",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/stm/__init__.pyi",
+      "upstream_git_blob": "7e50a91be92cc27cf503064fbe117725d45b7634",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/string/templatelib.pyi",
+      "bytes": 2299,
+      "sha256": "5cd2ecc3f4bd36b848411f114cd8b2cdf59c7c0a5c0faa31044d0131601057b6",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/string/templatelib.pyi",
+      "upstream_git_blob": "da3e16246118d81827a53a1aad9f8a5473cc3118",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/struct/__init__.pyi",
+      "bytes": 4699,
+      "sha256": "3ab6ef502c32a03f43e7da18f8cf3cfee2b54bfdfdb1c904375824e1a9564da9",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/struct/__init__.pyi",
+      "upstream_git_blob": "efd8f1467dc80850fe1fd492b178a1e37721dfa8",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/sys/__init__.pyi",
+      "bytes": 7641,
+      "sha256": "37985327932ed3d45e1a95f6597befc11a5def54ea966d707588cd333d4f35e0",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/sys/__init__.pyi",
+      "upstream_git_blob": "4f3f0a849913c8626bc306f6d76ec5cdc4960db3",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/time/__init__.pyi",
+      "bytes": 14046,
+      "sha256": "9d5399c37db36264e06f73cbd1aa343f2d1455ebf691a8c8dfee72a8a45bc82e",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/time/__init__.pyi",
+      "upstream_git_blob": "11dd36843db261f07835f756608568dba04daf9f",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/uarray.pyi",
+      "bytes": 93,
+      "sha256": "e60b645dbe2cf8159ea584459a0d3284af0db73052a2abd35f5c532310245ed2",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/uarray.pyi",
+      "upstream_git_blob": "873ca499a5f92663da2f8dc35397819d8df916ec",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/uasyncio.pyi",
+      "bytes": 97,
+      "sha256": "0755578e6fdefeebb5ee173479cade5dbe7d4a53e169fd571ee21ca30f054460",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/uasyncio.pyi",
+      "upstream_git_blob": "3ac00781f54b92807d31a1e9fdd7b21c8221d3d4",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/ubinascii.pyi",
+      "bytes": 99,
+      "sha256": "5ad89fb05fb2213628df0dbb55c94575cabaaae627789f92e77a0b2f96698786",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/ubinascii.pyi",
+      "upstream_git_blob": "fe2d8f75957bab7bf4ceb5805ce2b595b2f16b24",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/ubluetooth.pyi",
+      "bytes": 101,
+      "sha256": "a127b2bfcfd1d1b39fc0d45e5d21e2dd60161d57a4507ec5d8d8a7c4dcad4c14",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/ubluetooth.pyi",
+      "upstream_git_blob": "201128f245477447b117981f2267ba30c90caff9",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/ucryptolib.pyi",
+      "bytes": 101,
+      "sha256": "44b1089616cc134c420f75fed34025b33354e011a440cc9327078868a2c95fc7",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/ucryptolib.pyi",
+      "upstream_git_blob": "2f74b9561170bfeccb77cedfe809fa8811d78f21",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/uctypes/__init__.pyi",
+      "bytes": 4937,
+      "sha256": "7be35a229cb9f43c2f22e203639233f5431fd5ec9dd660bd833d3dc585ee070a",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/uctypes/__init__.pyi",
+      "upstream_git_blob": "f2d8e30261feeb5692ebf48d3860672e96df3769",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/uerrno.pyi",
+      "bytes": 93,
+      "sha256": "316e34e74c7f63d4e38ccf6e30554a0d232eac380cd8c708e26bbe48c9c210e1",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/uerrno.pyi",
+      "upstream_git_blob": "2aeab2ff03e4590de8ce2d0e903d14a729da7b50",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/uhashlib.pyi",
+      "bytes": 97,
+      "sha256": "a53be80494d5473ee502d36a01938855581b3c2012cd3b30b76f74b26dc21ae9",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/uhashlib.pyi",
+      "upstream_git_blob": "ef7e19406136970649c08d54110106ea6e189f1d",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/uheapq.pyi",
+      "bytes": 93,
+      "sha256": "373f7ed31ab642ce8edadc632ca33e4ac3c591001a0d006b753f6a0cff161b23",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/uheapq.pyi",
+      "upstream_git_blob": "ea1d8e6f89ee9ade09e0a6aa5ec0c2e4fd483c2e",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/uio.pyi",
+      "bytes": 87,
+      "sha256": "a4e5c97a7a3ab9c5bcf8d356d302c825f88da2bbad0dfc0c40efe76fca56f9de",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/uio.pyi",
+      "upstream_git_blob": "626627aa79aba0ec4abfcba48288b37b715178a6",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/ujson.pyi",
+      "bytes": 91,
+      "sha256": "f5b69f0acfca8b707bac030277bdaea13b22bb4e707a5d7a34437c93a20183c3",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/ujson.pyi",
+      "upstream_git_blob": "0787dd0dbb876e8c8e04495c989a1953a221a192",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/umachine.pyi",
+      "bytes": 97,
+      "sha256": "2d8885d80c7377b55ad63aedec12d74518800893ec531112a1fa0a477610faa0",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/umachine.pyi",
+      "upstream_git_blob": "800a67c122f71520848907d9746c3aae2d5a1a8c",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/uos.pyi",
+      "bytes": 87,
+      "sha256": "60829a30722364c3b5a7fa9ed9057c524dc3cbd0ef70cab067fc0cd390df8374",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/uos.pyi",
+      "upstream_git_blob": "53577fd8bb7bc8e39e62fd5b8750e45ada0d4f70",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/uplatform.pyi",
+      "bytes": 99,
+      "sha256": "cc9b925bf2ab1648d3d6d83f16f983b7ec8a5809212d15318335b9ff208d8033",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/uplatform.pyi",
+      "upstream_git_blob": "5a546da79f13469a90c7dbe58014991e90732dd4",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/urandom.pyi",
+      "bytes": 95,
+      "sha256": "5be2ae3291ac7502d0efbb8c35cadabb39741cc04c42dedbdd2b22205cd2206e",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/urandom.pyi",
+      "upstream_git_blob": "9175c6afe646af53e073a9be43e0a50cd6299b09",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/ure.pyi",
+      "bytes": 87,
+      "sha256": "abca1311efd499c70af23f59c28304d569f3f23f32bacd1f85393c2084d0036c",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/ure.pyi",
+      "upstream_git_blob": "fdca78eeac47014eda042877075e02fc9d3649b0",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/uselect.pyi",
+      "bytes": 95,
+      "sha256": "08b558fb703118f5b918097944becb241fb005bc82ca6947b6e69e33767956da",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/uselect.pyi",
+      "upstream_git_blob": "aca325aca90ceb861394532dab50a96bdbde61b6",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/usocket.pyi",
+      "bytes": 95,
+      "sha256": "46b0617643c6561ab317c630bd7143f8de3f7146ca05fb789c7ceea6e0e4d5e8",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/usocket.pyi",
+      "upstream_git_blob": "2ab1f572e764a431b6d4374d0cce72e731eb2678",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/ussl.pyi",
+      "bytes": 89,
+      "sha256": "c85450fe8e68bbc26fe1c9d7f18cab1ce4542c6c9a0d82e29c30607c97e444af",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/ussl.pyi",
+      "upstream_git_blob": "d0531009e7bcf58503d23e897b9ae7877910bb48",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/ustruct.pyi",
+      "bytes": 95,
+      "sha256": "ba6e7955e56734fef974eef228cde858e4b24f5cb422ad122a002a98be4e968d",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/ustruct.pyi",
+      "upstream_git_blob": "0fa28b2a1de0937bf07c8fd4916db4623c80c771",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/usys.pyi",
+      "bytes": 89,
+      "sha256": "c22ba7a3ba9a7fd3fcbe7d63d4f1471f04fb97aaaff8bdfc97b60d2c1bdaddcb",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/usys.pyi",
+      "upstream_git_blob": "84c1b4eaee7b04d6f1a5ae09e837de167b0a4310",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/utime.pyi",
+      "bytes": 91,
+      "sha256": "1d383cc18d6c8b7721496505e628799729d1aa4af7fc3f00e4d1bd549b1f6b89",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/utime.pyi",
+      "upstream_git_blob": "a3289ce4c7eba0198faf40d30c08f35e103af06b",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/uwebsocket.pyi",
+      "bytes": 101,
+      "sha256": "c418cddce28853dae1292b9241e9d1a6f992d83aa91d811a1a562fe385d2f2d9",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/uwebsocket.pyi",
+      "upstream_git_blob": "1649ff0ffba9ef55456f7df2f9fbd8a9155741b7",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/uzlib.pyi",
+      "bytes": 91,
+      "sha256": "a8dff93eede9fe9985b4a73ab6b77a35142c0a79627afd0ead6f5f8066b05262",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/uzlib.pyi",
+      "upstream_git_blob": "6598ed9d5ae39b81a647a8845f88d4cfab8ab946",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/vfs/__init__.pyi",
+      "bytes": 12430,
+      "sha256": "323d47a098861e685ce3610a0baeb06dacf0fb5fe283a02c6136ff203103cca2",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/vfs/__init__.pyi",
+      "upstream_git_blob": "0c4622a4fc4d7f6215f53fd82ca0a59cd00f94c2",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/weakref/__init__.pyi",
+      "bytes": 3515,
+      "sha256": "737f425c7ad687e2a3714f06a6740ad53ef02a5e4ea4a1cca7eb75c081aadf84",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/weakref/__init__.pyi",
+      "upstream_git_blob": "015336e85a2901f02ccc0e8c5058c665fdaeb9ec",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/wipy/__init__.pyi",
+      "bytes": 854,
+      "sha256": "e33af6425f9ec6a95239379ce3b81e45b7e0e0f5e94df77bb70f0334578656e2",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/wipy/__init__.pyi",
+      "upstream_git_blob": "06eb17b954edf35b1e334af1f833742e21ee8b07",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/wm8960/__init__.pyi",
+      "bytes": 10385,
+      "sha256": "17a70bf4f78b8e9e009d380b929f0c804c43fd7e1f748d573353cb9e3333ecf8",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/wm8960/__init__.pyi",
+      "upstream_git_blob": "3104b040908d8f816081e2811c335be192a6cedf",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/zephyr/DiskAccess.pyi",
+      "bytes": 1652,
+      "sha256": "677fc849271fefc709dc07827852623eb7faa92f43b41be5b14f7b4805c114bc",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/zephyr/DiskAccess.pyi",
+      "upstream_git_blob": "b3676a68fdeee4531d97ecb692705f9dc75f62e1",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/zephyr/Display.pyi",
+      "bytes": 2197,
+      "sha256": "9822edd2b8843addba93a1464c1e4149878e730062308f49e8ac0ab42f8f488a",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/zephyr/Display.pyi",
+      "upstream_git_blob": "afb0abe603305c077e03ec68f4db2324f9ac0490",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/zephyr/FlashArea.pyi",
+      "bytes": 3355,
+      "sha256": "f2aa58b7c406f272458ef833aae394fe36db2a5f78ff75df00b0eccb8196af27",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/zephyr/FlashArea.pyi",
+      "upstream_git_blob": "9cec25390a16b1710238361baf2abb124b04b1f7",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/zephyr/PinCtrl.pyi",
+      "bytes": 1246,
+      "sha256": "8b3c15d76329ba3676baeba8bf98f69d64037110ae1c9ae6f32e3eaf67782f43",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/zephyr/PinCtrl.pyi",
+      "upstream_git_blob": "4f48d2eacaa5511063788f9834fefe23ae307c28",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/zephyr/PinMux.pyi",
+      "bytes": 371,
+      "sha256": "20ed0ffaf3cac9cc1210f12093e3443658d4d4dfdd3c5a5231c522f74d8430be",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/zephyr/PinMux.pyi",
+      "upstream_git_blob": "0a0dfaadc2b13b1194bb47d05bd14a57abc9de18",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/zephyr/__init__.pyi",
+      "bytes": 2495,
+      "sha256": "4da3b7681b5b735f3a2b4341aa74bc1832ce06e9c635b5beb0aae531e3ddf843",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/zephyr/__init__.pyi",
+      "upstream_git_blob": "d7f98a02298c88d710609002e8eeb6b2f4ade188",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/zephyr/zsensor.pyi",
+      "bytes": 6851,
+      "sha256": "1c566fc8ddc83332a392360ebd9e53d06c0f314175d2d18a843f94642157e56d",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/zephyr/zsensor.pyi",
+      "upstream_git_blob": "5a92aba2baea3fbea2dcb367580c228b6784c8e5",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "docstubs/zlib/__init__.pyi",
+      "bytes": 4074,
+      "sha256": "56e745ab39fed63d3243e047872900ab93c9457c121d3a555c6e60fe5fde8c3b",
+      "upstream_path": "stubs/micropython-v1_30_0_preview-docstubs/zlib/__init__.pyi",
+      "upstream_git_blob": "3a8aa95ab16fcd20a10c13e26b51d90821a27feb",
+      "classification": "documentation",
+      "modified": false
+    },
+    {
+      "path": "reference/_asyncio/__init__.pyi",
+      "bytes": 5366,
+      "sha256": "61998727194c1bba181cbab27b15a73263d5519e6dea2f965d7d3f63d4831bdd",
+      "upstream_path": "reference/micropython/_asyncio/__init__.pyi",
+      "upstream_git_blob": "e49079262d658cd67abdf0c81d49e927be26fcf8",
+      "classification": "curated-reference",
+      "modified": false
+    },
+    {
+      "path": "reference/_espnow/__init__.pyi",
+      "bytes": 7413,
+      "sha256": "4aab23efef0bb30a63052d9f5f14aca843ec62cd42c7c805e449322808882df2",
+      "upstream_path": "reference/micropython/_espnow/__init__.pyi",
+      "upstream_git_blob": "130f68ed9566a8d5c864a2b0b6106b6c75dccf86",
+      "classification": "curated-reference",
+      "modified": false
+    },
+    {
+      "path": "reference/_rp2/__init__.pyi",
+      "bytes": 677,
+      "sha256": "85c169067232675efdc1ba833b79e63d3c3c42f048a05106ea9f6c2cd242f9e8",
+      "upstream_path": "reference/micropython/_rp2/__init__.pyi",
+      "upstream_git_blob": "023f34505fadfcfb34fb844d7ccdf8c4278e7683",
+      "classification": "curated-reference",
+      "modified": false
+    },
+    {
+      "path": "reference/alif/__init__.pyi",
+      "bytes": 469,
+      "sha256": "4e4a3b031d94bf6331d39f93823c271ef0dbc75e67cdb44e373ed5fde4434fa8",
+      "upstream_path": "reference/micropython/alif/__init__.pyi",
+      "upstream_git_blob": "fb9532e08d434e87719e7b48dcf06e68018326fb",
+      "classification": "curated-reference",
+      "modified": false
+    },
+    {
+      "path": "reference/flashbdev/flashbdev.pyi",
+      "bytes": 186,
+      "sha256": "477c35b400d2d595d524687e8b25577435029e6bb748c12283dc1144561e84c6",
+      "upstream_path": "reference/micropython/flashbdev/flashbdev.pyi",
+      "upstream_git_blob": "aaf3fdf7f8edc11443a49262bebb4a306a7d6258",
+      "classification": "curated-reference",
+      "modified": false
+    },
+    {
+      "path": "reference/jsffi/__init__.pyi",
+      "bytes": 5049,
+      "sha256": "677b3a8245e1cf31a4128a3f3c6bdef646abc36efd14bd5b65740670fc690d88",
+      "upstream_path": "reference/micropython/jsffi/__init__.pyi",
+      "upstream_git_blob": "25b9f068d94a7c3ae6ca393a88bee506b9e4143e",
+      "classification": "curated-reference",
+      "modified": false
+    },
+    {
+      "path": "reference/music/__init__.pyi",
+      "bytes": 2180,
+      "sha256": "7ad4263e6315048048e62374f58ab6af202f5dd61a68c97b437f6d98aeba5d94",
+      "upstream_path": "reference/micropython/music/__init__.pyi",
+      "upstream_git_blob": "fdabf55d7869a94e76a20632cab8b2b850a1faa9",
+      "classification": "curated-reference",
+      "modified": false
+    },
+    {
+      "path": "reference/nrf/__init__.pyi",
+      "bytes": 2368,
+      "sha256": "8a56f1acbfd5ab1659fdb28c77efe5d02f99b2932369cf9658a64ba90a4da01f",
+      "upstream_path": "reference/micropython/nrf/__init__.pyi",
+      "upstream_git_blob": "94a685149e9096af5fad3c6cc714dcbc24d9dcea",
+      "classification": "curated-reference",
+      "modified": false
+    },
+    {
+      "path": "reference/onewire/__init__.pyi",
+      "bytes": 1631,
+      "sha256": "1a5bec9bd7b9c69588b647bff9aa82cdb986d5af57a702a11c60749c1ffe6b19",
+      "upstream_path": "reference/micropython/onewire/__init__.pyi",
+      "upstream_git_blob": "dbeb3a1d50338232d85ba3271658d62cc3781198",
+      "classification": "curated-reference",
+      "modified": false
+    },
+    {
+      "path": "reference/tls/__init__.pyi",
+      "bytes": 4419,
+      "sha256": "c6b27fcb0c5abc695ba5593da9352390410331e850df79bf807dd123a7eca1a8",
+      "upstream_path": "reference/micropython/tls/__init__.pyi",
+      "upstream_git_blob": "1b94d218a8eaf2864b6fd424cfd5a62cb88333ab",
+      "classification": "curated-reference",
+      "modified": false
+    },
+    {
+      "path": "reference/ubluepy/__init__.pyi",
+      "bytes": 7284,
+      "sha256": "f42768d8793aebbf6a198f72efb1ea2ef92a12bb0245d67450fb7e9449cbef94",
+      "upstream_path": "reference/micropython/ubluepy/__init__.pyi",
+      "upstream_git_blob": "340eb355518098d3eb268bff75b9076a83156631",
+      "classification": "curated-reference",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/IRQs.pyi",
+      "bytes": 1235,
+      "sha256": "8e3028c1b03c2ff1a2fce560c53f223491ba234271c8ab80274443c0391961b6",
+      "upstream_path": "reference/_mpy_shed/IRQs.pyi",
+      "upstream_git_blob": "af323acf6fb44c7a8718b8abaa12d02250275c2b",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/__init__.pyi",
+      "bytes": 5063,
+      "sha256": "966f7e7a007df7f1094abd3367dfdc71935dc61ac8232d3716a57eb7b09e73ff",
+      "upstream_path": "reference/_mpy_shed/__init__.pyi",
+      "upstream_git_blob": "6969d0b143255ac771d48250f0568273cd725396",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/_collections_abc.pyi",
+      "bytes": 3143,
+      "sha256": "81b0e4c299ae29e7ee593e44beee8088debf6d81e62f7e2820e8b4b69e11a3e3",
+      "upstream_path": "reference/_mpy_shed/_collections_abc.pyi",
+      "upstream_git_blob": "ed6a499b2d7f3f5aa9747512f205de14019d0e0a",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/_mp_available.pyi",
+      "bytes": 1182,
+      "sha256": "9bdbe89cb44c3b8a6b0983922bd406a43b4a91063e13db241c93eb4565c798a6",
+      "upstream_path": "reference/_mpy_shed/_mp_available.pyi",
+      "upstream_git_blob": "957c0b5c447e4461833a48b9b8fba776e90aa6ca",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/_mpy_builtins.pyi",
+      "bytes": 2744,
+      "sha256": "5f005711ebdfabd77b066d3f0b25a3d9e54be1e8dcbd7913d6a27a57697dce6a",
+      "upstream_path": "reference/_mpy_shed/_mpy_builtins.pyi",
+      "upstream_git_blob": "8268fd559b1840b54bdf40eddff4aefb38f7de29",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/blockdevice.pyi",
+      "bytes": 9864,
+      "sha256": "bd98813b949ea93ed371d92323910d9ebb0eec2b8ba68d1f50b5472d5a64db36",
+      "upstream_path": "reference/_mpy_shed/blockdevice.pyi",
+      "upstream_git_blob": "0341fe35c8fadd9c8fbd4fb4110dccdf1c686600",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/buffer_mp.pyi",
+      "bytes": 442,
+      "sha256": "9769eed6137df410acbeba093910ebe6764c2426eedfe88d419151be0b504028",
+      "upstream_path": "reference/_mpy_shed/buffer_mp.pyi",
+      "upstream_git_blob": "a1e3846b2170c75c5b9dc9f687b22d454c0145bc",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/collections/__init__.pyi",
+      "bytes": 23885,
+      "sha256": "a337d4f94e73bfc655e2fba9176954d68e27fed23b3dca661e589f15d64def5e",
+      "upstream_path": "reference/_mpy_shed/collections/__init__.pyi",
+      "upstream_git_blob": "7f8bc0567fcb83757ce2738aff0b5564bf5551cd",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/collections/abc.pyi",
+      "bytes": 82,
+      "sha256": "73c7b4f574a301d94dfdd7fa6dbd56b8c18b0b8f053956bfa39eb69095ca835c",
+      "upstream_path": "reference/_mpy_shed/collections/abc.pyi",
+      "upstream_git_blob": "fbceeba05af1475d0bfca062e38120a0324fd6af",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/io_modes.pyi",
+      "bytes": 1909,
+      "sha256": "3cb28dd7704c675143457c7a8354a9af0448ee119c874ff1e25dca868584a3a5",
+      "upstream_path": "reference/_mpy_shed/io_modes.pyi",
+      "upstream_git_blob": "14139659062fd65b5432446ef2a633eb2d798444",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/io_mp.pyi",
+      "bytes": 2297,
+      "sha256": "499b12133fd40315c9c9bdf435ed3da7c21b182b6d8a627c33d8dace10c04b99",
+      "upstream_path": "reference/_mpy_shed/io_mp.pyi",
+      "upstream_git_blob": "c98182491550ca5b3b1305d63f273feebb5d2729",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/mp_implementation.pyi",
+      "bytes": 1034,
+      "sha256": "d4ecbbdd54c88fb4fbb6fdcbcb2e542c33d28757f151853ca0b782d41d551b3d",
+      "upstream_path": "reference/_mpy_shed/mp_implementation.pyi",
+      "upstream_git_blob": "0169ecd256da0b2ace3b7bfaf1877d5858ce94dc",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/mp_mem.pyi",
+      "bytes": 578,
+      "sha256": "94b401adb8a54841f90b3ef42544adb2a417558bf5af22c9f8f880b663c19258",
+      "upstream_path": "reference/_mpy_shed/mp_mem.pyi",
+      "upstream_git_blob": "a90211c8c27f91c46641657ea64e438acf3223d9",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/neopixelbase.pyi",
+      "bytes": 595,
+      "sha256": "26983ab4d09b78c9764c4857dce1ebc917ac8e0fd5ae67f8e7190b5477720f0a",
+      "upstream_path": "reference/_mpy_shed/neopixelbase.pyi",
+      "upstream_git_blob": "166c434962cc774dbced4d043d7bdfa707f9ab05",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/os_vfs.pyi",
+      "bytes": 4179,
+      "sha256": "ca0f7c6ae792c3ff1e8ea737a1607e701eb5399e0e56078b177dbb7fffdf66d5",
+      "upstream_path": "reference/_mpy_shed/os_vfs.pyi",
+      "upstream_git_blob": "913be388c268d5e2a8519bf9e5e8ea9e1c229a2d",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/pathlike.pyi",
+      "bytes": 667,
+      "sha256": "9795fd8990c1844e4fd38b674132b40aaee2eadd93f68c20b62a28d456dc6289",
+      "upstream_path": "reference/_mpy_shed/pathlike.pyi",
+      "upstream_git_blob": "37ffe7b80e4f1af9f9d0426ab7aa6df5acd6e828",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/subscriptable.pyi",
+      "bytes": 627,
+      "sha256": "4f19f2a17add2d21105518b230e93f5a661ced9aa12d6c01439fe46412c2697e",
+      "upstream_path": "reference/_mpy_shed/subscriptable.pyi",
+      "upstream_git_blob": "e58489e4dc1ee98ec962fc17518846158fe23a67",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "_mpy_shed/time_mp.pyi",
+      "bytes": 1593,
+      "sha256": "45d180d3e25074e9f5a7259e50ba0f80845772130623c950be833db2868b6d31",
+      "upstream_path": "reference/_mpy_shed/time_mp.pyi",
+      "upstream_git_blob": "4f6eda8a2cfa7b416cb6fdeb09fb07e620974678",
+      "classification": "typing-support",
+      "modified": false
+    },
+    {
+      "path": "typeshed/_typeshed/__init__.pyi",
+      "bytes": 12202,
+      "sha256": "ad2f409b900534eb7bde260b09b6c87e730e14c9836117cfc03dcf8bd2e4897f",
+      "upstream_path": "publish/micropython-stdlib-stubs/stdlib/_typeshed/__init__.pyi",
+      "upstream_git_blob": "1d15da13b7f22a9fecc3ecb7b327376ada909b17",
+      "classification": "typeshed-support",
+      "modified": false
+    }
+  ],
+  "evidence": [
+    {
+      "path": "evidence/upstream-docstubs-tree.json",
+      "bytes": 43773,
+      "sha256": "826fb59a5622f888c6e0fce1c98fe497abc3f32ab479f32e8730b0525feedfb8"
+    },
+    {
+      "path": "evidence/upstream-reference-tree.json",
+      "bytes": 39793,
+      "sha256": "09c8092ebe8110f67c0b86d4fd374d5d751642960a6e49c52459c3eda2b0fec0"
+    },
+    {
+      "path": "evidence/upstream-helpers-tree.json",
+      "bytes": 4570,
+      "sha256": "4b4eb7d3d3a42c86bf58e5b7e228a8dcb004dfc2f0f78d5008e5274f6f5aeb69"
+    },
+    {
+      "path": "evidence/get-doc-stubs.yml",
+      "bytes": 3398,
+      "sha256": "b1771d75853948ab79dd9f28fb845fc9d0cd01706d74032db1eb75f71d07a4cd"
+    },
+    {
+      "path": "evidence/micropython-stubber-METADATA",
+      "bytes": 21129,
+      "sha256": "6b3597f5606790845c9296c7c63fb3f846d7ac3f3d02cc8519dfcf6e3994092d"
+    },
+    {
+      "path": "evidence/micropython-stubber-RECORD",
+      "bytes": 9134,
+      "sha256": "932f1c6aaaffc9e50e833b80b772e5cca8751a6fca7913247725094f8621e862"
+    },
+    {
+      "path": "evidence/stubs_from_docs.py",
+      "bytes": 3597,
+      "sha256": "eba1042ebc1a84d1217975cf7110ffd099e4f91ed43a8d717f5bbe01b36c9ca0"
+    },
+    {
+      "path": "evidence/get_docstubs_cmd.py",
+      "bytes": 5148,
+      "sha256": "0a98708b21e79b686c7b1a8a39469a7dbea207abf80ece979c5bb4858bcd7515"
+    },
+    {
+      "path": "evidence/modcat.py",
+      "bytes": 4868,
+      "sha256": "ac2bc5022d9bdf1f249c7a67e5e640ef7590384b153b2d39b7236890dcdbe52a"
+    },
+    {
+      "path": "evidence/typeshed_commit.txt",
+      "bytes": 202,
+      "sha256": "edbdfff43b84c7063c880187b45097b3bae9906c7cbaff015ed73286c0e7ac76"
+    }
+  ],
+  "notices": [
+    {
+      "path": "notices/LICENSE.micropython-stubs",
+      "bytes": 1084,
+      "sha256": "022af6d8f0edc20f988a107eb23c325a905fccd47808f219792dd32b78a0523f"
+    },
+    {
+      "path": "notices/LICENSE.micropython-stubber",
+      "bytes": 1542,
+      "sha256": "db3b0e5e562097d5bbfd71977277005c861fbd2565c8d715072702ea18652a10"
+    },
+    {
+      "path": "notices/LICENSE.MicroPython",
+      "bytes": 3419,
+      "sha256": "80d3459978572b5bbb1dd274a98b01a625aeff467588ad69cefdf7eb607c1306"
+    },
+    {
+      "path": "notices/LICENSE.typeshed",
+      "bytes": 12657,
+      "sha256": "295f8538c94ae5c3043301cf7cff1c852dab6a786a8ddee471e061b40d5ecabe"
+    },
+    {
+      "path": "notices/LICENSE.micropython-stdlib-stubs",
+      "bytes": 12828,
+      "sha256": "4fd610fb7d49f1091013b0b3a8343efa048a21f6e2d506abed85ed7afd8be9ee"
+    }
+  ]
+}

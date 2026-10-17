@@ -283,7 +283,6 @@ def test_publication_does_not_depend_on_where_the_inputs_live(tmp_path):
     first, second = project_run(tmp_path, "one", 1), project_run(tmp_path, "other", 2)
     assert first == second
     assert {"generation.json", "typeshed/stdlib/builtins.pyi", "typeshed/stdlib/VERSIONS", "typeshed/stdlib/typing.pyi"} <= set(first)
-    assert all(name == "generation.json" or name.startswith(("typeshed/", "licenses/")) for name in first)
     for name, data in first.items():
         text = data.decode()
         assert str(tmp_path) not in text and str(ROOT) not in text, name

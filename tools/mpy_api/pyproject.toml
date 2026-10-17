@@ -19,4 +19,9 @@ packages = ["mpy_api"]
 package-dir = {mpy_api = "."}
 
 [tool.setuptools.package-data]
-mpy_api = ["vendor/**", "overlay/**"]
+mpy_api = [
+    "vendor/micropython_stdlib_stubs/**",
+    "vendor/micropython_stdlib_stubs.provenance.json",
+    "vendor/micropython_docstubs/**",
+    "overlay/**",
+]

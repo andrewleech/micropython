@@ -293,8 +293,9 @@ def path_names(args, root, build_dir):
     for name, path in assignments(args.path_var, "manifest path variable").items():
         if not named_directory(str(Path(path).resolve())):
             claim("path-var/" + name, Path(path).resolve(strict=True))
-    if args.enrichment and not named_directory(str(args.enrichment.resolve())):
-        claim("enrichment", args.enrichment.resolve(strict=True).parent)
+    for index, manifest in enumerate(args.enrichment, 1):
+        if not named_directory(str(manifest.resolve())):
+            claim(f"enrichment/{index}", manifest.resolve(strict=True).parent)
     for role, paths in (("compdb", [args.compdb]), ("elf", [args.elf]), ("map", [args.map_path]),
                         ("link-command", [args.link_command]), ("manifest", args.manifest)):
         for path in paths:
@@ -457,7 +458,8 @@ def argument_parser():
     parser.add_argument("--path-var", action="append", default=[], metavar="NAME=PATH")
     parser.add_argument("--source-root", action="append", default=[], metavar="NAME=PATH")
     parser.add_argument("--source-owner", action="append", default=[], metavar="NAME=OWNER")
-    parser.add_argument("--enrichment", type=Path, help="optional schema-v1 manifest pinning a .pyi enrichment tree and its source/licence inputs")
+    parser.add_argument("--enrichment", type=Path, action="append", default=[],
+                        help="additional schema-v1 reference manifest; later references enrich fields left unknown by the build")
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--open-modules", choices=OPEN_MODULES, default="proven",
                         help="which modules and classes with dynamic attribute evidence get a catch-all __getattr__: "
@@ -482,9 +484,12 @@ def generate(args):
     output = args.output.absolute()
     if output.exists() or output.is_symlink():
         raise FileExistsError(f"output already exists: {output}")
+    from .docstubs import default_enrichment_path
     from .enrichment import load_enrichment, merge_enrichment, validate_enrichment_target, verify_enrichment
-    enrichment = load_enrichment(args.enrichment) if args.enrichment else None
-    if enrichment:
+    enrichments = {"bundled": load_enrichment(default_enrichment_path())}
+    enrichments.update((f"reference-{index}", load_enrichment(path))
+                       for index, path in enumerate(args.enrichment, 1))
+    for enrichment in enrichments.values():
         validate_enrichment_target(enrichment, {key: getattr(args, key) for key in ("port", "target", "variant")})
     tools = producer_tools(root)
     inputs = {"compdb": file_identity(args.compdb), "elf": file_identity(args.elf),
@@ -532,10 +537,17 @@ def generate(args):
                                          "records": [module["provenance"] for module in frozen]}
         identities = {**inputs, "tool_version": __version__, "python": sys.version,
                       "tools": tools, "parser": parser, "frozen": frozen_inputs,
-                      "enrichment": None, "declaration_options": {"open_modules": args.open_modules}}
+                      "declaration_options": {"open_modules": args.open_modules}}
         surface["provenance"]["producer_inputs"] = identities
-        if enrichment:
-            merge_enrichment(surface, enrichment)
+        enrichment_inputs, comparisons = {}, {}
+        for label, enrichment in enrichments.items():
+            comparisons[label] = merge_enrichment(surface, enrichment, compare=args.inventory)
+            enrichment_inputs[label] = identities["enrichment"]
+            if args.inventory:
+                comparisons[label]["inputs_ref"] = f"provenance.producer_inputs.enrichment.{label}.inputs"
+        identities["enrichment"] = enrichment_inputs
+        if args.inventory:
+            surface["enrichment"] = comparisons
         # Everything from here on is published: the host paths of the records become names, so the
         # declarations (typing variable names derive from identities) and the receipt do not depend on
         # where the inputs live.
@@ -553,6 +565,30 @@ def generate(args):
         # The published tree is the generated declarations assembled with the support layer; the support
         # inputs are part of what generation_id identifies.
         pack = assemble_pack(declarations)
+        from .docmerge import enrich_declarations
+        available = {name: data.decode("utf-8") for name, data in pack.files.items() if name.endswith(".pyi")}
+        selected_modules = {module["name"] for module in surface["modules"]} | {"builtins"}
+        selected = {
+            name for name in available if name.startswith("typeshed/stdlib/")
+            and name[len("typeshed/stdlib/"):-4].removesuffix("/__init__").replace("/", ".") in selected_modules
+        }
+        applications = {}
+        for label, enrichment in enrichments.items():
+            enriched, application = enrich_declarations(
+                {name: available[name] for name in sorted(selected)}, enrichment, surface,
+                generated_declarations=declarations, available_declarations=available)
+            for name, text in enriched.items():
+                text = paths.text(text)
+                if text != available[name]:
+                    pack.files[name] = text.encode("utf-8")
+                    pack.records[name]["documentation_enriched"] = True
+                    available[name] = text
+            application.pop("references")
+            application.pop("lineage")
+            application["provenance_ref"] = f"inputs.enrichment.{label}.provenance"
+            application["target_match"] = comparisons[label]["target_match"]
+            applications[label] = application
+        pack.receipt["enrichment"] = paths.value({"applications": applications})
         identities = {**identities, "support": pack.inputs}
         def verify_publication_inputs():
             verify_identities([*inputs.values(), *frozen_inputs["manifests"],
@@ -566,11 +602,12 @@ def generate(args):
                 raise RuntimeError("parser installation changed during generation")
             if source_revision(root) != revision:
                 raise RuntimeError("source revision changed during generation")
-            if enrichment:
+            for enrichment in enrichments.values():
                 verify_enrichment(enrichment)
 
         receipt = write_generation(output, surface, pack.files, identities, pack=pack,
-                                   notices=enrichment["notice_artifacts"] if enrichment else {},
+                                   notices={name: data for enrichment in enrichments.values()
+                                            for name, data in enrichment["notice_artifacts"].items()},
                                    verify=verify_publication_inputs,
                                    inventory=document.value(surface, paths) if document else None)
         return output, receipt, store.report()
