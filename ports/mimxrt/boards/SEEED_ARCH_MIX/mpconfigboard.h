@@ -10,6 +10,25 @@
 #define MICROPY_HW_LED_ON(pin) (mp_hal_pin_low(pin))
 #define MICROPY_HW_LED_OFF(pin) (mp_hal_pin_high(pin))
 
+// Standalone Mboot uses GPIO descriptors, not the runtime pin objects above.
+#if defined(BUILDING_MBOOT)
+#define MBOOT_LED1_GPIO GPIO1
+#define MBOOT_LED1_PIN 9u
+#define MBOOT_LED1_MUX IOMUXC_GPIO_AD_B0_09_GPIO1_IO09
+#define MBOOT_LED1_PAD_CONFIG 0x58u
+#define MBOOT_LED1_ACTIVE_LOW 1
+#define MBOOT_LED2_GPIO GPIO1
+#define MBOOT_LED2_PIN 10u
+#define MBOOT_LED2_MUX IOMUXC_GPIO_AD_B0_10_GPIO1_IO10
+#define MBOOT_LED2_PAD_CONFIG 0x58u
+#define MBOOT_LED2_ACTIVE_LOW 1
+#define MBOOT_LED3_GPIO GPIO1
+#define MBOOT_LED3_PIN 11u
+#define MBOOT_LED3_MUX IOMUXC_GPIO_AD_B0_11_GPIO1_IO11
+#define MBOOT_LED3_PAD_CONFIG 0x58u
+#define MBOOT_LED3_ACTIVE_LOW 1
+#endif
+
 #define MICROPY_HW_NUM_PIN_IRQS (4 * 32 + 3)
 
 // Define mapping logical UART # to hardware UART #

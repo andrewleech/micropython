@@ -32,6 +32,7 @@ INC += -I$(TOP) -I. -I$(BOARD_DIR) -I$(BUILD)
 INC += -I$(TOP)/ports/mimxrt -I$(TOP)/lib/CMSIS_6/CMSIS/Core/Include
 INC += -I$(TOP)/$(MCU_DIR) -I$(TOP)/$(MCU_DIR)/drivers
 INC += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/common
+INC += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/igpio
 INC += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/flexram
 INC += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/flexspi
 INC += -I$(TOP)/lib/tinyusb/src -I$(TOP)/shared/tinyusb
@@ -84,8 +85,11 @@ endif
 
 SRC_C = \
     mboot_port.c \
+    mboot_led.c \
     flash.c \
     mboot_nxp_boot.c \
+    mimxrt_reset_cause.c \
+    mimxrt_usb_phy.c \
     boards/$(MCU_SERIES)_clock_config.c \
     shared/libc/string0.c \
     $(MBOOT_SRC_C) \
@@ -101,6 +105,7 @@ SRC_HAL = \
     hal/flexspi_nor_flash.c \
     hal/qspi_nor_flash_config.c \
     $(MCU_DIR)/drivers/fsl_clock.c \
+    $(MCUX_SDK_DIR)/drivers/igpio/fsl_gpio.c \
     $(MCUX_SDK_DIR)/drivers/wdog01/fsl_wdog.c
 SRC_HAL += $(MBOOT_EXTRA_SRC_HAL)
 SRC_TINYUSB_C = \

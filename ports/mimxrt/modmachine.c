@@ -43,6 +43,7 @@
 #endif
 #if defined(MICROPY_HW_ENABLE_MBOOT) && MICROPY_HW_ENABLE_MBOOT
 #include "mboot_app.h"
+#include "mimxrt_reset_cause.h"
 #endif
 
 
@@ -115,24 +116,25 @@ void machine_init(void) {
     uint32_t reset_flags = mboot_app_reset_flags(SRC->SRSR);
     uint32_t src_reset_flags = reset_flags & 0xffffu;
     uint16_t wdog_reset_flags = (uint16_t)(reset_flags >> 16);
-    #ifdef MIMXRT117x_SERIES
-    const uint32_t src_soft_reset = kSRC_M7CoreM7RequestResetFlag | kSRC_M7CoreM7LockUpResetFlag | kSRC_M7CoreJtagSWResetFlag;
-    const uint32_t src_wdog_reset = kSRC_M7CoreWdogResetFlag | kSRC_M7CoreWdog3ResetFlag | kSRC_M7CoreWdog4ResetFlag;
-    bool wdog_software = (wdog_reset_flags & kWDOG_SoftwareResetFlag) && (src_reset_flags & kSRC_M7CoreWdogResetFlag);
-    #else
-    const uint32_t src_soft_reset = SRC_SRSR_LOCKUP_SYSRESETREQ_MASK;
-    const uint32_t src_wdog_reset = SRC_SRSR_WDOG_RST_B_MASK;
-    bool wdog_software = false;
-    #endif
-    // The WDOG power-on bit survives software resets; use the SRC and WDOG software flags.
+    mimxrt_reset_cause_t cause = mimxrt_reset_cause_classify(src_reset_flags, wdog_reset_flags);
     if (woke_from_deepsleep || (src_reset_flags & user_reset_flag)) {
         reset_cause = MP_DEEPSLEEP_RESET;
-    } else if ((wdog_reset_flags & kWDOG_PowerOnResetFlag) && !(src_reset_flags & src_soft_reset) && !wdog_software) {
-        reset_cause = MP_PWRON_RESET;
-    } else if ((src_reset_flags & src_wdog_reset) && !wdog_software) {
-        reset_cause = MP_WDT_RESET;
     } else {
-        reset_cause = MP_HARD_RESET;
+        switch (cause) {
+            case MIMXRT_RESET_CAUSE_POR:
+                reset_cause = MP_PWRON_RESET;
+                break;
+            case MIMXRT_RESET_CAUSE_WATCHDOG:
+                reset_cause = MP_WDT_RESET;
+                break;
+            case MIMXRT_RESET_CAUSE_PIN:
+            case MIMXRT_RESET_CAUSE_SOFTWARE:
+            case MIMXRT_RESET_CAUSE_OVERVOLTAGE:
+            case MIMXRT_RESET_CAUSE_OTHER:
+            default:
+                reset_cause = MP_HARD_RESET;
+                break;
+        }
     }
     #else
     // Determine the current reset cause.
