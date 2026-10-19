@@ -1,0 +1,174 @@
+# Makefile of the STM32 Mboot bootloader (MBOOT_ROLE=bootloader), for STM32H5 boards and for
+# STM32F7 boards whose mpconfigboard.h has the MICROPY_*MBOOT_* settings (PYBD_SF6).
+#
+#   make -f Makefile.mboot BOARD=NUCLEO_H563ZI                  builds build-NUCLEO_H563ZI-mboot/firmware.{elf,bin,hex}
+#   make -f Makefile.mboot BOARD=NUCLEO_H563ZI PROBE=<serial> deploy-bootloader   programs the bootloader through pyocd
+#
+# The board's mpconfigboard.h holds the MICROPY_*MBOOT_* settings (slot placement and the choices
+# listed in shared/mboot/include/mboot_layout.h), mboot_dev.h describes the flash. The clocks, pins,
+# USB and flash services are those of the application: the board's MICROPY_HW_CLK_*, LED, USER
+# button and USB settings. The build rules are in shared/mboot/mboot_bootloader.mk.
+
+# Select the board to build for:
+ifdef BOARD_DIR
+# Custom board path - remove trailing slash and get the final component of the path as
+# the board name.
+BOARD ?= $(notdir $(BOARD_DIR:/=))
+else
+BOARD ?= NUCLEO_H563ZI
+BOARD_DIR ?= $(abspath boards/$(BOARD))
+endif
+
+# If the build directory is not given, make it reflect the board name.
+BUILD ?= build-$(BOARD)-mboot
+
+ifeq ($(wildcard $(BOARD_DIR)/.),)
+$(error Invalid BOARD specified: $(BOARD_DIR))
+endif
+
+# stm32.mk selects the soft-float flags of the bootloader with this.
+BUILDING_MBOOT = 1
+
+include ../../py/mkenv.mk
+include $(BOARD_DIR)/mpconfigboard.mk
+
+ifeq ($(filter $(MCU_SERIES),h5 f7),)
+$(error the Mboot bootloader of the stm32 port is implemented for STM32H5 and STM32F7 only, board $(BOARD) is MCU_SERIES=$(MCU_SERIES))
+endif
+
+CROSS_COMPILE ?= arm-none-eabi-
+
+include stm32.mk
+
+# Layout files, key table and the source lists of shared/mboot.
+MBOOT_ROLE = bootloader
+MBOOT_DEV_DIR = $(CURDIR)
+# mboot_dev.h reads the CMSIS device header, so the layout generator needs these to preprocess
+# it.
+MBOOT_CPP_FLAGS = $(CFLAGS_MCU_$(MCU_SERIES)) -D$(CMSIS_MCU) -I$(TOP)/lib/CMSIS_6/CMSIS/Core/Include -I$(STM32LIB_CMSIS_ABS)/Include -I$(TOP)/ports/stm32
+include $(TOP)/shared/mboot/mboot_common.mk
+
+INC += -I.
+INC += -I$(TOP)
+INC += -I$(BUILD)
+INC += -I$(BOARD_DIR)
+INC += -I$(TOP)/lib/CMSIS_6/CMSIS/Core/Include
+INC += -I$(STM32LIB_CMSIS_ABS)/Include
+INC += -I$(STM32LIB_HAL_ABS)/Inc
+INC += -I$(TOP)/lib/tinyusb/src
+INC += $(MBOOT_INC)
+
+CFLAGS += -D$(CMSIS_MCU) -DUSE_FULL_LL_DRIVER
+CFLAGS += $(CFLAGS_MCU_$(MCU_SERIES))
+CFLAGS += -DBOARD_$(BOARD) -DBUILDING_MBOOT=1 -DMICROPY_HW_STM32WB_FLASH_SYNCRONISATION=0 -DSTM32_HAL_H='<stm32$(MCU_SERIES)xx_hal.h>'
+CFLAGS += $(MBOOT_CFLAGS)
+CFLAGS += -DMICROPY_HW_UART_NO_RUNTIME=1
+
+# SRAM linker symbols, from the CMSIS header.
+MBOOT_SRAM_LD = $(BUILD)/mboot_sram.ld
+MBOOT_CMSIS_H = stm32$(MCU_SERIES)xx.h
+
+# The services of the port that the application also uses: the clock configuration, the flash
+# driver, the pin and UART drivers, the USB hardware setup and serial number. uart.c has no
+# runtime parts here (MICROPY_HW_UART_NO_RUNTIME).
+SRC_C = \
+	mboot_boot.c \
+	mboot_port.c \
+	system_stm32.c \
+	powerctrlboot.c \
+	flash.c \
+	mphalport_hw.c \
+	uart.c \
+	shared/libc/string0.c \
+	$(MBOOT_SRC_C) \
+	$(MBOOT_MCU_SRC_C)
+
+# A SPI flash of the board (MICROPY_HW_MBOOT_SPIFLASH_* in mpconfigboard.h) uses the drivers of mboot.
+ifeq ($(MBOOT_SPIFLASH_ENABLE),1)
+SRC_C += drivers/bus/softspi.c drivers/bus/softqspi.c drivers/memory/spiflash.c \
+	qspi.c spibdev.c xspi.c $(wildcard $(BOARD_DIR)/*.c)
+endif
+
+# The HAL: the tick, the clock, power and cache drivers of the clock configuration and the flash
+# driver.
+SRC_HAL = $(STM32LIB_HAL_BASE)/Src/stm32$(MCU_SERIES)xx_hal.c
+SRC_HAL += $(addprefix $(STM32LIB_HAL_BASE)/Src/stm32$(MCU_SERIES)xx_hal_, \
+	cortex.c rcc.c rcc_ex.c pwr.c pwr_ex.c flash.c flash_ex.c)
+SRC_HAL += $(STM32LIB_HAL_BASE)/Src/stm32$(MCU_SERIES)xx_ll_rcc.c
+ifeq ($(MCU_SERIES),h5)
+SRC_HAL += $(STM32LIB_HAL_BASE)/Src/stm32h5xx_hal_icache.c
+endif
+
+# The USB device controller driver (the USB DRD FS of the STM32H5, the DWC2 OTG core of the
+# STM32F7); the TinyUSB core and DFU class are listed by mboot_common.mk. The hardware setup is the
+# USB code of the port.
+SRC_TINYUSB_C =
+ifeq ($(MBOOT_DFU_ENABLE),1)
+SRC_C += usbd_conf.c usbd.c
+SRC_TINYUSB_C += $(MBOOT_TINYUSB_SRC_C)
+CFLAGS += -DMICROPY_MBOOT_TINYUSB=1 -DMICROPY_HW_TINYUSB_STACK=1 -DMICROPY_HW_USB_CDC=0 -DMICROPY_HW_USB_MSC=0
+CFLAGS += -DMICROPY_HW_ENABLE_USB_RUNTIME_DEVICE=0
+CFLAGS += -DCFG_TUSB_CONFIG_FILE='"mboot_tusb_config.h"'
+INC += -Iusbdev/core/inc
+ifeq ($(MCU_SERIES),h5)
+SRC_TINYUSB_C += $(addprefix lib/tinyusb/src/, \
+	portable/st/stm32_fsdev/dcd_stm32_fsdev.c \
+	portable/st/stm32_fsdev/fsdev_common.c \
+	)
+else
+SRC_TINYUSB_C += $(addprefix lib/tinyusb/src/, \
+	portable/synopsys/dwc2/dcd_dwc2.c \
+	portable/synopsys/dwc2/dwc2_common.c \
+	)
+endif
+endif
+
+# The vector table and the weak default handlers come from the ST startup file; its
+# Reset_Handler is replaced by resethandler.s, which calls stm32_main().
+SRC_O = \
+	$(STARTUP_FILE) \
+	$(SYSTEM_FILE) \
+	resethandler.o \
+	pins_$(BOARD).o
+
+include $(TOP)/shared/mboot/mboot_bootloader.mk
+
+#########################################
+# The pin objects of the board, as in the application. The bootloader has no runtime, so the
+# qstr header only numbers the names that the pin tables use, and the source of the pin tables
+# is built like any other.
+
+MAKE_PINS = boards/make-pins.py
+PREFIX_FILE = boards/stm32f4xx_prefix.c
+BOARD_PINS = $(BOARD_DIR)/pins.csv
+HEADER_BUILD = $(BUILD)/genhdr
+GEN_PINS_SRC = $(BUILD)/pins_$(BOARD).c
+GEN_PINS_HDR = $(HEADER_BUILD)/pins.h
+GEN_PINS_AF_CONST = $(HEADER_BUILD)/pins_af_const.h
+GEN_PINS_AF_DEFS = $(HEADER_BUILD)/pins_af_defs.h
+GEN_QSTRDEFS_GENERATED = $(HEADER_BUILD)/qstrdefs.generated.h
+GEN_ROOT_POINTERS = $(HEADER_BUILD)/root_pointers.h
+
+$(OBJ): $(GEN_PINS_AF_DEFS) $(GEN_QSTRDEFS_GENERATED) $(GEN_ROOT_POINTERS)
+
+$(HEADER_BUILD):
+	$(MKDIR) -p $@
+
+$(GEN_PINS_AF_DEFS): $(BOARD_PINS) $(MAKE_PINS) $(AF_FILE) $(PREFIX_FILE) | $(HEADER_BUILD)
+	$(ECHO) "GEN $@"
+	$(Q)$(PYTHON) $(MAKE_PINS) --board-csv $(BOARD_PINS) --af-csv $(AF_FILE) --prefix $(PREFIX_FILE) \
+		--output-source $(GEN_PINS_SRC) --output-header $(GEN_PINS_HDR) \
+		--output-af-const $(GEN_PINS_AF_CONST) --output-af-defs $(GEN_PINS_AF_DEFS)
+
+$(GEN_QSTRDEFS_GENERATED): $(GEN_PINS_AF_DEFS) $(GEN_ROOT_POINTERS)
+	$(ECHO) "GEN $@"
+	$(Q)$(CC) -E -DNO_QSTR $(CFLAGS) $(GEN_PINS_SRC) | grep -o 'MP_QSTR_[A-Za-z0-9_]*' | sort -u | \
+		$(SED) -e 's/\(MP_QSTR_\(.*\)\)/QDEF0(\1, 0, 0, "\2")/' > $@
+
+$(GEN_ROOT_POINTERS): | $(HEADER_BUILD)
+	$(Q)echo "// empty" > $@
+
+$(GEN_PINS_SRC): $(GEN_PINS_AF_DEFS)
+
+$(BUILD)/pins_$(BOARD).o: $(GEN_PINS_SRC)
+	$(call compile_c)
