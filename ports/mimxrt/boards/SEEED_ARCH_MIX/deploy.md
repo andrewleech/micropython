@@ -68,3 +68,5 @@ make -C ports/mimxrt BOARD=SEEED_ARCH_MIX MBOOT=1 MBOOT_ROMFS=<romfs-image> MBOO
 ```
 
 The signed application includes a padded 512 KiB ROMFS image; changes to ROMFS require rebuilding and signing the application, not writing ROMFS in place. Do not use the UF2, sdphost or TinyUF2 recovery instructions above for Mboot. Before installation, make a complete flash backup, verify an independent recovery and restore path, and review the binary, map and programmer commands against the flash layout. Check that the signed application fits the configured slot, including the image header, validation metadata and swap trailer. The build commands do not provide a deployment or restore procedure.
+
+Standalone Mboot maps LED slots 1, 2 and 3 to the active-low red, green and blue LEDs. Their `MBOOT_LED*_PAD_CONFIG` value is `0x58`, matching runtime output mode on RT1052: slow slew, medium speed, pull/keeper disabled, open-drain disabled, DSE=3 and hysteresis disabled.

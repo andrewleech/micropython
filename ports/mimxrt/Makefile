@@ -254,8 +254,10 @@ INC += $(INC_HAL_IMX)
 # C source files
 SRC_C += \
 	board_init.c \
-	boards/$(MCU_SERIES)_clock_config.c \
+	mimxrt_reset_cause.c \
+	mimxrt_usb_phy.c \
 	dma_manager.c \
+	boards/$(MCU_SERIES)_clock_config.c \
 	drivers/bus/softspi.c \
 	drivers/dht/dht.c \
 	eth.c \

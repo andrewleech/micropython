@@ -32,11 +32,14 @@
 #include "mphalport.h"
 #endif
 #include "mboot_dev.h"
+#include "mboot_led.h"
 
 #include "flash.h"
 #include "fsl_clock.h"
 #include "fsl_wdog.h"
 #include "fsl_device_registers.h"
+#include "mimxrt_reset_cause.h"
+#include "mimxrt_usb_phy.h"
 #include CLOCK_CONFIG_H
 #include CPU_HEADER_H
 
@@ -70,45 +73,20 @@ static uint32_t mboot_reset_raw(void) {
 }
 
 static uint32_t mboot_reset_cause_from_flags(uint32_t raw, uint32_t wdog_flags) {
-    #ifdef MIMXRT117x_SERIES
-    const uint32_t software_reset_flags =
-        kSRC_M7CoreM7RequestResetFlag | kSRC_M7CoreM7LockUpResetFlag | kSRC_M7CoreJtagSWResetFlag;
-    // The WDOG1 power-on flag stays set across the WDOG1 software reset that sets its software
-    // flag, so that reset is told apart by the core watchdog reset flag of the SRC.
-    bool wdog_software = (wdog_flags & kWDOG_SoftwareResetFlag) && (raw & kSRC_M7CoreWdogResetFlag);
-    if ((wdog_flags & kWDOG_PowerOnResetFlag) && !(raw & software_reset_flags) && !wdog_software) {
-        return MBOOT_RESET_POR;
+    switch (mimxrt_reset_cause_classify(raw, wdog_flags)) {
+        case MIMXRT_RESET_CAUSE_POR:
+            return MBOOT_RESET_POR;
+        case MIMXRT_RESET_CAUSE_WATCHDOG:
+            return MBOOT_RESET_WDT;
+        case MIMXRT_RESET_CAUSE_PIN:
+            return MBOOT_RESET_PIN;
+        case MIMXRT_RESET_CAUSE_SOFTWARE:
+            return MBOOT_RESET_SOFT;
+        case MIMXRT_RESET_CAUSE_OVERVOLTAGE:
+            return MBOOT_RESET_POR;
+        default:
+            return MBOOT_RESET_OTHER;
     }
-    if (wdog_software) {
-        return MBOOT_RESET_SOFT;
-    }
-    if (raw & (kSRC_M7CoreWdogResetFlag | kSRC_M7CoreWdog3ResetFlag | kSRC_M7CoreWdog4ResetFlag)) {
-        return MBOOT_RESET_WDT;
-    }
-    if (raw & kSRC_M7CoreIppResetFlag) {
-        return MBOOT_RESET_PIN;
-    }
-    if (raw & software_reset_flags) {
-        return MBOOT_RESET_SOFT;
-    }
-    if (raw & kSRC_M7CoreOverVoltageResetFlag) {
-        return MBOOT_RESET_POR;
-    }
-    #else
-    if ((wdog_flags & kWDOG_PowerOnResetFlag) && !(raw & SRC_SRSR_LOCKUP_SYSRESETREQ_MASK)) {
-        return MBOOT_RESET_POR;
-    }
-    if (raw & SRC_SRSR_WDOG_RST_B_MASK) {
-        return MBOOT_RESET_WDT;
-    }
-    if (raw & SRC_SRSR_IPP_RESET_B_MASK) {
-        return MBOOT_RESET_PIN;
-    }
-    if (raw & SRC_SRSR_LOCKUP_SYSRESETREQ_MASK) {
-        return MBOOT_RESET_SOFT;
-    }
-    #endif
-    return MBOOT_RESET_OTHER;
 }
 
 static void mboot_reset_flags_clear(uint32_t raw) {
@@ -403,8 +381,9 @@ void mboot_port_usb_serial_number(char *buf, size_t len) {
 }
 
 void mboot_port_led(uint32_t mask) {
-    (void)mask;
+    mboot_led_set(mask);
 }
+
 
 void mboot_port_log_write(const char *s, size_t n) {
     (void)s;
@@ -423,21 +402,7 @@ int mboot_port_usb_init(void) {
         return -EIO;
     }
     mboot_usb_clocks_enabled = true;
-    #if defined(USBPHY1)
-    USBPHY_Type *usb_phy = USBPHY1;
-    #else
-    USBPHY_Type *usb_phy = USBPHY;
-    #endif
-    #if defined(MIMXRT117x_SERIES)
-    usb_phy->TRIM_OVERRIDE_EN = USBPHY_TRIM_OVERRIDE_EN_TRIM_DIV_SEL_OVERRIDE(1) |
-        USBPHY_TRIM_OVERRIDE_EN_TRIM_ENV_TAIL_ADJ_VD_OVERRIDE(1) |
-        USBPHY_TRIM_OVERRIDE_EN_TRIM_TX_D_CAL_OVERRIDE(1) |
-        USBPHY_TRIM_OVERRIDE_EN_TRIM_TX_CAL45DP_OVERRIDE(1) |
-        USBPHY_TRIM_OVERRIDE_EN_TRIM_TX_CAL45DN_OVERRIDE(1);
-    #endif
-    usb_phy->PWD = 0;
-    usb_phy->TX = (usb_phy->TX & ~(USBPHY_TX_D_CAL_MASK | USBPHY_TX_TXCAL45DM_MASK | USBPHY_TX_TXCAL45DP_MASK)) |
-        USBPHY_TX_D_CAL(0b0111) | USBPHY_TX_TXCAL45DP(0b0110) | USBPHY_TX_TXCAL45DM(0b0110);
+    mimxrt_usb_phy_init(0b0111, 0b0110, 0b0110);
     NVIC_ClearPendingIRQ(USB_OTG1_IRQn);
     NVIC_SetPriority(USB_OTG1_IRQn, 2);
     NVIC_EnableIRQ(USB_OTG1_IRQn);
@@ -470,5 +435,6 @@ void USB_OTG1_IRQHandler(void) {
 
 void SysTick_Handler(void) {
     ++mboot_ticks;
+    mboot_led_tick_1ms();
 }
 #endif
