@@ -1,0 +1,94 @@
+name: mpy_analysis tools
+
+on:
+  push:
+  pull_request:
+    paths:
+      - '.github/workflows/tools_mpy_analysis.yml'
+      - 'tools/mpy_analysis/**'
+      - 'tools/mpy_build_inputs/**'
+      - 'lib/**'
+      - 'LICENSE'
+      - 'py/mpconfig.h'
+      - 'ports/unix/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    # Every library checkout must be present: the version and licence drift checks fail
+    # instead of skipping when one is missing.
+    runs-on: ubuntu-latest
+    env:
+      MPY_REQUIRE_SUBMODULES: 1
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+    - name: Fetch every submodule
+      run: git submodule update --init --recursive
+    - name: Install the tools
+      run: pip install ./tools/mpy_build_inputs ./tools/mpy_analysis pytest
+    - name: Run the regressions
+      # The two suites each have a conftest.py, so they run as separate pytest sessions.
+      run: |
+        PYTHONPATH=tools/mpy_analysis:tools python -m pytest -q tools/mpy_analysis/tests
+        PYTHONPATH=tools python -m pytest -q tools/mpy_build_inputs/tests
+
+  unix_sbom:
+    # Builds the Unix port, derives link evidence from the build, and generates both SBOM
+    # formats for it. The summary must report no gaps and the SPDX output must pass the
+    # reference validator.
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+    - name: Fetch the libraries the Unix build uses
+      run: git submodule update --init --recursive
+    - name: Install the tools
+      run: pip install ./tools/mpy_build_inputs ./tools/mpy_analysis "spdx-tools>=0.8,<0.9"
+    - name: Build
+      run: |
+        sudo apt-get update && sudo apt-get install -y libffi-dev pkg-config
+        make -C mpy-cross -j"$(nproc)"
+        mkdir -p /tmp/sbom
+        cd ports/unix
+        python -m compiledb -n -S -o /tmp/sbom/compile_commands.json make
+        make -j"$(nproc)"
+    - name: Generate the SBOMs
+      run: |
+        P=$PWD
+        B=$P/ports/unix/build-standard
+        ROOTS="--root micropython=$P --root mbedtls=$P/lib/mbedtls --root micropython-lib=$P/lib/micropython-lib --root berkeley-db-1.xx=$P/lib/berkeley-db-1.xx"
+        sast-link-evidence --compile-database /tmp/sbom/compile_commands.json \
+          --image unix:application:$B/micropython:$B/micropython.map \
+          $(echo $ROOTS | sed 's/--root /--source-root /g') \
+          --output /tmp/sbom/evidence.json --selected-database /tmp/sbom/selected.json
+        mpy-build-scope --manifest ports/unix/variants/standard/manifest.py \
+          --micropython-root . $ROOTS \
+          --owner micropython=application --owner mbedtls=external \
+          --owner micropython-lib=external --owner berkeley-db-1.xx=external \
+          --var MPY_DIR=$P --var MPY_LIB_DIR=$P/lib/micropython-lib \
+          --var PORT_DIR=$P/ports/unix --var BOARD_DIR=$P/ports/unix/variants/standard \
+          --target x86_64-linux-gnu --variant standard --port unix \
+          --compile-database /tmp/sbom/selected.json --output /tmp/sbom/scope.json
+        sast-sbom --scope /tmp/sbom/scope.json --micropython-root . \
+          --link-evidence /tmp/sbom/evidence.json --output-dir /tmp/sbom/spdx
+        sast-sbom --scope /tmp/sbom/scope.json --micropython-root . \
+          --link-evidence /tmp/sbom/evidence.json --output-dir /tmp/sbom/cdx --format cyclonedx
+    - name: Check the results
+      run: |
+        pyspdxtools -i /tmp/sbom/spdx/sbom.spdx.json
+        python - <<'EOF'
+        import json
+        summary = json.load(open("/tmp/sbom/spdx/sbom-summary.json"))
+        gaps = [(g["kind"], g.get("boundary"), g.get("field")) for g in summary["gaps"]]
+        assert not gaps, gaps
+        EOF
+        sast-sbom-policy --summary /tmp/sbom/spdx/sbom-summary.json \
+          --link-evidence /tmp/sbom/evidence.json --profile firmware-complete

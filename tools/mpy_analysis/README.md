@@ -282,10 +282,11 @@ The checker writes its own `fixture-summary.json` with matched findings, failure
 
 ### Verification
 
-Run the package regressions:
+Run the package regressions (the two suites each have a `conftest.py`, so they are separate pytest sessions; set `MPY_REQUIRE_SUBMODULES=1` so a missing library checkout fails the drift checks instead of skipping them):
 
 ```sh
-PYTHONPATH=tools/mpy_analysis:tools python3 -m pytest tools/mpy_analysis/tests tools/mpy_build_inputs/tests
+PYTHONPATH=tools/mpy_analysis:tools python3 -m pytest tools/mpy_analysis/tests
+PYTHONPATH=tools python3 -m pytest tools/mpy_build_inputs/tests
 ```
 
 Runner behavioral tests use controlled executable responses to cover report-only findings, operational failures, missing/partial reports, exact rebasing, explicit external roots, duplicate import identities, staging collisions/escapes, stale cleanup, unknown-group accounting and fail-closed typing receipts. They do not replace a real installed-scanner smoke. For that smoke, supply a manifest-selected positive fixture with an imported companion, a matching negative fixture, explicit policy and executable paths; check source accounting, actual reports and rebased source URIs for each selected scanner. Run missing-executable/report/prerequisite cases separately. Type/Pysa acceptance remains blocked until the external builtin environment and supported tool combination have been verified.
