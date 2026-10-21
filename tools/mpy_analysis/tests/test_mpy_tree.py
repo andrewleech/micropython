@@ -200,3 +200,51 @@ def test_licence_keyword_in_a_comment_does_not_count_as_declared(tmp_path):
     build = 'index["license"] = metadata.license or "MIT"\n'
     package = _index_checkout(tmp_path, build, '# license="GPL"\nmetadata(version="1.0")\n')
     assert mpy_tree.identity(package)["license"][0] == "MIT"
+
+
+def test_edited_vendor_code_is_listed_in_license_and_takes_the_micropython_release():
+    listed = {
+        "/".join(parts) for parts, _ in mpy_tree.license_tree((REPO / "LICENSE").read_text())
+    }
+    assert set(mpy_tree.MICROPYTHON_EDITED) <= listed
+    for relative in mpy_tree.MICROPYTHON_EDITED:
+        found = mpy_tree.identity(REPO / relative)
+        assert found["version"][0] == mpy_tree.release(REPO)[0]
+
+
+def test_non_spdx_licence_is_retained_as_the_notice_the_files_carry(tmp_path):
+    from mpy_analysis import custom_license
+
+    notice = (
+        '/*\n * Licensed under Some Vendor Licence V2, (the "License");\n'
+        " * You may not use this file except in compliance with the License.\n"
+        " * See the License for the specific language governing permissions and\n"
+        " * limitations under the License.\n */\n"
+    )
+    (tmp_path / "vendor").mkdir()
+    (tmp_path / "vendor/a.c").write_text("// Copyright 2014\n" + notice)
+    (tmp_path / "vendor/b.c").write_text("// Copyright 2015\n" + notice)
+    assert (
+        custom_license.reference("Some Vendor Licence V2") == "LicenseRef-Some-Vendor-Licence-V2"
+    )
+    text, path = custom_license.retained_text(tmp_path, "vendor", "Some Vendor Licence V2")
+    assert text.startswith("Licensed under Some Vendor Licence V2") and text.endswith(
+        "limitations under the License."
+    )
+    (tmp_path / "vendor/c.c").write_text(notice.replace("You may not", "You must not"))
+    with pytest.raises(ValueError, match="2 different"):
+        custom_license.retained_text(tmp_path, "vendor", "Some Vendor Licence V2")
+    with pytest.raises(ValueError, match="no file"):
+        custom_license.retained_text(tmp_path, "vendor", "Another Licence")
+
+
+def test_stm32_usb_sources_resolve_to_a_retained_licence_ref_and_the_release():
+    from mpy_analysis.metadata import collect_metadata
+
+    directory = REPO / "ports/stm32/usbdev"
+    files = sorted(directory.rglob("usbd_core.c"))
+    metadata = collect_metadata(directory, selected_files=files, binding_files=files)
+    ref = "LicenseRef-MCD-ST-Liberty-SW-License-Agreement-V2"
+    assert metadata["fields"]["license"] == ref
+    assert metadata["fields"]["version"] == mpy_tree.release(REPO)[0]
+    assert metadata["license_texts"][ref]["text"].startswith("Licensed under MCD-ST Liberty")

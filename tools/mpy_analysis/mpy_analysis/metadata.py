@@ -21,7 +21,7 @@ from reuse.copyright import SourceType
 from reuse.global_licensing import NestedReuseTOML, PrecedenceType, ReuseDep5, ReuseTOML
 from reuse.project import Project
 
-from . import license_text, mpy_tree, submodule_identity
+from . import custom_license, license_text, mpy_tree, submodule_identity
 from .metadata_bom import valid_uri
 
 FIELDS = ("name", "version", "description", "author", "license", "url")
@@ -927,8 +927,18 @@ class _Collector:
         if not found:
             return
         root = mpy_tree.find_root(self.directory)
-        if "license" in found and root is not None and self.directory == root.resolve():
-            found["license"] = self._root_license(root, found["license"])
+        if "license" in found and root is not None:
+            if self.directory == root.resolve():
+                found["license"] = self._root_license(root, found["license"])
+            else:
+                relative = "/".join(self.directory.relative_to(root.resolve()).parts)
+                try:
+                    found["license"] = (
+                        self._tree_licence(root, relative, found["license"][0]),
+                        found["license"][1],
+                    )
+                except ValueError:
+                    pass
         if self.assertions.get("name"):
             found.pop("name", None)
         for field, (value, path) in found.items():
@@ -968,6 +978,18 @@ class _Collector:
                         self.add("license", identifier, target, "license-pointer-match-1")
                         self.license_is_default = True
 
+    def _tree_licence(self, root: Path, pattern: str, licence: str) -> str:
+        """A licence the LICENSE tree names: an SPDX expression, else a ``LicenseRef`` with its notice."""
+        try:
+            return validate_license(licence)
+        except ValueError:
+            text, path = custom_license.retained_text(root, pattern, licence)
+        identifier = custom_license.reference(licence)
+        self.licensing_inputs.add(path.resolve())
+        self.evidence("license_text", text, path, "mpy-tree-notice-1", identifier=identifier)
+        self.custom_text[identifier] = {"path": str(path.resolve()), "text": text}
+        return identifier
+
     def _root_license(self, root: Path, declared: tuple[str, Path]) -> tuple[str, Path]:
         """The root licence AND the licences the LICENSE tree gives selected files it lists."""
         licences, unmodelled = [declared[0]], {}
@@ -975,7 +997,7 @@ class _Collector:
             relative = selected.resolve().relative_to(root.resolve()).as_posix()
             for pattern, licence in mpy_tree.deviations(root, relative):
                 try:
-                    licences.append(validate_license(licence))
+                    licences.append(self._tree_licence(root, pattern, licence))
                 except ValueError:
                     unmodelled.setdefault(f"{pattern} ({licence})", []).append(str(selected))
         for entry, paths in unmodelled.items():

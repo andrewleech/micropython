@@ -250,6 +250,11 @@ def deviations(root: Path, relative: str) -> list[tuple[str, str]]:
     return found
 
 
+# Vendor code that MicroPython carries in its own tree and has edited in place: it is
+# released with MicroPython, so it takes the MicroPython release as its version.
+MICROPYTHON_EDITED = ("ports/stm32/usbdev", "ports/stm32/usbhost")
+
+
 def release(root: Path) -> tuple[str, Path]:
     """The release from ``py/mpconfig.h``, with the ``-preview`` suffix ``makeversionhdr.py`` adds."""
     text, path = _read(root, "py/mpconfig.h")
@@ -373,6 +378,8 @@ def identity(
     version = library_version(root, relative.as_posix(), selected)
     if version is None and entry is not None:
         version = _exact_tag(directory)
+    if version is None and relative.as_posix() in MICROPYTHON_EDITED:
+        version = release(root)
     if entry is None and version is None:
         return None
     generation = generation_of(relative.as_posix(), selected)
