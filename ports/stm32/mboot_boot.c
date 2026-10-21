@@ -542,6 +542,7 @@ void mboot_port_usb_deinit(void) {
     if (tud_inited()) {
         // Remove the pull-up so the host sees the device leave.
         tud_disconnect();
+        tusb_deinit(USB_RHPORT);
     }
     NVIC_ClearPendingIRQ(USB_IRQn);
 

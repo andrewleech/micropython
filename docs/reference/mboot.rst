@@ -37,8 +37,23 @@ Signing keys
 
 Set ``MBOOT_PUBKEY=<public-key.pem>`` for both builds and ``MBOOT_SIGN_KEY=<private-key.pem>`` for the application build. These must be a matching ECDSA P-256 key pair. The signing step rejects a private key that does not match ``MBOOT_PUBKEY``. Keep the private key outside the device and repository. The default builds use a public test key included in the repository, which is unsuitable for a product because anyone can sign an image with it. Set ``MBOOT_PRODUCTION=1`` for production builds; this rejects the supplied test keys and configurations that skip primary-image validation.
 
-Initial installation and updates
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The application targets ``sign-digest`` and ``sign-apply SIG=<signature-file>`` support signing on a separate machine. ``sign-digest`` writes ``firmware.digest``; ``sign-apply`` applies the signature and writes ``firmware.signed.bin``. Use ``MBOOT_SIGN_PUBKEY`` to select the public key for checking an externally supplied signature.
+
+For bootloader debugging, ``MICROPY_MBOOT_DIAGNOSTIC_WAIT=1`` enables an indefinite USB DFU gate after flash initialisation and layout checks, before flash scrubbing, security-counter initialisation, swap processing or application boot. It is disabled by default and should stay disabled in release builds. Enable it by passing ``CFLAGS_EXTRA=-DMICROPY_MBOOT_DIAGNOSTIC_WAIT=1`` to the bootloader make command.
+
+USB enumeration and ordinary USB resets do not release this gate. To continue boot processing without resetting the chip, send a vendor/interface USB control transfer to the DFU interface with ``bmRequestType=0x41``, ``bRequest=0x82``, ``wValue=0``, ``wIndex=0`` and no payload. A successful DFU download followed by its USB reset also releases the gate. Normal boot policy can still select recovery if the image or update state is not bootable. Every chip reset returns to the diagnostic gate.
+
+In swap layouts, the diagnostic gate rejects downloads and other destructive DFU operations while an update or revert is pending, a test image is unconfirmed, a swap is interrupted, or either slot's trailer cannot be read. This protects the rollback image. Non-destructive diagnostics and the continue request remain available. Continue normal boot processing to settle a pending swap or revert, and confirm a running test image before staging another update.
+
+Initial installation
+~~~~~~~~~~~~~~~~~~~~
+
+Use a programmer to write both the bootloader and initial application image to their configured flash addresses. On STM32, run ``deploy-bootloader`` in the bootloader build and ``deploy-initial`` in the application build. Both use pyocd and require ``PROBE=<probe-serial-number>`` to identify the probe; there is no default. The pyocd target comes from ``PYOCD_TARGET`` in the board's ``mpconfigboard.mk``. NUCLEO_H563ZI sets this value; PYBD_SF6 does not, so pass ``PYOCD_TARGET=<target>`` for that board.
+
+Mboot does not update itself. To replace the bootloader or change the flash layout, program the device rather than using an application update.
+
+Entering recovery
+~~~~~~~~~~~~~~~~~
 
 After installation, enter the bootloader with ``machine.bootloader()``, by resetting the board twice in quick succession if it has ``MICROPY_MBOOT_DOUBLE_TAP``, or by holding the user button (``MICROPY_HW_USRSW_PIN``) at reset.
 

@@ -532,6 +532,22 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_requ
         s_activity++;
     }
 
+    #if MICROPY_MBOOT_DIAGNOSTIC_WAIT
+    // Diagnostic continue: finish the control transfer before leaving USB.
+    if (request->bmRequestType == 0x41 && request->bRequest == 0x82) {
+        if (request->wLength != 0 || request->wValue != 0) {
+            return false;
+        }
+        if (stage == CONTROL_STAGE_SETUP) {
+            return tud_control_status(rhport, request);
+        }
+        if (stage == CONTROL_STAGE_ACK) {
+            s_leave_requested = true;
+        }
+        return true;
+    }
+    #endif
+
     if (request->bmRequestType == MBOOT_VREQ_RESULT_REQTYPE && request->bRequest == MBOOT_VREQ_RESULT) {
         if (stage == CONTROL_STAGE_SETUP) {
             if (request->wLength != MBOOT_VREQ_RESULT_LEN) {
