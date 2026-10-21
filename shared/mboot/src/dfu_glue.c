@@ -55,6 +55,9 @@
 #define LED_USB (1u << 1)
 #define LED_ERROR (1u << 2)
 
+// The diagnostic gate must not change flash while boot_go() still needs either slot.
+static bool s_download_blocked;
+
 // ---------------------------------------------------------------------------
 // Write ranges and the mboot_port_flash_* shims
 // ---------------------------------------------------------------------------
@@ -101,6 +104,9 @@ bool mboot_port_flash_is_writable(mboot_addr_t addr, size_t len) {
 // Erase the sector that contains addr, if it lies inside a write range. Used by the
 // mboot_port_flash_page_erase() shim and by the session-begin hook.
 static int glue_erase_sector(mboot_addr_t addr, mboot_addr_t *next_addr) {
+    if (s_download_blocked) {
+        return -EBUSY;
+    }
     const mboot_wrange_t *r = wrange_find(addr, 1, false);
     if (r == NULL) {
         return -EACCES;
@@ -130,6 +136,9 @@ int mboot_port_flash_page_erase(mboot_addr_t addr, mboot_addr_t *next_addr) {
 }
 
 int mboot_port_flash_write(mboot_addr_t addr, const uint8_t *src, size_t len) {
+    if (s_download_blocked) {
+        return -EBUSY;
+    }
     const mboot_wrange_t *r = wrange_find(addr, len, false);
     if (r == NULL) {
         return -EACCES;
@@ -358,6 +367,10 @@ int mboot_hook_session_begin(uint8_t alt) {
     if (!alt_is_image(alt)) {
         return 0;
     }
+    if (s_download_blocked) {
+        set_last_result(MBOOT_RES_ERR_PENDING, MBOOT_DFU_PHASE_BEGIN, (uint32_t)-EBUSY);
+        return -EBUSY;
+    }
     uint16_t code = MBOOT_RES_OK;
     uint32_t detail = 0;
     int rc = 0;
@@ -413,6 +426,10 @@ static void scramble_view(const struct flash_area *view) {
 uint8_t mboot_hook_manifest(uint8_t alt) {
     if (!alt_is_image(alt)) {
         return DFU_STATUS_OK;
+    }
+    if (s_download_blocked) {
+        set_last_result(MBOOT_RES_ERR_PENDING, MBOOT_DFU_PHASE_VALIDATE, (uint32_t)-EBUSY);
+        return DFU_STATUS_ERR_NOTDONE;
     }
     const struct flash_area *view = mboot_dfu_recovery_target_view();
     if (view == NULL) {
@@ -486,7 +503,7 @@ static uint32_t dfu_timeout_ms(mboot_recovery_cause_t why) {
     return s * 1000u;
 }
 
-MBOOT_NORETURN void mboot_dfu_recovery_run(mboot_recovery_cause_t why) {
+static void dfu_run(mboot_recovery_cause_t why, bool wait_for_host) {
     int rc = mboot_dfu_recovery_regions_init();
     if (rc == 0) {
         rc = mboot_dfu_init();
@@ -500,7 +517,7 @@ MBOOT_NORETURN void mboot_dfu_recovery_run(mboot_recovery_cause_t why) {
     }
     mboot_port_led(LED_ALIVE);
 
-    uint32_t timeout_ms = dfu_timeout_ms(why);
+    uint32_t timeout_ms = wait_for_host ? 0 : dfu_timeout_ms(why);
     uint32_t deadline = mboot_port_ticks_ms() + timeout_ms;
     uint32_t last_activity = mboot_usbd_activity();
 
@@ -508,6 +525,10 @@ MBOOT_NORETURN void mboot_dfu_recovery_run(mboot_recovery_cause_t why) {
         tud_task();
         mboot_port_wdt_feed();
         if (mboot_usbd_leave_requested()) {
+            if (wait_for_host) {
+                mboot_port_usb_deinit();
+                return;
+            }
             // Reset rather than jump: boot_go() decides what runs next.
             mboot_port_deinit();
             mboot_port_reset();
@@ -522,5 +543,17 @@ MBOOT_NORETURN void mboot_dfu_recovery_run(mboot_recovery_cause_t why) {
             mboot_port_deinit();
             mboot_port_reset();
         }
+    }
+}
+
+void mboot_dfu_wait_for_host(bool allow_download) {
+    s_download_blocked = !allow_download;
+    dfu_run(REC_FORCED, true);
+    s_download_blocked = false;
+}
+
+MBOOT_NORETURN void mboot_dfu_recovery_run(mboot_recovery_cause_t why) {
+    dfu_run(why, false);
+    for (;;) {
     }
 }

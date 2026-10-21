@@ -239,6 +239,31 @@ static void drop_pending_without_image(void) {
 }
 #endif
 
+#if MICROPY_MBOOT_DIAGNOSTIC_WAIT
+// Diagnostics run before boot_go() can finish a swap. Keep both slots intact until the
+// normal boot flow has settled any pending or interrupted operation.
+static bool diagnostic_download_allowed(void) {
+    #if MBOOT_POLICY_SWAP
+    struct boot_swap_state primary;
+    struct boot_swap_state secondary;
+    if (boot_read_swap_state_by_id(FLASH_AREA_IMAGE_PRIMARY(0), &primary) != 0
+        || boot_read_swap_state_by_id(FLASH_AREA_IMAGE_SECONDARY(0), &secondary) != 0) {
+        return false;
+    }
+    if (primary.magic == BOOT_MAGIC_GOOD && primary.copy_done == BOOT_FLAG_UNSET
+        && primary.swap_type != BOOT_SWAP_TYPE_NONE) {
+        return false;
+    }
+    if (primary.copy_done == BOOT_FLAG_SET && primary.image_ok != BOOT_FLAG_SET) {
+        return false;
+    }
+    return boot_swap_type_multi(0) == BOOT_SWAP_TYPE_NONE;
+    #else
+    return true;
+    #endif
+}
+#endif
+
 // ---- main flow ----
 
 int mboot_main(void) {
@@ -251,6 +276,7 @@ int mboot_main(void) {
     // zero, so a crash or reset during recovery lands in normal boot.
     mboot_request_take(&req, mboot_port_reset_cause());
 
+
     // Flash checks. Recovery must stay reachable when they fail, so the tables are not
     // trusted and there is no recovery step on the slots here.
     int rc = mboot_port_flash_dev_init();
@@ -261,6 +287,9 @@ int mboot_main(void) {
         MCUBOOT_LOG_ERR("flash map check failed rc=%d", rc);
         enter_recovery(REC_FAULT);
     }
+    #if MICROPY_MBOOT_DIAGNOSTIC_WAIT
+    mboot_dfu_wait_for_host(diagnostic_download_allowed());
+    #endif
 
     if (mboot_port_fault_resets() >= FAULT_RESETS_MAX) {
         MCUBOOT_LOG_ERR("repeated fault resets, entering recovery");

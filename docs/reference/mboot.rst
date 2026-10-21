@@ -33,6 +33,12 @@ Set ``MBOOT_PUBKEY=<public-key.pem>`` for both the bootloader and the applicatio
 
 The application targets ``sign-digest`` and ``sign-apply SIG=<signature-file>`` support signing outside the build machine. The former writes ``firmware.digest``; the latter applies the signature to produce ``firmware.signed.bin``. ``MBOOT_SIGN_PUBKEY`` selects the public key used to check an externally supplied signature.
 
+For bootloader debugging, ``MICROPY_MBOOT_DIAGNOSTIC_WAIT=1`` enables an indefinite USB DFU gate after flash initialisation and layout checks, before flash scrubbing, security-counter initialisation, swap processing or application boot. It is disabled by default and should remain disabled for release builds. Pass ``CFLAGS_EXTRA=-DMICROPY_MBOOT_DIAGNOSTIC_WAIT=1`` to the bootloader make command to enable it.
+
+USB enumeration and ordinary USB resets do not release this gate. To continue normal boot processing without resetting the chip, send a vendor/interface USB control transfer with ``bmRequestType=0x41``, ``bRequest=0x82``, ``wValue=0``, ``wIndex=0`` and no payload to the DFU interface. A successful DFU download followed by its USB reset also releases the gate. Normal boot policy can still select recovery if the image or update state is not bootable. Every chip reset returns to the diagnostic gate.
+
+In swap layouts, the diagnostic gate refuses downloads and other destructive DFU operations while an update or revert is pending, a test image is unconfirmed, a swap is interrupted, or either slot's trailer cannot be read. This protects the rollback image. Non-destructive diagnostics and the continue request remain available. Continue normal boot processing to settle a pending swap or revert; confirm a running test image before staging another update.
+
 Initial installation and updates
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

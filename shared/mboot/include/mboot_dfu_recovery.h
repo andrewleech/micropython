@@ -111,4 +111,8 @@ const struct flash_area *mboot_dfu_recovery_target_view(void);
 // through the log and LED and ends in a reset.
 MBOOT_NORETURN void mboot_dfu_recovery_run(mboot_recovery_cause_t why);
 
+// Wait indefinitely in USB DFU, returning when the host requests departure. With
+// allow_download false, reads, status and departure remain available, but no flash may change.
+void mboot_dfu_wait_for_host(bool allow_download);
+
 #endif // MICROPY_INCLUDED_SHARED_MBOOT_MBOOT_DFU_H
