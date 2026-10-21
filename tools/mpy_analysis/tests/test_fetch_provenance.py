@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from mpy_analysis import sbom
 from mpy_analysis.sbom import FIRMWARE_BLOCKING_GAPS
-from mpy_build_inputs.scope import FROZEN_GROUP
 from mpy_analysis.submodules import SubmoduleInspector, url_relation
+from mpy_build_inputs.scope import FROZEN_GROUP
 
 MPY_ROOT = Path(__file__).resolve().parents[3]
 IDENTITY = ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"]
@@ -136,23 +136,48 @@ def test_selected_submodule_reports_url_pin_and_checkout_state(workspace):
         "dirty-selected-repository",
     ):
         assert not gaps(receipt, kind)
-    # The gitlink is revision evidence only: the dependency has no release version of its own.
-    assert model.components[sdk_component].version is None
+    # A submodule that declares nothing is named from its path and versioned by its pin.
+    assert model.components[sdk_component].name == "submodule-libs-sdk"
+    assert model.components[sdk_component].version == pin
     entry = next(item for item in receipt["metadata"] if item["root"] == "sdk")
-    assert entry["fields"]["version"]["status"] != "known"
+    assert entry["fields"]["version"]["status"] == "known"
     assert entry["fields"]["license"]["status"] != "known"
-    # Without package metadata the checkout is an unmarked boundary: the pin is not an identity.
-    assert entry["boundary_kind"] == "repository"
-    assert any(
-        gap["kind"] == "unresolved-identity" and gap["boundary"] == entry["boundary"]
-        for gap in receipt["gaps"]
-    )
+    assert entry["boundary_issues"] == []
+    assert not [
+        g for g in gaps(receipt, "unresolved-identity") if g["boundary"] == entry["boundary"]
+    ]
     assert any(
         gap["kind"] == "dependency-metadata-unresolved"
         and gap["field"] == "license"
         and gap["component"] == sdk_component
         for gap in receipt["gaps"]
     )
+
+
+def test_gitmodules_sbom_variables_declare_the_submodule_identity(workspace):
+    git(
+        workspace["app"],
+        "config",
+        "--file",
+        ".gitmodules",
+        "submodule.libs/sdk.sbom-version",
+        "1.7.18",
+    )
+    git(
+        workspace["app"],
+        "config",
+        "--file",
+        ".gitmodules",
+        "submodule.libs/sdk.sbom-description",
+        "A library",
+    )
+    git(workspace["app"], "commit", "--quiet", "-am", "Declare the SDK")
+    model, receipt = generate(workspace)
+    sdk_component = next(
+        item["component"] for item in receipt["metadata"] if item["root"] == "sdk"
+    )
+    assert model.components[sdk_component].version == "1.7.18"
+    assert model.components[sdk_component].name == "submodule-libs-sdk"
 
 
 def test_unused_initialised_submodule_is_a_candidate_not_a_component(workspace):

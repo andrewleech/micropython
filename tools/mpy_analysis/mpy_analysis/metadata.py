@@ -21,7 +21,7 @@ from reuse.copyright import SourceType
 from reuse.global_licensing import NestedReuseTOML, PrecedenceType, ReuseDep5, ReuseTOML
 from reuse.project import Project
 
-from . import license_text, mpy_tree
+from . import license_text, mpy_tree, submodule_identity
 from .metadata_bom import valid_uri
 
 FIELDS = ("name", "version", "description", "author", "license", "url")
@@ -901,6 +901,26 @@ class _Collector:
                 "esp-idf-version-header-1",
             )
 
+    def parse_submodule(self, record: dict[str, Any]) -> None:
+        """Identity of a pinned submodule: its ``.gitmodules`` ``sbom-*`` variables, else its pin."""
+        gitmodules = Path(record["superproject"]) / ".gitmodules"
+        self.allow_licensing(gitmodules, Path(record["superproject"]).resolve())
+        for field in ("name", "version", "description", "url"):
+            if record.get("sbom", {}).get(field):
+                self.add(field, record["sbom"][field], gitmodules, "git-submodule-sbom-1")
+        if not self.assertions.get("name"):
+            self.add(
+                "name", submodule_identity.fallback_name(record), gitmodules, "git-submodule-1"
+            )
+        if not self.assertions.get("version"):
+            self.add(
+                "version",
+                record["pinned_commit"],
+                gitmodules,
+                "git-submodule-1",
+                version_kind="git-commit",
+            )
+
     def parse_mpy_tree(self) -> None:
         """Name, version and licence MicroPython declares for its own root and carried libraries."""
         found = mpy_tree.identity(self.directory, tuple(self.files or ()))
@@ -1461,6 +1481,7 @@ def collect_metadata(
     binding_files: list[Path] | None = None,
     source_context: dict[str, Any] | None = None,
     input_paths: set[Path] | None = None,
+    submodule: dict[str, Any] | None = None,
 ) -> dict:
     """Collect only source-local static declarations, preserving conflict and scope.
 
@@ -1569,5 +1590,7 @@ def collect_metadata(
         collector.issue("license", "unsupported", f"cannot read licence file: {error}")
     for directory in collector.context_dirs:
         collector.parse_context(directory)
+    if submodule:
+        collector.parse_submodule(submodule)
     collector.parse_licensing()
     return collector.finish()

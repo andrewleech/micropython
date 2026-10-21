@@ -9,10 +9,11 @@ from typing import Any, Sequence
 from jsonschema import FormatChecker
 from mpy_build_inputs.scope import HEADER_GROUP, SELECTED_GROUPS, source_path
 
+from . import submodule_identity
 from .boundaries import discover_boundaries, metadata_context, uncovered_headers
 from .declarations import load_declarations, merge_declaration, revision_matches_selected
-from .metadata import collect_metadata
 from .fetch_provenance import summarise
+from .metadata import collect_metadata
 from .metadata_bom import valid_uri
 from .sbom_model import (
     LIBRARY,
@@ -91,7 +92,9 @@ def _manifest_identity(
 
 def _hashes(entries: list[dict[str, str]]) -> dict[str, str]:
     """Neutral hash mapping from CycloneDX hash entries ("SHA-256" becomes "sha256")."""
-    return {item["alg"].lower().replace("sha-", "sha"): item["content"].lower() for item in entries}
+    return {
+        item["alg"].lower().replace("sha-", "sha"): item["content"].lower() for item in entries
+    }
 
 
 def _party(entity: dict[str, Any]) -> Party:
@@ -103,11 +106,17 @@ def _party(entity: dict[str, Any]) -> Party:
                 name=item.get("name"),
                 email=item.get("email"),
                 phone=item.get("phone"),
-                extra={key: value for key, value in item.items() if key not in ("name", "email", "phone")},
+                extra={
+                    key: value
+                    for key, value in item.items()
+                    if key not in ("name", "email", "phone")
+                },
             )
             for item in entity.get("contact", [])
         ],
-        extra={key: value for key, value in entity.items() if key not in ("name", "url", "contact")},
+        extra={
+            key: value for key, value in entity.items() if key not in ("name", "url", "contact")
+        },
     )
 
 
@@ -174,7 +183,9 @@ def _dependency_component(
             if declared.get(key):
                 setattr(component, key, declared[key])
         component.properties.update(
-            property_values({"manual-declared-relationships": declaration["declared_relationships"]})
+            property_values(
+                {"manual-declared-relationships": declaration["declared_relationships"]}
+            )
         )
     component.external_references = references
     return component
@@ -260,6 +271,7 @@ def assemble(
         directory = Path(boundary["directory"])
         files = sorted({source_path(scope, record) for _, record in boundary["sources"]})
         outside = [path for path in files if not path.is_relative_to(directory)]
+        submodule = submodule_identity.record_of(boundary)
         repository = builder.repository(
             directory, declared_root=Path(scope["roots"][boundary["root"]])
         )
@@ -276,6 +288,7 @@ def assemble(
                 if repository and revision_matches_selected(scope, directory)
                 else None,
             },
+            submodule=submodule,
         )
         for path in metadata.get("markers", []):
             metadata_inputs.add(str(Path(path).resolve()))
@@ -414,7 +427,7 @@ def assemble(
             "value": repository["revision"] if repository else None,
             "applicability": "base-checkout",
         }
-        boundary_issues = boundary.get("issues", [])
+        boundary_issues = submodule_identity.unresolved(boundary.get("issues", []), submodule)
         for issue in boundary_issues:
             builder.gaps.append(
                 {

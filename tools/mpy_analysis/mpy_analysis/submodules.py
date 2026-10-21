@@ -182,7 +182,9 @@ class SubmoduleInspector:
     def toplevel(self, directory: Path) -> Path | None:
         """The working-tree root Git reports for ``directory``, or None outside a usable checkout."""
         if directory not in self._toplevels:
-            value = _text(directory, "rev-parse", "--show-toplevel") if directory.is_dir() else None
+            value = (
+                _text(directory, "rev-parse", "--show-toplevel") if directory.is_dir() else None
+            )
             self._toplevels[directory] = Path(value).resolve() if value else None
         return self._toplevels[directory]
 
@@ -268,12 +270,19 @@ class SubmoduleInspector:
         }
         if entry and entry.get("branch"):
             record["declared_branch"] = entry["branch"]
+        sbom = {k[len("sbom-") :]: v for k, v in (entry or {}).items() if k.startswith("sbom-")}
+        if sbom:
+            record["sbom"] = sbom
         if link is None:
             findings.add("no-gitlink")
         else:
             if index is not None and index != pinned:
                 record["index_commit"] = index
-                findings.add("gitlink-not-committed" if pinned is None else "index-pin-differs-from-head-pin")
+                findings.add(
+                    "gitlink-not-committed"
+                    if pinned is None
+                    else "index-pin-differs-from-head-pin"
+                )
             if link["unmerged"]:
                 findings.add("unmerged-gitlink")
         if entry is None or not entry.get("url"):
