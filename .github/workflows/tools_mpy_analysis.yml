@@ -11,6 +11,8 @@ on:
       - 'LICENSE'
       - 'py/mpconfig.h'
       - 'ports/unix/**'
+      - 'ports/stm32/**'
+      - 'ports/esp32/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -38,57 +40,58 @@ jobs:
         PYTHONPATH=tools/mpy_analysis:tools python -m pytest -q tools/mpy_analysis/tests
         PYTHONPATH=tools python -m pytest -q tools/mpy_build_inputs/tests
 
-  unix_sbom:
-    # Builds the Unix port, derives link evidence from the build, and generates both SBOM
-    # formats for it. The summary must report no gaps and the SPDX output must pass the
-    # reference validator.
+  sbom_unix:
+    # Each sbom_* job builds a port, derives link evidence from the build and generates both
+    # SBOM formats (see tools/mpy_analysis/ci.sh). The SPDX output must pass the reference
+    # validator, the summary must report no gaps and the firmware-complete policy must hold.
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
     - uses: actions/setup-python@v7
       with:
         python-version: '3.12'
-    - name: Fetch the libraries the Unix build uses
+    - name: Fetch the libraries
       run: git submodule update --init --recursive
     - name: Install the tools
       run: pip install ./tools/mpy_build_inputs ./tools/mpy_analysis "spdx-tools>=0.8,<0.9"
+    - name: Install the build dependencies
+      run: sudo apt-get update && sudo apt-get install -y libffi-dev pkg-config
+    - name: Build and generate the SBOMs
+      run: tools/mpy_analysis/ci.sh sbom_unix
+
+  sbom_stm32:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+    - name: Fetch the libraries
+      run: git submodule update --init --recursive
+    - name: Install the tools
+      run: pip install ./tools/mpy_build_inputs ./tools/mpy_analysis "spdx-tools>=0.8,<0.9"
+    - name: Install the cross compiler
+      run: tools/ci.sh gcc_arm_setup
+    - name: Build and generate the SBOMs
+      run: tools/mpy_analysis/ci.sh sbom_stm32
+
+  sbom_esp32:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+    - name: Fetch the libraries
+      run: git submodule update --init --recursive
+    - name: Install the tools
+      run: pip install ./tools/mpy_build_inputs ./tools/mpy_analysis "spdx-tools>=0.8,<0.9"
+    - name: Setup ESP-IDF
+      uses: ./.github/actions/setup_esp32
+      with:
+        idf_ver: v5.5.5
+        ccache_key: sbom
     - name: Build
-      run: |
-        sudo apt-get update && sudo apt-get install -y libffi-dev pkg-config
-        make -C mpy-cross -j"$(nproc)"
-        mkdir -p /tmp/sbom
-        cd ports/unix
-        python -m compiledb -n -S -o /tmp/sbom/compile_commands.json make
-        make -j"$(nproc)"
+      run: tools/mpy_analysis/ci.sh sbom_esp32_build
     - name: Generate the SBOMs
-      run: |
-        P=$PWD
-        B=$P/ports/unix/build-standard
-        ROOTS="--root micropython=$P --root mbedtls=$P/lib/mbedtls --root micropython-lib=$P/lib/micropython-lib --root berkeley-db-1.xx=$P/lib/berkeley-db-1.xx"
-        sast-link-evidence --compile-database /tmp/sbom/compile_commands.json \
-          --image unix:application:$B/micropython:$B/micropython.map \
-          $(echo $ROOTS | sed 's/--root /--source-root /g') \
-          --output /tmp/sbom/evidence.json --selected-database /tmp/sbom/selected.json
-        mpy-build-scope --manifest ports/unix/variants/standard/manifest.py \
-          --micropython-root . $ROOTS \
-          --owner micropython=application --owner mbedtls=external \
-          --owner micropython-lib=external --owner berkeley-db-1.xx=external \
-          --var MPY_DIR=$P --var MPY_LIB_DIR=$P/lib/micropython-lib \
-          --var PORT_DIR=$P/ports/unix --var BOARD_DIR=$P/ports/unix/variants/standard \
-          --target x86_64-linux-gnu --variant standard --port unix \
-          --compile-database /tmp/sbom/selected.json --output /tmp/sbom/scope.json
-        sast-sbom --scope /tmp/sbom/scope.json --micropython-root . \
-          --link-evidence /tmp/sbom/evidence.json --output-dir /tmp/sbom/spdx
-        sast-sbom --scope /tmp/sbom/scope.json --micropython-root . \
-          --link-evidence /tmp/sbom/evidence.json --output-dir /tmp/sbom/cdx --format cyclonedx
-    - name: Check the results
-      run: |
-        pyspdxtools -i /tmp/sbom/spdx/sbom.spdx.json
-        python - <<'EOF'
-        import json
-        summary = json.load(open("/tmp/sbom/spdx/sbom-summary.json"))
-        gaps = [(g["kind"], g.get("boundary"), g.get("field")) for g in summary["gaps"]]
-        assert not gaps, gaps
-        EOF
-        sast-sbom-policy --summary /tmp/sbom/spdx/sbom-summary.json \
-          --link-evidence /tmp/sbom/evidence.json --profile firmware-complete
+      run: tools/mpy_analysis/ci.sh sbom_esp32
