@@ -1223,6 +1223,134 @@ function ci_zephyr_run_tests {
 }
 
 ########################################################################################
+# tools/mpy_analysis
+#
+# The SBOM functions build a port, derive link evidence from the build, generate the SPDX
+# and CycloneDX SBOMs and check them: the SPDX output must pass the reference validator, the
+# summary must report no gaps and the firmware-complete policy must be satisfied. They need
+# the libraries the port uses (git submodule update --init --recursive) and the packages
+# installed by ci_mpy_analysis_setup. SBOM_OUT is the output directory (default /tmp/sbom)
+# and IDF_DIR the ESP-IDF checkout (default ./esp-idf).
+
+function ci_mpy_analysis_setup {
+    pip3 install ./tools/mpy_build_inputs ./tools/mpy_analysis "spdx-tools>=0.8,<0.9"
+}
+
+# Installs the pinned external analysers (see sast-install-tools) into build/analysis-ext.
+function ci_mpy_analysis_sast_setup {
+    sast-install-tools --prefix "$(pwd)/build/analysis-ext"
+}
+
+function ci_mpy_analysis_unix_setup {
+    sudo apt-get update
+    sudo apt-get install -y libffi-dev pkg-config
+}
+
+# Sets the variables the SBOM functions share.
+function _ci_mpy_analysis_env {
+    ROOT=$(pwd)
+    SBOM_OUT=${SBOM_OUT:-/tmp/sbom}
+    IDF_DIR=${IDF_DIR:-$ROOT/esp-idf}
+    mkdir -p "$SBOM_OUT"
+}
+
+# _ci_mpy_analysis_sbom_run <name>: uses the arrays ROOTS and OWNERS (name=value), COMPDBS
+# (paths), IMAGES (--image values) and SCOPE_ARGS (extra mpy-build-scope arguments).
+function _ci_mpy_analysis_sbom_run {
+    local out=$SBOM_OUT/$1 item
+    local roots=() source_roots=() owners=() databases=() images=()
+    for item in "${ROOTS[@]}"; do roots+=(--root "$item"); source_roots+=(--source-root "$item"); done
+    for item in "${OWNERS[@]}"; do owners+=(--owner "$item"); done
+    for item in "${COMPDBS[@]}"; do databases+=(--compile-database "$item"); done
+    for item in "${IMAGES[@]}"; do images+=(--image "$item"); done
+    mkdir -p "$out"
+    sast-link-evidence "${databases[@]}" "${images[@]}" "${source_roots[@]}" \
+        --output "$out/evidence.json" --selected-database "$out/selected.json"
+    mpy-build-scope --micropython-root . "${roots[@]}" "${owners[@]}" "${SCOPE_ARGS[@]}" \
+        --compile-database "$out/selected.json" --output "$out/scope.json"
+    sast-sbom --scope "$out/scope.json" --micropython-root . \
+        --link-evidence "$out/evidence.json" --output-dir "$out/spdx"
+    sast-sbom --scope "$out/scope.json" --micropython-root . \
+        --link-evidence "$out/evidence.json" --output-dir "$out/cdx" --format cyclonedx
+    pyspdxtools -i "$out/spdx/sbom.spdx.json"
+    python3 - "$out/spdx/sbom-summary.json" <<'EOF'
+import json
+import sys
+
+gaps = [(g["kind"], g.get("boundary"), g.get("field")) for g in json.load(open(sys.argv[1]))["gaps"]]
+assert not gaps, gaps
+EOF
+    sast-sbom-policy --summary "$out/spdx/sbom-summary.json" \
+        --link-evidence "$out/evidence.json" --profile firmware-complete
+}
+
+function ci_mpy_analysis_sbom_unix {
+    _ci_mpy_analysis_env
+    make ${MAKEOPTS} -C mpy-cross
+    # compiledb reads the commands of a build that has not run yet.
+    (cd ports/unix && python3 -m compiledb -n -S -o "$SBOM_OUT/unix-compile.json" make && make ${MAKEOPTS})
+    local build=$ROOT/ports/unix/build-standard
+    ROOTS=(micropython="$ROOT" mbedtls="$ROOT/lib/mbedtls" micropython-lib="$ROOT/lib/micropython-lib"
+        berkeley-db-1.xx="$ROOT/lib/berkeley-db-1.xx")
+    OWNERS=(micropython=application mbedtls=external micropython-lib=external berkeley-db-1.xx=external)
+    COMPDBS=("$SBOM_OUT/unix-compile.json")
+    IMAGES=("unix:application:$build/micropython:$build/micropython.map")
+    SCOPE_ARGS=(--manifest ports/unix/variants/standard/manifest.py
+        --var MPY_DIR="$ROOT" --var MPY_LIB_DIR="$ROOT/lib/micropython-lib"
+        --var PORT_DIR="$ROOT/ports/unix" --var BOARD_DIR="$ROOT/ports/unix/variants/standard"
+        --target x86_64-linux-gnu --variant standard --port unix)
+    _ci_mpy_analysis_sbom_run unix
+}
+
+function ci_mpy_analysis_sbom_stm32 {
+    _ci_mpy_analysis_env
+    local board=NUCLEO_H563ZI lib
+    make ${MAKEOPTS} -C mpy-cross
+    (cd ports/stm32 && python3 -m compiledb -n -S -o "$SBOM_OUT/stm32-app.json" make BOARD=$board \
+        && make ${MAKEOPTS} BOARD=$board)
+    (cd ports/stm32/mboot && python3 -m compiledb -n -S -o "$SBOM_OUT/stm32-mboot.json" make BOARD=$board \
+        && make ${MAKEOPTS} BOARD=$board)
+    local app=$ROOT/ports/stm32/build-$board mboot=$ROOT/ports/stm32/mboot/build-$board
+    ROOTS=(micropython="$ROOT") OWNERS=(micropython=runtime)
+    for lib in lwip mbedtls CMSIS_6 micropython-lib stm32lib tinyusb; do
+        ROOTS+=("$lib=$ROOT/lib/$lib")
+        OWNERS+=("$lib=dependency")
+    done
+    COMPDBS=("$SBOM_OUT/stm32-app.json" "$SBOM_OUT/stm32-mboot.json")
+    IMAGES=("application:application:$app/firmware.elf:$app/firmware.map"
+        "mboot:bootloader:$mboot/firmware.elf:$mboot/firmware.map")
+    SCOPE_ARGS=(--manifest ports/stm32/boards/manifest.py
+        --var MPY_DIR="$ROOT" --var MPY_LIB_DIR="$ROOT/lib/micropython-lib"
+        --var PORT_DIR="$ROOT/ports/stm32" --var BOARD_DIR="$ROOT/ports/stm32/boards/$board"
+        --target arm-none-eabi --variant $board --port stm32)
+    _ci_mpy_analysis_sbom_run stm32
+}
+
+# The ESP32 build needs the ESP-IDF environment (see ci_esp32_idf_setup); the
+# analysis does not, and runs with the Python the tools were installed into.
+function ci_mpy_analysis_sbom_esp32_build {
+    _ci_mpy_analysis_env
+    # shellcheck disable=SC1091
+    source "$IDF_DIR/export.sh"
+    make ${MAKEOPTS} -C mpy-cross
+    make ${MAKEOPTS} -C ports/esp32 submodules
+    make ${MAKEOPTS} -C ports/esp32 BOARD=ESP32_GENERIC
+    # The build refreshes the dependency lock file, which is not part of the analysed state.
+    git restore ports/esp32/lockfiles
+}
+
+function ci_mpy_analysis_sbom_esp32 {
+    _ci_mpy_analysis_env
+    local build=$ROOT/ports/esp32/build-ESP32_GENERIC
+    ROOTS=(micropython="$ROOT" idf="$IDF_DIR") OWNERS=(micropython=runtime idf=dependency)
+    COMPDBS=("$build/compile_commands.json" "$build/bootloader/compile_commands.json")
+    IMAGES=("app:firmware-image:$build/micropython.elf:$build/micropython.map"
+        "bootloader:bootloader-image:$build/bootloader/bootloader.elf:$build/bootloader/bootloader.map")
+    SCOPE_ARGS=(--target xtensa-esp32-elf --variant ESP32_GENERIC --port esp32)
+    _ci_mpy_analysis_sbom_run esp32
+}
+
+########################################################################################
 # Helpers to run this script as a CLI tool.
 
 function _ci_help {

@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/tools_mpy_analysis.yml'
+      - 'tools/ci.sh'
       - 'tools/mpy_analysis/**'
       - 'tools/mpy_build_inputs/**'
       - 'lib/**'
@@ -42,8 +43,8 @@ jobs:
 
   sbom_unix:
     # Each sbom_* job builds a port, derives link evidence from the build and generates both
-    # SBOM formats (see tools/mpy_analysis/ci.sh). The SPDX output must pass the reference
-    # validator, the summary must report no gaps and the firmware-complete policy must hold.
+    # SBOM formats (see tools/ci.sh). The SPDX output must pass the reference validator, the
+    # summary must report no gaps and the firmware-complete policy must hold.
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
@@ -52,12 +53,10 @@ jobs:
         python-version: '3.12'
     - name: Fetch the libraries
       run: git submodule update --init --recursive
-    - name: Install the tools
-      run: pip install ./tools/mpy_build_inputs ./tools/mpy_analysis "spdx-tools>=0.8,<0.9"
-    - name: Install the build dependencies
-      run: sudo apt-get update && sudo apt-get install -y libffi-dev pkg-config
+    - name: Install packages
+      run: tools/ci.sh mpy_analysis_setup mpy_analysis_unix_setup
     - name: Build and generate the SBOMs
-      run: tools/mpy_analysis/ci.sh sbom_unix
+      run: tools/ci.sh mpy_analysis_sbom_unix
 
   sbom_stm32:
     runs-on: ubuntu-latest
@@ -68,12 +67,12 @@ jobs:
         python-version: '3.12'
     - name: Fetch the libraries
       run: git submodule update --init --recursive
-    - name: Install the tools
-      run: pip install ./tools/mpy_build_inputs ./tools/mpy_analysis "spdx-tools>=0.8,<0.9"
-    - name: Install the cross compiler
-      run: tools/ci.sh gcc_arm_setup
+    - name: Install packages
+      run: tools/ci.sh mpy_analysis_setup stm32_setup
     - name: Build and generate the SBOMs
-      run: tools/mpy_analysis/ci.sh sbom_stm32
+      run: |
+        export PATH=$(tools/ci.sh stm32_path):$PATH
+        tools/ci.sh mpy_analysis_sbom_stm32
 
   sbom_esp32:
     runs-on: ubuntu-latest
@@ -84,14 +83,28 @@ jobs:
         python-version: '3.12'
     - name: Fetch the libraries
       run: git submodule update --init --recursive
-    - name: Install the tools
-      run: pip install ./tools/mpy_build_inputs ./tools/mpy_analysis "spdx-tools>=0.8,<0.9"
     - name: Setup ESP-IDF
       uses: ./.github/actions/setup_esp32
       with:
         idf_ver: v5.4.1
         ccache_key: sbom
+    - name: Install packages
+      run: tools/ci.sh mpy_analysis_setup
     - name: Build
-      run: tools/mpy_analysis/ci.sh sbom_esp32_build
+      run: tools/ci.sh mpy_analysis_sbom_esp32_build
     - name: Generate the SBOMs
-      run: tools/mpy_analysis/ci.sh sbom_esp32
+      run: tools/ci.sh mpy_analysis_sbom_esp32
+
+  sast_tools:
+    # The pinned scanners must install (cppcheck is built from its release tag, CodeChecker and
+    # clang are hash-checked downloads).
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+    - name: Install packages
+      run: tools/ci.sh mpy_analysis_setup
+    - name: Install the analysers
+      run: tools/ci.sh mpy_analysis_sast_setup
