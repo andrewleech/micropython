@@ -89,7 +89,7 @@ jobs:
     - name: Setup ESP-IDF
       uses: ./.github/actions/setup_esp32
       with:
-        idf_ver: v5.5.5
+        idf_ver: v5.4.1
         ccache_key: sbom
     - name: Build
       run: tools/mpy_analysis/ci.sh sbom_esp32_build
