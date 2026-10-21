@@ -11,6 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 ROOT=$PWD
 OUT=${SBOM_OUT:-/tmp/sbom}
+IDF_DIR=${IDF_DIR:-$ROOT/esp-idf}
 
 # sbom_run <name>: uses the arrays ROOTS and OWNERS (name=value), COMPDBS (paths), IMAGES
 # (--image values) and SCOPE_ARGS (extra mpy-build-scope arguments).
@@ -86,7 +87,7 @@ function sbom_stm32 {
 # analysis does not, and runs with the Python the tools were installed into.
 function sbom_esp32_build {
     # shellcheck disable=SC1091
-    source esp-idf/export.sh
+    source "$IDF_DIR/export.sh"
     make -C mpy-cross -j"$(nproc)"
     make -C ports/esp32 submodules
     make -C ports/esp32 -j"$(nproc)" BOARD=ESP32_GENERIC
@@ -96,7 +97,7 @@ function sbom_esp32_build {
 
 function sbom_esp32 {
     local build=$ROOT/ports/esp32/build-ESP32_GENERIC
-    ROOTS=(micropython="$ROOT" idf="$ROOT/esp-idf") OWNERS=(micropython=runtime idf=dependency)
+    ROOTS=(micropython="$ROOT" idf="$IDF_DIR") OWNERS=(micropython=runtime idf=dependency)
     COMPDBS=("$build/compile_commands.json" "$build/bootloader/compile_commands.json")
     IMAGES=("app:firmware-image:$build/micropython.elf:$build/micropython.map"
         "bootloader:bootloader-image:$build/bootloader/bootloader.elf:$build/bootloader/bootloader.map")
