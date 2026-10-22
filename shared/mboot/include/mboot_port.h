@@ -152,6 +152,13 @@ void mboot_port_wdt_feed(void);
 // Hardware forced entry (button held, boot pin). Must not block more than 50 ms.
 bool mboot_port_entry_forced(void);
 
+// bootloader, required with MICROPY_MBOOT_DOUBLE_TAP. A word that keeps its value across a
+// reset (not cleared by the reset, not used for anything else, readable and writable at the
+// start of the bootloader). The UF2 bootloaders' word is the right choice on a board whose
+// application is also started by one.
+volatile uint32_t *mboot_port_double_tap_word(void);
+bool mboot_double_tap_check(void);
+
 // bootloader, optional. Number of consecutive resets that the fault handlers of the port
 // (HardFault, an NMI that is not a flash ECC event, ...) caused since the bootloader last handed
 // over to the application. The port clears it in mboot_port_deinit(). At 3 the main flow stops
