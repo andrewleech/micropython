@@ -57,7 +57,8 @@ Entering recovery
 
 After installation, enter the bootloader with ``machine.bootloader()``, by resetting the board twice in quick succession if it has ``MICROPY_MBOOT_DOUBLE_TAP``, or by holding the user button (``MICROPY_HW_USRSW_PIN``) at reset.
 
-After installation, enter the bootloader using ``machine.bootloader()`` or by holding the board's user button (``MICROPY_HW_USRSW_PIN``) at reset. Mboot implements plain DFU 1.1 over USB, so ``dfu-util -a 0 -D firmware.signed.bin`` downloads a signed image to alternate setting 0, and the ``dfu`` application target also packages it as ``firmware.signed.dfu`` for ``tools/pydfu.py``. The USB update path writes the image to the location selected by the board layout, not to an arbitrary application address. A DFU session entered by ``machine.bootloader()`` or the user button resets into a normal boot after ``MICROPY_MBOOT_DFU_TIMEOUT_S`` (120 seconds by default) without USB activity; recovery from a missing or invalid image waits until it is updated.
+USB update
+~~~~~~~~~~
 
 Mboot implements plain DFU 1.1 over USB. Download a signed image to alternate setting 0 with ``dfu-util -a 0 -D firmware.signed.bin``. The application ``dfu`` target also packages the image as ``firmware.signed.dfu`` for ``tools/pydfu.py``. The USB update path writes to the location selected by the board layout, not to an arbitrary application address.
 
@@ -125,4 +126,6 @@ Every board defines ``MICROPY_MBOOT_ROLLBACK_COUNTER``: ``1`` keeps a monotonic 
 Validation and diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The board can also select the cryptographic implementation, fault-injection hardening level and logging level. Signature validation of the primary image is enabled by default and should remain enabled in a product. These settings and their dependencies are documented alongside their defaults in ``mboot_layout.h``.
+The board can select the cryptographic implementation, fault-injection hardening level and logging level. Signature validation of the primary image is enabled by default and should remain enabled in a product. ``mboot_layout.h`` documents these settings, their dependencies and defaults.
+
+``MICROPY_MBOOT_DOUBLE_TAP`` enters recovery when the board is reset a second time within ``MICROPY_MBOOT_DOUBLE_TAP_MS`` (350 ms by default) of the bootloader starting, as the UF2 bootloaders do. The bootloader leaves ``MICROPY_MBOOT_DOUBLE_TAP_MAGIC`` in a word that survives reset, supplied by the port through ``mboot_port_double_tap_word()``, and clears it when the window ends. Every boot that is not already going to recovery therefore waits for the whole window. The word is separate from the request and retention words, so taking a request does not touch it.

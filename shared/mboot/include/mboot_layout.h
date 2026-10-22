@@ -76,6 +76,11 @@
 //   MICROPY_HW_MBOOT_DFU_VID, _PID       USB ids of the bootloader (default MICROPY_HW_USB_VID or 0xF055, and 0xDFA5)
 //   MICROPY_HW_MBOOT_DFU_PRODUCT         USB product string (default board name + " Mboot")
 //   MICROPY_MBOOT_DFU_TIMEOUT_S       inactivity timeout of a requested recovery, 0 for none (default 120)
+//   MICROPY_MBOOT_DOUBLE_TAP          1 enters recovery when a reset follows within
+//                                     MICROPY_MBOOT_DOUBLE_TAP_MS (default 350) of the
+//                                     bootloader starting; the port supplies the word through
+//                                     mboot_port_double_tap_word() (default 0)
+//   MICROPY_MBOOT_DOUBLE_TAP_MAGIC    the value left in that word (default 0xf01669ef)
 //   MICROPY_MBOOT_LOG_LEVEL           0 off to 4 debug (default 3)
 //   MICROPY_MBOOT_TMPBUF_SZ           hash read chunk (default 4096)
 //
@@ -186,6 +191,15 @@
 #endif
 #ifndef MICROPY_MBOOT_DFU_TIMEOUT_S
 #define MICROPY_MBOOT_DFU_TIMEOUT_S (120)
+#endif
+#ifndef MICROPY_MBOOT_DOUBLE_TAP
+#define MICROPY_MBOOT_DOUBLE_TAP (0)
+#endif
+#ifndef MICROPY_MBOOT_DOUBLE_TAP_MS
+#define MICROPY_MBOOT_DOUBLE_TAP_MS (350)
+#endif
+#ifndef MICROPY_MBOOT_DOUBLE_TAP_MAGIC
+#define MICROPY_MBOOT_DOUBLE_TAP_MAGIC (0xf01669efu)
 #endif
 #ifndef MICROPY_MBOOT_LOG_LEVEL
 #define MICROPY_MBOOT_LOG_LEVEL (3)

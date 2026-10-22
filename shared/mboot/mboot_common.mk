@@ -185,7 +185,7 @@ MBOOT_CRYPTO_SRC_C := $(addprefix lib/mcuboot/ext/tinycrypt/lib/source/, ecc.c e
 endif
 
 # Boot flow, validation and the front ends.
-MBOOT_FRONT_SRC_C := $(addprefix $(MBOOT_SRC_DIR)/, boot_main.c validate.c)
+MBOOT_FRONT_SRC_C := $(addprefix $(MBOOT_SRC_DIR)/, boot_main.c validate.c double_tap.c)
 ifeq ($(MBOOT_DFU_ENABLE),1)
 # dfu_glue.c binds the DFU core of shared/mboot/dfu. The core pads every download block to
 # MICROPY_HW_MBOOT_DFU_WRITE_ALIGN, which has to be the value the glue checks against.

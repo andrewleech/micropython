@@ -275,7 +275,9 @@ int mboot_main(void) {
     // First consumer of the handoff: afterwards the request memory and the retention word are
     // zero, so a crash or reset during recovery lands in normal boot.
     mboot_request_take(&req, mboot_port_reset_cause());
-
+    #if MICROPY_MBOOT_DOUBLE_TAP
+    bool tapped = req.mode == MBOOT_REQ_NONE && mboot_double_tap_check();
+    #endif
 
     // Flash checks. Recovery must stay reachable when they fail, so the tables are not
     // trusted and there is no recovery step on the slots here.
@@ -310,6 +312,9 @@ int mboot_main(void) {
     #endif
 
     bool forced = mboot_port_entry_forced();
+    #if MICROPY_MBOOT_DOUBLE_TAP
+    forced = forced || tapped;
+    #endif
     bool recovery = req.mode != MBOOT_REQ_NONE || forced;
     mboot_recovery_cause_t why = req.mode != MBOOT_REQ_NONE ? REC_APP_REQUEST : forced ? REC_FORCED : REC_NONE;
 
