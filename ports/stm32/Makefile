@@ -606,6 +606,12 @@ define GENERATE_HEX
 	$(Q)$(OBJCOPY) -O ihex $(2) $(1)
 endef
 
+.PHONY: sbom
+
+sbom:
+	$(Q)$(TOP)/tools/mpy_analysis/make_sbom.sh stm32 "$(abspath $(BUILD))" "$(MAKE)" \
+		"$(BOARD)" "$(abspath $(BOARD_DIR))" "$(abspath $(FROZEN_MANIFEST))" "$(BOARD_VARIANT)"
+
 .PHONY: deploy deploy-stlink deploy-openocd deploy-trusted
 
 ifeq ($(MBOOT_ENABLE_PACKING),1)

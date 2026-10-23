@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "mpy-deployment/v1",
+  "description": "Deployment manifest owned by the consuming application and its verifier: every artifact the deployed device carries, hash-pinned, plus the runtime fetch policy and the stated exclusions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "name", "target", "members"],
+  "properties": {
+    "schema": {"const": "mpy-deployment/v1"},
+    "name": {"type": "string", "pattern": "\\S"},
+    "target": {"type": "string", "pattern": "\\S"},
+    "members": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "path", "sha256"],
+        "properties": {
+          "id": {"type": "string", "pattern": "\\S"},
+          "kind": {
+            "enum": [
+              "firmware-image",
+              "bootloader-image",
+              "filesystem-file",
+              "python-package-file",
+              "native-module",
+              "resource",
+              "partition-image"
+            ]
+          },
+          "path": {"type": "string", "pattern": "\\S"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "image": {"type": "string", "pattern": "\\S"}
+        },
+        "if": {
+          "properties": {
+            "kind": {
+              "enum": [
+                "filesystem-file",
+                "python-package-file",
+                "native-module",
+                "resource",
+                "partition-image"
+              ]
+            }
+          }
+        },
+        "then": {"not": {"required": ["image"]}}
+      }
+    },
+    "runtime_fetch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {"enum": ["none", "restricted", "unrestricted"]},
+        "immutable_by": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["hash_pinning", "sources"],
+          "properties": {
+            "hash_pinning": {"type": "string", "pattern": "\\S"},
+            "sources": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"type": "string", "pattern": "\\S"}
+            }
+          }
+        }
+      },
+      "if": {"properties": {"mode": {"const": "restricted"}}},
+      "then": {"required": ["immutable_by"]},
+      "else": {"not": {"required": ["immutable_by"]}}
+    },
+    "exclusions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reason"],
+        "properties": {
+          "path": {"type": "string", "pattern": "\\S"},
+          "image": {"type": "string", "pattern": "\\S"},
+          "reason": {"type": "string", "pattern": "\\S"}
+        },
+        "oneOf": [{"required": ["path"]}, {"required": ["image"]}]
+      }
+    }
+  }
+}

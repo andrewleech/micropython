@@ -9,7 +9,7 @@ jobs:
     - uses: actions/checkout@v7
     # codespell version should be kept in sync with .pre-commit-config.yml
     - run: pip install --user codespell==2.4.1 tomli
-    - run: codespell
+    - run: codespell --skip='*bom-1.6.schema.json,*spdx-2.3.schema.json,schema-CC-BY-3.0.txt'
     # additionally check for misspelling of "MicroPython"
     - run: |
         if git grep -n Micropython -- ":(exclude).github/workflows/codespell.yml"; then

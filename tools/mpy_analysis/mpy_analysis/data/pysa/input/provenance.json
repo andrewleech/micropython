@@ -1,0 +1,14 @@
+{
+  "family": "input",
+  "model_version": 1,
+  "micropython_revision": "09f5bb447504a058376c62fe991b3613531837e6",
+  "sources": [
+    {"path": "py/modbuiltins.c", "lines": "224-239,696-714", "behavior": "input returns the line read from the port's readline provider; registration is gated by MICROPY_PY_BUILTINS_INPUT"}
+  ],
+  "typing_signature_reference": "micropython-stdlib-stubs==1.29.0.post2 stdlib/builtins.pyi",
+  "model_signature_contract": "input retains its optional positional-only prompt parameter",
+  "required_capabilities": ["MICROPY_PY_BUILTINS_INPUT"],
+  "taint_kinds": {"sources": ["UserControlled"], "sinks": []},
+  "sanitizers": [],
+  "coverage_gaps": ["Unverified against supported target-aware Pyrefly/Pysa output", "Other input channels are not modelled", "No general code-execution sanitizer guarantee is established"]
+}

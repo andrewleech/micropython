@@ -1223,6 +1223,74 @@ function ci_zephyr_run_tests {
 }
 
 ########################################################################################
+# tools/mpy_analysis
+#
+# The SBOM functions build a port, derive link evidence from the build, generate the SPDX
+# and CycloneDX SBOMs and check them: the SPDX output must pass the reference validator, the
+# summary must report no gaps and the firmware-complete policy must be satisfied. They need
+# the libraries the port uses (git submodule update --init --recursive) and the packages
+# installed by ci_mpy_analysis_setup. SBOM files are written into the port build directory,
+# and IDF_DIR is the ESP-IDF checkout (default ./esp-idf).
+
+function ci_mpy_analysis_setup {
+    pip3 install ./tools/mpy_build_inputs ./tools/mpy_analysis "spdx-tools>=0.8,<0.9"
+}
+
+# Installs the pinned external analysers (see sast-install-tools) into build/analysis-ext.
+function ci_mpy_analysis_sast_setup {
+    sast-install-tools --prefix "$(pwd)/build/analysis-ext"
+}
+
+function ci_mpy_analysis_unix_setup {
+    sudo apt-get update
+    sudo apt-get install -y libffi-dev pkg-config
+}
+
+# Sets variables shared by the SBOM functions.
+function _ci_mpy_analysis_env {
+    ROOT=$(pwd)
+    IDF_DIR=${IDF_DIR:-$ROOT/esp-idf}
+}
+
+# The SBOM functions use each port's `make sbom` target so CI analyses the same
+# configured build a user gets from a normal make invocation.
+function _ci_mpy_analysis_sbom_check {
+    local build=$1
+    pyspdxtools -i "$build/sbom.spdx.json"
+    python3 - "$build/sbom-summary.json" <<'EOF'
+import json
+import sys
+
+gaps = [(gap["kind"], gap.get("boundary"), gap.get("field")) for gap in json.load(open(sys.argv[1]))["gaps"]]
+assert not gaps, gaps
+EOF
+    sast-sbom-policy --summary "$build/sbom-summary.json" \
+        --link-evidence "$build/.mpy-analysis/evidence.json" --profile firmware-complete
+}
+
+function ci_mpy_analysis_sbom_unix {
+    local build=$(pwd)/ports/unix/build-standard
+    make ${MAKEOPTS} -C ports/unix sbom VARIANT=standard
+    _ci_mpy_analysis_sbom_check "$build"
+}
+
+function ci_mpy_analysis_sbom_stm32 {
+    local board=NUCLEO_H563ZI
+    local build=$(pwd)/ports/stm32/build-$board
+    make ${MAKEOPTS} -C ports/stm32 sbom BOARD=$board
+    _ci_mpy_analysis_sbom_check "$build"
+}
+
+function ci_mpy_analysis_sbom_esp32 {
+    local board=ESP32_GENERIC
+    local build=$(pwd)/ports/esp32/build-$board
+    IDF_DIR=${IDF_DIR:-$(pwd)/esp-idf}
+    export IDF_DIR
+    MPY_SBOM_RESTORE_LOCKFILES=1 make ${MAKEOPTS} -C ports/esp32 sbom BOARD=$board IDF_DIR="$IDF_DIR"
+    _ci_mpy_analysis_sbom_check "$build"
+}
+
+########################################################################################
 # Helpers to run this script as a CLI tool.
 
 function _ci_help {
