@@ -251,6 +251,12 @@ MICROPY_ROM_TEXT_COMPRESSION = 0
 endif
 
 include $(TOP)/py/mkrules.mk
+.PHONY: sbom
+
+sbom:
+	$(Q)$(TOP)/tools/mpy_analysis/make_sbom.sh unix "$(abspath $(BUILD))" "$(MAKE)" \
+		"$(VARIANT)" "$(abspath $(VARIANT_DIR))" "$(abspath $(FROZEN_MANIFEST))" \
+		"$(abspath $(MPY_LIB_DIR))" "$(PROG)" "$(if $(CROSS_COMPILE),$(patsubst %-,%,$(CROSS_COMPILE)),$(shell $(CC) -dumpmachine))"
 
 .PHONY: test test_full_no_native test_full test//% test/% test-failures print-failures clean-failures
 

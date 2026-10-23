@@ -86,6 +86,20 @@ sast-sbom --scope scope.json --micropython-root "$MPY" --output-dir build/sbom
 
 `$MPY` must match the inventory's actual manifest authority, including its version. The library root selected by `MPY_LIB_DIR` need not be the MicroPython checkout's gitlinked library; its actual repository revision is recorded. Explicit roots can also name separately versioned locally frozen libraries. Only `runtime_frozen_python` and compiler-evidenced `native` records enter this SBOM; other groups are reported as unassessed.
 
+### Building a matching SBOM
+
+Unix, STM32 and ESP32 expose `make sbom` as a follow-on to their normal build. Invoke it from the repository root and pass the same build variables as for `make`, including the board or variant, custom `BUILD` path and configuration overrides:
+
+```sh
+make -C ports/unix sbom VARIANT=standard
+make -C ports/stm32 sbom BOARD=NUCLEO_H563ZI
+make -C ports/esp32 sbom BOARD=ESP32_GENERIC IDF_DIR=/path/to/esp-idf
+```
+
+The target builds the configured image and generates its SBOM from that build's compiler and link evidence. It requires the SBOM tools, `compiledb`, and the normal port toolchain to be installed; for ESP32, set `IDF_DIR` to the ESP-IDF checkout and the target sources its `export.sh`. The final files `sbom.spdx.json`, `sbom.json` and `sbom-summary.json` are written at the top level of `BUILD`. Capture databases, scope, selected sources, link evidence and temporary format outputs stay in `BUILD/.mpy-analysis`.
+
+CI runs the same build-to-SBOM flow for Unix, STM32 and ESP32, prints component coverage and any gaps in the job log, and uploads the build directory as a downloadable artifact.
+
 The Python API is `generate_sbom(scope, *, micropython_root, declaration_files=(), link_evidence=None, posthoc_link_inventory=None, link_generation=None, deployment=None)` in `mpy_analysis.sbom`, returning `(model, receipt)` where `model` is the format-neutral `mpy_analysis.sbom_model.Model`. `mpy_analysis.sbom_spdx.to_spdx` and `mpy_analysis.sbom_cyclonedx.to_cyclonedx` are independent writers over that model; neither document is derived from the other. The CLI writes a schema-validated SPDX 2.3 `sbom.spdx.json` by default, or CycloneDX 1.6 `sbom.json` with `--format cyclonedx`, plus `sbom-summary.json` (which records `document_format` and `document_file`), deterministically and without network access; a previous document of either format is removed before a run. Selected source files retain SHA-256 hashes and dependency ownership. Actual Git roots/submodules retain their origin, revision, tracked state and gitlink evidence. Git revisions identify checkout state, not release versions. Multiple compiler actions remain distinct receipt rows without duplicating their source file; frozen import aliases remain distinct identities.
 
 ### Firmware link evidence

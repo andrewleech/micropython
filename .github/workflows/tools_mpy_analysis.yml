@@ -57,6 +57,13 @@ jobs:
       run: tools/ci.sh mpy_analysis_setup mpy_analysis_unix_setup
     - name: Build and generate the SBOMs
       run: tools/ci.sh mpy_analysis_sbom_unix
+    - name: Upload Unix SBOM and build outputs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-unix
+        path: ports/unix/build-standard/
+        include-hidden-files: true
 
   sbom_stm32:
     runs-on: ubuntu-latest
@@ -73,6 +80,15 @@ jobs:
       run: |
         export PATH=$(tools/ci.sh stm32_path):$PATH
         tools/ci.sh mpy_analysis_sbom_stm32
+    - name: Upload STM32 SBOM and build outputs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-stm32
+        path: |
+          ports/stm32/build-NUCLEO_H563ZI/
+          ports/stm32/mboot/build-NUCLEO_H563ZI/
+        include-hidden-files: true
 
   sbom_esp32:
     runs-on: ubuntu-latest
@@ -90,10 +106,15 @@ jobs:
         ccache_key: sbom
     - name: Install packages
       run: tools/ci.sh mpy_analysis_setup
-    - name: Build
-      run: tools/ci.sh mpy_analysis_sbom_esp32_build
-    - name: Generate the SBOMs
+    - name: Build and generate the SBOMs
       run: tools/ci.sh mpy_analysis_sbom_esp32
+    - name: Upload ESP32 SBOM and build outputs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-esp32
+        path: ports/esp32/build-ESP32_GENERIC/
+        include-hidden-files: true
 
   sast_tools:
     # The pinned scanners must install (cppcheck is built from its release tag, CodeChecker and
