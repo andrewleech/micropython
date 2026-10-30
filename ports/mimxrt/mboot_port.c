@@ -38,6 +38,7 @@
 #include "fsl_clock.h"
 #include "fsl_wdog.h"
 #include "fsl_device_registers.h"
+#include "fsl_snvs_lp.h"
 #include "mimxrt_reset_cause.h"
 #include "mimxrt_usb_phy.h"
 #include CLOCK_CONFIG_H
@@ -270,6 +271,16 @@ bool mboot_port_entry_forced(void) {
     #endif
 }
 
+#if MICROPY_MBOOT_DOUBLE_TAP
+// SNVS LPGPR[3] is the word of the UF2 bootloaders, left out of machine.mem_backup() by
+// MICROPY_HW_SNVS_LPGPR_SAFE_COUNT.
+volatile uint32_t *mboot_port_double_tap_word(void) {
+    // Without SNVS_LP_Init() (SNVS LP clock enable, power-glitch status clear) a write to
+    // the word does not take effect in the bootloader.
+    SNVS_LP_Init(SNVS);
+    return &SNVS->LPGPR[3];
+}
+#endif
 
 uint32_t mboot_port_bkp_read(unsigned idx) {
     if (idx >= MBOOT_BACKUP_WORDS) {
