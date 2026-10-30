@@ -37,11 +37,10 @@ Signing keys
 
 Set ``MBOOT_PUBKEY=<public-key.pem>`` for both builds and ``MBOOT_SIGN_KEY=<private-key.pem>`` for the application build. These must be a matching ECDSA P-256 key pair. The signing step rejects a private key that does not match ``MBOOT_PUBKEY``. Keep the private key outside the device and repository. The default builds use a public test key included in the repository, which is unsuitable for a product because anyone can sign an image with it. Set ``MBOOT_PRODUCTION=1`` for production builds; this rejects the supplied test keys and configurations that skip primary-image validation.
 
-<<<<<<< HEAD
 The application targets ``sign-digest`` and ``sign-apply SIG=<signature-file>`` support signing on a separate machine. ``sign-digest`` writes ``firmware.digest``; ``sign-apply`` applies the signature and writes ``firmware.signed.bin``. Use ``MBOOT_SIGN_PUBKEY`` to select the public key for checking an externally supplied signature.
-=======
+
 MIMXRT opt-in builds
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 Mboot build support is also available for ``SEEED_ARCH_MIX`` (RT1052) and ``MIMXRT1170_EVK`` (RT1176 M7). It is opt-in and leaves ordinary board builds on their existing boot paths. Initialize the mimxrt port dependencies and signing tools as described by the port build instructions, then build the bootloader and signed application for the same board::
 
@@ -64,10 +63,7 @@ MIMXRT flash erase and program operations are blocking and mask interrupts while
 
 After a failed flash-status transfer, the driver retains the first error and performs bounded controller recovery and retries within the same 10-second readiness deadline. It returns ``EIO`` through Mboot only after confirming that the NOR is idle and the controller can safely resume instruction fetch. If that deadline expires or controller recovery fails, RAM-resident code resets the device through the port reset path without restoring interrupts, caches or DMA into unsafe flash access. Application flash waits do not feed ``machine.WDT``; auxiliary and bootloader watchdog service remains limited by these wait bounds.
 
-On the RT1170 EVK, resetting during early bootloader initialisation can leave the ROM stopped without USB enumeration. A full power cycle is required to recover from this state; SWD programming remains available. Do not rely on a software reset as the only recovery path.
-
-For bootloader debugging, ``MICROPY_MBOOT_DIAGNOSTIC_WAIT=1`` enables an indefinite USB DFU gate after flash initialisation and layout checks, before flash scrubbing, security-counter initialisation, swap processing or application boot. It is disabled by default and should remain disabled for release builds. Pass ``CFLAGS_EXTRA=-DMICROPY_MBOOT_DIAGNOSTIC_WAIT=1`` to the bootloader make command to enable it.
->>>>>>> 787f60cdae (mimxrt: Add opt-in MCUboot firmware update builds.)
+On the RT1170 EVK, resetting during early bootloader initialisation can leave the ROM stopped without USB enumeration. A full power cycle is required to recover from this state; SWD programming remains available. Do not rely on a software reset as the only recovery path. Physical double-reset entry on this board lacks hardware validation.
 
 For bootloader debugging, ``MICROPY_MBOOT_DIAGNOSTIC_WAIT=1`` enables an indefinite USB DFU gate after flash initialisation and layout checks, before flash scrubbing, security-counter initialisation, swap processing or application boot. It is disabled by default and should stay disabled in release builds. Enable it by passing ``CFLAGS_EXTRA=-DMICROPY_MBOOT_DIAGNOSTIC_WAIT=1`` to the bootloader make command.
 
@@ -158,4 +154,4 @@ Validation and diagnostics
 
 The board can select the cryptographic implementation, fault-injection hardening level and logging level. Signature validation of the primary image is enabled by default and should remain enabled in a product. ``mboot_layout.h`` documents these settings, their dependencies and defaults.
 
-``MICROPY_MBOOT_DOUBLE_TAP`` enters recovery when the board is reset a second time within ``MICROPY_MBOOT_DOUBLE_TAP_MS`` (350 ms by default) of the bootloader starting, as the UF2 bootloaders do. The bootloader leaves ``MICROPY_MBOOT_DOUBLE_TAP_MAGIC`` in a word that survives reset, supplied by the port through ``mboot_port_double_tap_word()``, and clears it when the window ends. Every boot that is not already going to recovery therefore waits for the whole window. The word is separate from the request and retention words, so taking a request does not touch it.
+``MICROPY_MBOOT_DOUBLE_TAP`` enters recovery when the board is reset a second time within ``MICROPY_MBOOT_DOUBLE_TAP_MS`` (350 ms by default) of the bootloader starting, as the UF2 bootloaders do. The bootloader leaves ``MICROPY_MBOOT_DOUBLE_TAP_MAGIC`` in a word that survives reset, supplied by the port through ``mboot_port_double_tap_word()``, and clears it when the window ends. Every boot that is not already going to recovery therefore waits for the whole window. The word is separate from the request and retention words, so taking a request does not touch it. On MIMXRT, it is ``SNVS->LPGPR[3]``, also used by TinyUF2. Set ``MICROPY_HW_SNVS_LPGPR_SAFE_COUNT`` so ``machine.mem_backup()`` does not use this word.

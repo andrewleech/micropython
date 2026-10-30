@@ -37,6 +37,7 @@ INC += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/flexram
 INC += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/flexspi
 INC += -I$(TOP)/lib/tinyusb/src -I$(TOP)/shared/tinyusb
 INC += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/wdog01 -I$(TOP)/$(MCUX_SDK_DIR)/drivers/src
+INC += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/snvs_lp
 
 CFLAGS += $(INC) -DCPU_$(MCU_VARIANT)$(MCU_CORE)
 CFLAGS += -DBOARD_$(BOARD) -DBUILDING_MBOOT=1 -DMICROPY_HW_ENABLE_MBOOT=1
@@ -106,7 +107,8 @@ SRC_HAL = \
     hal/qspi_nor_flash_config.c \
     $(MCU_DIR)/drivers/fsl_clock.c \
     $(MCUX_SDK_DIR)/drivers/igpio/fsl_gpio.c \
-    $(MCUX_SDK_DIR)/drivers/wdog01/fsl_wdog.c
+    $(MCUX_SDK_DIR)/drivers/wdog01/fsl_wdog.c \
+    $(MCUX_SDK_DIR)/drivers/snvs_lp/fsl_snvs_lp.c
 SRC_HAL += $(MBOOT_EXTRA_SRC_HAL)
 SRC_TINYUSB_C = \
     $(MBOOT_TINYUSB_SRC_C) \

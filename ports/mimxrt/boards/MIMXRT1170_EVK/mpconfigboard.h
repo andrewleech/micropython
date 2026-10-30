@@ -281,5 +281,8 @@
 #define MICROPY_MBOOT_UPDATE_MODE (MICROPY_MBOOT_UPDATE_MODE_SWAP)
 #define MICROPY_MBOOT_SWAP_MODE (MICROPY_MBOOT_SWAP_MODE_OFFSET)
 #define MICROPY_MBOOT_DFU (1)
+#define MICROPY_MBOOT_DOUBLE_TAP (1)
+// LPGPR[3] is the Mboot double-tap word; keep it out of machine.mem_backup().
+#define MICROPY_HW_SNVS_LPGPR_SAFE_COUNT (3)
 #define MICROPY_MBOOT_FSLOAD_RAW (1)
 #endif
