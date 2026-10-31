@@ -191,6 +191,37 @@ function ci_mpy_cross_debug_emitter {
 }
 
 ########################################################################################
+# mboot
+
+function ci_mboot_setup {
+    ci_gcc_arm_setup
+    pip3 install cryptography intelhex click cbor2 pyyaml pytest
+    # STM32 bootloader builds use CMSIS, STM32 HAL and TinyUSB.
+    # MCUboot's optional crypto backend uses Mbed TLS.
+    git submodule update --init lib/mcuboot lib/stm32lib lib/CMSIS_6 lib/mbedtls lib/tinyusb
+}
+
+function ci_mboot_python_test {
+    # Independent pydfu protocol checks do not require the hardware models.
+    python3 -m pytest shared/mboot/dfu/tests/test_pydfu_wire.py -q
+}
+
+function ci_mboot_stm32_bootloader_build {
+    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI submodules
+    make ${MAKEOPTS} -C ports/stm32 -f Makefile.mboot BOARD=NUCLEO_H563ZI
+    make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF6 submodules
+    make ${MAKEOPTS} -C ports/stm32 -f Makefile.mboot BOARD=PYBD_SF6
+}
+
+function ci_mboot_stm32_app_build {
+    make ${MAKEOPTS} -C mpy-cross
+    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI submodules
+    make ${MAKEOPTS} -C ports/stm32 BOARD=NUCLEO_H563ZI
+    make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF6 submodules
+    make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF6
+}
+
+########################################################################################
 # ports/alif
 
 function ci_alif_setup {
@@ -557,6 +588,8 @@ function ci_stm32_path {
 function ci_stm32_pyb_build {
     # This function builds the following MCU families: F4, F7.
 
+    pip3 install cryptography intelhex click cbor2 pyyaml
+    git submodule update --init lib/mcuboot
     make ${MAKEOPTS} -C mpy-cross
     make ${MAKEOPTS} -C ports/stm32 MICROPY_PY_NETWORK_WIZNET5K=5200 submodules
     make ${MAKEOPTS} -C ports/stm32 BOARD=PYBD_SF2 submodules
