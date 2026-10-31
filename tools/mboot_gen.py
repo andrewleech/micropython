@@ -516,6 +516,7 @@ def render_mk(lay):
     fsload = lay["fsload"]
     pairs = [
         ("MBOOT_LAYOUT_ID", lay["layout_id"]),
+        ("MBOOT_BOOT_SIZE", "0x{:X}".format(lay["areas"]["boot"]["size"])),
         ("MBOOT_APP_LINK_ADDR", "0x{:08X}".format(lay["app_start"])),
         ("MBOOT_PRIMARY_ADDR", "0x{:08X}".format(lay["areas"]["primary"]["addr"])),
         ("MBOOT_DFU_UPDATE_ADDR", "0x{:08X}".format(lay["dfu"]["update_addr"])),
