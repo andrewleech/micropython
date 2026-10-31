@@ -10,6 +10,25 @@
 #define MICROPY_HW_LED_ON(pin) (mp_hal_pin_low(pin))
 #define MICROPY_HW_LED_OFF(pin) (mp_hal_pin_high(pin))
 
+// Standalone Mboot uses GPIO descriptors, not the runtime pin objects above.
+#if defined(BUILDING_MBOOT)
+#define MBOOT_LED1_GPIO GPIO1
+#define MBOOT_LED1_PIN 9u
+#define MBOOT_LED1_MUX IOMUXC_GPIO_AD_B0_09_GPIO1_IO09
+#define MBOOT_LED1_PAD_CONFIG 0x58u
+#define MBOOT_LED1_ACTIVE_LOW 1
+#define MBOOT_LED2_GPIO GPIO1
+#define MBOOT_LED2_PIN 10u
+#define MBOOT_LED2_MUX IOMUXC_GPIO_AD_B0_10_GPIO1_IO10
+#define MBOOT_LED2_PAD_CONFIG 0x58u
+#define MBOOT_LED2_ACTIVE_LOW 1
+#define MBOOT_LED3_GPIO GPIO1
+#define MBOOT_LED3_PIN 11u
+#define MBOOT_LED3_MUX IOMUXC_GPIO_AD_B0_11_GPIO1_IO11
+#define MBOOT_LED3_PAD_CONFIG 0x58u
+#define MBOOT_LED3_ACTIVE_LOW 1
+#endif
+
 #define MICROPY_HW_NUM_PIN_IRQS (4 * 32 + 3)
 
 // Define mapping logical UART # to hardware UART #
@@ -196,3 +215,19 @@
 // LPGPR[3] is used by the TinyUF2 bootloader for double-tap entry detection;
 // exclude it from machine.mem_backup() to prevent accidental corruption.
 #define MICROPY_HW_SNVS_LPGPR_SAFE_COUNT (3)
+
+// Mboot uses a dedicated signed XIP image and relocates the writable filesystem.
+#if MICROPY_HW_ENABLE_MBOOT
+#define MICROPY_HW_MBOOT_PRIMARY_ADDR (0x60040000u)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (0x200000u)
+#define MICROPY_HW_MBOOT_SECONDARY_ADDR (0x60240000u)
+#define MICROPY_HW_MBOOT_SECCNT_ADDR (0x60441000u)
+#define MICROPY_HW_MBOOT_FS_ADDR (0x60443000u)
+#define MICROPY_HW_MBOOT_FS_SIZE (MICROPY_HW_FLASH_SIZE - 0x443000u)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (1)
+#define MICROPY_MBOOT_UPDATE_MODE (MICROPY_MBOOT_UPDATE_MODE_SWAP)
+#define MICROPY_MBOOT_SWAP_MODE (MICROPY_MBOOT_SWAP_MODE_OFFSET)
+#define MICROPY_MBOOT_DFU (1)
+#define MICROPY_MBOOT_DOUBLE_TAP (1)
+#define MICROPY_MBOOT_FSLOAD_RAW (1)
+#endif

@@ -38,12 +38,11 @@
 #include "fsl_lpuart.h"
 
 #include CLOCK_CONFIG_H
+#include "mimxrt_usb_phy.h"
 #include "modmachine.h"
 #include "irq.h"
 
 const uint8_t dcd_data[] = { 0x00 };
-
-void usb_phy0_init(uint8_t d_cal, uint8_t txcal45dp, uint8_t txcal45dn);
 
 void board_init(void) {
     // Clean and enable cache
@@ -70,7 +69,9 @@ void board_init(void) {
     NVIC_SetPriority(SysTick_IRQn, IRQ_PRI_SYSTICK);
 
     // USB0
-    usb_phy0_init(0b0111, 0b0110, 0b0110);  // Configure nominal values for D_CAL and TXCAL45DP/DN
+    CLOCK_EnableUsbhs0PhyPllClock(kCLOCK_Usbphy480M, BOARD_XTAL0_CLK_HZ);
+    CLOCK_EnableUsbhs0Clock(kCLOCK_Usb480M, BOARD_XTAL0_CLK_HZ);
+    mimxrt_usb_phy_init(0b0111, 0b0110, 0b0110);
 
     // ADC
     machine_adc_init();
@@ -108,27 +109,6 @@ void board_init(void) {
     #endif
 }
 
-void usb_phy0_init(uint8_t d_cal, uint8_t txcal45dp, uint8_t txcal45dn) {
-    #ifdef USBPHY1
-    USBPHY_Type *usb_phy = USBPHY1;
-    #else
-    USBPHY_Type *usb_phy = USBPHY;
-    #endif
-
-    CLOCK_EnableUsbhs0PhyPllClock(kCLOCK_Usbphy480M, BOARD_XTAL0_CLK_HZ);
-    CLOCK_EnableUsbhs0Clock(kCLOCK_Usb480M, BOARD_XTAL0_CLK_HZ);
-
-    #if defined(MIMXRT117x_SERIES)
-    usb_phy->TRIM_OVERRIDE_EN = USBPHY_TRIM_OVERRIDE_EN_TRIM_DIV_SEL_OVERRIDE(1) |
-        USBPHY_TRIM_OVERRIDE_EN_TRIM_ENV_TAIL_ADJ_VD_OVERRIDE(1) |
-        USBPHY_TRIM_OVERRIDE_EN_TRIM_TX_D_CAL_OVERRIDE(1) |
-        USBPHY_TRIM_OVERRIDE_EN_TRIM_TX_CAL45DP_OVERRIDE(1) |
-        USBPHY_TRIM_OVERRIDE_EN_TRIM_TX_CAL45DN_OVERRIDE(1);  // Enable override for D_CAL and TXCAL45DP/DN
-    #endif
-    usb_phy->PWD = 0U;  // Set all bits in PWD register to normal operation
-    usb_phy->TX = ((usb_phy->TX & (~(USBPHY_TX_D_CAL_MASK | USBPHY_TX_TXCAL45DM_MASK | USBPHY_TX_TXCAL45DP_MASK))) |
-        (USBPHY_TX_D_CAL(d_cal) | USBPHY_TX_TXCAL45DP(txcal45dp) | USBPHY_TX_TXCAL45DM(txcal45dn)));  // Configure values for D_CAL and TXCAL45DP/DN
-}
 
 void USB_OTG1_IRQHandler(void) {
     tud_int_handler(0);

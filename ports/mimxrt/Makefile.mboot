@@ -1,0 +1,149 @@
+# Standalone Mboot bootloader build for SEEED_ARCH_MIX and MIMXRT1170_EVK M7.
+ifdef BOARD_DIR
+BOARD ?= $(notdir $(BOARD_DIR:/=))
+else
+BOARD ?= SEEED_ARCH_MIX
+BOARD_DIR ?= boards/$(BOARD)
+endif
+BUILD ?= build-$(BOARD)-mboot
+CROSS_COMPILE ?= arm-none-eabi-
+
+ifeq ($(wildcard $(BOARD_DIR)/.),)
+$(error Invalid BOARD specified: $(BOARD_DIR))
+endif
+ifeq ($(filter $(BOARD),SEEED_ARCH_MIX MIMXRT1170_EVK),)
+$(error Mboot is supported only for SEEED_ARCH_MIX and MIMXRT1170_EVK)
+endif
+
+BUILDING_MBOOT = 1
+MICROPY_HW_ENABLE_MBOOT = 1
+include ../../py/mkenv.mk
+include $(BOARD_DIR)/mpconfigboard.mk
+
+MCUX_SDK_DIR = lib/nxp_driver/sdk
+MCU_DIR = $(MCUX_SDK_DIR)/devices/$(MCU_SERIES)
+MBOOT_ROLE = bootloader
+MBOOT_DEV_DIR = $(CURDIR)
+MBOOT_SRAM_LD = $(BUILD)/mboot_sram.ld
+MBOOT_CMSIS_H = $(MCU_SERIES)$(MCU_CORE).h
+MBOOT_CPP_FLAGS = -DCPU_$(MCU_VARIANT)$(MCU_CORE) -DMICROPY_HW_ENABLE_MBOOT=1 -DMICROPY_HW_FLASH_SIZE=$(MICROPY_HW_FLASH_SIZE)
+
+INC += -I$(TOP) -I. -I$(BOARD_DIR) -I$(BUILD)
+INC += -I$(TOP)/ports/mimxrt -I$(TOP)/lib/CMSIS_6/CMSIS/Core/Include
+INC += -I$(TOP)/$(MCU_DIR) -I$(TOP)/$(MCU_DIR)/drivers
+INC += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/common
+INC += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/igpio
+INC += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/flexram
+INC += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/flexspi
+INC += -I$(TOP)/lib/tinyusb/src -I$(TOP)/shared/tinyusb
+INC += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/wdog01 -I$(TOP)/$(MCUX_SDK_DIR)/drivers/src
+INC += -I$(TOP)/$(MCUX_SDK_DIR)/drivers/snvs_lp
+
+CFLAGS += $(INC) -DCPU_$(MCU_VARIANT)$(MCU_CORE)
+CFLAGS += -DBOARD_$(BOARD) -DBUILDING_MBOOT=1 -DMICROPY_HW_ENABLE_MBOOT=1
+CFLAGS += -D__START=main
+CFLAGS += -DBOARD_FLASH_SIZE=$(MBOOT_BOOT_SIZE) -DMICROPY_HW_QSPI_NOR_RUNTIME_CONFIG=1
+CFLAGS += -DMICROPY_HW_FLASH_SIZE=$(MICROPY_HW_FLASH_SIZE) -DMICROPY_HW_ROMFS_BYTES=$(MICROPY_HW_ROMFS_BYTES)
+CFLAGS += -DCPU_HEADER_H='<$(MCU_SERIES)$(MCU_CORE).h>'
+ifdef MICROPY_HW_FLASH_CLK
+CFLAGS += -DMICROPY_HW_FLASH_CLK=$(MICROPY_HW_FLASH_CLK)
+endif
+ifdef MICROPY_HW_FLASH_QE_CMD
+CFLAGS += -DMICROPY_HW_FLASH_QE_CMD=$(MICROPY_HW_FLASH_QE_CMD)
+endif
+ifdef MICROPY_HW_FLASH_QE_ARG
+CFLAGS += -DMICROPY_HW_FLASH_QE_ARG=$(MICROPY_HW_FLASH_QE_ARG)
+endif
+CFLAGS += -DCFG_TUSB_MCU=OPT_MCU_MIMXRT1XXX -DCFG_TUSB_CONFIG_FILE=\"mboot_tusb_config.h\"
+CFLAGS += -DBOARD_FLASH_OPS_HEADER_H=\"hal/flexspi_nor_flash.h\"
+CFLAGS += -DBOARD_FLASH_CONFIG_HEADER_H=\"hal/flexspi_flash_config.h\"
+CFLAGS += -DXIP_BOOT_HEADER_ENABLE=1 -DXIP_EXTERNAL_FLASH=1
+CFLAGS += -DFSL_SDK_ENABLE_DRIVER_CACHE_CONTROL=1 -DMICROPY_HW_SDRAM_AVAIL=0
+CFLAGS += -DCLOCK_CONFIG_H='<boards/$(MCU_SERIES)_clock_config.h>'
+CFLAGS += -fdata-sections -ffunction-sections -mcpu=cortex-m7 -mthumb -mtune=cortex-m7
+CFLAGS += -mfloat-abi=hard -mfpu=fpv5-d16 -Wall -Wdouble-promotion -Werror
+CFLAGS += -Wno-error=unused-parameter -Os -DNDEBUG
+
+ifeq ($(MCU_SERIES),MIMXRT1052)
+MBOOT_FCB_OFFSET = 0
+MBOOT_FCB_SIZE = 0x1000
+MBOOT_VECTOR_OFFSET = 0xc000
+MBOOT_EXTRA_SRC_HAL += $(MCUX_SDK_DIR)/drivers/src/fsl_src.c
+else
+MBOOT_FCB_OFFSET = 0x400
+MBOOT_FCB_SIZE = 0xc00
+MBOOT_VECTOR_OFFSET = 0x2000
+MBOOT_EXTRA_SRC_HAL += $(MCU_DIR)/drivers/fsl_soc_src.c
+INC += -I$(TOP)/$(MCU_DIR)/drivers/cm7
+MBOOT_EXTRA_SRC_HAL += \
+    $(MCU_DIR)/drivers/cm7/fsl_cache.c \
+    $(MCU_DIR)/drivers/fsl_dcdc.c \
+    $(MCU_DIR)/drivers/fsl_pmu.c \
+    $(MCU_DIR)/drivers/fsl_anatop_ai.c \
+    $(MCU_DIR)/drivers/fsl_gpc.c
+CFLAGS += -DMIMXRT117x_SERIES -DUSB1_BASE=USB_OTG1_BASE -DUSB2_BASE=USB_OTG2_BASE
+endif
+
+SRC_C = \
+    mboot_port.c \
+    mboot_led.c \
+    flash.c \
+    mboot_nxp_boot.c \
+    mimxrt_reset_cause.c \
+    mimxrt_usb_phy.c \
+    boards/$(MCU_SERIES)_clock_config.c \
+    shared/libc/string0.c \
+    $(MBOOT_SRC_C) \
+    $(MBOOT_MCU_SRC_C)
+
+SRC_HAL = \
+    $(MCU_DIR)/system_$(MCU_SERIES)$(MCU_CORE).c \
+    $(MCU_DIR)/xip/fsl_flexspi_nor_boot.c \
+    $(MCUX_SDK_DIR)/drivers/common/fsl_common.c \
+    $(MCUX_SDK_DIR)/drivers/common/fsl_common_arm.c \
+    $(MCUX_SDK_DIR)/drivers/flexspi/fsl_flexspi.c \
+    $(MCUX_SDK_DIR)/drivers/flexram/fsl_flexram.c \
+    hal/flexspi_nor_flash.c \
+    hal/qspi_nor_flash_config.c \
+    $(MCU_DIR)/drivers/fsl_clock.c \
+    $(MCUX_SDK_DIR)/drivers/igpio/fsl_gpio.c \
+    $(MCUX_SDK_DIR)/drivers/wdog01/fsl_wdog.c \
+    $(MCUX_SDK_DIR)/drivers/snvs_lp/fsl_snvs_lp.c
+SRC_HAL += $(MBOOT_EXTRA_SRC_HAL)
+SRC_TINYUSB_C = \
+    $(MBOOT_TINYUSB_SRC_C) \
+    lib/tinyusb/src/portable/chipidea/ci_hs/dcd_ci_hs.c
+SRC_O = startup.o mboot_resethandler.o
+
+MBOOT_FLEXRAM_LD_FILES = boards/$(MCU_SERIES).ld boards/common.ld
+FLEXRAM_CONFIG_SRC = $(BUILD)/flexram_config.s
+
+include $(TOP)/shared/mboot/mboot_common.mk
+INC += $(MBOOT_INC)
+MBOOT_MCU_SRC_C := $(addprefix shared/mboot/src/, backup_words.c fault.c boot_info.c)
+MBOOT_BOOT_LINKER_SCRIPT = $(TOP)/ports/mimxrt/mboot_bootloader.ld
+LDFLAGS += --defsym=MBOOT_FCB_OFFSET=$(MBOOT_FCB_OFFSET)
+LDFLAGS += --defsym=MBOOT_FCB_SIZE=$(MBOOT_FCB_SIZE)
+LDFLAGS += --defsym=MBOOT_VECTOR_OFFSET=$(MBOOT_VECTOR_OFFSET)
+CFLAGS += $(MBOOT_CFLAGS) -DMICROPY_MBOOT_TINYUSB=1
+CFLAGS += -DMICROPY_HW_ENABLE_USB_RUNTIME_DEVICE=0 -DMICROPY_HW_USB_CDC=0 -DMICROPY_HW_USB_MSC=0
+
+include $(TOP)/shared/mboot/mboot_bootloader.mk
+
+$(BUILD)/startup.o: $(TOP)/$(MCU_DIR)/gcc/startup_$(MCU_SERIES)$(MCU_CORE).S
+	$(ECHO) "AS $<"
+	$(Q)$(CC) $(CFLAGS) -x assembler-with-cpp -c -o $@ $<
+
+$(BUILD)/mboot_resethandler.o: mboot_resethandler.S $(FLEXRAM_CONFIG_SRC)
+	$(ECHO) "AS $<"
+	$(Q)$(CC) $(CFLAGS) -I$(BUILD) -x assembler-with-cpp -c -o $@ $<
+
+MBOOT_FLEXRAM_FEATURES = $(TOP)/$(MCU_DIR)/$(MCU_SERIES)$(MCU_CORE)_features.h
+
+$(FLEXRAM_CONFIG_SRC): $(TOP)/$(MCU_DIR)/$(MCU_SERIES)$(MCU_CORE).h $(MBOOT_FLEXRAM_FEATURES) $(MBOOT_FLEXRAM_LD_FILES)
+	$(ECHO) "GEN $@"
+	$(Q)$(MKDIR) -p $(dir $@)
+	$(Q)$(PYTHON) boards/make-flexram-config.py -d $(TOP)/$(MCU_DIR)/$(MCU_SERIES)$(MCU_CORE).h \
+		-f $(MBOOT_FLEXRAM_FEATURES) $(addprefix -l,$(MBOOT_FLEXRAM_LD_FILES)) \
+		-c $(MCU_SERIES) > $@
+

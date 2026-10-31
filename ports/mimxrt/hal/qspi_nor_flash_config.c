@@ -17,6 +17,8 @@
 /*******************************************************************************
  * Code
  ******************************************************************************/
+#if (defined(XIP_BOOT_HEADER_ENABLE) && (XIP_BOOT_HEADER_ENABLE == 1)) || \
+    (defined(MICROPY_HW_QSPI_NOR_RUNTIME_CONFIG) && MICROPY_HW_QSPI_NOR_RUNTIME_CONFIG)
 #if defined(XIP_BOOT_HEADER_ENABLE) && (XIP_BOOT_HEADER_ENABLE == 1)
 #if defined(__ARMCC_VERSION) || defined(__GNUC__)
 __attribute__((section(".boot_hdr.conf")))
@@ -24,6 +26,7 @@ __attribute__((section(".boot_hdr.conf")))
 #pragma location = ".boot_hdr.conf"
 #endif
 
+#endif
 #ifndef MICROPY_HW_FLASH_DQS
 #define MICROPY_HW_FLASH_DQS kFlexSPIReadSampleClk_LoopbackFromDqsPad
 #endif
@@ -137,4 +140,4 @@ const flexspi_nor_config_t qspiflash_config = {
     .isUniformBlockSize = false,
     // .ipcmdSerialClkFreq = kFlexSpiSerialClk_30MHz,
 };
-#endif /* XIP_BOOT_HEADER_ENABLE */
+#endif /* Runtime QSPI configuration */
