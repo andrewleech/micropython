@@ -181,6 +181,8 @@ void uart_init0(void) {
     #endif
 }
 
+#if !MICROPY_HW_UART_NO_RUNTIME
+
 // unregister all interrupt sources
 void uart_deinit_all(void) {
     for (int i = 0; i < MP_ARRAY_SIZE(MP_STATE_PORT(machine_uart_obj_all)); i++) {
@@ -273,9 +275,11 @@ bool uart_exists(int uart_id) {
     }
 }
 
-// assumes Init parameters have been set up correctly
-bool uart_init(machine_uart_obj_t *uart_obj,
-    uint32_t baudrate, uint32_t bits, uint32_t parity, uint32_t stop, uint32_t flow, uint32_t invert) {
+#endif // !MICROPY_HW_UART_NO_RUNTIME
+
+// Selects the instance of uart_obj->uart_id, enables its clock and configures its pins. Sets
+// uart_obj->uartx and returns the interrupt number of the instance in *irqn_out.
+static bool uart_init_pins(machine_uart_obj_t *uart_obj, uint32_t flow, IRQn_Type *irqn_out) {
     USART_TypeDef *UARTx;
     IRQn_Type irqn;
     uint8_t uart_fn = AF_FN_UART;
@@ -751,6 +755,37 @@ bool uart_init(machine_uart_obj_t *uart_obj,
     }
 
     uart_obj->uartx = UARTx;
+    *irqn_out = irqn;
+    return true;
+}
+
+#if MICROPY_HW_UART_NO_RUNTIME
+// Starts a transmit only console, 8N1, with the baudrate set from the kernel clock the same way
+// as uart_set_baudrate(). It does not use HAL_UART_Init(), whose clock tree query is large on
+// STM32H5 and STM32H7, and leaves the interrupts off.
+bool uart_init_tx(machine_uart_obj_t *uart_obj, uint32_t baudrate) {
+    IRQn_Type irqn;
+    if (!uart_init_pins(uart_obj, 0, &irqn)) {
+        return false;
+    }
+    uart_set_baudrate(uart_obj, baudrate);
+    uart_obj->uartx->CR1 = USART_CR1_TE | USART_CR1_UE;
+    uart_obj->is_enabled = true;
+    uart_obj->attached_to_repl = false;
+    uart_obj->char_mask = 0xff;
+    uart_obj->char_width = CHAR_WIDTH_8BIT;
+    return true;
+}
+#endif
+
+// assumes Init parameters have been set up correctly
+bool uart_init(machine_uart_obj_t *uart_obj,
+    uint32_t baudrate, uint32_t bits, uint32_t parity, uint32_t stop, uint32_t flow, uint32_t invert) {
+    IRQn_Type irqn;
+    if (!uart_init_pins(uart_obj, flow, &irqn)) {
+        return false;
+    }
+    USART_TypeDef *UARTx = uart_obj->uartx;
 
     // Set the initialisation parameters for the UART.
     UART_HandleTypeDef huart;
@@ -1353,6 +1388,8 @@ void uart_tx_strn(machine_uart_obj_t *uart_obj, const char *str, uint len) {
     uart_tx_data(uart_obj, str, len, &errcode);
 }
 
+#if !MICROPY_HW_UART_NO_RUNTIME
+
 // This IRQ handler is set up to handle RXNE, IDLE and ORE interrupts only.
 // Notes:
 // - ORE (overrun error) is tied to the RXNE IRQ line.
@@ -1474,3 +1511,5 @@ const mp_irq_methods_t uart_irq_methods = {
 };
 
 MP_REGISTER_ROOT_POINTER(struct _machine_uart_obj_t *machine_uart_obj_all[MICROPY_HW_MAX_UART + MICROPY_HW_MAX_LPUART]);
+
+#endif // !MICROPY_HW_UART_NO_RUNTIME

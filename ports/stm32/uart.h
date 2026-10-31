@@ -29,6 +29,12 @@
 #include "py/mphal.h"
 #include "shared/runtime/mpirq.h"
 
+// The bootloader sets this to build only the hardware initialisation and the transmit of the
+// UART: it has no MicroPython runtime for the UART object registry and the interrupt handler.
+#ifndef MICROPY_HW_UART_NO_RUNTIME
+#define MICROPY_HW_UART_NO_RUNTIME (0)
+#endif
+
 typedef enum {
     PYB_UART_NONE = 0,
     PYB_UART_1 = 1,
@@ -90,6 +96,9 @@ void uart_deinit_all(void);
 bool uart_exists(int uart_id);
 bool uart_init(machine_uart_obj_t *uart_obj,
     uint32_t baudrate, uint32_t bits, uint32_t parity, uint32_t stop, uint32_t flow, uint32_t invert);
+#if MICROPY_HW_UART_NO_RUNTIME
+bool uart_init_tx(machine_uart_obj_t *uart_obj, uint32_t baudrate);
+#endif
 void uart_irq_config(machine_uart_obj_t *self, bool enable);
 void uart_set_rxbuf(machine_uart_obj_t *self, size_t len, void *buf);
 void uart_deinit(machine_uart_obj_t *uart_obj);
