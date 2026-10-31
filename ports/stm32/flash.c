@@ -124,13 +124,9 @@ static const flash_layout_t flash_layout[] = {
 #else
 // This is for dual-bank mode disabled
 static const flash_layout_t flash_layout[] = {
-    { 0x08000000, 0x08000, 4 },
-    { 0x08020000, 0x20000, 1 },
-    #if FLASH_SECTOR_TOTAL == 8
-    { 0x08040000, 0x40000, 3 },
-    #else
-    { 0x08040000, 0x40000, 7 },
-    #endif
+    { FLASH_LAYOUT_RUN0_BASE, FLASH_LAYOUT_RUN0_SECTOR_SIZE, FLASH_LAYOUT_RUN0_SECTOR_COUNT },
+    { FLASH_LAYOUT_RUN1_BASE, FLASH_LAYOUT_RUN1_SECTOR_SIZE, FLASH_LAYOUT_RUN1_SECTOR_COUNT },
+    { FLASH_LAYOUT_RUN2_BASE, FLASH_LAYOUT_RUN2_SECTOR_SIZE, FLASH_LAYOUT_RUN2_SECTOR_COUNT },
 };
 #endif
 
@@ -470,11 +466,10 @@ int flash_write(uint32_t flash_dest, const uint32_t *src, uint32_t num_word32) {
 
     #elif defined(STM32H5) || defined(STM32H7) || defined(STM32U5)
 
+    static const unsigned int WORD32_PER_FLASHWORD = FLASH_NB_32BITWORD_IN_FLASHWORD;
     #if defined(STM32H5) || defined(STM32U5)
-    static const unsigned int WORD32_PER_FLASHWORD = 4;
     static const unsigned int PROGRAM_TYPE = FLASH_TYPEPROGRAM_QUADWORD;
     #else
-    static const unsigned int WORD32_PER_FLASHWORD = FLASH_NB_32BITWORD_IN_FLASHWORD;
     static const unsigned int PROGRAM_TYPE = FLASH_TYPEPROGRAM_FLASHWORD;
     #endif
 
