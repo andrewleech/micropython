@@ -33,7 +33,7 @@ import sys
 import zlib
 
 sys.path.append(os.path.dirname(__file__) + "/../../../tools")
-import dfu
+import create_dfu
 
 try:
     import pyhy
@@ -97,37 +97,16 @@ class Keys:
 
 
 def dfu_read(filename):
-    elems = []
+    dfu = create_dfu.DfuFile.read(filename)
+    return dfu, [(e.addr, e.data) for e in dfu.elements]
 
-    with open(filename, "rb") as f:
-        hdr = f.read(11)
-        sig, ver, size, num_targ = struct.unpack("<5sBIB", hdr)
-        file_offset = 11
 
-        for i in range(num_targ):
-            hdr = f.read(274)
-            sig, alt, has_name, name, t_size, num_elem = struct.unpack("<6sBi255sII", hdr)
-
-            file_offset += 274
-            file_offset_t = file_offset
-            for j in range(num_elem):
-                hdr = f.read(8)
-                addr, e_size = struct.unpack("<II", hdr)
-                data = f.read(e_size)
-                elems.append((addr, data))
-                file_offset += 8 + e_size
-
-            if t_size != file_offset - file_offset_t:
-                raise Exception("corrupt DFU {} {}".format(t_size, file_offset - file_offset_t))
-
-        if size != file_offset:
-            raise Exception("corrupt DFU {} {}".format(size, file_offset))
-
-        hdr = f.read(16)
-        hdr = struct.unpack("<HHHH3sBI", hdr)
-        vid_pid = "0x{:04x}:0x{:04x}".format(hdr[2], hdr[1])
-
-    return vid_pid, elems
+def dfu_write(filename, dfu_in, target):
+    """Write the elements of target as one DfuSe target, for the USB IDs of the file dfu_in."""
+    elements = [create_dfu.Element(e["address"], e["data"]) for e in target]
+    create_dfu.DfuFile.dfuse(
+        [create_dfu.Target(elements)], dfu_in.vid, dfu_in.pid, dfu_in.device
+    ).write(filename, align=8)
 
 
 def compress(data):
@@ -172,7 +151,7 @@ def pack_dfu(keys, args):
     keys.load()
 
     # Read the input DFU file.
-    vid_pid, elems = dfu_read(args.infile[0])
+    dfu, elems = dfu_read(args.infile[0])
 
     # Ensure firmware sections are processed in order of destination memory address.
     elems = sorted(elems, key=lambda e: e[0])
@@ -211,7 +190,7 @@ def pack_dfu(keys, args):
     target.append({"address": chunk_addr, "data": full_signature_chunk})
 
     # Build the packed DFU file of all the encrypted and signed chunks.
-    dfu.build(args.outfile[0], [target], vid_pid)
+    dfu_write(args.outfile[0], dfu, target)
 
     # Verify the packed DFU file.
     verify_pack_dfu(keys, args.outfile[0])
@@ -260,7 +239,7 @@ def unpack_dfu(keys, args):
 
     # Build a DFU file from the decrypted binary data.
     data = verify_pack_dfu(keys, args.infile[0])
-    dfu.build(args.outfile[0], [data])
+    dfu_write(args.outfile[0], dfu_read(args.infile[0])[0], data)
 
 
 def main():

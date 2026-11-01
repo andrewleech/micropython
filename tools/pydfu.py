@@ -14,13 +14,16 @@ See document UM0391 for a description of the DFuse file.
 import argparse
 import collections
 import inspect
+import os
 import re
 import struct
 import sys
-import zlib
 
 import usb.core
 import usb.util
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import create_dfu
 
 # USB request __TIMEOUT
 __TIMEOUT = 4000
@@ -427,133 +430,41 @@ def named(values, names):
     return dict(zip(names.split(), values))
 
 
-def consume(fmt, data, names):
-    """Parses the struct defined by `fmt` from `data`, stores the parsed fields
-    into a named tuple using `names`. Returns the named tuple, and the data
-    with the struct stripped off."""
-
-    size = struct.calcsize(fmt)
-    return named(struct.unpack(fmt, data[:size]), names), data[size:]
-
-
-def cstring(string):
-    """Extracts a null-terminated string from a byte array."""
-    return string.decode("utf-8").split("\0", 1)[0]
-
-
-def compute_crc(data):
-    """Computes the CRC32 value for the data passed in."""
-    return 0xFFFFFFFF & -zlib.crc32(data) - 1
-
-
 def read_dfu_file(filename):
     """Reads a DFU file, and parses the individual elements from the file.
     Returns an array of elements. Each element is a dictionary with the
     following keys:
         num     - The element index.
-        address - The address that the element data should be written to.
+        addr    - The address that the element data should be written to.
         size    - The size of the element data.
         data    - The element data.
     If an error occurs while parsing the file, then None is returned.
     """
 
     print(f"File: {filename}")
-    with open(filename, "rb") as fin:
-        data = fin.read()
-    crc = compute_crc(data[:-4])
+    try:
+        dfu = create_dfu.DfuFile.read(filename)
+    except (OSError, create_dfu.DfuError) as exc:
+        print(f"Error: {exc}")
+        return None
+    if dfu.payload is not None:
+        print("Error: plain DFU files have no target address, use dfu-util")
+        return None
+    print(f"    usb: {dfu.vid:04x}:{dfu.pid:04x}, device: 0x{dfu.device:04x}")
     elements = []
-
-    # Decode the DFU Prefix
-    #
-    # <5sBIB
-    #   <   little endian           Endianness
-    #   5s  char[5]     signature   "DfuSe"
-    #   B   uint8_t     version     1
-    #   I   uint32_t    size        Size of the DFU file (without suffix)
-    #   B   uint8_t     targets     Number of targets
-    dfu_prefix, data = consume("<5sBIB", data, "signature version size targets")
-    print(
-        f"    {dfu_prefix['signature']} v{dfu_prefix['version']}, "
-        f"image size: {dfu_prefix['size']}, targets: {dfu_prefix['targets']}"
-    )
-    for target_idx in range(dfu_prefix["targets"]):
-        # Decode the Image Prefix
-        #
-        # <6sBI255s2I
-        #   <       little endian           Endianness
-        #   6s      char[6]     signature   "Target"
-        #   B       uint8_t     altsetting
-        #   I       uint32_t    named       Bool indicating if a name was used
-        #   255s    char[255]   name        Name of the target
-        #   I       uint32_t    size        Size of image (without prefix)
-        #   I       uint32_t    elements    Number of elements in the image
-        img_prefix, data = consume(
-            "<6sBI255s2I", data, "signature altsetting named name size elements"
-        )
-        img_prefix["num"] = target_idx
-        if img_prefix["named"]:
-            img_prefix["name"] = cstring(img_prefix["name"])
-        else:
-            img_prefix["name"] = ""
-        print(
-            f"    {img_prefix['signature']} {img_prefix['num']}, "
-            f"alt setting: {img_prefix['altsetting']}, "
-            f'name: "{img_prefix["name"]}", size: {img_prefix["size"]}, '
-            f"elements: {img_prefix['elements']}"
-        )
-
-        target_size = img_prefix["size"]
-        target_data = data[:target_size]
-        data = data[target_size:]
-        for elem_idx in range(img_prefix["elements"]):
-            # Decode target prefix
-            #
-            # <2I
-            #   <   little endian           Endianness
-            #   I   uint32_t    element     Address
-            #   I   uint32_t    element     Size
-            elem_prefix, target_data = consume("<2I", target_data, "addr size")
-            elem_prefix["num"] = elem_idx
-            print(
-                f"      {elem_prefix['num']}, address: 0x{elem_prefix['addr']:08x}, "
-                f"size: {elem_prefix['size']}"
+    for target in dfu.targets:
+        print(f'    alt setting: {target.alt}, name: "{target.name or ""}"')
+        for element in target.elements:
+            num = len(elements)
+            print(f"      {num}, address: 0x{element.addr:08x}, size: {len(element.data)}")
+            elements.append(
+                {
+                    "num": num,
+                    "addr": element.addr,
+                    "size": len(element.data),
+                    "data": element.data,
+                }
             )
-            elem_size = elem_prefix["size"]
-            elem_data = target_data[:elem_size]
-            target_data = target_data[elem_size:]
-            elem_prefix["data"] = elem_data
-            elements.append(elem_prefix)
-
-        if len(target_data):
-            print(f"target {target_idx} PARSE ERROR")
-
-    # Decode DFU Suffix
-    #
-    # <4H3sBI
-    #   <   little endian           Endianness
-    #   H   uint16_t    device      Firmware version
-    #   H   uint16_t    product
-    #   H   uint16_t    vendor
-    #   H   uint16_t    dfu         0x11a   (DFU file format version)
-    #   3s  char[3]     ufd         "UFD"
-    #   B   uint8_t     len         16
-    #   I   uint32_t    crc32       Checksum
-    dfu_suffix = named(
-        struct.unpack("<4H3sBI", data[:16]), "device product vendor dfu ufd len crc"
-    )
-    print(
-        f"    usb: {dfu_suffix['vendor']:04x}:{dfu_suffix['product']:04x}, "
-        f"device: 0x{dfu_suffix['device']:04x}, dfu: 0x{dfu_suffix['dfu']:04x}, "
-        f"{dfu_suffix['ufd']}, {dfu_suffix['len']}, 0x{dfu_suffix['crc']:08x}"
-    )
-    if crc != dfu_suffix["crc"]:
-        print(f"CRC ERROR: computed crc32 is 0x{crc:08x}")
-        return
-    data = data[16:]
-    if data:
-        print("PARSE ERROR")
-        return
-
     return elements
 
 

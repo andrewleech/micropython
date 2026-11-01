@@ -20,7 +20,7 @@ INC += -I$(TOP)
 INC += -I$(BUILD)
 
 ifeq ($(CROSS), 1)
-DFU = $(TOP)/tools/dfu.py
+DFU = $(TOP)/tools/create_dfu.py
 PYDFU = $(TOP)/tools/pydfu.py
 CFLAGS_CORTEX_M4 = -mthumb -mtune=cortex-m4 -mcpu=cortex-m4 -msoft-float -fsingle-precision-constant -Wdouble-promotion -Wfloat-conversion
 CFLAGS += $(INC) -Wall -Werror -std=c99 $(CFLAGS_CORTEX_M4) $(COPT)
@@ -88,7 +88,7 @@ $(BUILD)/firmware.bin: $(BUILD)/firmware.elf
 
 $(BUILD)/firmware.dfu: $(BUILD)/firmware.bin
 	$(ECHO) "Create $@"
-	$(Q)$(PYTHON) $(DFU) -b 0x08000000:$(BUILD)/firmware.bin $@
+	$(Q)$(PYTHON) $(DFU) create --usb 0483:df11 -o $@ 0x08000000:$(BUILD)/firmware.bin
 
 deploy: $(BUILD)/firmware.dfu
 	$(ECHO) "Writing $< to the board"

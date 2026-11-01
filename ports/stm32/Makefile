@@ -64,7 +64,7 @@ CROSS_COMPILE ?= arm-none-eabi-
 LD_DIR=boards
 USBDEV_DIR=usbdev
 #USBHOST_DIR=usbhost
-DFU=$(TOP)/tools/dfu.py
+DFU=$(TOP)/tools/create_dfu.py
 MBOOT_PACK_DFU = mboot/mboot_pack_dfu.py
 # may need to prefix dfu-util with sudo
 USE_PYDFU ?= 1
@@ -603,11 +603,11 @@ endef
 
 define GENERATE_DFU
 	$(ECHO) "GEN $(1)"
-	$(Q)$(PYTHON) $(DFU) \
-	-D $(BOOTLOADER_DFU_USB_VID):$(BOOTLOADER_DFU_USB_PID) \
-	$(if $(2),$(addprefix -b ,$(3):$(2))) \
-	$(if $(4),$(addprefix -b ,$(5):$(4))) \
-	$(1)
+	$(Q)$(PYTHON) $(DFU) create --align 8 \
+	--usb $(BOOTLOADER_DFU_USB_VID):$(BOOTLOADER_DFU_USB_PID) \
+	-o $(1) \
+	$(if $(2),$(3):$(2)) \
+	$(if $(4),$(5):$(4))
 endef
 
 define GENERATE_PACK_DFU
