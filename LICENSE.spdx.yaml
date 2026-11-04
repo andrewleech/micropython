@@ -220,6 +220,24 @@ external_repositories:
     license: BSD-3-Clause
   - path: src/netif/ppp/polarssl/sha1.c
     license: BSD-3-Clause
+- url: https://github.com/georgerobotics/cyw43-driver.git
+  commit: 055d64274b014dd7b1c2fc94d26e8a18face7124
+  # LICENSE.RP provides a separate conditional grant for use with Raspberry Pi Ltd semiconductors.
+  licenses:
+  - path: src/cyw43_bthci_uart.c
+    license: LicenseRef-CYW43-NonCommercial
+  - path: src/cyw43_ctrl.c
+    license: LicenseRef-CYW43-NonCommercial
+  - path: src/cyw43_lwip.c
+    license: LicenseRef-CYW43-NonCommercial
+  - path: src/cyw43_ll.c
+    license: LicenseRef-CYW43-NonCommercial
+  - path: src/cyw43_sdio.c
+    license: LicenseRef-CYW43-NonCommercial
+  - path: src/cyw43_spi.c
+    license: LicenseRef-CYW43-NonCommercial
+  - path: src/cyw43_stats.c
+    license: LicenseRef-CYW43-NonCommercial
 packages:
 - name: micropython
   packageFileName: .
@@ -728,6 +746,41 @@ packages:
     uu.py carries the Ellinghouse notice and CPython history. The notice restricts use of Lance
     Ellinghouse's name in advertising or publicity without prior written permission.
 hasExtractedLicensingInfos:
+- licenseId: LicenseRef-CYW43-NonCommercial
+  name: CYW43 personal non-commercial licence
+  extractedText: |
+    Copyright (C) 2019-2022 George Robotics Pty Ltd
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions are met:
+
+    1. Redistributions of source code must retain the above copyright notice,
+       this list of conditions and the following disclaimer.
+    2. Redistributions in binary form must reproduce the above copyright notice,
+       this list of conditions and the following disclaimer in the documentation
+       and/or other materials provided with the distribution.
+    3. Any redistribution, use, or modification in source or binary form is done
+       solely for personal benefit and not for any commercial purpose or for
+       monetary gain.
+
+    THIS SOFTWARE IS PROVIDED BY THE LICENSOR AND COPYRIGHT OWNER "AS IS" AND ANY
+    EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+    WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+    DISCLAIMED. IN NO EVENT SHALL THE LICENSOR OR COPYRIGHT OWNER BE LIABLE FOR
+    ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+    DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+    SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+    OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+    This software is also available for use with Raspberry Pi Ltd semiconductor
+    devices under different terms (see ./LICENSE.RP).
+
+    For commercial licensing options please email contact@georgerobotics.com.au
+  seeAlso:
+  - https://github.com/georgerobotics/cyw43-driver/blob/055d64274b014dd7b1c2fc94d26e8a18face7124/LICENSE
+  - https://github.com/georgerobotics/cyw43-driver/blob/055d64274b014dd7b1c2fc94d26e8a18face7124/LICENSE.RP
 - licenseId: LicenseRef-PPP-Komulainen
   name: Tommi Komulainen PPP notice
   extractedText: |

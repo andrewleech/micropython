@@ -30,10 +30,13 @@ from spdx_tools.spdx.model import (
     Annotation,
     AnnotationType,
     CreationInfo,
+    Checksum,
+    ChecksumAlgorithm,
     Document,
     ExternalPackageRef,
     ExternalPackageRefCategory,
     ExtractedLicensingInfo,
+    File,
     Package,
     Relationship,
     RelationshipType,
@@ -223,7 +226,7 @@ def _licence_comments(item):
     return comments
 
 
-def _write_spdx(model, path, extracted):
+def _write_spdx(model, path, extracted, original, root):
     now = datetime.now(timezone.utc).replace(microsecond=0)
     tool = Actor(ActorType.TOOL, _TOOL)
     build_inputs = bool(model.get("subject", {}).get("image"))
@@ -247,7 +250,11 @@ def _write_spdx(model, path, extracted):
         scope.update(scope="build-input", scope_description=_BUILD_SCOPE_DESCRIPTION)
     annotations = [Annotation("SPDXRef-MicroPython", AnnotationType.OTHER, tool, now, _json(scope))]
     details = {}
+    files = []
+    file_evidence = {}
+    original_items = iter(_components(original["components"]))
     for identity, item, parent in _components(model["components"]):
+        _, original_item, _ = next(original_items)
         identifier = "SPDXRef-Package-" + identity.replace("/", "-")
         references = []
         purl = _purl(item)
@@ -279,6 +286,42 @@ def _write_spdx(model, path, extracted):
         else:
             relationships.append(Relationship("SPDXRef-MicroPython", RelationshipType.CONTAINS, identifier))
         annotations.append(Annotation(identifier, AnnotationType.OTHER, tool, now, _json(_provenance(item))))
+        if build_inputs:
+            for index, (evidence, original_evidence) in enumerate(zip(
+                item.get("file_licences", []), original_item.get("file_licences", [])
+            )):
+                expression = evidence.get("expression")
+                trusted = bool(evidence.get("trusted") and expression)
+                source = Path(original_evidence["source"])
+                if not source.is_absolute():
+                    if root is None:
+                        raise ValueError("root is required for relative build-input source paths")
+                    source = root / source
+                source = source.resolve()
+                if source.is_dir():
+                    continue
+                licence = spdx_licensing.parse(expression) if trusted else None
+                entry = file_evidence.get(source)
+                if entry is None:
+                    entry = file_evidence[source] = {
+                        "evidence": evidence, "licence": licence, "identity": identity,
+                        "identifier": identifier, "index": index, "conflict": not trusted,
+                        "in_file": trusted and evidence.get("provenance") in (
+                            "source SPDX header", "source MIT header"
+                        ),
+                    }
+                else:
+                    if not trusted:
+                        entry["conflict"] = True
+                    elif entry["licence"] is None:
+                        entry["licence"] = licence
+                    elif not spdx_licensing.is_equivalent(entry["licence"], licence):
+                        entry["conflict"] = True
+                    entry["in_file"] |= trusted and evidence.get("provenance") in (
+                        "source SPDX header", "source MIT header"
+                    )
+                    if identity.count("/") > entry["identity"].count("/"):
+                        entry.update(evidence=evidence, identity=identity, identifier=identifier, index=index)
         for licence_id in item["licence_texts"]:
             detail = item.get("licence_details", {}).get(licence_id, {})
             entry = details.setdefault(licence_id, {"names": set(), "comments": set(), "urls": set()})
@@ -287,6 +330,30 @@ def _write_spdx(model, path, extracted):
             if detail.get("comment"):
                 entry["comments"].add(detail["comment"])
             entry["urls"].update(detail.get("seeAlso", ()))
+    for source, entry in file_evidence.items():
+        if entry["licence"] is None:
+            continue
+        digest = hashlib.sha1()
+        with source.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        name = entry["evidence"]["source"].replace("\\", "/")
+        if name.startswith("/") or ".." in name.split("/"):
+            name = "external-source-" + hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
+        file_id = "SPDXRef-File-" + entry["identity"].replace("/", "-") + "-" + str(entry["index"])
+        licence = _NO_ASSERTION if entry["conflict"] else entry["licence"]
+        files.append(File(
+            name=name,
+            spdx_id=file_id,
+            checksums=[Checksum(ChecksumAlgorithm.SHA1, digest.hexdigest())],
+            license_concluded=licence,
+            license_info_in_file=[licence if entry["in_file"] else _NO_ASSERTION],
+            copyright_text=_NO_ASSERTION,
+        ))
+        relationships.append(Relationship(
+            file_id, RelationshipType.OTHER, entry["identifier"],
+            comment="Selected source file provides licence evidence for this build input.",
+        ))
     if model["issues"]:
         annotations.append(
             Annotation("SPDXRef-DOCUMENT", AnnotationType.OTHER, tool, now, _json({"issues": model["issues"]}))
@@ -316,6 +383,7 @@ def _write_spdx(model, path, extracted):
             document_comment=_BUILD_SCOPE_DESCRIPTION if build_inputs else None,
         ),
         packages=packages,
+        files=files,
         relationships=relationships,
         annotations=annotations,
         extracted_licensing_info=licensing_info,
@@ -425,10 +493,12 @@ def _write_cyclonedx(model, path):
 
 def write_sbom(model, path, format, *, root=None):
     """Write the supplied inventory as an SPDX 2.3 or CycloneDX 1.6 JSON document."""
+    root = Path(root) if root is not None else None
+    original = model
     model = _portable_model(model, root if root is not None else Path(__file__).resolve().parent.parent)
     extracted = _extracted_licences(model)
     if format == "spdx":
-        _write_spdx(model, path, extracted)
+        _write_spdx(model, path, extracted, original, root)
     elif format == "cyclonedx":
         _write_cyclonedx(model, path)
     else:

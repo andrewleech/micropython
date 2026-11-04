@@ -2,6 +2,7 @@
 """Generate an SPDX or CycloneDX SBOM from repository or build inputs."""
 
 import argparse
+from contextvars import ContextVar
 import hashlib
 import json
 import re
@@ -13,7 +14,9 @@ from urllib.parse import quote, urlparse
 from packageurl import PackageURL
 
 from sbom_inputs import read_inputs
-from sbom_licences import _covers, _load, resolve_licences
+from sbom_licences import (
+    _covers, _external_checkout, _external_declarations, _load, resolve_licences,
+)
 from sbom_writers import write_sbom
 
 
@@ -122,8 +125,14 @@ class ExtractorError(Exception):
     """An in-tree extractor's expected file or field is missing/unparseable."""
 
 
+_extractor_files = ContextVar("extractor_files", default=None)
+
+
 def _read(repo, relpath):
     """Read a file from the repo. Raises ExtractorError if missing/unreadable."""
+    files = _extractor_files.get()
+    if files is not None:
+        files.add(repo / relpath)
     try:
         return (repo / relpath).read_text(errors="replace")
     except FileNotFoundError:
@@ -385,6 +394,7 @@ def _sub_stm32lib(repo):
                 "group": "stm32lib",
                 "name": d.name,
                 "version": ".".join(parts),
+                "_version_file": rel,
                 "properties": [
                     {"name": "submodule:path", "value": f"lib/stm32lib/CMSIS/{d.name}"},
                     {"name": "version:source", "value": "in-tree"},
@@ -418,6 +428,7 @@ def _sub_asf4(repo):
                 # Build number kept as semver build metadata: the version
                 # string alone ("1.0") is shared by samd51 and same54.
                 "version": f"{v['COMPONENT_VERSION_STRING']}+build.{v['BUILD_NUMBER']}",
+                "_version_file": rel,
                 "properties": [
                     {"name": "submodule:path", "value": f"lib/asf4/{d.name}"},
                     {"name": "version:source", "value": "in-tree"},
@@ -495,13 +506,14 @@ VENDORED = [
         "path": "lib/libm_dbl",
         "name": "libm-dbl",
         "upstream": "https://musl.libc.org",
+        "upstream_type": "website",
         "extractor": _vext_libm_dbl,
     },
 ]
 
 
-def _vendored_purl(upstream, name, version):
-    return url_to_purl(upstream, None if version == "unknown" else version, name)
+def _vendored_purl(upstream, name):
+    return url_to_purl(upstream, None, name)
 
 
 def build_vendored_component(repo, v):
@@ -524,8 +536,8 @@ def build_vendored_component(repo, v):
         "type": "library",
         "name": name,
         "version": version,
-        "purl": _vendored_purl(upstream, name, version),
-        "externalReferences": [{"type": "vcs", "url": upstream}],
+        "purl": _vendored_purl(upstream, name) if v.get("upstream_type", "vcs") == "vcs" else None,
+        "externalReferences": [{"type": v.get("upstream_type", "vcs"), "url": upstream}],
         "properties": [
             {"name": "vendored:path", "value": path},
             {"name": "version:source", "value": source},
@@ -685,11 +697,11 @@ def build_component(repo, submod, sha, version, source):
 def repo_version(repo):
     try:
         return run(
-            ["git", "describe", "--tags", "--always", "--dirty"],
+            ["git", "describe", "--tags", "--dirty"],
             cwd=str(repo),
         ).strip()
     except subprocess.CalledProcessError:
-        return "unknown"
+        return None
 
 
 def _component(name, path, version=None, revision=None, purl=None):
@@ -725,7 +737,8 @@ def _build_inventory_component(repo, kind, item, offline):
     else:
         raw = build_vendored_component(repo, item)
     component = _component(raw["name"], item["path"],
-                           None if raw["version"] == "unknown" else raw["version"],
+                           None if raw["version"] == "unknown" or
+                           (kind == "submodule" and source == "git-sha") else raw["version"],
                            sha, raw["purl"])
     component["owner_root"] = str((repo / item["path"]).resolve())
     component["declaration_root"] = str(repo)
@@ -741,6 +754,8 @@ def _build_inventory_component(repo, kind, item, offline):
             normalized["declaration_root"] = str(repo)
             normalized["properties"] = child["properties"]
             normalized["group"] = child["group"]
+            if child.get("_version_file"):
+                normalized["_version_file"] = repo / child["_version_file"]
             component["components"].append(normalized)
     return component
 
@@ -835,6 +850,7 @@ def _build_document(repo, args):
     repo_revision = _revision(repo)
     declaration_states = {}
     declaration_checkouts = {}
+    external_cache = {}
 
     def metadata_status(path):
         git_root = _checkout_root(path.parent)
@@ -852,6 +868,57 @@ def _build_document(repo, args):
         if relative in changed:
             return "dirty"
         return None
+
+    def inventory_component(kind, item):
+        if kind == "submodule" and _is_checked_out(repo / item["path"]):
+            root = (repo / item["path"]).resolve()
+            expected = submodule_sha(repo, item["path"])
+            try:
+                actual = _revision(root) if _checkout_root(root) == root else None
+            except (OSError, subprocess.CalledProcessError):
+                actual = None
+            if not expected or actual != expected:
+                message = f"{item['path']}: submodule HEAD {actual or 'unavailable'} does not match gitlink {expected or 'unavailable'}"
+                if message not in issues:
+                    issues.append(message)
+                component = _component(root.name, item["path"])
+                component["externalReferences"] = [{"type": "vcs", "url": item["url"]}]
+                component["owner_root"] = str(root)
+                component["declaration_root"] = str(repo)
+                component["identity_problems"] = [message]
+                component["unreviewed"] = True
+                return component
+        files = set()
+        token = _extractor_files.set(files)
+        try:
+            component = _build_inventory_component(repo, kind, item, args.offline)
+        finally:
+            _extractor_files.reset(token)
+        files.difference_update(child["_version_file"] for child in component.get("components", [])
+                                if child.get("_version_file"))
+        problems = [(path, metadata_status(path)) for path in sorted(files)]
+        problems = [(path, status) for path, status in problems if status]
+        if kind == "vendored" and not problems:
+            if repo not in declaration_checkouts:
+                declaration_checkouts[repo] = _source_state(repo)
+            changed = declaration_checkouts[repo][1]
+            prefix = item["path"].rstrip("/") + "/"
+            if not any(path == item["path"] or path.startswith(prefix) for path in changed):
+                component["revision"] = repo_revision
+        if problems:
+            for path, status in problems:
+                message = f"{status} version evidence: {_display_path(repo, path)}"
+                if message not in issues:
+                    issues.append(message)
+            for part in [component, *component.get("components", [])]:
+                part["version"] = None
+                part["purl"] = None
+                part.pop("cpe", None)
+                part["properties"] = [
+                    prop for prop in part.get("properties", [])
+                    if prop["name"] != "version:source"
+                ]
+        return component
 
     def declaration_state(root):
         if root not in declaration_states:
@@ -878,7 +945,7 @@ def _build_document(repo, args):
     if not args.compdb:
         for entries in inventory.values():
             for kind, item in entries:
-                component = _build_inventory_component(repo, kind, item, args.offline)
+                component = inventory_component(kind, item)
                 component["selection"].append("repository inventory")
                 components.append(component)
         name = "micropython-repository"
@@ -974,11 +1041,30 @@ def _build_document(repo, args):
             if relative in changed:
                 return "dirty"
             return None
+
+        def firmware_specific_scope(scope, base, source):
+            driver = repo / "lib" / "cyw43-driver"
+            firmware_dir = driver / "firmware"
+            checkout = checkout_root(source.parent)
+            if not checkout or not driver.is_relative_to(checkout) or not driver.is_relative_to(base):
+                return False
+            if _covers(scope, driver.relative_to(base).as_posix()):
+                return False
+            source_problem(checkout, source)
+            tracked, _ = source_states[checkout]
+            for path in tracked:
+                selected = checkout / path
+                if selected.is_relative_to(driver) and not selected.is_relative_to(firmware_dir):
+                    if _covers(scope, selected.relative_to(base).as_posix()):
+                        return False
+            return True
+
         nested_idf_components = {}
         declarations = {}
         groups = {}
         for record in records:
             source = record["source"]
+            firmware = record.get("input_kind") == "firmware"
             manifest = record.get("manifest")
             owner_path = manifest if manifest is not None else source
             matches = [root for root in roots if owner_path == root or root in owner_path.parents]
@@ -1112,8 +1198,37 @@ def _build_document(repo, args):
                     if matches_scope:
                         candidate = matches_scope[0]
                         scope_path = declaration_root / candidate["scope"]
-                        if scope_path != root and scope_path.is_relative_to(root):
+                        if firmware or (scope_path != root and scope_path.is_relative_to(root)):
                             scoped = candidate
+            firmware_root = repo / "lib" / "cyw43-driver" / "firmware"
+            firmware_scoped = (
+                firmware and scoped
+                and firmware_specific_scope(scoped["scope"], declaration_root, source)
+            )
+            external_firmware_scope = None
+            if firmware and not declaration_state(repo)[0] and not declaration_state(declaration_root)[0]:
+                _, repo_texts, _ = _load(repo)
+                _, local_texts, _ = _load(declaration_root)
+                reviewed = _external_declarations(repo, repo_texts)
+                identity = _external_checkout(
+                    source, {"unreviewed": unreviewed, "identity_problems": identity_problems},
+                    repo, external_cache.setdefault("checkouts", {}),
+                    external_cache.setdefault("roots", {}), reviewed,
+                )
+                if identity:
+                    checkout, remote, revision = identity
+                    if (firmware_root.is_relative_to(checkout)
+                            and checkout.is_relative_to(declaration_root)
+                            and not any(key in local_texts and local_texts[key] != value
+                                        for key, value in repo_texts.items())):
+                        source_path = source.relative_to(checkout).as_posix()
+                        external_matches = [
+                            entry for entry in reviewed[(remote, revision)]
+                            if firmware_specific_scope(entry["scope"], checkout, source)
+                            and _covers(entry["scope"], source_path)
+                        ]
+                        if external_matches:
+                            external_firmware_scope = max(external_matches, key=scope_rank)["scope"]
             grouped_scope = None
             if (scoped and entries and entries[0][0] == "vendored"
                     and entries[0][1]["name"] == "oofatfs" and scoped.get("expression")):
@@ -1124,12 +1239,28 @@ def _build_document(repo, args):
             if record["selection"] == "frozen":
                 key = (str(root), "frozen", package, str(manifest) if manifest else None,
                        unreviewed, bool(identity_problems))
+            elif firmware:
+                key = (str(root), "firmware", scoped["scope"] if firmware_scoped else None,
+                       external_firmware_scope, unreviewed, bool(identity_problems))
             else:
                 key = (str(root), "native", entries[0][1].get("name") if entries else None,
                        grouped_scope if grouped_scope else scoped["scope"] if scoped else None,
                        unreviewed, bool(identity_problems))
             if key not in groups:
-                if record["selection"] == "frozen":
+                if firmware:
+                    submodules = [item for kind, item in inventory.get(root, []) if kind == "submodule"]
+                    if submodules:
+                        revision = validate_submodule(root, submodules[0])
+                    elif root == repo:
+                        revision = repo_revision
+                    else:
+                        git_root = checkout_root(root)
+                        revision = _revision(git_root) if git_root else None
+                    component = _component("cyw43-firmware", _display_path(repo, firmware_root),
+                                           revision=revision)
+                    if not firmware_scoped and not external_firmware_scope:
+                        component["licence"] = "NOASSERTION"
+                elif record["selection"] == "frozen":
                     package_path = manifest.parent if manifest else root
                     revision = repo_revision if root == repo else None
                     submodules = [item for kind, item in inventory.get(root, []) if kind == "submodule"]
@@ -1152,7 +1283,7 @@ def _build_document(repo, args):
                     elif root != repo and checkout_root(root):
                         revision = _revision(checkout_root(root))
                     if entries and not identity_problems:
-                        component = _build_inventory_component(repo, *entries[0], args.offline)
+                        component = inventory_component(*entries[0])
                         if grouped_scope:
                             component["name"] += "-" + grouped_scope[0]
                         else:
@@ -1172,6 +1303,10 @@ def _build_document(repo, args):
                         )
                     if not grouped_scope:
                         component["scope"] = scoped["scope"]
+                elif entries and not identity_problems:
+                    component = inventory_component(*entries[0])
+                    if root in explicit:
+                        component["name"] = explicit[root]
                 elif root in explicit or root in idf_components or root in nested_idf_components:
                     git_root = checkout_root(root)
                     component = _component(
@@ -1179,8 +1314,6 @@ def _build_document(repo, args):
                         _display_path(repo, root),
                         revision=_revision(git_root) if git_root else None,
                     )
-                elif entries and not identity_problems:
-                    component = _build_inventory_component(repo, *entries[0], args.offline)
                 else:
                     component = _component(entries[0][1]["name"] if entries else
                                            ("micropython" if root == repo else root.name),
@@ -1220,7 +1353,7 @@ def _build_document(repo, args):
             if path not in component["sources"]:
                 component["sources"].append(path)
             kind = ("frozen" if record["selection"] == "frozen" else
-                    "included" if record.get("input_kind") == "depfile" else "compiled")
+                    "included" if record.get("input_kind") in ("depfile", "firmware") else "compiled")
             evidence = {"source": path, "kind": kind}
             for field in ("originating_source", "object", "depfile"):
                 if record.get(field) is not None:
@@ -1228,7 +1361,6 @@ def _build_document(repo, args):
             if evidence not in component["source_evidence"]:
                 component["source_evidence"].append(evidence)
         name = args.image
-    external_cache = {}
     for component in components:
         children = component.get("components", [])
         if args.compdb:
@@ -1249,6 +1381,21 @@ def _build_document(repo, args):
                     child["selection"] = list(component["selection"])
                     selected.append(child)
             component["components"] = selected
+        for child in component.get("components", []):
+            path = child.pop("_version_file", None)
+            status = metadata_status(path) if path else ("missing" if child.get("version") else None)
+            if status:
+                location = _display_path(repo, path) if path else child["path"]
+                message = f"{status} version evidence: {location}"
+                if message not in issues:
+                    issues.append(message)
+                child["version"] = None
+                child["purl"] = None
+                child.pop("cpe", None)
+                child["properties"] = [
+                    prop for prop in child.get("properties", [])
+                    if prop["name"] != "version:source"
+                ]
         items = [component] + component.get("components", [])
         for item in items:
             declaration_state(Path(item.get("declaration_root", repo)))

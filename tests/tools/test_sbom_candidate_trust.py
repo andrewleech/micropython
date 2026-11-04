@@ -63,7 +63,7 @@ class TestCandidateTrust(unittest.TestCase):
 
     def serialized_package(self, document):
         output = self.repo / "out.spdx.json"
-        write_sbom(document, output, "spdx")
+        write_sbom(document, output, "spdx", root=self.repo)
         packages = json.loads(output.read_text(encoding="utf-8"))["packages"]
         name = document["components"][0]["name"]
         return next(package for package in packages if package["name"] == name)

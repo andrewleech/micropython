@@ -132,7 +132,7 @@ def _ninja_dependencies(root):
     return objects, None
 
 
-def _dependency_sources(entry, directory, source, excludes, database_dir, ninja_cache):
+def _dependency_sources(entry, directory, source, excludes, database_dir, ninja_cache, firmware_dir):
     obj, explicit = _command_outputs(entry, directory, source)
     candidates = []
     if explicit:
@@ -185,20 +185,27 @@ def _dependency_sources(entry, directory, source, excludes, database_dir, ninja_
         evidence.update(depfile=root / ".ninja_deps", status="read")
     sources = []
     seen = set()
-    missing = []
+    missing = {"depfile": [], "firmware": []}
     for prerequisite in prerequisites:
         path = _resolve(prerequisite, directory)
-        if (path.suffix != ".c" or path == source or path in seen
+        firmware = (path.parent == firmware_dir and
+                    (path.match("w*_combined.h") or path.match("cyw43_btfw_*.h")))
+        if ((path.suffix != ".c" and not firmware) or path == source or path in seen
                 or any(_within(path, exclude) for exclude in excludes)):
             continue
         seen.add(path)
+        kind = "firmware" if firmware else "depfile"
         if not path.is_file():
-            missing.append(path)
+            missing[kind].append(path)
             continue
-        sources.append(path)
-    if missing:
-        evidence.update(status="incomplete", error="missing C dependencies: "
-                        + ", ".join(str(path) for path in missing))
+        sources.append((path, kind))
+    errors = []
+    for kind, label in (("depfile", "C"), ("firmware", "firmware")):
+        if missing[kind]:
+            errors.append(f"missing {label} dependencies: "
+                          + ", ".join(str(path) for path in missing[kind]))
+    if errors:
+        evidence.update(status="incomplete", error="; ".join(errors))
     return evidence, sources
 
 
@@ -208,6 +215,7 @@ def read_inputs(repo, databases, excludes, frozen, depfile_evidence=None):
     seen = set()
     frozen_commands = []
     exclude_paths = [_resolve(p, repo) for p in excludes]
+    firmware_dir = (Path(repo) / "lib/cyw43-driver/firmware").resolve()
     ninja_cache = {}
     for database in databases:
         database = Path(database).resolve()
@@ -224,15 +232,15 @@ def read_inputs(repo, databases, excludes, frozen, depfile_evidence=None):
                     raise ValueError(f"{database}: excluded frozen_content.c compilation command: {source}")
                 continue
             evidence, dependencies = _dependency_sources(
-                entry, directory, source, exclude_paths, database.parent, ninja_cache)
+                entry, directory, source, exclude_paths, database.parent, ninja_cache, firmware_dir)
             if depfile_evidence is not None:
                 depfile_evidence.append(evidence)
-            for dependency in dependencies:
-                key = ("native-depfile", dependency, source, evidence["object"])
+            for dependency, kind in dependencies:
+                key = ("native-" + kind, dependency, source, evidence["object"])
                 if key not in seen:
                     seen.add(key)
                     records.append({
-                        "source": dependency, "selection": "native", "input_kind": "depfile",
+                        "source": dependency, "selection": "native", "input_kind": kind,
                         "originating_source": source, "object": evidence["object"],
                         "depfile": evidence["depfile"],
                     })

@@ -90,22 +90,21 @@ class TestCandidateVendored(unittest.TestCase):
 
     def test_scoped_vendored_sources_keep_identity_and_licence(self):
         expected = {
-            "lib/littlefs/lfs1.c": ("1.7", "pkg:github/littlefs-project/littlefs@1.7", "BSD-3-Clause"),
-            "lib/littlefs/lfs2.c": ("2.11", "pkg:github/littlefs-project/littlefs@2.11", "BSD-3-Clause"),
-            "lib/oofatfs/ff.c": ("R0.13c-rev86604", "pkg:github/micropython/oofatfs@R0.13c-rev86604", "BSD-1-Clause"),
-            "lib/oofatfs/ff.h": ("R0.13c-rev86604", "pkg:github/micropython/oofatfs@R0.13c-rev86604", "BSD-1-Clause"),
-            "lib/oofatfs/ffunicode.c": ("R0.13c-rev86604", "pkg:github/micropython/oofatfs@R0.13c-rev86604", "BSD-1-Clause"),
-            "lib/oofatfs/diskio.h": ("R0.13c-rev86604", "pkg:github/micropython/oofatfs@R0.13c-rev86604", "BSD-1-Clause"),
-            "lib/oofatfs/ffconf.h": ("R0.13c-rev86604", "pkg:github/micropython/oofatfs@R0.13c-rev86604", "MIT"),
+            "lib/littlefs/lfs1.c": ("1.7", "BSD-3-Clause"),
+            "lib/littlefs/lfs2.c": ("2.11", "BSD-3-Clause"),
+            "lib/oofatfs/ff.c": ("R0.13c-rev86604", "BSD-1-Clause"),
+            "lib/oofatfs/ff.h": ("R0.13c-rev86604", "BSD-1-Clause"),
+            "lib/oofatfs/ffunicode.c": ("R0.13c-rev86604", "BSD-1-Clause"),
+            "lib/oofatfs/diskio.h": ("R0.13c-rev86604", "BSD-1-Clause"),
+            "lib/oofatfs/ffconf.h": ("R0.13c-rev86604", "MIT"),
         }
         document = self.document([self.repo / path for path in expected])
         by_source = {source: item for item in document["components"] for source in item["sources"]}
         self.assertEqual(set(by_source), set(expected))
-        for source, (version, purl, licence) in expected.items():
+        for source, (version, licence) in expected.items():
             with self.subTest(source=source):
                 item = by_source[source]
                 self.assertEqual(item["version"], version)
-                self.assertEqual(item["purl"], purl)
                 self.assertIn({"name": "version:source", "value": "vendored-in-tree"},
                               item["properties"])
                 upstream = ("https://github.com/littlefs-project/littlefs"

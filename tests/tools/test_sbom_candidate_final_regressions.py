@@ -68,7 +68,7 @@ class TestFrozenManifestTrust(unittest.TestCase):
                 document = _build_document(repo, args)
                 component = next(item for item in document["components"] if item["name"] == "alpha")
                 output = repo / "build/out.spdx.json"
-                write_sbom(document, output, "spdx")
+                write_sbom(document, output, "spdx", root=repo)
                 packages = json.loads(output.read_text(encoding="utf-8"))["packages"]
                 package = next(item for item in packages if item["name"] == "alpha")
                 if state == "clean":
@@ -153,7 +153,7 @@ class TestFrozenManifestTrust(unittest.TestCase):
                         self.assertTrue(any(issue["kind"] == "source_identity"
                                             for issue in component["licence_issues"]))
                         output = repo / "build/out.spdx.json"
-                        write_sbom(document, output, "spdx")
+                        write_sbom(document, output, "spdx", root=repo)
                         packages = json.loads(output.read_text(encoding="utf-8"))["packages"]
                         package = next(item for item in packages if item["name"] == "alpha")
                         self.assertEqual(package["licenseDeclared"], "NOASSERTION")

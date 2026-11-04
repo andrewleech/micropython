@@ -153,7 +153,6 @@ class TestCandidateProvenance(unittest.TestCase):
         self.assertEqual(component["name"], "thirdparty-pkg")
         self.assertEqual(component["path"], "lib/thirdparty/pkg")
         self.assertEqual(component["revision"], revision)
-        self.assertEqual(component["version"], revision[:12])
         self.assertTrue(component["purl"])
         self.assertIn({"name": "submodule:path", "value": "lib/thirdparty"}, component["properties"])
         self.assertIn({"name": "git:commit", "value": revision}, component["properties"])

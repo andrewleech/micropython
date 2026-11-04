@@ -103,7 +103,7 @@ class TestCandidatePolicyConflicts(unittest.TestCase):
         self.assertIsNone(component["file_licences"][0]["expression"])
         self.assertFalse(component["file_licences"][0]["trusted"])
         output = self.repo / "build/out.spdx.json"
-        write_sbom(document, output, "spdx")
+        write_sbom(document, output, "spdx", root=self.repo)
         packages = json.loads(output.read_text(encoding="utf-8"))["packages"]
         package = next(item for item in packages if item["name"] == "uu")
         self.assertEqual(package["licenseDeclared"], "NOASSERTION")
