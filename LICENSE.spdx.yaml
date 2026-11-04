@@ -349,6 +349,87 @@ packages:
 - name: micropython
   packageFileName: .
   licenseDeclared: MIT
+- name: libm-dbl
+  packageFileName: lib/libm_dbl
+  downloadLocation: NOASSERTION
+  externalRefs:
+  - referenceCategory: PERSISTENT-ID
+    referenceType: gitoid
+    referenceLocator: gitoid:tree:sha1:a22e6b025bce6d0186e42f69416a301b3699b349
+  licenseDeclared: MIT
+  licenseComments: >-
+    README applies the musl MIT licence to files without an individual notice, except
+    lgamma.c, log10.c and tanh.c, which it describes as too small for a licence.
+    The SunPro and SunSoft notices match SunPro. Three 2004 notices omit that attribution.
+- name: libm-dbl-cos-kernel
+  packageFileName: lib/libm_dbl/__cos.c
+  licenseDeclared: SunPro
+- name: libm-dbl-rem-pio2
+  packageFileName: lib/libm_dbl/__rem_pio2.c
+  licenseDeclared: SunPro
+- name: libm-dbl-rem-pio2-large
+  packageFileName: lib/libm_dbl/__rem_pio2_large.c
+  licenseDeclared: SunPro
+- name: libm-dbl-sin-kernel
+  packageFileName: lib/libm_dbl/__sin.c
+  licenseDeclared: SunPro
+- name: libm-dbl-acos
+  packageFileName: lib/libm_dbl/acos.c
+  licenseDeclared: SunPro
+- name: libm-dbl-asin
+  packageFileName: lib/libm_dbl/asin.c
+  licenseDeclared: SunPro
+- name: libm-dbl-atan
+  packageFileName: lib/libm_dbl/atan.c
+  licenseDeclared: SunPro
+- name: libm-dbl-atan2
+  packageFileName: lib/libm_dbl/atan2.c
+  licenseDeclared: SunPro
+- name: libm-dbl-cos
+  packageFileName: lib/libm_dbl/cos.c
+  licenseDeclared: SunPro
+- name: libm-dbl-erf
+  packageFileName: lib/libm_dbl/erf.c
+  licenseDeclared: SunPro
+- name: libm-dbl-expm1
+  packageFileName: lib/libm_dbl/expm1.c
+  licenseDeclared: SunPro
+- name: libm-dbl-header
+  packageFileName: lib/libm_dbl/libm.h
+  licenseDeclared: SunPro
+- name: libm-dbl-log
+  packageFileName: lib/libm_dbl/log.c
+  licenseDeclared: SunPro
+- name: libm-dbl-log1p
+  packageFileName: lib/libm_dbl/log1p.c
+  licenseDeclared: SunPro
+- name: libm-dbl-sin
+  packageFileName: lib/libm_dbl/sin.c
+  licenseDeclared: SunPro
+- name: libm-dbl-sqrt
+  packageFileName: lib/libm_dbl/sqrt.c
+  licenseDeclared: SunPro
+- name: libm-dbl-tan
+  packageFileName: lib/libm_dbl/tan.c
+  licenseDeclared: SunPro
+- name: libm-dbl-tan-kernel
+  packageFileName: lib/libm_dbl/__tan.c
+  licenseDeclared: LicenseRef-Sun-Microsystems-Freely-Granted
+- name: libm-dbl-exp
+  packageFileName: lib/libm_dbl/exp.c
+  licenseDeclared: LicenseRef-Sun-Microsystems-Freely-Granted
+- name: libm-dbl-pow
+  packageFileName: lib/libm_dbl/pow.c
+  licenseDeclared: LicenseRef-Sun-Microsystems-Freely-Granted
+- name: libm-dbl-lgamma
+  packageFileName: lib/libm_dbl/lgamma.c
+  licenseDeclared: NOASSERTION
+- name: libm-dbl-log10
+  packageFileName: lib/libm_dbl/log10.c
+  licenseDeclared: NOASSERTION
+- name: libm-dbl-tanh
+  packageFileName: lib/libm_dbl/tanh.c
+  licenseDeclared: NOASSERTION
 - name: uzlib
   packageFileName: lib/uzlib
   downloadLocation: NOASSERTION
@@ -853,6 +934,19 @@ packages:
     uu.py carries the Ellinghouse notice and CPython history. The notice restricts use of Lance
     Ellinghouse's name in advertising or publicity without prior written permission.
 hasExtractedLicensingInfos:
+- licenseId: LicenseRef-Sun-Microsystems-Freely-Granted
+  name: Sun Microsystems 2004 permission notice
+  extractedText: |
+    Copyright (C) 2004 by Sun Microsystems, Inc. All rights reserved.
+
+    Permission to use, copy, modify, and distribute this
+    software is freely granted, provided that this notice
+    is preserved.
+  seeAlso:
+  - https://github.com/micropython/micropython/blob/0fd6c573ea815774668bbb16b8e197c8822368b2/lib/libm_dbl/exp.c
+  - https://github.com/micropython/micropython/blob/0fd6c573ea815774668bbb16b8e197c8822368b2/lib/libm_dbl/pow.c
+  - https://github.com/micropython/micropython/blob/0fd6c573ea815774668bbb16b8e197c8822368b2/lib/libm_dbl/__tan.c
+  comment: The __tan.c notice has the same permission text and a different copyright line.
 - licenseId: LicenseRef-CYW43-NonCommercial
   name: CYW43 personal non-commercial licence
   extractedText: |
