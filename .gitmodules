@@ -107,3 +107,6 @@
 [submodule "lib/mm-halow-driver"]
 	path = lib/mm-halow-driver
 	url = https://github.com/micropython/mm-halow-driver.git
+[submodule "lib/mcuboot"]
+	path = lib/mcuboot
+	url = https://github.com/mcu-tools/mcuboot

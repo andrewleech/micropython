@@ -9,7 +9,7 @@ MICROPY_ROM_TEXT_COMPRESSION ?= 0
 
 # Define toolchain and other tools.
 CROSS_COMPILE ?= arm-none-eabi-
-DFU ?= $(TOP)/tools/dfu.py
+DFU ?= $(TOP)/tools/create_dfu.py
 PYDFU ?= $(TOP)/tools/pydfu.py
 
 # Set CFLAGS.
@@ -50,7 +50,7 @@ $(BUILD)/firmware.bin: $(BUILD)/firmware.elf
 
 $(BUILD)/firmware.dfu: $(BUILD)/firmware.bin
 	$(ECHO) "Create $@"
-	$(Q)$(PYTHON) $(DFU) -b 0x08000000:$^ $@
+	$(Q)$(PYTHON) $(DFU) create --usb 0483:df11 -o $@ 0x08000000:$^
 
 deploy: $(BUILD)/firmware.dfu
 	$(Q)$(PYTHON) $(PYDFU) -u $^

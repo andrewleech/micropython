@@ -50,7 +50,7 @@ MBOOT_VERSION_INCLUDE_OPTIONS ?= 1  # if set to 1, this will append build option
 
 CROSS_COMPILE ?= arm-none-eabi-
 USBDEV_DIR=usbdev
-DFU=$(TOP)/tools/dfu.py
+DFU=$(TOP)/tools/create_dfu.py
 PYDFU ?= $(TOP)/tools/pydfu.py
 BOOTLOADER_DFU_USB_VID ?= 0x0483
 BOOTLOADER_DFU_USB_PID ?= 0xDF11
@@ -240,7 +240,7 @@ $(BUILD)/firmware.bin: $(BUILD)/firmware.elf
 
 $(BUILD)/firmware.dfu: $(BUILD)/firmware.bin
 	$(ECHO) "Create $@"
-	$(Q)$(PYTHON) $(DFU) -b $(MBOOT_TEXT0_ADDR):$(BUILD)/firmware.bin $@
+	$(Q)$(PYTHON) $(DFU) create --usb $(BOOTLOADER_DFU_USB_VID):$(BOOTLOADER_DFU_USB_PID) -o $@ $(MBOOT_TEXT0_ADDR):$(BUILD)/firmware.bin
 
 $(BUILD)/firmware.hex: $(BUILD)/firmware.elf
 	$(ECHO) "Create $@"

@@ -48,40 +48,8 @@
 #include "i2c.h"
 #include "spi.h"
 #include "shared/tinyusb/mp_usbd.h"
-
-#if defined(STM32G0)
-// G0 has BOR and POR combined
-#define RCC_CSR_BORRSTF RCC_CSR_PWRRSTF
-#define RCC_CSR_PORRSTF RCC_CSR_PWRRSTF
-#endif
-
-#if defined(STM32H5) || defined(STM32N6)
-#define RCC_SR          RSR
-#define RCC_SR_IWDGRSTF RCC_RSR_IWDGRSTF
-#define RCC_SR_WWDGRSTF RCC_RSR_WWDGRSTF
-#define RCC_SR_BORRSTF  RCC_RSR_BORRSTF
-#define RCC_SR_PINRSTF  RCC_RSR_PINRSTF
-#define RCC_SR_RMVF     RCC_RSR_RMVF
-#elif defined(STM32H7)
-#define RCC_SR          RSR
-#define RCC_SR_IWDGRSTF RCC_RSR_IWDG1RSTF
-#define RCC_SR_WWDGRSTF RCC_RSR_WWDG1RSTF
-#define RCC_SR_PORRSTF  RCC_RSR_PORRSTF
-#define RCC_SR_BORRSTF  RCC_RSR_BORRSTF
-#define RCC_SR_PINRSTF  RCC_RSR_PINRSTF
-#define RCC_SR_RMVF     RCC_RSR_RMVF
-#else
-#define RCC_SR          CSR
-#define RCC_SR_IWDGRSTF RCC_CSR_IWDGRSTF
-#define RCC_SR_WWDGRSTF RCC_CSR_WWDGRSTF
-#if defined(RCC_CSR_PORRSTF)
-#define RCC_SR_PORRSTF  RCC_CSR_PORRSTF
-#endif
-#if defined(RCC_CSR_BORRSTF)
-#define RCC_SR_BORRSTF  RCC_CSR_BORRSTF
-#endif
-#define RCC_SR_PINRSTF  RCC_CSR_PINRSTF
-#define RCC_SR_RMVF     RCC_CSR_RMVF
+#if MICROPY_HW_MBOOT_APP
+#include "shared/mboot/include/mboot_app.h"
 #endif
 
 #define PYB_RESET_SOFT      (0)
@@ -158,6 +126,10 @@ void machine_init(void) {
     {
         // get reset cause from RCC flags
         uint32_t state = RCC->RCC_SR;
+        #if MICROPY_HW_MBOOT_APP
+        // The MCUboot bootloader clears the flags and hands them over in a backup register.
+        state = mboot_app_reset_flags(state);
+        #endif
         if (state & RCC_SR_IWDGRSTF || state & RCC_SR_WWDGRSTF) {
             reset_cause = PYB_RESET_WDT;
         } else if (0
@@ -295,6 +267,19 @@ static mp_obj_t mp_machine_unique_id(void) {
 MP_NORETURN static void mp_machine_reset(void) {
     powerctrl_mcu_reset();
 }
+
+#if MICROPY_HW_MBOOT_APP
+static MP_NORETURN void mboot_stm32_app_enter_bootloader(size_t n_args, const mp_obj_t *args) {
+    if (n_args > 0 && mp_obj_is_type(args[0], &mp_type_bytes)) {
+        size_t len;
+        const uint8_t *elems = (const uint8_t *)mp_obj_str_get_data(args[0], &len);
+        if (mboot_app_request_fsload(elems, len) < 0) {
+            mp_raise_ValueError(MP_ERROR_TEXT("invalid element stream"));
+        }
+    }
+    mboot_app_request_dfu();
+}
+#endif
 
 // Activate the bootloader without BOOT* pins.
 MP_NORETURN void mp_machine_bootloader(size_t n_args, const mp_obj_t *args) {

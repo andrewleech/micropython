@@ -19,8 +19,8 @@ $(error Invalid BOARD_VARIANT specified: $(BOARD_VARIANT))
 endif
 endif
 
-# If the build directory is not given, make it reflect the board name (and
-# optionally the board variant).
+# If the build directory is not given, make it reflect the board name and
+# optionally the board variant.
 ifneq ($(BOARD_VARIANT),)
 BUILD ?= build-$(BOARD)-$(BOARD_VARIANT)
 else
@@ -64,7 +64,7 @@ CROSS_COMPILE ?= arm-none-eabi-
 LD_DIR=boards
 USBDEV_DIR=usbdev
 #USBHOST_DIR=usbhost
-DFU=$(TOP)/tools/dfu.py
+DFU=$(TOP)/tools/create_dfu.py
 MBOOT_PACK_DFU = mboot/mboot_pack_dfu.py
 # may need to prefix dfu-util with sudo
 USE_PYDFU ?= 1
@@ -266,6 +266,7 @@ SRC_C += \
 	led.c \
 	pin.c \
 	pin_defs_stm32.c \
+	mphalport_hw.c \
 	pin_named_pins.c \
 	bufhelper.c \
 	dma.c \
@@ -552,7 +553,9 @@ endif
 
 all: $(TOP)/lib/stm32lib/README.md all_main $(BUILD)/firmware.hex
 
-ifeq ($(MBOOT_ENABLE_PACKING),1)
+ifeq ($(MBOOT_ROLE),app)
+all_main: $(BUILD)/firmware.bin
+else ifeq ($(MBOOT_ENABLE_PACKING),1)
 all_main: $(BUILD)/firmware.pack.dfu
 else ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),n6))
 ifeq ($(USE_MBOOT),1)
@@ -603,11 +606,11 @@ endef
 
 define GENERATE_DFU
 	$(ECHO) "GEN $(1)"
-	$(Q)$(PYTHON) $(DFU) \
-	-D $(BOOTLOADER_DFU_USB_VID):$(BOOTLOADER_DFU_USB_PID) \
-	$(if $(2),$(addprefix -b ,$(3):$(2))) \
-	$(if $(4),$(addprefix -b ,$(5):$(4))) \
-	$(1)
+	$(Q)$(PYTHON) $(DFU) create --align 8 \
+	--usb $(BOOTLOADER_DFU_USB_VID):$(BOOTLOADER_DFU_USB_PID) \
+	-o $(1) \
+	$(if $(2),$(3):$(2)) \
+	$(if $(4),$(5):$(4))
 endef
 
 define GENERATE_PACK_DFU
@@ -740,5 +743,9 @@ $(GEN_CDCINF_HEADER): $(GEN_CDCINF_FILE) $(FILE2H) | $(HEADER_BUILD)
 $(GEN_CDCINF_FILE): $(CDCINF_TEMPLATE) $(INSERT_USB_IDS) $(USB_IDS_FILE) | $(HEADER_BUILD)
 	$(ECHO) "GEN $@"
 	$(Q)$(PYTHON) $(INSERT_USB_IDS) $(USB_IDS_FILE) $< > $@
+
+ifeq ($(MBOOT_ROLE),app)
+include mboot_app_rules.mk
+endif
 
 include $(TOP)/py/mkrules.mk

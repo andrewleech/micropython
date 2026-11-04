@@ -29,6 +29,78 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// The reset status register and its flags: RCC->RSR on H5/H7/N6, RCC->CSR elsewhere.
+#if defined(STM32G0)
+// G0 has BOR and POR combined
+#define RCC_CSR_BORRSTF RCC_CSR_PWRRSTF
+#define RCC_CSR_PORRSTF RCC_CSR_PWRRSTF
+#endif
+
+#if defined(STM32H5) || defined(STM32N6)
+#define RCC_SR          RSR
+#define RCC_SR_IWDGRSTF RCC_RSR_IWDGRSTF
+#define RCC_SR_WWDGRSTF RCC_RSR_WWDGRSTF
+#define RCC_SR_BORRSTF  RCC_RSR_BORRSTF
+#define RCC_SR_PINRSTF  RCC_RSR_PINRSTF
+#define RCC_SR_SFTRSTF  RCC_RSR_SFTRSTF
+#define RCC_SR_RMVF     RCC_RSR_RMVF
+#if defined(RCC_RSR_LPWRRSTF)
+#define RCC_SR_LPWRRSTF RCC_RSR_LPWRRSTF
+#endif
+#elif defined(STM32H7)
+#define RCC_SR          RSR
+#define RCC_SR_IWDGRSTF RCC_RSR_IWDG1RSTF
+#define RCC_SR_WWDGRSTF RCC_RSR_WWDG1RSTF
+#define RCC_SR_PORRSTF  RCC_RSR_PORRSTF
+#define RCC_SR_BORRSTF  RCC_RSR_BORRSTF
+#define RCC_SR_PINRSTF  RCC_RSR_PINRSTF
+#if defined(STM32H747xx)
+#define RCC_SR_SFTRSTF  RCC_RSR_SFT2RSTF
+#else
+#define RCC_SR_SFTRSTF  RCC_RSR_SFTRSTF
+#endif
+#define RCC_SR_RMVF     RCC_RSR_RMVF
+#else
+#define RCC_SR          CSR
+#define RCC_SR_IWDGRSTF RCC_CSR_IWDGRSTF
+#define RCC_SR_WWDGRSTF RCC_CSR_WWDGRSTF
+#if defined(RCC_CSR_PORRSTF)
+#define RCC_SR_PORRSTF  RCC_CSR_PORRSTF
+#endif
+#if defined(RCC_CSR_BORRSTF)
+#define RCC_SR_BORRSTF  RCC_CSR_BORRSTF
+#endif
+#define RCC_SR_PINRSTF  RCC_CSR_PINRSTF
+#define RCC_SR_SFTRSTF  RCC_CSR_SFTRSTF
+#define RCC_SR_RMVF     RCC_CSR_RMVF
+#if defined(RCC_CSR_LPWRRSTF)
+#define RCC_SR_LPWRRSTF RCC_CSR_LPWRRSTF
+#endif
+#endif
+
+// Whether this MCU has an independent PLL which can generate 48MHz for USB.
+#if defined(STM32F413xx)
+// STM32F413 uses PLLI2S as secondary PLL.
+#define HAVE_PLL48 1
+#define RCC_CR_PLL48_ON RCC_CR_PLLI2SON
+#define RCC_CR_PLL48_RDY RCC_CR_PLLI2SRDY
+#elif defined(STM32F7)
+// STM32F7 uses PLLSAI as secondary PLL.
+#define HAVE_PLL48 1
+#define RCC_CR_PLL48_ON RCC_CR_PLLSAION
+#define RCC_CR_PLL48_RDY RCC_CR_PLLSAIRDY
+#else
+// MCU does not have a secondary PLL.
+#define HAVE_PLL48 0
+#endif
+
+static inline void powerctrl_disable_hsi_if_unused(void) {
+    #if !MICROPY_HW_CLK_USE_HSI && (defined(STM32F4) || defined(STM32F7) || defined(STM32H7))
+    // Disable HSI if it's not used to save a little bit of power
+    __HAL_RCC_HSI_DISABLE();
+    #endif
+}
+
 #if defined(STM32WB)
 void stm32_system_init(void);
 #else
