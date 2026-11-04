@@ -2,6 +2,51 @@
 # Entries also record unresolved licence issues and referenced non-standard licence text.
 # Paths are relative to the verified checkout of the specified repository and commit.
 external_repositories:
+- url: https://github.com/micropython/stm32lib
+  commit: 07619754261b571fb2f7c9f36ab94c203880d9fb
+  # The F7 system source and HAL sources carry BSD-3-Clause terms in their headers.
+  licenses:
+  - path: CMSIS/STM32F7xx/Source/Templates/system_stm32f7xx.c
+    license: BSD-3-Clause
+  - path: STM32F7xx_HAL_Driver/Src
+    license: BSD-3-Clause
+- url: https://github.com/micropython/mynewt-nimble.git
+  commit: 42849560ba7906f023f61e5f7ff3709ba2c1dfca
+  # These selected files carry Apache, Intel BSD, or MacKay and Intel notices.
+  licenses:
+  - path: ext/tinycrypt/src/aes_encrypt.c
+    license: BSD-3-Clause
+  - path: ext/tinycrypt/src/cmac_mode.c
+    license: BSD-3-Clause
+  - path: ext/tinycrypt/src/ecc.c
+    license: BSD-2-Clause AND BSD-3-Clause
+  - path: ext/tinycrypt/src/ecc_dh.c
+    license: BSD-2-Clause AND BSD-3-Clause
+  - path: ext/tinycrypt/src/utils.c
+    license: BSD-3-Clause
+  - path: nimble/host/services/gap/src/ble_svc_gap.c
+    license: Apache-2.0
+  - path: nimble/host/services/gatt/src/ble_svc_gatt.c
+    license: Apache-2.0
+  - path: nimble/host/src
+    license: Apache-2.0
+  - path: nimble/host/util/src/addr.c
+    license: Apache-2.0
+  - path: nimble/transport/uart/src/ble_hci_uart.c
+    license: Apache-2.0
+  - path: porting/nimble/src/endian.c
+    license: Apache-2.0
+  - path: porting/nimble/src/mem.c
+    license: Apache-2.0
+  - path: porting/nimble/src/nimble_port.c
+    license: Apache-2.0
+  # The FreeBSD-derived notice adds three conditions, numbered 1, 2 and 4, to the repository's Apache-2.0 licence.
+  - path: porting/nimble/src/os_mbuf.c
+    license: Apache-2.0 AND BSD-3-Clause
+  - path: porting/nimble/src/os_mempool.c
+    license: Apache-2.0
+  - path: porting/nimble/src/os_msys_init.c
+    license: Apache-2.0
 - url: https://github.com/ThrowTheSwitch/Unity.git
   commit: bf560290f6020737eafaa8b5cbd2177c3956c03f
   # src/unity.c names MIT; LICENSE.txt contains the licence text.
@@ -220,6 +265,68 @@ external_repositories:
     license: BSD-3-Clause
   - path: src/netif/ppp/polarssl/sha1.c
     license: BSD-3-Clause
+- url: https://github.com/lwip-tcpip/lwip.git
+  commit: 77dcd25a72509eb83f72b033d219b1d40cd8eb95
+  # lwIP source notices and per-file PPP notices.
+  licenses:
+  - path: src/apps/mdns
+    license: BSD-3-Clause
+  - path: src/core
+    license: BSD-3-Clause
+  - path: src/netif/ethernet.c
+    license: BSD-3-Clause
+  - path: src/netif/ppp/auth.c
+    license: Mackerras-3-Clause-acknowledgment AND BSD-Attribution-HPND-disclaimer
+  - path: src/netif/ppp/ccp.c
+    license: Mackerras-3-Clause-acknowledgment
+  - path: src/netif/ppp/chap-md5.c
+    license: Mackerras-3-Clause-acknowledgment
+  - path: src/netif/ppp/chap-new.c
+    license: Mackerras-3-Clause-acknowledgment
+  - path: src/netif/ppp/chap_ms.c
+    license: Mackerras-3-Clause
+  - path: src/netif/ppp/demand.c
+    license: Mackerras-3-Clause-acknowledgment
+  - path: src/netif/ppp/eap.c
+    license: Sun-PPP
+  - path: src/netif/ppp/ecp.c
+    license: Mackerras-3-Clause AND Mackerras-3-Clause-acknowledgment
+  - path: src/netif/ppp/eui64.c
+    license: LicenseRef-PPP-Komulainen
+  - path: src/netif/ppp/fsm.c
+    license: BSD-Attribution-HPND-disclaimer
+  - path: src/netif/ppp/ipcp.c
+    license: BSD-Attribution-HPND-disclaimer
+  - path: src/netif/ppp/ipv6cp.c
+    license: LicenseRef-PPP-Komulainen AND HPND-INRIA-IMAG AND BSD-Attribution-HPND-disclaimer
+  - path: src/netif/ppp/lcp.c
+    license: BSD-Attribution-HPND-disclaimer
+  - path: src/netif/ppp/magic.c
+    license: BSD-Attribution-HPND-disclaimer AND LicenseRef-PPP-MBSI
+  - path: src/netif/ppp/mppe.c
+    license: LicenseRef-PPP-Google-MPPE
+  - path: src/netif/ppp/multilink.c
+    license: Mackerras-3-Clause-acknowledgment
+  - path: src/netif/ppp/polarssl/md5.c
+    license: BSD-3-Clause
+  - path: src/netif/ppp/ppp.c
+    license: LicenseRef-PPP-MBSI AND LicenseRef-PPP-ANU AND BSD-4.3TAHOE
+  - path: src/netif/ppp/pppapi.c
+    license: BSD-3-Clause
+  - path: src/netif/ppp/pppcrypt.c
+    license: Mackerras-3-Clause
+  - path: src/netif/ppp/pppoe.c
+    license: LicenseRef-PPP-MBSI AND BSD-4-Clause
+  - path: src/netif/ppp/pppol2tp.c
+    license: BSD-3-Clause
+  - path: src/netif/ppp/pppos.c
+    license: BSD-3-Clause
+  - path: src/netif/ppp/upap.c
+    license: BSD-Attribution-HPND-disclaimer
+  - path: src/netif/ppp/utils.c
+    license: Mackerras-3-Clause-acknowledgment
+  - path: src/netif/ppp/vj.c
+    license: BSD-4.3TAHOE
 - url: https://github.com/georgerobotics/cyw43-driver.git
   commit: 055d64274b014dd7b1c2fc94d26e8a18face7124
   # LICENSE.RP provides a separate conditional grant for use with Raspberry Pi Ltd semiconductors.
@@ -817,6 +924,8 @@ hasExtractedLicensingInfos:
   seeAlso:
   - https://github.com/espressif/esp-lwip/blob/fd432e4ee2cfb7f7f1c7eb7227e0173412e7b84e/src/netif/ppp/eui64.c
   - https://github.com/espressif/esp-lwip/blob/fd432e4ee2cfb7f7f1c7eb7227e0173412e7b84e/src/netif/ppp/ipv6cp.c
+  - https://github.com/lwip-tcpip/lwip/blob/77dcd25a72509eb83f72b033d219b1d40cd8eb95/src/netif/ppp/eui64.c
+  - https://github.com/lwip-tcpip/lwip/blob/77dcd25a72509eb83f72b033d219b1d40cd8eb95/src/netif/ppp/ipv6cp.c
 - licenseId: LicenseRef-PPP-MBSI
   name: Marc Boucher PPP notice
   extractedText: |
@@ -841,6 +950,9 @@ hasExtractedLicensingInfos:
   - https://github.com/espressif/esp-lwip/blob/fd432e4ee2cfb7f7f1c7eb7227e0173412e7b84e/src/netif/ppp/magic.c
   - https://github.com/espressif/esp-lwip/blob/fd432e4ee2cfb7f7f1c7eb7227e0173412e7b84e/src/netif/ppp/ppp.c
   - https://github.com/espressif/esp-lwip/blob/fd432e4ee2cfb7f7f1c7eb7227e0173412e7b84e/src/netif/ppp/pppoe.c
+  - https://github.com/lwip-tcpip/lwip/blob/77dcd25a72509eb83f72b033d219b1d40cd8eb95/src/netif/ppp/magic.c
+  - https://github.com/lwip-tcpip/lwip/blob/77dcd25a72509eb83f72b033d219b1d40cd8eb95/src/netif/ppp/ppp.c
+  - https://github.com/lwip-tcpip/lwip/blob/77dcd25a72509eb83f72b033d219b1d40cd8eb95/src/netif/ppp/pppoe.c
 - licenseId: LicenseRef-PPP-ANU
   name: Australian National University PPP notice
   extractedText: |
@@ -868,6 +980,7 @@ hasExtractedLicensingInfos:
     OR MODIFICATIONS.
   seeAlso:
   - https://github.com/espressif/esp-lwip/blob/fd432e4ee2cfb7f7f1c7eb7227e0173412e7b84e/src/netif/ppp/ppp.c
+  - https://github.com/lwip-tcpip/lwip/blob/77dcd25a72509eb83f72b033d219b1d40cd8eb95/src/netif/ppp/ppp.c
 - licenseId: LicenseRef-PPP-Google-MPPE
   name: Google MPPE permission notice
   extractedText: |
@@ -882,6 +995,7 @@ hasExtractedLicensingInfos:
     warranty, express or implied.
   seeAlso:
   - https://github.com/espressif/esp-lwip/blob/fd432e4ee2cfb7f7f1c7eb7227e0173412e7b84e/src/netif/ppp/mppe.c
+  - https://github.com/lwip-tcpip/lwip/blob/77dcd25a72509eb83f72b033d219b1d40cd8eb95/src/netif/ppp/mppe.c
 - licenseId: LicenseRef-Alif-Semiconductor-Software-License-Agreement-Notice
   name: Alif Semiconductor Software License Agreement notice (source file header)
   extractedText: |
