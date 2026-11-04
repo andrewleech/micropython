@@ -30,51 +30,89 @@ def component(name, **fields):
 
 
 class TestCandidateGraph(unittest.TestCase):
-    def test_spdx_and_cyclonedx_have_the_same_dependency_graph(self):
-        model = {
-            "name": "test-image",
-            "issues": [],
-            "components": [
-                component("parent", components=[
-                    component("child", components=[component("grandchild")]),
-                ]),
-                component("sibling"),
-            ],
-        }
-        with tempfile.TemporaryDirectory() as tmp:
-            documents = {}
-            for format in ("spdx", "cyclonedx"):
-                path = Path(tmp) / (format + ".json")
-                write_sbom(model, path, format)
-                documents[format] = json.loads(path.read_text(encoding="utf-8"))
+    def test_build_and_repository_graphs(self):
+        for image in ("test-image", None):
+            with self.subTest(image=image), tempfile.TemporaryDirectory() as tmp:
+                model = {
+                    "name": image or "micropython-repository",
+                    "subject": {"image": image},
+                    "issues": [],
+                    "components": [
+                        component("parent", components=[
+                            component("child", components=[component("grandchild")]),
+                        ]),
+                        component("sibling"),
+                    ],
+                }
+                documents = {}
+                for format in ("spdx", "cyclonedx"):
+                    path = Path(tmp) / (format + ".json")
+                    write_sbom(model, path, format)
+                    documents[format] = json.loads(path.read_text(encoding="utf-8"))
 
-        spdx = documents["spdx"]
-        spdx_names = {package["SPDXID"]: package["name"] for package in spdx["packages"]}
-        spdx_edges = {
-            (spdx_names[edge["spdxElementId"]], spdx_names[edge["relatedSpdxElement"]])
-            for edge in spdx["relationships"] if edge["relationshipType"] == "CONTAINS"
-        }
-        cdx = documents["cyclonedx"]
-        cdx_names = {cdx["metadata"]["component"]["bom-ref"]: "MicroPython"}
+                spdx = documents["spdx"]
+                spdx_names = {package["SPDXID"]: package["name"] for package in spdx["packages"]}
+                root = next(package for package in spdx["packages"] if package["name"] == "MicroPython")
+                subject = json.loads(root["annotations"][0]["comment"])
+                contains = {
+                    (spdx_names[edge["spdxElementId"]], spdx_names[edge["relatedSpdxElement"]])
+                    for edge in spdx["relationships"] if edge["relationshipType"] == "CONTAINS"
+                }
+                build_dependencies = {
+                    (spdx_names[edge["spdxElementId"]], spdx_names[edge["relatedSpdxElement"]])
+                    for edge in spdx["relationships"] if edge["relationshipType"] == "BUILD_DEPENDENCY_OF"
+                }
+                nested_edges = {("parent", "child"), ("child", "grandchild")}
+                if image:
+                    self.assertEqual(contains, nested_edges)
+                    self.assertEqual(build_dependencies, {
+                        ("parent", "MicroPython"), ("sibling", "MicroPython"),
+                    })
+                    self.assertEqual(subject["scope"], "build-input")
+                    self.assertTrue(subject["scope_description"])
+                else:
+                    self.assertEqual(contains, nested_edges | {
+                        ("MicroPython", "parent"), ("MicroPython", "sibling"),
+                    })
+                    self.assertEqual(build_dependencies, set())
+                    self.assertNotIn("scope", subject)
 
-        def collect(items):
-            for item in items:
-                cdx_names[item["bom-ref"]] = item["name"]
-                collect(item.get("components", []))
+                cdx = documents["cyclonedx"]
+                metadata = cdx["metadata"]
+                root = metadata["component"]
+                cdx_names = {root["bom-ref"]: "MicroPython"}
 
-        collect(cdx["components"])
-        cdx_edges = {
-            (cdx_names[edge["ref"]], cdx_names[child])
-            for edge in cdx["dependencies"] for child in edge.get("dependsOn", [])
-        }
-        expected = {
-            ("MicroPython", "parent"),
-            ("MicroPython", "sibling"),
-            ("parent", "child"),
-            ("child", "grandchild"),
-        }
-        self.assertEqual(spdx_edges, expected)
-        self.assertEqual(cdx_edges, expected)
+                def collect(items):
+                    for item in items:
+                        cdx_names[item["bom-ref"]] = item["name"]
+                        if image:
+                            self.assertNotIn("scope", item)
+                        collect(item.get("components", []))
+
+                collect(cdx["components"])
+                parent = next(item for item in cdx["components"] if item["name"] == "parent")
+                self.assertEqual([item["name"] for item in parent["components"]], ["child"])
+                self.assertEqual(
+                    [item["name"] for item in parent["components"][0]["components"]], ["grandchild"],
+                )
+                self.assertEqual(set(cdx_names.values()), {
+                    "MicroPython", "parent", "child", "grandchild", "sibling",
+                })
+                cdx_edges = {
+                    (cdx_names[edge["ref"]], cdx_names[child])
+                    for edge in cdx.get("dependencies", []) for child in edge.get("dependsOn", [])
+                }
+                properties = {prop["name"]: prop["value"] for prop in root.get("properties", [])}
+                if image:
+                    self.assertEqual(cdx_edges, nested_edges)
+                    self.assertEqual(metadata["lifecycles"], [{"phase": "build"}])
+                    self.assertEqual(properties["micropython:scope"], "build-input")
+                else:
+                    self.assertEqual(cdx_edges, nested_edges | {
+                        ("MicroPython", "parent"), ("MicroPython", "sibling"),
+                    })
+                    self.assertNotIn("lifecycles", metadata)
+                    self.assertNotIn("micropython:scope", properties)
 
     def test_stm32_usb_glue_and_usbdev_have_distinct_native_scopes(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -20,6 +20,7 @@ from cyclonedx.model.bom import Bom, BomMetaData
 from cyclonedx.model.component import Component, ComponentType
 from cyclonedx.model.component_evidence import ComponentEvidence
 from cyclonedx.model.license import DisjunctiveLicense, LicenseAcknowledgement, LicenseExpression
+from cyclonedx.model.lifecycle import LifecyclePhase, PredefinedLifecycle
 from cyclonedx.output.json import JsonV1Dot6
 from packageurl import PackageURL
 from spdx_tools.common.spdx_licensing import spdx_licensing
@@ -43,6 +44,10 @@ from spdx_tools.spdx.writer.json.json_writer import write_document_to_stream
 
 _TOOL = "micropython-sbom"
 _NO_ASSERTION = SpdxNoAssertion()
+_BUILD_SCOPE_DESCRIPTION = (
+    "Components are selected build inputs; their presence does not assert that they are linked into "
+    "the image or present at runtime."
+)
 
 
 def _json(value):
@@ -221,6 +226,7 @@ def _licence_comments(item):
 def _write_spdx(model, path, extracted):
     now = datetime.now(timezone.utc).replace(microsecond=0)
     tool = Actor(ActorType.TOOL, _TOOL)
+    build_inputs = bool(model.get("subject", {}).get("image"))
     subject = model.get("subject", {})
     packages = [
         Package(
@@ -232,10 +238,14 @@ def _write_spdx(model, path, extracted):
             license_concluded=_NO_ASSERTION,
             license_declared=_NO_ASSERTION,
             copyright_text=_NO_ASSERTION,
+            comment=_BUILD_SCOPE_DESCRIPTION if build_inputs else None,
         )
     ]
     relationships = [Relationship("SPDXRef-DOCUMENT", RelationshipType.DESCRIBES, "SPDXRef-MicroPython")]
-    annotations = [Annotation("SPDXRef-MicroPython", AnnotationType.OTHER, tool, now, _json(subject))]
+    scope = dict(subject)
+    if build_inputs:
+        scope.update(scope="build-input", scope_description=_BUILD_SCOPE_DESCRIPTION)
+    annotations = [Annotation("SPDXRef-MicroPython", AnnotationType.OTHER, tool, now, _json(scope))]
     details = {}
     for identity, item, parent in _components(model["components"]):
         identifier = "SPDXRef-Package-" + identity.replace("/", "-")
@@ -263,6 +273,9 @@ def _write_spdx(model, path, extracted):
         if parent:
             parent_id = "SPDXRef-Package-" + parent.rstrip("/").replace("/", "-")
             relationships.append(Relationship(parent_id, RelationshipType.CONTAINS, identifier))
+        elif build_inputs:
+            # Build selection does not establish that a component is linked into the image.
+            relationships.append(Relationship(identifier, RelationshipType.BUILD_DEPENDENCY_OF, "SPDXRef-MicroPython"))
         else:
             relationships.append(Relationship("SPDXRef-MicroPython", RelationshipType.CONTAINS, identifier))
         annotations.append(Annotation(identifier, AnnotationType.OTHER, tool, now, _json(_provenance(item))))
@@ -298,6 +311,7 @@ def _write_spdx(model, path, extracted):
             document_namespace="https://spdx.org/spdxdocs/micropython-" + hashlib.sha256(seed.encode("utf-8")).hexdigest(),
             creators=[tool],
             created=now,
+            document_comment=_BUILD_SCOPE_DESCRIPTION if build_inputs else None,
         ),
         packages=packages,
         relationships=relationships,
@@ -353,6 +367,7 @@ def _cyclonedx_component(item, identity):
 
 def _write_cyclonedx(model, path):
     subject = model.get("subject", {})
+    build_inputs = bool(subject.get("image"))
     components = [
         _cyclonedx_component(item, _identity(index, item))
         for index, item in enumerate(model["components"])
@@ -367,8 +382,11 @@ def _write_cyclonedx(model, path):
                 properties=[
                     Property(name="micropython:" + key, value=value)
                     for key, value in subject.items() if value is not None
-                ],
+                ] + ([Property(name="micropython:scope", value="build-input"),
+                      Property(name="micropython:scope_description", value=_BUILD_SCOPE_DESCRIPTION)]
+                     if build_inputs else []),
             ),
+            lifecycles=[PredefinedLifecycle(LifecyclePhase.BUILD)] if build_inputs else None,
             properties=[
                 Property(name="micropython:document-name", value=model["name"]),
                 Property(name="micropython:issues", value=_json(model["issues"])),
@@ -384,7 +402,13 @@ def _write_cyclonedx(model, path):
             if child.components:
                 register_children(child, child.components)
 
-    register_children(bom.metadata.component, components)
+    if build_inputs:
+        # Preserve collection relationships without asserting runtime dependencies of the image.
+        for component in components:
+            if component.components:
+                register_children(component, component.components)
+    else:
+        register_children(bom.metadata.component, components)
     output = JsonV1Dot6(bom).output_as_string(indent=2) + "\n"
     _write_output(path, output)
 
