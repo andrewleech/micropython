@@ -1,0 +1,401 @@
+# This file is part of the MicroPython project, http://micropython.org/
+#
+# SPDX-License-Identifier: MIT
+
+"""Serialize the shared dependency inventory as SPDX or CycloneDX JSON."""
+
+import hashlib
+import io
+import json
+import os
+import re
+import stat
+import sys
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+from cyclonedx.model import AttachedText, ExternalReference, ExternalReferenceType, Property, XsUri
+from cyclonedx.model.bom import Bom, BomMetaData
+from cyclonedx.model.component import Component, ComponentType
+from cyclonedx.model.component_evidence import ComponentEvidence
+from cyclonedx.model.license import DisjunctiveLicense, LicenseAcknowledgement, LicenseExpression
+from cyclonedx.output.json import JsonV1Dot6
+from packageurl import PackageURL
+from spdx_tools.common.spdx_licensing import spdx_licensing
+from spdx_tools.spdx.model import (
+    Actor,
+    ActorType,
+    Annotation,
+    AnnotationType,
+    CreationInfo,
+    Document,
+    ExternalPackageRef,
+    ExternalPackageRefCategory,
+    ExtractedLicensingInfo,
+    Package,
+    Relationship,
+    RelationshipType,
+    SpdxNoAssertion,
+)
+from spdx_tools.spdx.writer.json.json_writer import write_document_to_stream
+
+
+_TOOL = "micropython-sbom"
+_NO_ASSERTION = SpdxNoAssertion()
+
+
+def _json(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+_ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9_:/\.])/(?!/)[^\s\"'<>(),;]+")
+_PATH_FIELDS = {
+    "path", "source", "sources", "originating_source", "object", "depfile", "owner_root", "declaration_root",
+}
+
+
+def _portable_model(model, root):
+    """Replace host paths without changing the inventory used by the caller."""
+    root = os.path.normpath(os.fspath(root))
+    roots = [(root, ".")]
+    external = {}
+
+    def add_external(path):
+        path = os.path.normpath(path)
+        if path == root or path.startswith(root + os.sep):
+            return
+        if any(path == base or path.startswith(base + os.sep) for base in external):
+            return
+        external[path] = f"external-{len(external) + 1}"
+
+    def collect(value, key=None):
+        if isinstance(value, dict):
+            for field, child in value.items():
+                if field not in ("licence_texts", "license_texts"):
+                    collect(child, field)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child, key)
+        elif isinstance(value, str) and key in ("owner_root", "declaration_root") and os.path.isabs(value):
+            add_external(value)
+
+    collect(model)
+    roots.extend(external.items())
+
+    def portable_path(path):
+        normalized = os.path.normpath(path)
+        for base, label in sorted(roots, key=lambda item: len(item[0]), reverse=True):
+            if normalized == base:
+                return label
+            if normalized.startswith(base + os.sep):
+                suffix = normalized[len(base) + 1:].replace(os.sep, "/")
+                return suffix if label == "." else label + "/" + suffix
+        directory, name = os.path.split(normalized)
+        if directory not in external:
+            external[directory] = f"external-{len(external) + 1}"
+            roots.append((directory, external[directory]))
+        return external[directory] + "/" + name
+
+    def convert(value, key=None):
+        if isinstance(value, dict):
+            return {
+                field: child if field in ("licence_texts", "license_texts") else convert(child, field)
+                for field, child in value.items()
+            }
+        if isinstance(value, list):
+            return [convert(child, key) for child in value]
+        if isinstance(value, str):
+            if key in _PATH_FIELDS and os.path.isabs(value):
+                return portable_path(value)
+
+            def replace(match):
+                path = match.group()
+                trimmed = path.rstrip(".:")
+                return portable_path(trimmed) + path[len(trimmed):]
+
+            for base, label in sorted(roots, key=lambda item: len(item[0]), reverse=True):
+                value = re.sub(
+                    r"(?<![A-Za-z0-9_:/])" + re.escape(base) + r"(?=$|[/\s\"'<>(),;:.])",
+                    lambda match: label, value,
+                )
+            return _ABSOLUTE_PATH.sub(replace, value)
+        return value
+
+    return convert(model)
+
+
+def _identity(index, component):
+    # The index also distinguishes otherwise identical records in the input.
+    digest = hashlib.sha256(_json(component).encode("utf-8")).hexdigest()[:16]
+    return f"{index}-{digest}"
+
+
+def _provenance(component):
+    provenance = {
+        key: component[key]
+        for key in (
+            "path", "revision", "selection", "sources", "licence_comments", "licence_details",
+            "properties", "externalReferences", "manifest", "manifest_license", "kind",
+            "declaration_root", "owner_root", "scope", "group", "licence_declared",
+            "licence_status", "licence_issues", "licence_mixed", "file_licences", "source_evidence",
+        )
+        if key in component
+    }
+    if "licence_declared" in component:
+        provenance["licence_declared"] = _declared_licence(component)
+    return provenance
+
+
+def _components(components, prefix=""):
+    for index, item in enumerate(components):
+        identity = prefix + _identity(index, item)
+        yield identity, item, prefix
+        yield from _components(item.get("components", []), identity + "/")
+
+
+def _extracted_licences(model):
+    extracted = {}
+    for _, item, _ in _components(model["components"]):
+        for identifier, text in item["licence_texts"].items():
+            if identifier in extracted and extracted[identifier] != text:
+                raise ValueError(f"Conflicting extracted text for {identifier}")
+            extracted[identifier] = text
+    return extracted
+
+
+def _purl(item):
+    return str(PackageURL.from_string(item["purl"])) if item.get("purl") else None
+
+
+def _write_output(path, output):
+    if str(path) == "-":
+        sys.stdout.write(output)
+        return
+    path = Path(path)
+    try:
+        target_mode = stat.S_IMODE(path.stat().st_mode)
+    except FileNotFoundError:
+        target_mode = None
+    temporary = None
+    try:
+        while True:
+            candidate = path.parent / (".%s.%s.tmp" % (path.name, uuid.uuid4().hex))
+            try:
+                stream = open(candidate, "x", encoding="utf-8")
+            except FileExistsError:
+                continue
+            temporary = candidate
+            break
+        with stream:
+            stream.write(output)
+        if target_mode is not None:
+            os.chmod(temporary, target_mode)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None and os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _declared_licence(item):
+    issues = item.get("licence_issues", [])
+    if any(issue.get("kind") not in ("licence_gap", "declaration_identity") for issue in issues):
+        return None
+    if any(issue.get("kind") == "declaration_identity" for issue in issues):
+        files = item.get("file_licences", [])
+        if not item.get("licence_declared") or not files or not all(file.get("trusted") for file in files):
+            return None
+    if item["licence"] is None and not issues:
+        return None
+    return item.get("licence_declared", item["licence"])
+
+
+def _licence_comments(item):
+    comments = list(item["licence_comments"])
+    for file in item.get("file_licences", []):
+        expression = file.get("expression") or "NOASSERTION"
+        provenance = file.get("provenance") or "unknown"
+        comments.append(f"{file['source']}: {expression} (provenance: {provenance}; trusted: {file.get('trusted', False)})")
+    return comments
+
+
+def _write_spdx(model, path, extracted):
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    tool = Actor(ActorType.TOOL, _TOOL)
+    subject = model.get("subject", {})
+    packages = [
+        Package(
+            spdx_id="SPDXRef-MicroPython",
+            name="MicroPython",
+            version=subject.get("repo_version"),
+            download_location=_NO_ASSERTION,
+            files_analyzed=False,
+            license_concluded=_NO_ASSERTION,
+            license_declared=_NO_ASSERTION,
+            copyright_text=_NO_ASSERTION,
+        )
+    ]
+    relationships = [Relationship("SPDXRef-DOCUMENT", RelationshipType.DESCRIBES, "SPDXRef-MicroPython")]
+    annotations = [Annotation("SPDXRef-MicroPython", AnnotationType.OTHER, tool, now, _json(subject))]
+    details = {}
+    for identity, item, parent in _components(model["components"]):
+        identifier = "SPDXRef-Package-" + identity.replace("/", "-")
+        references = []
+        purl = _purl(item)
+        if purl:
+            references.append(ExternalPackageRef(ExternalPackageRefCategory.PACKAGE_MANAGER, "purl", purl))
+        if item.get("cpe"):
+            references.append(ExternalPackageRef(ExternalPackageRefCategory.SECURITY, "cpe23Type", item["cpe"]))
+        declared = _declared_licence(item)
+        packages.append(
+            Package(
+                spdx_id=identifier,
+                name=item["name"],
+                version=item["version"],
+                download_location=_NO_ASSERTION,
+                files_analyzed=False,
+                license_concluded=_NO_ASSERTION,
+                license_declared=spdx_licensing.parse(declared) if declared else _NO_ASSERTION,
+                license_comment="\n".join(_licence_comments(item)) or None,
+                copyright_text=_NO_ASSERTION,
+                external_references=references,
+            )
+        )
+        if parent:
+            parent_id = "SPDXRef-Package-" + parent.rstrip("/").replace("/", "-")
+            relationships.append(Relationship(parent_id, RelationshipType.CONTAINS, identifier))
+        else:
+            relationships.append(Relationship("SPDXRef-MicroPython", RelationshipType.CONTAINS, identifier))
+        annotations.append(Annotation(identifier, AnnotationType.OTHER, tool, now, _json(_provenance(item))))
+        for licence_id, detail in item.get("licence_details", {}).items():
+            entry = details.setdefault(licence_id, {"names": set(), "comments": set()})
+            if detail.get("name"):
+                entry["names"].add(detail["name"])
+            if detail.get("comment"):
+                entry["comments"].add(detail["comment"])
+    if model["issues"]:
+        annotations.append(
+            Annotation("SPDXRef-DOCUMENT", AnnotationType.OTHER, tool, now, _json({"issues": model["issues"]}))
+        )
+    licensing_info = []
+    for identifier, text in sorted(extracted.items()):
+        detail = details.get(identifier, {})
+        names = sorted(detail.get("names", ()))
+        comments = sorted(detail.get("comments", ()))
+        if len(names) > 1:
+            comments.append("Other names: " + "; ".join(names[1:]))
+        licensing_info.append(
+            ExtractedLicensingInfo(
+                identifier, text, license_name=names[0] if names else None,
+                comment="\n".join(comments) or None,
+            )
+        )
+    seed = _json(model)
+    document = Document(
+        CreationInfo(
+            spdx_version="SPDX-2.3",
+            spdx_id="SPDXRef-DOCUMENT",
+            name=model["name"],
+            document_namespace="https://spdx.org/spdxdocs/micropython-" + hashlib.sha256(seed.encode("utf-8")).hexdigest(),
+            creators=[tool],
+            created=now,
+        ),
+        packages=packages,
+        relationships=relationships,
+        annotations=annotations,
+        extracted_licensing_info=licensing_info,
+    )
+    stream = io.StringIO()
+    write_document_to_stream(document, stream, validate=True)
+    _write_output(path, stream.getvalue() + "\n")
+
+
+def _cyclonedx_component(item, identity):
+    provenance = _provenance(item)
+    properties = [Property(name="micropython:" + key, value=_json(value)) for key, value in provenance.items()]
+    properties.extend(Property(name=prop["name"], value=prop["value"]) for prop in item.get("properties", []))
+    evidence = None
+    if item["licence_texts"]:
+        licences = []
+        for identifier, text in sorted(item["licence_texts"].items()):
+            detail = item.get("licence_details", {}).get(identifier, {})
+            licence_properties = [Property(name="micropython:licence-id", value=identifier)]
+            if detail.get("comment"):
+                licence_properties.append(Property(name="micropython:licence-comment", value=detail["comment"]))
+            licences.append(
+                DisjunctiveLicense(
+                    name=detail.get("name") or identifier, text=AttachedText(content=text),
+                    properties=licence_properties,
+                )
+            )
+        evidence = ComponentEvidence(licenses=licences)
+    declared = _declared_licence(item)
+    return Component(
+        name=item["name"],
+        group=item.get("group"),
+        type=ComponentType.LIBRARY,
+        bom_ref="component-" + identity,
+        version=item["version"],
+        purl=PackageURL.from_string(_purl(item)) if item.get("purl") else None,
+        cpe=item.get("cpe"),
+        licenses=[LicenseExpression(declared, acknowledgement=LicenseAcknowledgement.DECLARED)] if declared else None,
+        evidence=evidence,
+        properties=properties,
+        external_references=[
+            ExternalReference(type=ExternalReferenceType(ref["type"]), url=XsUri(ref["url"]))
+            for ref in item.get("externalReferences", [])
+        ],
+        components=[
+            _cyclonedx_component(child, identity + "/" + _identity(index, child))
+            for index, child in enumerate(item.get("components", []))
+        ],
+    )
+
+
+def _write_cyclonedx(model, path):
+    subject = model.get("subject", {})
+    components = [
+        _cyclonedx_component(item, _identity(index, item))
+        for index, item in enumerate(model["components"])
+    ]
+    bom = Bom(
+        metadata=BomMetaData(
+            component=Component(
+                name="MicroPython",
+                type=ComponentType.APPLICATION,
+                bom_ref="micropython",
+                version=subject.get("repo_version"),
+                properties=[
+                    Property(name="micropython:" + key, value=value)
+                    for key, value in subject.items() if value is not None
+                ],
+            ),
+            properties=[
+                Property(name="micropython:document-name", value=model["name"]),
+                Property(name="micropython:issues", value=_json(model["issues"])),
+            ]
+        ),
+        components=components,
+        serial_number=uuid.uuid5(uuid.NAMESPACE_URL, _json(model)),
+    )
+
+    def register_children(parent, children):
+        bom.register_dependency(parent, children)
+        for child in children:
+            if child.components:
+                register_children(child, child.components)
+
+    register_children(bom.metadata.component, components)
+    output = JsonV1Dot6(bom).output_as_string(indent=2) + "\n"
+    _write_output(path, output)
+
+
+def write_sbom(model, path, format, *, root=None):
+    """Write the supplied inventory as an SPDX 2.3 or CycloneDX 1.6 JSON document."""
+    model = _portable_model(model, root if root is not None else Path(__file__).resolve().parent.parent)
+    extracted = _extracted_licences(model)
+    if format == "spdx":
+        _write_spdx(model, path, extracted)
+    elif format == "cyclonedx":
+        _write_cyclonedx(model, path)
+    else:
+        raise ValueError(f"Unsupported SBOM format: {format}")

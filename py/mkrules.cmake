@@ -300,10 +300,14 @@ if(MICROPY_FROZEN_MANIFEST)
     # MICROPY_MAKEMANIFEST_ARGS is populated by py/manifest.cmake (included via
     # py/usermod.cmake before this file). Reuse that list so both the c_module
     # extraction pass and the frozen content step substitute the same values.
+    set(MICROPY_FROZEN_OUTPUT_ARGS)
+    if(MICROPY_FROZEN_OUTPUT)
+        list(APPEND MICROPY_FROZEN_OUTPUT_ARGS --frozen-output "${MICROPY_FROZEN_OUTPUT}")
+    endif()
     add_custom_target(
         BUILD_FROZEN_CONTENT ALL
-        BYPRODUCTS ${MICROPY_FROZEN_CONTENT}
-        COMMAND ${Python3_EXECUTABLE} ${MICROPY_DIR}/tools/makemanifest.py -o ${MICROPY_FROZEN_CONTENT} ${MICROPY_MAKEMANIFEST_ARGS} -b "${CMAKE_BINARY_DIR}" ${MICROPY_CROSS_FLAGS} --mpy-tool-flags=${MICROPY_MPY_TOOL_FLAGS} ${MICROPY_FROZEN_MANIFEST}
+        BYPRODUCTS ${MICROPY_FROZEN_CONTENT} ${MICROPY_FROZEN_OUTPUT}
+        COMMAND ${Python3_EXECUTABLE} ${MICROPY_DIR}/tools/makemanifest.py -o ${MICROPY_FROZEN_CONTENT} ${MICROPY_MAKEMANIFEST_ARGS} -b "${CMAKE_BINARY_DIR}" ${MICROPY_CROSS_FLAGS} --mpy-tool-flags=${MICROPY_MPY_TOOL_FLAGS} ${MICROPY_FROZEN_OUTPUT_ARGS} ${MICROPY_FROZEN_MANIFEST}
         DEPENDS
             ${MICROPY_QSTRDEFS_GENERATED}
             ${MICROPY_ROOT_POINTERS}

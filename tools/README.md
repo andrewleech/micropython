@@ -1,52 +1,26 @@
 # tools/
 
-Notes on the helper scripts in this directory. See each script's module
-docstring for full usage; this README only covers the bits that are easier
-to learn from a paste than from reading code.
+Notes on helper scripts in this directory. See each script's help for its options.
 
-## sbom.py — readable views of the SBOM
+## SBOM generation
 
-`sbom.py` emits a CycloneDX 1.5 JSON SBOM. The `--text` flag produces a
-flat `name=version` list, which is fine for sanity checks but loses the
-purl, vcs URL, and version-source provenance. For richer post-processing,
-pipe the JSON through `jq` + `column`.
+Install the dependencies with `python -m pip install -r tools/sbom-requirements.txt`. Run `python tools/sbom.py --repo . --offline -o repository.spdx.json` to inventory repository dependencies. This mode is separate from build-input mode and does not describe a firmware image. Omit `--offline` to query remote tags. SPDX JSON is the default; use `--format cyclonedx` for CycloneDX JSON.
 
-Prerequisite (if you don't have `jq`):
+For one image, pass one or more existing compilation databases and the image identity:
 
-```bash
-curl -sSfL -o ~/.local/bin/jq \
-  https://github.com/jqlang/jq/releases/latest/download/jq-linux-amd64
-chmod +x ~/.local/bin/jq
+```sh
+python tools/sbom.py --repo . --offline \
+  --compdb /path/to/compile_commands.json --image unix-standard \
+  --exclude mpy-cross --root sdk=/path/to/sdk \
+  --frozen /path/to/frozen-inputs.json -o unix-standard.spdx.json
 ```
 
-### Full table — name, version, source, VCS URL
+Repeat `--compdb`, `--root`, `--exclude`, or `--frozen` as needed. Roots use `NAME=PATH`; relative root and exclusion paths are relative to `--repo`. The deepest matching known or explicit root owns a source. An external source without a matching root remains in the output as an unmatched source. Exclusions match both source paths and command working directories. Exclude all host-tool source or working directories present in the databases, including `mpy-cross` where applicable. The caller must provide databases for a single image; use separate invocations and image identities for an application and bootloader. A database that mixes images without a usable directory boundary must be separated externally.
 
-```bash
-jq -r '.components[] |
-  [.name, .version,
-   (.properties[]|select(.name=="version:source")|.value),
-   .externalReferences[0].url] | @tsv' sbom.json \
-  | column -t -s $'\t'
-```
+To retain resolved frozen selections, set `MICROPY_FROZEN_OUTPUT` to an absolute JSON path during the normal make build, or set the CMake variable of that name. Pass the resulting file with `--frozen`. It records the source, frozen target, freeze kind and `require()` package identity from the manifest evaluation. Do not substitute a manifest source file for this resolved output.
 
-### Gaps only — components scanners cannot usefully check
+Build-input mode also reads existing compiler depfiles. It selects additional `.c` prerequisites from the first rule, maps each to its own source owner, and records whether a source was compiled directly or included by another translation unit. It reports missing, unreadable, or unspecified depfiles as issues. It does not generate depfiles or recursively traverse headers.
 
-Filters to entries resolved by SHA (no upstream tag/in-tree version) or
-recorded as `vendored-unknown`.
+For each selected file, licence resolution prefers its SPDX source header, then explicit package metadata or a reviewed path-specific declaration, then the owning library's default, then the applicable repository default. Each file retains its expression and provenance. Different expressions within a component are not combined into an inferred `AND` or `OR` expression; review the per-file data.
 
-```bash
-jq -r '.components[] |
-  select((.properties[]|select(.name=="version:source")|.value)
-         | test("sha|unknown"))
-  | [.name, .version] | @tsv' sbom.json \
-  | column -t -s $'\t'
-```
-
-### Summary — component count by resolution source
-
-```bash
-jq -r '[.components[]
-        | (.properties[]|select(.name=="version:source")|.value)]
-       | group_by(.) | map("\(.[0])\t\(length)")[]' sbom.json \
-  | column -t -s $'\t'
-```
+These inputs record compilation commands, available depfile prerequisites and frozen selections, not proof that a source was linked into the image. They do not account for consumed headers, prebuilt dependencies, or `.c` inclusions absent from the available depfiles. Review reported issues and unknown licence declarations before qualification.

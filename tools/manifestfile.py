@@ -99,8 +99,10 @@ ManifestOutput = namedtuple(
 
 # Represents the metadata for a package.
 class ManifestPackageMetadata:
-    def __init__(self, is_require=False):
+    def __init__(self, is_require=False, require_name=None, manifest_path=None):
         self._is_require = is_require
+        self.require_name = require_name
+        self.manifest_path = manifest_path
         self._initialised = False
 
         self.version = None
@@ -202,6 +204,8 @@ class ManifestFile:
         self._visited = set()
         # Stack of metadata for each level.
         self._metadata = [ManifestPackageMetadata()]
+        # Names of packages currently being included by require().
+        self._require_names = []
         # Registered external libraries.
         self._libraries = {}
         # List of directories to search for packages.
@@ -388,7 +392,14 @@ class ManifestFile:
             if is_require:
                 # This include is the result of require("name"), so push a new
                 # package metadata onto the stack.
-                self._metadata.append(ManifestPackageMetadata(is_require=True))
+                require_name = self._require_names[-1] if self._require_names else None
+                if self._require_names:
+                    self._require_names[-1] = None
+                self._metadata.append(
+                    ManifestPackageMetadata(
+                        is_require=True, require_name=require_name, manifest_path=manifest_path
+                    )
+                )
             try:
                 with open(manifest_path) as f:
                     # Make paths relative to this manifest file while processing it.
@@ -414,7 +425,11 @@ class ManifestFile:
     def _require_from_path(self, library_path, name, version, extra_kwargs):
         for root, dirnames, filenames in os.walk(library_path):
             if os.path.basename(root) == name and "manifest.py" in filenames:
-                self.include(root, is_require=True, **extra_kwargs)
+                self._require_names.append(name)
+                try:
+                    self.include(root, is_require=True, **extra_kwargs)
+                finally:
+                    self._require_names.pop()
                 return True
         return False
 

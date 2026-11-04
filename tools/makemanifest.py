@@ -24,9 +24,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import hashlib
+import json
 import sys
 import os
 import subprocess
+import tempfile
 
 # Always use the mpy-cross from this repo.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../mpy-cross"))
@@ -57,6 +60,14 @@ def get_timestamp(path, default=None):
         if default is None:
             raise FreezeError("cannot stat {}".format(path))
         return default
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def mkdir(filename):
@@ -139,8 +150,20 @@ def main():
     cmd_parser.add_argument(
         "--list-c-modules", action="store_true", help="list C module paths from manifest and exit"
     )
+    cmd_parser.add_argument(
+        "--frozen-output", help="write resolved frozen inputs as JSON"
+    )
     cmd_parser.add_argument("files", nargs="+", help="input manifest list")
     args = cmd_parser.parse_args()
+    if args.list_c_modules and args.frozen_output:
+        cmd_parser.error("--frozen-output cannot be used with --list-c-modules")
+    if args.frozen_output:
+        if not args.output or not args.build_dir:
+            cmd_parser.error("--frozen-output requires --output and --build-dir")
+        if os.path.realpath(args.frozen_output) == os.path.realpath(args.output):
+            cmd_parser.error("--frozen-output must differ from --output")
+        if os.path.commonpath((os.path.realpath(args.output), os.path.realpath(args.build_dir))) != os.path.realpath(args.build_dir):
+            cmd_parser.error("--output must be inside --build-dir when exporting frozen inputs")
 
     # Extract variables for substitution.
     for var in args.var:
@@ -179,6 +202,7 @@ def main():
                 print(module)
         sys.exit(0)
 
+
     # Get paths to tools
     MPY_CROSS = VARS["MPY_DIR"] + "/mpy-cross/build/mpy-cross"
     if sys.platform == "win32":
@@ -190,6 +214,39 @@ def main():
     if not os.path.exists(MPY_CROSS):
         print("mpy-cross not found at {}, please build it first".format(MPY_CROSS))
         sys.exit(1)
+
+    files = None
+    frozen_content = None
+    force_generate = False
+    if args.frozen_output:
+        kinds = {
+            manifestfile.KIND_FREEZE_AS_STR: "freeze_as_str",
+            manifestfile.KIND_FREEZE_AS_MPY: "freeze_as_mpy",
+            manifestfile.KIND_FREEZE_MPY: "freeze_mpy",
+        }
+        files = [
+            {
+                "source": os.path.abspath(result.full_path),
+                "target": result.target_path,
+                "kind": kinds[result.kind],
+                "package": result.metadata.require_name,
+                "manifest": result.metadata.manifest_path,
+                "version": result.metadata.version,
+                "license": result.metadata.license,
+            }
+            for result in manifest.files()
+        ]
+        frozen_content = {
+            "path": os.path.realpath(args.output),
+            "build_dir": os.path.realpath(args.build_dir),
+        }
+        try:
+            with open(args.frozen_output, encoding="utf-8") as f:
+                previous = json.load(f)
+            frozen_content["sha256"] = file_sha256(args.output)
+            force_generate = previous != {"frozen_content": frozen_content, "files": files}
+        except (OSError, ValueError, UnicodeError):
+            force_generate = True
 
     # Process the manifest
     str_paths = []
@@ -207,7 +264,7 @@ def main():
         elif result.kind == manifestfile.KIND_FREEZE_AS_MPY:
             outfile = "{}/frozen_mpy/{}.mpy".format(args.build_dir, result.target_path[:-3])
             ts_outfile = get_timestamp(outfile, 0)
-            if result.timestamp >= ts_outfile:
+            if force_generate or result.timestamp >= ts_outfile:
                 print("MPY", result.target_path)
                 mkdir(outfile)
                 # Add __version__ to the end of the file before compiling.
@@ -234,53 +291,79 @@ def main():
         ts_newest = max(ts_newest, ts_outfile)
 
     # Check if output file needs generating
-    if ts_newest < get_timestamp(args.output, 0):
-        # No files are newer than output file so it does not need updating
-        return
-
-    # Freeze paths as strings
-    output_str = generate_frozen_str_content(str_paths)
-
-    # Freeze .mpy files
-    if mpy_files:
-        res, output_mpy = system(
-            [
-                sys.executable,
-                MPY_TOOL,
-                "-f",
-                "-q",
-                args.build_dir + "/genhdr/qstrdefs.preprocessed.h",
-            ]
-            + args.mpy_tool_flags.split()
-            + mpy_files
-        )
-        if res != 0:
-            print("error freezing mpy {}:".format(mpy_files))
-            print(output_mpy.decode())
-            sys.exit(1)
+    if not force_generate and ts_newest < get_timestamp(args.output, 0):
+        if not args.frozen_output:
+            return
     else:
-        output_mpy = (
-            b'#include "py/emitglue.h"\n'
-            b"extern const qstr_pool_t mp_qstr_const_pool;\n"
-            b"const qstr_pool_t mp_qstr_frozen_const_pool = {\n"
-            b"    #if MICROPY_QSTR_BYTES_IN_HASH\n"
-            b"    (qstr_pool_t*)&mp_qstr_const_pool, MP_QSTRnumber_of, 0, 0, 0, NULL, NULL, {},\n"
-            b"    #else\n"
-            b"    (qstr_pool_t*)&mp_qstr_const_pool, MP_QSTRnumber_of, 0, 0, 0, NULL, {},\n"
-            b"    #endif\n"
-            b"};\n"
-            b'const char mp_frozen_names[] = { MP_FROZEN_STR_NAMES "\\0"};\n'
-            b"const mp_raw_code_t *const mp_frozen_mpy_content[] = {NULL};\n"
-        )
+        # Freeze paths as strings
+        output_str = generate_frozen_str_content(str_paths)
 
-    # Generate output
-    print("GEN", args.output)
-    mkdir(args.output)
-    with open(args.output, "wb") as f:
-        f.write(b"//\n// Content for MICROPY_MODULE_FROZEN_STR\n//\n")
-        f.write(output_str)
-        f.write(b"//\n// Content for MICROPY_MODULE_FROZEN_MPY\n//\n")
-        f.write(output_mpy)
+        # Freeze .mpy files
+        if mpy_files:
+            res, output_mpy = system(
+                [
+                    sys.executable,
+                    MPY_TOOL,
+                    "-f",
+                    "-q",
+                    args.build_dir + "/genhdr/qstrdefs.preprocessed.h",
+                ]
+                + args.mpy_tool_flags.split()
+                + mpy_files
+            )
+            if res != 0:
+                print("error freezing mpy {}:".format(mpy_files))
+                print(output_mpy.decode())
+                sys.exit(1)
+        else:
+            output_mpy = (
+                b'#include "py/emitglue.h"\n'
+                b"extern const qstr_pool_t mp_qstr_const_pool;\n"
+                b"const qstr_pool_t mp_qstr_frozen_const_pool = {\n"
+                b"    #if MICROPY_QSTR_BYTES_IN_HASH\n"
+                b"    (qstr_pool_t*)&mp_qstr_const_pool, MP_QSTRnumber_of, 0, 0, 0, NULL, NULL, {},\n"
+                b"    #else\n"
+                b"    (qstr_pool_t*)&mp_qstr_const_pool, MP_QSTRnumber_of, 0, 0, 0, NULL, {},\n"
+                b"    #endif\n"
+                b"};\n"
+                b'const char mp_frozen_names[] = { MP_FROZEN_STR_NAMES "\\0"};\n'
+                b"const mp_raw_code_t *const mp_frozen_mpy_content[] = {NULL};\n"
+            )
+
+        # Generate output
+        output = (
+            b"//\n// Content for MICROPY_MODULE_FROZEN_STR\n//\n"
+            + output_str
+            + b"//\n// Content for MICROPY_MODULE_FROZEN_MPY\n//\n"
+            + output_mpy
+        )
+        try:
+            with open(args.output, "rb") as f:
+                unchanged = f.read() == output
+        except FileNotFoundError:
+            unchanged = False
+        if not unchanged:
+            print("GEN", args.output)
+            mkdir(args.output)
+            with open(args.output, "wb") as f:
+                f.write(output)
+        else:
+            os.utime(args.output, None)
+
+    if args.frozen_output:
+        frozen_content["sha256"] = file_sha256(args.output)
+        data = {"frozen_content": frozen_content, "files": files}
+        directory = os.path.dirname(os.path.abspath(args.frozen_output))
+        mkdir(os.path.abspath(args.frozen_output))
+        fd, temporary = tempfile.mkstemp(prefix=".frozen-", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+                f.write("\n")
+            os.replace(temporary, args.frozen_output)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
 
 if __name__ == "__main__":

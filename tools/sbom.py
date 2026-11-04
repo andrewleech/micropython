@@ -1,66 +1,19 @@
 #!/usr/bin/env python3
-"""Generate a CycloneDX SBOM for the MicroPython repository.
-
-Catalogues two flavours of third-party dependency:
-
-1. Git submodules registered in .gitmodules — pinned commit SHA comes from
-   the parent repo's gitlink entries, version is resolved via the layered
-   strategy below.
-2. Vendored libraries copied into ``lib/`` (e.g., littlefs, oofatfs, uzlib)
-   that are not git submodules. Versions are extracted from in-tree
-   files when the upstream embeds one, otherwise the component is emitted
-   with ``version:source=vendored-unknown`` so the gap is explicit.
-
-For submodules the version resolution is layered:
-
-    1. in-tree extractor — read the version directly from a known file in the
-       checked-out submodule (header macros, CMake variables, autoconf, etc.).
-       Most authoritative because it is what actually gets compiled.
-    2. ``git ls-remote`` tag match — query the upstream and look for a tag
-       pointing at the pinned commit.
-    3. short commit SHA — final fallback when nothing else identifies the
-       pinned commit (forks, branch-tracking submodules, frozen sources).
-
-A few submodules are collections of independently versioned per-MCU-family
-trees (lib/stm32lib, lib/asf4) where no single version is correct. These keep
-their commit pin on the parent component and additionally emit one nested
-sub-component per family, each with its own in-tree version.
-
-The ``version:source`` property on each component records which strategy was
-used. If an in-tree extractor's expected file or field is missing, the
-script reports the failure and exits non-zero — that condition means
-upstream has moved the version source and the registry must be updated;
-silently falling back would mask the regression. Submodules that simply
-aren't checked out trigger a warning and fall through to ls-remote/SHA,
-since that is a user-environment issue rather than a script bug.
-
-Usage:
-    python tools/sbom.py                    # full resolution (network)
-    python tools/sbom.py --offline          # extractors + SHA only
-    python tools/sbom.py -o sbom.json
-
-Known coverage gaps (deliberately not yet implemented):
-
-* Recursive sub-submodules. pico-sdk, btstack, and mbedtls each pull in
-  their own submodules; we only catalogue the top level.
-* Per-port vendored code under ports/*/ — e.g., ports/cc3200/simplelink,
-  ports/stm32/usbhost, ports/esp32/managed_components.
-* Build-time fetched SDKs that aren't checked in — e.g., ESP-IDF for the
-  esp32 port, the Alif toolkit downloads, the emsdk/ tree (gitignored).
-* MicroPython-internal trees in lib/ are deliberately excluded
-  (lib/mbedtls_errors is MP's own code-generation tooling, not a
-  third-party dependency).
-"""
+"""Generate an SPDX or CycloneDX SBOM from repository or build inputs."""
 
 import argparse
-import datetime
-import json
+import hashlib
 import re
 import subprocess
 import sys
-import uuid
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
+
+from packageurl import PackageURL
+
+from sbom_inputs import read_inputs
+from sbom_licences import _covers, _load, resolve_licences
+from sbom_writers import write_sbom
 
 
 def run(args, cwd=None):
@@ -136,17 +89,19 @@ def ls_remote_tags(url, timeout=60):
     return merged
 
 
-def url_to_purl(url, sha):
-    """Build a Package URL (purl) for a git submodule."""
+def url_to_purl(url, sha, fallback_name=None):
+    """Build a canonical Package URL for an upstream repository."""
     parsed = urlparse(url)
-    host = parsed.netloc.lower()
-    path = parsed.path.lstrip("/")
+    path = parsed.path.strip("/")
     if path.endswith(".git"):
         path = path[:-4]
-    if host == "github.com":
-        return f"pkg:github/{path}@{sha}"
-    name = path.rsplit("/", 1)[-1] or host
-    return f"pkg:generic/{name}@{sha}?vcs_url={url}"
+    version = f"@{quote(sha, safe='')}" if sha else ""
+    if parsed.netloc.lower() == "github.com" and "/" in path:
+        result = "pkg:github/" + "/".join(quote(part, safe="") for part in path.split("/")) + version
+    else:
+        name = path.rsplit("/", 1)[-1] or fallback_name or parsed.netloc
+        result = f"pkg:generic/{quote(name, safe='')}{version}?vcs_url={quote(url, safe='')}"
+    return PackageURL.from_string(result).to_string()
 
 
 # --- in-tree version extractors --------------------------------------------
@@ -545,14 +500,7 @@ VENDORED = [
 
 
 def _vendored_purl(upstream, name, version):
-    parsed = urlparse(upstream)
-    host = parsed.netloc.lower()
-    path = parsed.path.lstrip("/")
-    if path.endswith(".git"):
-        path = path[:-4]
-    if host == "github.com" and path:
-        return f"pkg:github/{path}@{version}"
-    return f"pkg:generic/{name}@{version}?vcs_url={upstream}"
+    return url_to_purl(upstream, None if version == "unknown" else version, name)
 
 
 def build_vendored_component(repo, v):
@@ -710,7 +658,8 @@ def build_component(repo, submod, sha, version, source):
         properties.append({"name": "git:branch", "value": submod["branch"]})
 
     purl_template = PURL_OVERRIDES.get(submod["path"])
-    purl = purl_template.format(sha=sha) if purl_template else url_to_purl(submod["url"], sha)
+    purl = (PackageURL.from_string(purl_template.format(sha=sha)).to_string()
+            if purl_template else url_to_purl(submod["url"], sha))
 
     component = {
         "type": "library",
@@ -742,89 +691,546 @@ def repo_version(repo):
         return "unknown"
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument(
-        "--repo", default=".", help="Path to the MicroPython repository (default: cwd)."
-    )
-    parser.add_argument(
-        "--offline", action="store_true", help="Skip git ls-remote; report commit SHAs as version."
-    )
-    parser.add_argument("-o", "--output", default="-", help="Output file (default: stdout).")
-    parser.add_argument(
-        "--text", action="store_true", help="Emit `name=version` lines instead of CycloneDX JSON."
-    )
-    args = parser.parse_args()
+def _component(name, path, version=None, revision=None, purl=None):
+    return {"name": name, "path": path, "version": version, "revision": revision,
+            "purl": purl, "licence": None, "licence_texts": {}, "licence_comments": [],
+            "selection": [], "sources": [], "source_evidence": []}
 
-    repo = Path(args.repo).resolve()
-    submods = sorted(parse_gitmodules(repo), key=lambda s: s["path"])
 
-    components = []
-    extractor_failures = []
-    for s in submods:
-        sha = submodule_sha(repo, s["path"])
+def _display_path(repo, path):
+    try:
+        return path.relative_to(repo).as_posix() or "."
+    except ValueError:
+        return str(path)
+
+
+def _inventory(repo):
+    roots = {}
+    for submod in parse_gitmodules(repo):
+        roots.setdefault((repo / submod["path"]).resolve(), []).append(("submodule", submod))
+    for vendor in VENDORED:
+        roots.setdefault((repo / vendor["path"]).resolve(), []).append(("vendored", vendor))
+    return roots
+
+
+def _build_inventory_component(repo, kind, item, offline):
+    sha = None
+    if kind == "submodule":
+        sha = submodule_sha(repo, item["path"])
         if not sha:
-            print(f"warning: no gitlink for {s['path']}", file=sys.stderr)
-            continue
-        print(f"resolving {s['path']}...", file=sys.stderr)
-        try:
-            version, source = resolve_version(repo, s, sha, offline=args.offline)
-            components.append(build_component(repo, s, sha, version, source))
-        except ExtractorError as e:
-            extractor_failures.append((s["path"], str(e)))
-            continue
-
-    for v in VENDORED:
-        print(f"resolving {v['path']} (vendored: {v['name']})...", file=sys.stderr)
-        try:
-            components.append(build_vendored_component(repo, v))
-        except ExtractorError as e:
-            extractor_failures.append((v["path"], str(e)))
-
-    components.sort(key=lambda c: c["name"])
-
-    if extractor_failures:
-        print(
-            "\nerror: in-tree extractor(s) failed — the version source for these", file=sys.stderr
-        )
-        print("       libraries has likely changed upstream and EXTRACTORS needs", file=sys.stderr)
-        print("       updating in tools/sbom.py:", file=sys.stderr)
-        for path, msg in extractor_failures:
-            print(f"  {path}: {msg}", file=sys.stderr)
-        sys.exit(1)
-
-    if args.text:
-        lines = []
-        for c in components:
-            lines.append(f"{c['name']}={c['version']}\n")
-            for sub in c.get("components", []):
-                lines.append(f"  {sub['name']}={sub['version']}\n")
-        text = "".join(lines)
+            raise ValueError(f"no gitlink for {item['path']}")
+        version, source = resolve_version(repo, item, sha, offline=offline)
+        raw = build_component(repo, item, sha, version, source)
     else:
-        bom = {
-            "bomFormat": "CycloneDX",
-            "specVersion": "1.5",
-            "serialNumber": f"urn:uuid:{uuid.uuid4()}",
-            "version": 1,
-            "metadata": {
-                "timestamp": datetime.datetime.now(datetime.timezone.utc)
-                .replace(microsecond=0)
-                .isoformat(),
-                "tools": [{"vendor": "MicroPython", "name": "tools/sbom.py"}],
-                "component": {
-                    "type": "application",
-                    "name": "micropython",
-                    "version": repo_version(repo),
-                },
-            },
-            "components": components,
+        raw = build_vendored_component(repo, item)
+    component = _component(raw["name"], item["path"],
+                           None if raw["version"] == "unknown" else raw["version"],
+                           sha, raw["purl"])
+    component["owner_root"] = str((repo / item["path"]).resolve())
+    component["declaration_root"] = str(repo)
+    for field in ("cpe", "properties", "externalReferences"):
+        if field in raw:
+            component[field] = raw[field]
+    if "components" in raw:
+        component["components"] = []
+        for child in raw["components"]:
+            path = next(p["value"] for p in child["properties"] if p["name"] == "submodule:path")
+            normalized = _component(child["name"], path, child["version"])
+            normalized["owner_root"] = component["owner_root"]
+            normalized["declaration_root"] = str(repo)
+            normalized["properties"] = child["properties"]
+            normalized["group"] = child["group"]
+            component["components"].append(normalized)
+    return component
+
+
+def _root_arg(value, repo):
+    name, separator, path = value.partition("=")
+    if not separator or not name or not path:
+        raise ValueError(f"invalid root {value!r}; expected NAME=PATH")
+    resolved = Path(path)
+    resolved = (resolved if resolved.is_absolute() else repo / resolved).absolute()
+    resolved = resolved.resolve()
+    if not resolved.is_dir():
+        raise ValueError(f"root is not a directory: {resolved}")
+    return name, resolved
+
+
+def _checkout_root(path):
+    try:
+        root = run(["git", "-C", str(path), "rev-parse", "--show-toplevel"]).strip()
+        return Path(root).resolve()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def _revision(repo):
+    return run(["git", "rev-parse", "HEAD"], cwd=str(repo)).strip()
+
+
+def _has_symlink(path, stop=None):
+    for part in (path, *path.parents):
+        if part == stop:
+            break
+        if part.is_symlink():
+            return True
+    return False
+
+
+def _source_state(root):
+    """Return tracked and changed paths for a Git checkout."""
+    tracked = set(run(["git", "ls-files", "-z"], cwd=str(root)).split("\0"))
+    status = run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+                 cwd=str(root)).split("\0")
+    changed = set()
+    index = 0
+    while index < len(status):
+        entry = status[index]
+        index += 1
+        if not entry:
+            continue
+        changed.add(entry[3:])
+        if "R" in entry[:2] or "C" in entry[:2]:
+            if index < len(status):
+                changed.add(status[index])
+                index += 1
+    return tracked, changed
+
+
+def _build_document(repo, args):
+    inventory = _inventory(repo)
+    issues = []
+    components = []
+    repo_revision = _revision(repo)
+    declaration_states = {}
+    declaration_checkouts = {}
+
+    def metadata_status(path):
+        git_root = _checkout_root(path.parent)
+        if git_root is None or _has_symlink(path, git_root):
+            return "untracked"
+        if git_root not in declaration_checkouts:
+            try:
+                declaration_checkouts[git_root] = _source_state(git_root)
+            except (OSError, subprocess.CalledProcessError) as exc:
+                raise ValueError(f"{git_root}: cannot determine source identity: {exc}") from exc
+        tracked, changed = declaration_checkouts[git_root]
+        relative = path.relative_to(git_root).as_posix()
+        if relative not in tracked:
+            return "untracked"
+        if relative in changed:
+            return "dirty"
+        return None
+
+    def declaration_state(root):
+        if root not in declaration_states:
+            declaration = root / "LICENSE.spdx.yaml"
+            if not declaration.is_file():
+                declaration_states[root] = (None, None)
+            else:
+                git_root = _checkout_root(root)
+                if git_root is None:
+                    status = "untracked"
+                else:
+                    if git_root not in declaration_checkouts:
+                        declaration_checkouts[git_root] = _source_state(git_root)
+                    tracked, changed = declaration_checkouts[git_root]
+                    relative = declaration.relative_to(git_root).as_posix()
+                    status = "untracked" if relative not in tracked else (
+                        "dirty" if relative in changed else None
+                    )
+                digest = hashlib.sha256(declaration.read_bytes()).hexdigest()
+                declaration_states[root] = (status, digest)
+        return declaration_states[root]
+
+    if not args.compdb:
+        for entries in inventory.values():
+            for kind, item in entries:
+                component = _build_inventory_component(repo, kind, item, args.offline)
+                component["selection"].append("repository inventory")
+                components.append(component)
+        name = "micropython-repository"
+    else:
+        if not args.image:
+            raise ValueError("--image is required with --compdb")
+        explicit = {}
+        for value in args.root:
+            root_name, root = _root_arg(value, repo)
+            if root in explicit:
+                raise ValueError(f"duplicate explicit root: {root}")
+            explicit[root] = root_name
+        roots = set(inventory) | set(explicit) | {repo}
+        depfile_evidence = []
+        records = read_inputs(repo, args.compdb, args.exclude, args.frozen, depfile_evidence)
+        for evidence in depfile_evidence:
+            if evidence["status"] == "read":
+                continue
+            source = _display_path(repo, evidence["source"])
+            depfile = evidence.get("depfile")
+            location = _display_path(repo, depfile) if depfile else "not specified"
+            message = f"depfile {evidence['status']} for {source}: {location}"
+            if evidence.get("error"):
+                message += f" ({evidence['error']})"
+            if message not in issues:
+                issues.append(message)
+        unsafe_roots = {
+            candidate: item["path"]
+            for candidate, entries in inventory.items()
+            for _, item in entries
+            if _has_symlink(repo / item["path"], repo)
         }
-        text = json.dumps(bom, indent=2) + "\n"
+        checkout_roots = {repo: repo}
+        source_states = {}
+        submodule_revisions = {}
 
-    if args.output == "-":
-        sys.stdout.write(text)
-    else:
-        Path(args.output).write_text(text)
+        def checkout_root(path):
+            if path not in checkout_roots:
+                checkout_roots[path] = _checkout_root(path)
+            return checkout_roots[path]
+
+        def validate_submodule(root, item):
+            if root not in submodule_revisions:
+                declared = repo / item["path"]
+                if _has_symlink(declared, repo):
+                    raise ValueError(f"{item['path']}: submodule root contains a symlink")
+                expected = submodule_sha(repo, item["path"])
+                if not expected:
+                    raise ValueError(f"{item['path']}: submodule gitlink unavailable")
+                if checkout_root(root) != root:
+                    raise ValueError(f"{item['path']}: submodule checkout unavailable")
+                try:
+                    actual = _revision(root)
+                except (OSError, subprocess.CalledProcessError) as exc:
+                    raise ValueError(f"{item['path']}: submodule checkout HEAD unavailable") from exc
+                if actual != expected:
+                    raise ValueError(
+                        f"{item['path']}: submodule checkout HEAD {actual} does not match gitlink {expected}"
+                    )
+                submodule_revisions[root] = expected
+            return submodule_revisions[root]
+
+        def source_problem(git_root, path):
+            if git_root not in source_states:
+                try:
+                    source_states[git_root] = _source_state(git_root)
+                except (OSError, subprocess.CalledProcessError) as exc:
+                    raise ValueError(f"{git_root}: cannot determine source identity: {exc}") from exc
+            tracked, changed = source_states[git_root]
+            relative = path.relative_to(git_root).as_posix()
+            if relative not in tracked:
+                return "untracked"
+            if relative in changed:
+                return "dirty"
+            return None
+        declarations = {}
+        groups = {}
+        for record in records:
+            source = record["source"]
+            manifest = record.get("manifest")
+            owner_path = manifest if manifest is not None else source
+            matches = [root for root in roots if owner_path == root or root in owner_path.parents]
+            root = max(matches, key=lambda p: len(p.parts)) if matches else None
+            if root is None:
+                root = checkout_root(owner_path.parent) or owner_path.parent
+            identity_problems = []
+            for selected_path in (source, manifest):
+                if selected_path is None:
+                    continue
+                for candidate, path in unsafe_roots.items():
+                    if selected_path.is_relative_to(candidate):
+                        raise ValueError(f"{path}: source root contains a symlink")
+                submodule_roots = [
+                    candidate for candidate, entries in inventory.items()
+                    if selected_path.is_relative_to(candidate)
+                    and any(kind == "submodule" for kind, _ in entries)
+                ]
+                for candidate in submodule_roots:
+                    item = next(item for kind, item in inventory[candidate] if kind == "submodule")
+                    validate_submodule(candidate, item)
+                if submodule_roots:
+                    git_root = max(submodule_roots, key=lambda p: len(p.parts))
+                elif root != repo and selected_path.is_relative_to(root):
+                    git_root = checkout_root(root)
+                elif selected_path.is_relative_to(repo):
+                    git_root = repo
+                else:
+                    git_root = checkout_root(root)
+                if git_root and selected_path.is_relative_to(git_root):
+                    problem = source_problem(git_root, selected_path)
+                    if problem:
+                        message = f"{problem} selected source: {_display_path(repo, selected_path)}"
+                        if message not in issues:
+                            issues.append(message)
+                        identity_problems.append(message)
+            unreviewed = bool(identity_problems)
+            if root == repo and record["selection"] == "native":
+                relative = source.relative_to(repo)
+                parts = relative.parts
+                if len(parts) > 2 and parts[0] == "lib":
+                    root = repo / "lib" / parts[1]
+                    if repo not in declarations:
+                        declarations[repo] = _load(repo)[0] if not declaration_state(repo)[0] else []
+                    root_scope = _display_path(repo, root)
+                    unreviewed = unreviewed or not any(
+                        entry["scope"] == root_scope and "pin" in entry
+                        for entry in declarations[repo]
+                    )
+                elif "managed_components" in parts:
+                    pos = parts.index("managed_components")
+                    root = repo.joinpath(*parts[:pos + 2])
+                    unreviewed = True
+                elif source_problem(repo, source) == "untracked":
+                    root = source.parent
+                    unreviewed = True
+                if unreviewed:
+                    issue = f"unreviewed source root: {_display_path(repo, root)}"
+                    if issue not in issues:
+                        issues.append(issue)
+            if record["selection"] == "frozen" and not matches:
+                issue = f"unmatched frozen package root: {owner_path}"
+                if issue not in issues:
+                    issues.append(issue)
+            if record["selection"] == "frozen" and source != root and root not in source.parents:
+                unreviewed = True
+                issue = f"frozen source outside owning root: {source}"
+                if issue not in issues:
+                    issues.append(issue)
+            entries = inventory.get(root, [])
+            if len(entries) > 1:
+                filename = source.name
+                selected = [entry for entry in entries if
+                            (entry[1]["name"].endswith("lfs1") and filename.startswith("lfs1")) or
+                            (entry[1]["name"].endswith("lfs2") and filename.startswith("lfs2"))]
+                entries = selected
+                if not entries:
+                    unreviewed = True
+                    issue = f"unmatched inventory component: {_display_path(repo, source)}"
+                    if issue not in issues:
+                        issues.append(issue)
+            scoped = None
+            if record["selection"] == "native":
+                declaration_root = repo if root == repo or repo in root.parents else (checkout_root(root) or root)
+                if source.is_relative_to(declaration_root):
+                    if declaration_root not in declarations:
+                        declarations[declaration_root] = (
+                            _load(declaration_root)[0] if not declaration_state(declaration_root)[0] else []
+                        )
+                    relative = source.relative_to(declaration_root).as_posix()
+                    matches_scope = [
+                        entry for entry in declarations[declaration_root]
+                        if entry["scope"] != "." and _covers(entry["scope"], relative)
+                    ]
+                    def scope_rank(entry):
+                        scope = entry["scope"]
+                        prefix = re.split(r"[*?\[]", scope, maxsplit=1)[0]
+                        if prefix != scope:
+                            prefix = prefix.rpartition("/")[0]
+                        depth = len(prefix.split("/")) if prefix else 0
+                        return depth, len(scope.split("/")), len(scope)
+
+                    matches_scope.sort(
+                        key=scope_rank,
+                        reverse=True,
+                    )
+                    if matches_scope:
+                        candidate = matches_scope[0]
+                        scope_path = declaration_root / candidate["scope"]
+                        if scope_path != root and scope_path.is_relative_to(root):
+                            scoped = candidate
+            grouped_scope = None
+            if (scoped and entries and entries[0][0] == "vendored"
+                    and entries[0][1]["name"] == "oofatfs" and scoped.get("expression")):
+                grouped_scope = (scoped["expression"], scoped.get("licenseComments"),
+                                 scoped.get("licenseGap"))
+            package = record.get("package")
+            target = record.get("target")
+            if record["selection"] == "frozen":
+                key = (str(root), "frozen", package, str(manifest) if manifest else None,
+                       unreviewed, bool(identity_problems))
+            else:
+                key = (str(root), "native", entries[0][1].get("name") if entries else None,
+                       grouped_scope if grouped_scope else scoped["scope"] if scoped else None,
+                       unreviewed, bool(identity_problems))
+            if key not in groups:
+                if record["selection"] == "frozen":
+                    package_path = manifest.parent if manifest else root
+                    revision = repo_revision if root == repo else None
+                    submodules = [item for kind, item in inventory.get(root, []) if kind == "submodule"]
+                    if submodules:
+                        revision = validate_submodule(root, submodules[0])
+                    elif root != repo and checkout_root(root):
+                        revision = _revision(checkout_root(root))
+                    name = ("micropython-frozen" if root == repo and package in (None, "micropython")
+                            else package or root.name)
+                    component = _component(name, _display_path(repo, package_path),
+                                           record.get("version"), revision)
+                    component["kind"] = "frozen"
+                    component["manifest"] = _display_path(repo, manifest) if manifest else None
+                    component["manifest_license"] = record.get("license")
+                elif scoped:
+                    revision = repo_revision if root == repo else None
+                    submodules = [item for kind, item in inventory.get(root, []) if kind == "submodule"]
+                    if submodules:
+                        revision = validate_submodule(root, submodules[0])
+                    elif root != repo and checkout_root(root):
+                        revision = _revision(checkout_root(root))
+                    if entries and not identity_problems:
+                        component = _build_inventory_component(repo, *entries[0], args.offline)
+                        if grouped_scope:
+                            component["name"] += "-" + grouped_scope[0]
+                        else:
+                            component["name"] = scoped.get("name") or scoped["scope"]
+                            component["path"] = _display_path(repo, declaration_root / scoped["scope"])
+                    elif grouped_scope:
+                        component = _component(
+                            entries[0][1]["name"] + "-" + grouped_scope[0],
+                            _display_path(repo, root),
+                            revision=revision,
+                        )
+                    else:
+                        component = _component(
+                            scoped.get("name") or scoped["scope"],
+                            _display_path(repo, declaration_root / scoped["scope"]),
+                            revision=revision,
+                        )
+                    if not grouped_scope:
+                        component["scope"] = scoped["scope"]
+                elif root in explicit:
+                    git_root = checkout_root(root)
+                    component = _component(
+                        explicit[root], _display_path(repo, root),
+                        revision=_revision(git_root) if git_root else None,
+                    )
+                elif entries and not identity_problems:
+                    component = _build_inventory_component(repo, *entries[0], args.offline)
+                else:
+                    component = _component(entries[0][1]["name"] if entries else
+                                           ("micropython" if root == repo else root.name),
+                                           _display_path(repo, root),
+                                           revision=repo_revision if root == repo else None)
+                    if not matches:
+                        issues.append(f"unmatched source: {source}")
+                declaration_root = repo if root == repo or repo in root.parents else (checkout_root(root) or root)
+                component["owner_root"] = str(root)
+                component["declaration_root"] = str(declaration_root)
+                if unreviewed:
+                    component["unreviewed"] = True
+                if identity_problems:
+                    component["revision"] = None
+                    component["identity_problems"] = list(identity_problems)
+                groups[key] = component
+                components.append(component)
+            component = groups[key]
+            if identity_problems:
+                for problem in identity_problems:
+                    if problem not in component["identity_problems"]:
+                        component["identity_problems"].append(problem)
+            if record["selection"] == "frozen" and (
+                component["version"] != record.get("version") or
+                component["manifest_license"] != record.get("license")
+            ):
+                raise ValueError(f"conflicting frozen package metadata: {package or root}")
+            if record["selection"] == "frozen":
+                selection = f"frozen:{record['kind']}:{target}"
+                if package is not None:
+                    selection += f":require:{package}"
+            else:
+                selection = "native"
+            if selection not in component["selection"]:
+                component["selection"].append(selection)
+            path = _display_path(repo, source)
+            if path not in component["sources"]:
+                component["sources"].append(path)
+            kind = ("frozen" if record["selection"] == "frozen" else
+                    "included" if record.get("input_kind") == "depfile" else "compiled")
+            evidence = {"source": path, "kind": kind}
+            for field in ("originating_source", "object", "depfile"):
+                if record.get(field) is not None:
+                    evidence[field] = _display_path(repo, record[field])
+            if evidence not in component["source_evidence"]:
+                component["source_evidence"].append(evidence)
+        name = args.image
+    for component in components:
+        children = component.get("components", [])
+        if args.compdb:
+            selected = []
+            for child in children:
+                family = child["name"].lower()
+                sources = [
+                    source for source in component["sources"]
+                    if any(part.lower() == family or part.lower().startswith(family + "_")
+                           for part in Path(source).parts)
+                ]
+                if sources:
+                    child["sources"] = sources
+                    child["source_evidence"] = [
+                        evidence for evidence in component["source_evidence"]
+                        if evidence["source"] in sources
+                    ]
+                    child["selection"] = list(component["selection"])
+                    selected.append(child)
+            component["components"] = selected
+        items = [component] + component.get("components", [])
+        for item in items:
+            declaration_state(Path(item.get("declaration_root", repo)))
+        if component.get("identity_problems"):
+            component["licence_status"] = "unresolved"
+            component["licence_declared"] = None
+            component["licence_issues"] = [
+                {"kind": "source_identity", "status": "unresolved", "message": problem}
+                for problem in component["identity_problems"]
+            ]
+            component["licence_comments"].extend(component["identity_problems"])
+        else:
+            issues.extend(resolve_licences(repo, items, declaration_states=declaration_states,
+                                           metadata_status=metadata_status))
+        for item in items:
+            declaration_root = Path(item.get("declaration_root", repo))
+            declaration = declaration_root / "LICENSE.spdx.yaml"
+            status, digest = declaration_states[declaration_root]
+            if status:
+                message = (
+                    f"{status} licence declaration: {_display_path(repo, declaration)} "
+                    f"(sha256: {digest})"
+                )
+                if message not in issues:
+                    issues.append(message)
+    return {
+        "name": name,
+        "subject": {
+            "repo_version": repo_version(repo),
+            "repo_revision": repo_revision,
+            "image": args.image,
+        },
+        "components": components,
+        "issues": issues,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate a repository or build-input SBOM.")
+    parser.add_argument("--repo", default=".", help="MicroPython repository root")
+    parser.add_argument("--offline", action="store_true", help="Do not query remote tags")
+    parser.add_argument("--compdb", action="append", default=[], metavar="PATH",
+                        help="Compilation database for one image; repeat for multiple databases")
+    parser.add_argument("--root", action="append", default=[], metavar="NAME=PATH",
+                        help="Explicit dependency root, relative to --repo or absolute")
+    parser.add_argument("--exclude", action="append", default=[], metavar="PATH",
+                        help="Exclude commands under this source or working directory")
+    parser.add_argument("--image", help="Identity of the single image described by the inputs")
+    parser.add_argument("--frozen", action="append", default=[], metavar="PATH",
+                        help="Resolved frozen-input JSON from makemanifest.py")
+    parser.add_argument("--format", choices=("spdx", "cyclonedx"), default="spdx")
+    parser.add_argument("-o", "--output", default="-", help="Output file, or - for stdout")
+    args = parser.parse_args()
+    if not args.compdb and (args.root or args.exclude or args.image or args.frozen):
+        parser.error("--root, --exclude, --image and --frozen require --compdb")
+    try:
+        repo = Path(args.repo).resolve()
+        document = _build_document(repo, args)
+        write_sbom(document, args.output, args.format, root=repo)
+    except (ValueError, OSError, ExtractorError, subprocess.CalledProcessError) as exc:
+        parser.exit(1, f"error: {exc}\n")
 
 
 if __name__ == "__main__":
