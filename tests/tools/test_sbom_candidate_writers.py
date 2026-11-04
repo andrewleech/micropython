@@ -96,6 +96,91 @@ class TestSbomWriters(unittest.TestCase):
         cdx = self.write("cyclonedx")["components"][0]
         self.assertEqual(cdx["licenses"], [{"acknowledgement": "declared", "expression": "Apache-2.0"}])
 
+    def test_conclusion_is_distinct_from_declaration_in_both_formats(self):
+        first = Path(self.tmpdir.name) / "first.c"
+        second = Path(self.tmpdir.name) / "second.c"
+        first.write_text("first\n", encoding="utf-8")
+        second.write_text("second\n", encoding="utf-8")
+        conclusion = "BSD-3-Clause AND (MIT OR Apache-2.0)"
+        self.model["components"] = [component(
+            "selected", "MIT", licence_declared="MIT", licence_concluded=conclusion,
+            file_licences=[
+                {"source": str(first), "expression": "BSD-3-Clause",
+                 "provenance": "source SPDX header", "trusted": True},
+                {"source": str(second), "expression": "MIT OR Apache-2.0",
+                 "provenance": "source SPDX header", "trusted": True},
+            ],
+        )]
+        spdx = next(p for p in self.write("spdx")["packages"] if p["name"] == "selected")
+        self.assertEqual(spdx["licenseDeclared"], "MIT")
+        self.assertEqual(spdx_licensing.parse(spdx["licenseConcluded"]), spdx_licensing.parse(conclusion))
+        self.assertIn("selected", spdx["licenseComments"].lower())
+        cdx = self.write("cyclonedx")["components"][0]
+        self.assertEqual(cdx["licenses"], [{"acknowledgement": "declared", "expression": "MIT"}])
+
+    def test_conclusion_without_declaration_has_concluded_acknowledgement(self):
+        source = Path(self.tmpdir.name) / "choice.c"
+        source.write_text("choice\n", encoding="utf-8")
+        choice = "MIT OR Apache-2.0"
+        self.model["components"] = [component(
+            "choice", None, licence_declared=None, licence_concluded=choice,
+            file_licences=[{"source": str(source), "expression": choice,
+                            "provenance": "source SPDX header", "trusted": True}],
+        )]
+        spdx = next(p for p in self.write("spdx")["packages"] if p["name"] == "choice")
+        self.assertEqual(spdx["licenseDeclared"], "NOASSERTION")
+        self.assertEqual(spdx_licensing.parse(spdx["licenseConcluded"]), spdx_licensing.parse(choice))
+        cdx = self.write("cyclonedx")["components"][0]
+        self.assertEqual(cdx["licenses"], [{"acknowledgement": "concluded", "expression": choice}])
+
+    def test_stale_conclusion_is_not_exported_for_incomplete_evidence(self):
+        source = Path(self.tmpdir.name) / "source.c"
+        source.write_text("source\n", encoding="utf-8")
+        for expression, trusted, issues in (
+            (None, False, []),
+            ("MIT", False, []),
+            ("MIT", True, [{"kind": "metadata_conflict", "status": "unresolved", "message": "conflict"}]),
+        ):
+            with self.subTest(expression=expression, trusted=trusted, issues=issues):
+                self.model["components"] = [component(
+                    "incomplete", None, licence_declared=None, licence_concluded="MIT",
+                    licence_issues=issues,
+                    file_licences=[{"source": str(source), "expression": expression,
+                                    "provenance": "source SPDX header", "trusted": trusted}],
+                )]
+                spdx = next(p for p in self.write("spdx")["packages"] if p["name"] == "incomplete")
+                self.assertEqual(spdx["licenseConcluded"], "NOASSERTION")
+                cdx = self.write("cyclonedx")["components"][0]
+                self.assertFalse(cdx.get("licenses"))
+
+    def test_absorbed_identifier_does_not_validate_stale_conclusion(self):
+        source = Path(self.tmpdir.name) / "source.c"
+        source.write_text("source\n", encoding="utf-8")
+        self.model["components"] = [component(
+            "dependency", None, licence_declared=None, licence_concluded="MIT",
+            file_licences=[{"source": str(source), "expression": "MIT OR (MIT AND Zlib)",
+                            "provenance": "source SPDX header", "trusted": True}],
+        )]
+        spdx = next(p for p in self.write("spdx")["packages"] if p["name"] == "dependency")
+        self.assertEqual(spdx["licenseConcluded"], "NOASSERTION")
+        self.assertFalse(self.write("cyclonedx")["components"][0].get("licenses"))
+
+    def test_shared_source_with_absorbed_identifier_blocks_both_conclusions(self):
+        source = Path(self.tmpdir.name) / "shared.c"
+        source.write_text("source\n", encoding="utf-8")
+        self.model["components"] = [
+            component(name, None, licence_declared=None, licence_concluded=expression,
+                      file_licences=[{"source": str(source), "expression": expression,
+                                      "provenance": "source SPDX header", "trusted": True}])
+            for name, expression in (("first", "MIT"), ("second", "MIT OR (MIT AND Zlib)"))
+        ]
+        packages = {p["name"]: p for p in self.write("spdx")["packages"]}
+        components = {p["name"]: p for p in self.write("cyclonedx")["components"]}
+        for name in ("first", "second"):
+            with self.subTest(name=name):
+                self.assertEqual(packages[name]["licenseConcluded"], "NOASSERTION")
+                self.assertFalse(components[name].get("licenses"))
+
     def test_purls_and_versions_match_across_formats(self):
         self.model["components"] = [
             component("parent", "MIT", "2.0", purl="pkg:generic/example@2.0", components=[

@@ -33,7 +33,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import yaml
-from license_expression import ExpressionError, get_spdx_licensing
+from license_expression import AND, OR, ExpressionError, get_spdx_licensing
 
 
 _LICENSING = get_spdx_licensing()
@@ -71,6 +71,39 @@ def _equivalent(left, right):
     if "NOASSERTION" in (left, right):
         return left == right
     return _LICENSING.is_equivalent(left, right)
+
+
+def _same_licence_terms(left, right):
+    if "NOASSERTION" in (left, right):
+        return left == right
+    left_symbols = _LICENSING.license_symbols(_LICENSING.parse(left, strict=True))
+    right_symbols = _LICENSING.license_symbols(_LICENSING.parse(right, strict=True))
+    return (
+        {symbol.key for symbol in left_symbols} == {symbol.key for symbol in right_symbols}
+        and _equivalent(left, right)
+    )
+
+
+def _concluded_licence(file_licences):
+    terms = []
+
+    def collect(expression):
+        if isinstance(expression, AND):
+            for argument in expression.args:
+                collect(argument)
+        else:
+            terms.append(expression)
+
+    for item in file_licences:
+        collect(_LICENSING.parse(item["expression"], strict=True))
+    unique = []
+    for term in sorted(terms, key=str):
+        if not any(_same_licence_terms(str(term), str(existing)) for existing in unique):
+            unique.append(term)
+    return " AND ".join(
+        f"({term})" if len(unique) > 1 and isinstance(term, OR) else str(term)
+        for term in unique
+    )
 
 
 def _load(root):
@@ -321,7 +354,7 @@ def _manifest_license(directory, texts, untrusted=()):
                         raise ValueError(f"{path}: licence is not a literal string")
                     declarations.append(_expression(keyword.value.value, texts))
     declarations = list(dict.fromkeys(value for value in declarations if value is not None))
-    if declarations and any(not _equivalent(declarations[0], value) for value in declarations[1:]):
+    if declarations and any(not _same_licence_terms(declarations[0], value) for value in declarations[1:]):
         raise _MetadataConflict(directory, declarations)
     return declarations[0] if declarations else None
 
@@ -363,7 +396,7 @@ def _source_license(path, texts):
         elif python and re.fullmatch(r"MIT licen[sc]e(?:;\s*Copyright\b.*)?", comment, re.IGNORECASE):
             legacy_mit = True
     declarations = list(dict.fromkeys(value for value in declarations if value is not None))
-    if declarations and any(not _equivalent(declarations[0], value) for value in declarations[1:]):
+    if declarations and any(not _same_licence_terms(declarations[0], value) for value in declarations[1:]):
         raise _MetadataConflict(path, declarations)
     if not declarations and legacy_mit:
         return "MIT", "source MIT header"
@@ -518,7 +551,7 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
                           metadata=repr(existing))
         try:
             manifest = _manifest_license(directory, component_texts, untrusted_metadata)
-            if explicit and manifest and not _equivalent(explicit, manifest):
+            if explicit and manifest and not _same_licence_terms(explicit, manifest):
                 add_issue("metadata_conflict", f"conflicting package licence declarations {explicit} and {manifest}",
                           expressions=[explicit, manifest])
             explicit = explicit or manifest
@@ -581,7 +614,7 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
                 for other in matches[1:]:
                     if (other["scope"] == entry["scope"] and other.get("expression")
                             and entry.get("expression")
-                            and not _equivalent(other["expression"], entry["expression"])):
+                            and not _same_licence_terms(other["expression"], entry["expression"])):
                         add_issue("metadata_conflict",
                                   f"{source}: conflicting reviewed declarations at {entry['scope']}",
                                   source=str(source), scope=entry["scope"],
@@ -637,7 +670,7 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
                 and any(other.get("external") and other.get("expression")
                         and other["scope"] != entry["scope"]
                         and _covers(other["scope"], entry["scope"])
-                        and not _equivalent(other["expression"], declared)
+                        and not _same_licence_terms(other["expression"], declared)
                         for other in matches)
             )
             scoped_conflict = (
@@ -652,7 +685,7 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
                          if entry.get("external") else
                          scope_rank(entry) >= scope_rank({"scope": directory.relative_to(declaration_root).as_posix()}))
                 ))
-                and not _equivalent(source_license, declared)
+                and not _same_licence_terms(source_license, declared)
             )
             if scoped_conflict:
                 add_issue("metadata_conflict",
@@ -669,7 +702,7 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
                         "scope": directory.relative_to(declaration_root).as_posix()
                     })
                 ))
-                and not _equivalent(explicit, declared)
+                and not _same_licence_terms(explicit, declared)
             )
             if metadata_conflict:
                 add_issue("metadata_conflict",
@@ -725,7 +758,7 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
                     if not (literal.startswith(prefix) or (_GLOB.search(scope) and prefix.startswith(literal))):
                         continue
                     candidate_expression = candidate.get("expression")
-                    if not expression or not candidate_expression or not _equivalent(expression, candidate_expression):
+                    if not expression or not candidate_expression or not _same_licence_terms(expression, candidate_expression):
                         nested.append({"scope": scope, "expression": candidate_expression})
                 if nested:
                     add_issue("nested_licence_scopes",
@@ -742,7 +775,7 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
                     add_issue("missing_assertion", f"{source}: no asserted licence; declaration review required",
                               source=str(source))
                 continue
-            if not any(_equivalent(expression, value) for value in expressions):
+            if not any(_same_licence_terms(expression, value) for value in expressions):
                 expressions.append(expression)
             if file_licence["trusted"]:
                 for symbol in _LICENSING.license_symbols(_LICENSING.parse(expression, strict=True)):
@@ -752,6 +785,11 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
         component["licence_mixed"] = len(expressions) > 1
         component["licence_declared"] = (
             expressions[0] if len(expressions) == 1 and all(item["trusted"] for item in file_licences) else None
+        )
+        component["licence_concluded"] = (
+            _concluded_licence(file_licences)
+            if file_licences and not component_issues and all(item["trusted"] for item in file_licences)
+            else None
         )
         component["licence_status"] = "unresolved" if component_issues else "mixed" if component["licence_mixed"] else "resolved"
         component["licence"] = None if component_issues else component["licence_declared"]

@@ -139,7 +139,8 @@ class TestReviewedNimble(unittest.TestCase):
         document = json.loads(output.read_text(encoding="utf-8"))
         package = next(item for item in document["packages"] if item["name"] == "mynewt-nimble")
         self.assertEqual(package["licenseDeclared"], "NOASSERTION")
-        self.assertEqual(package["licenseConcluded"], "NOASSERTION")
+        self.assertEqual(spdx_licensing.parse(package["licenseConcluded"]),
+                         spdx_licensing.parse("Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause"))
         records = {item["fileName"].removeprefix("./"): item for item in document["files"]}
         self.assertEqual(set(records), set(self.EXPECTED))
         evidence = {rel["spdxElementId"] for rel in document["relationships"]

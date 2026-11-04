@@ -1404,6 +1404,7 @@ def _build_document(repo, args):
         if component.get("identity_problems"):
             component["licence_status"] = "unresolved"
             component["licence_declared"] = None
+            component["licence_concluded"] = None
             component["licence"] = None
             component["licence_texts"] = {}
             component["licence_details"] = {}

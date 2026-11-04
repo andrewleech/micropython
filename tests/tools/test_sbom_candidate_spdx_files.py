@@ -173,6 +173,14 @@ class TestSpdxFileLicences(unittest.TestCase):
         self.assertEqual(record["licenseInfoInFiles"], ["NOASSERTION"])
         self.assertEqual(validate_full_spdx_document(JsonLikeDictParser().parse(document)), [])
 
+    def test_shared_file_does_not_absorb_a_distinct_licence_identifier(self):
+        source = self.source("vendor/child/shared.c", "shared source\n")
+        document = self.nested_document(source, "MIT", "MIT OR (MIT AND Zlib)")
+        self.assertEqual(len(document["files"]), 1)
+        record = document["files"][0]
+        self.assertEqual(record["licenseConcluded"], "NOASSERTION")
+        self.assertEqual(record["licenseInfoInFiles"], ["NOASSERTION"])
+
     def test_untrusted_child_does_not_inherit_parent_file_conclusion(self):
         source = self.source("vendor/child/shared.c", "shared source\n")
         document = self.nested_document(source, "MIT", None, child_trusted=False)

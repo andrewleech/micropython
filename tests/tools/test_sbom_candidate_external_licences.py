@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 import yaml
+from spdx_tools.common.spdx_licensing import spdx_licensing
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -39,6 +40,10 @@ class TestExternalLicences(unittest.TestCase):
         self.put(self.checkout, "library.json", '{"license": "Apache-2.0"}\n')
         self.put(self.checkout, "src/default.c", "int default_source;\n")
         self.put(self.checkout, "src/header.c", "// SPDX-License-Identifier: BSD-3-Clause\nint header;\n")
+        self.put(self.checkout, "src/choice.c", "// SPDX-License-Identifier: MIT OR Apache-2.0\nint choice;\n")
+        self.put(self.checkout, "src/absorbed-choice.c",
+                 "// SPDX-License-Identifier: MIT OR (MIT AND Zlib)\nint choice;\n")
+        self.put(self.checkout, "src/duplicate.c", "int duplicate;\n")
         self.put(self.checkout, "src/special/exception.c", "int exception;\n")
         self.put(self.checkout, "src/special/conflict.c", "// SPDX-License-Identifier: Apache-2.0\nint conflict;\n")
         self.put(self.checkout, "metadata/library.json", '{"license": "Apache-2.0"}\n')
@@ -98,6 +103,7 @@ class TestExternalLicences(unittest.TestCase):
         self.assertIsNone(file_licence["expression"])
         self.assertFalse(file_licence["trusted"])
         self.assertIsNone(component["licence"])
+        self.assertIsNone(component["licence_concluded"])
         self.assertTrue(issues)
 
     def test_matching_checkout_and_selected_path(self):
@@ -108,6 +114,86 @@ class TestExternalLicences(unittest.TestCase):
         self.assertTrue(file_licence["trusted"])
         component, file_licence, issues = self.resolve("other/uncovered.c")
         self.assert_unresolved(component, file_licence, issues)
+
+    def test_mixed_selected_files_conclude_all_terms_without_losing_choice(self):
+        sources = ["src/default.c", "src/header.c", "src/choice.c", "src/duplicate.c"]
+        component = {
+            "name": "dependency", "version": None, "path": str(self.checkout / "src"),
+            "owner_root": str(self.checkout), "declaration_root": str(self.checkout),
+            "revision": self.revision, "sources": [str(self.checkout / path) for path in sources],
+        }
+        self.assertEqual(resolve_licences(self.repo, [component]), [])
+        self.assertIsNone(component["licence_declared"])
+        self.assertEqual(component["licence_status"], "mixed")
+        expected = spdx_licensing.parse("MIT AND BSD-3-Clause AND (MIT OR Apache-2.0)")
+        self.assertEqual(spdx_licensing.parse(component["licence_concluded"]), expected)
+
+        # Reordering selected files must not change the serialized conclusion.
+        conclusion = component["licence_concluded"]
+        component["sources"].reverse()
+        self.assertEqual(resolve_licences(self.repo, [component]), [])
+        self.assertEqual(component["licence_concluded"], conclusion)
+
+        model = {"name": "test-image", "issues": [], "components": [component]}
+        for format in ("spdx", "cyclonedx"):
+            output = self.base / (format + ".json")
+            write_sbom(model, output, format, root=self.repo)
+            document = json.loads(output.read_text(encoding="utf-8"))
+            if format == "spdx":
+                package = next(item for item in document["packages"] if item["name"] == "dependency")
+                self.assertEqual(package["licenseDeclared"], "NOASSERTION")
+                self.assertEqual(spdx_licensing.parse(package["licenseConcluded"]), expected)
+                self.assertIn("selected", package["licenseComments"].lower())
+            else:
+                package = next(item for item in document["components"] if item["name"] == "dependency")
+                self.assertEqual(len(package["licenses"]), 1)
+                self.assertEqual(package["licenses"][0]["acknowledgement"], "concluded")
+                self.assertEqual(spdx_licensing.parse(package["licenses"][0]["expression"]), expected)
+
+    def test_selected_choice_is_not_lost_to_boolean_absorption(self):
+        sources = ["src/default.c", "src/absorbed-choice.c"]
+        component = {
+            "name": "dependency", "version": None, "path": str(self.checkout / "src"),
+            "owner_root": str(self.checkout), "declaration_root": str(self.checkout),
+            "revision": self.revision, "sources": [str(self.checkout / path) for path in sources],
+        }
+        self.assertEqual(resolve_licences(self.repo, [component]), [])
+        choice = component["file_licences"][1]["expression"]
+        self.assertIn("Zlib", choice)
+        self.assertIn(" OR ", choice)
+        self.assertIsNone(component["licence_declared"])
+        self.assertIn("Zlib", component["licence_concluded"])
+        self.assertIn(" OR ", component["licence_concluded"])
+
+        model = {"name": "test-image", "issues": [], "components": [component]}
+        for format in ("spdx", "cyclonedx"):
+            with self.subTest(format=format):
+                output = self.base / (format + ".json")
+                write_sbom(model, output, format, root=self.repo)
+                document = json.loads(output.read_text(encoding="utf-8"))
+                if format == "spdx":
+                    package = next(item for item in document["packages"] if item["name"] == "dependency")
+                    conclusion = package["licenseConcluded"]
+                    self.assertEqual(package["licenseDeclared"], "NOASSERTION")
+                else:
+                    package = next(item for item in document["components"] if item["name"] == "dependency")
+                    self.assertEqual(package["licenses"][0]["acknowledgement"], "concluded")
+                    conclusion = package["licenses"][0]["expression"]
+                self.assertIn("Zlib", conclusion)
+                self.assertIn(" OR ", conclusion)
+
+    def test_partial_selection_never_concludes_a_licence(self):
+        for other in ("other/uncovered.c", "src/special/conflict.c"):
+            with self.subTest(other=other):
+                component = {
+                    "name": "dependency", "path": str(self.checkout / "src"),
+                    "owner_root": str(self.checkout), "declaration_root": str(self.checkout),
+                    "revision": self.revision,
+                    "sources": [str(self.checkout / "src/default.c"), str(self.checkout / other)],
+                }
+                self.assertTrue(resolve_licences(self.repo, [component]))
+                self.assertTrue(any(item["trusted"] for item in component["file_licences"]))
+                self.assertIsNone(component["licence_concluded"])
 
     def test_source_and_package_metadata_take_precedence_over_default(self):
         component, file_licence, issues = self.resolve("metadata/package.c")
@@ -285,11 +371,13 @@ class TestExternalLicences(unittest.TestCase):
                 evidence = cdx_component.get("evidence", {}).get("licenses", [])
                 if dirty:
                     self.assertTrue(component["identity_problems"])
+                    self.assertIsNone(component["licence_concluded"])
                     self.assertIsNone(component["licence"])
                     self.assertNotIn(ref, extracted)
                     self.assertEqual(evidence, [])
                 else:
                     self.assertEqual(component["licence"], ref)
+                    self.assertEqual(component["licence_concluded"], ref)
                     self.assertIn(ref, extracted)
                     self.assertTrue(evidence)
 

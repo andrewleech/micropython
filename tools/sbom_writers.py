@@ -138,7 +138,7 @@ def _identity(index, component):
     return f"{index}-{digest}"
 
 
-def _provenance(component):
+def _provenance(component, concluded):
     provenance = {
         key: component[key]
         for key in (
@@ -151,6 +151,8 @@ def _provenance(component):
     }
     if "licence_declared" in component:
         provenance["licence_declared"] = _declared_licence(component)
+    if "licence_concluded" in component:
+        provenance["licence_concluded"] = concluded
     return provenance
 
 
@@ -226,7 +228,65 @@ def _licence_comments(item):
     return comments
 
 
-def _write_spdx(model, path, extracted, original, root):
+def _same_licence_terms(left, right):
+    return (
+        {symbol.key for symbol in spdx_licensing.license_symbols(left)}
+        == {symbol.key for symbol in spdx_licensing.license_symbols(right)}
+        and spdx_licensing.is_equivalent(left, right)
+    )
+
+
+def _safe_conclusions(model, original, root):
+    """Check conclusions against the selected records, including shared sources."""
+    items = list(_components(model["components"]))
+    originals = list(_components(original["components"]))
+    if len(items) != len(originals):
+        return {}
+
+    sources = {}
+    records = {}
+    for (identity, item, _), (_, original_item, _) in zip(items, originals):
+        evidence = item.get("file_licences", [])
+        original_evidence = original_item.get("file_licences", [])
+        if len(evidence) != len(original_evidence):
+            return {}
+        keys = []
+        valid = bool(evidence) and not item.get("licence_issues")
+        for file, original_file in zip(evidence, original_evidence):
+            source = original_file.get("source")
+            expression = file.get("expression")
+            trusted = bool(file.get("trusted") and expression)
+            if (not source or file.get("expression") != original_file.get("expression")
+                    or file.get("trusted") != original_file.get("trusted")):
+                valid = False
+                continue
+            source = Path(source)
+            if not source.is_absolute():
+                source = (root if root is not None else Path.cwd()) / source
+            source = source.resolve()
+            keys.append(source)
+            licence = spdx_licensing.parse(expression) if trusted else None
+            if source not in sources:
+                sources[source] = [licence, not trusted]
+            else:
+                previous = sources[source]
+                if not trusted or previous[0] is None or not _same_licence_terms(previous[0], licence):
+                    previous[1] = True
+            valid &= trusted
+        records[identity] = (item, evidence, keys, valid)
+
+    conclusions = {}
+    for identity, (item, evidence, keys, valid) in records.items():
+        conclusion = item.get("licence_concluded")
+        if not conclusion or not valid or any(sources[key][1] for key in keys):
+            continue
+        selected = " AND ".join(f"({file['expression']})" for file in evidence)
+        if _same_licence_terms(spdx_licensing.parse(conclusion), spdx_licensing.parse(selected)):
+            conclusions[identity] = conclusion
+    return conclusions
+
+
+def _write_spdx(model, path, extracted, original, root, conclusions):
     now = datetime.now(timezone.utc).replace(microsecond=0)
     tool = Actor(ActorType.TOOL, _TOOL)
     build_inputs = bool(model.get("subject", {}).get("image"))
@@ -263,6 +323,12 @@ def _write_spdx(model, path, extracted, original, root):
         if item.get("cpe"):
             references.append(ExternalPackageRef(ExternalPackageRefCategory.SECURITY, "cpe23Type", item["cpe"]))
         declared = _declared_licence(item)
+        concluded = conclusions.get(identity)
+        comments = _licence_comments(item)
+        if concluded and (not declared or not _same_licence_terms(
+            spdx_licensing.parse(concluded), spdx_licensing.parse(declared)
+        )):
+            comments.append("Licence conclusion covers the selected source files, not the entire dependency.")
         packages.append(
             Package(
                 spdx_id=identifier,
@@ -270,9 +336,9 @@ def _write_spdx(model, path, extracted, original, root):
                 version=item["version"],
                 download_location=_NO_ASSERTION,
                 files_analyzed=False,
-                license_concluded=_NO_ASSERTION,
+                license_concluded=spdx_licensing.parse(concluded) if concluded else _NO_ASSERTION,
                 license_declared=spdx_licensing.parse(declared) if declared else _NO_ASSERTION,
-                license_comment="\n".join(_licence_comments(item)) or None,
+                license_comment="\n".join(comments) or None,
                 copyright_text=_NO_ASSERTION,
                 external_references=references,
             )
@@ -285,7 +351,7 @@ def _write_spdx(model, path, extracted, original, root):
             relationships.append(Relationship(identifier, RelationshipType.BUILD_DEPENDENCY_OF, "SPDXRef-MicroPython"))
         else:
             relationships.append(Relationship("SPDXRef-MicroPython", RelationshipType.CONTAINS, identifier))
-        annotations.append(Annotation(identifier, AnnotationType.OTHER, tool, now, _json(_provenance(item))))
+        annotations.append(Annotation(identifier, AnnotationType.OTHER, tool, now, _json(_provenance(item, concluded))))
         if build_inputs:
             for index, (evidence, original_evidence) in enumerate(zip(
                 item.get("file_licences", []), original_item.get("file_licences", [])
@@ -315,7 +381,7 @@ def _write_spdx(model, path, extracted, original, root):
                         entry["conflict"] = True
                     elif entry["licence"] is None:
                         entry["licence"] = licence
-                    elif not spdx_licensing.is_equivalent(entry["licence"], licence):
+                    elif not _same_licence_terms(entry["licence"], licence):
                         entry["conflict"] = True
                     entry["in_file"] |= trusted and evidence.get("provenance") in (
                         "source SPDX header", "source MIT header"
@@ -393,8 +459,9 @@ def _write_spdx(model, path, extracted, original, root):
     _write_output(path, stream.getvalue() + "\n")
 
 
-def _cyclonedx_component(item, identity):
-    provenance = _provenance(item)
+def _cyclonedx_component(item, identity, conclusions):
+    concluded = conclusions.get(identity)
+    provenance = _provenance(item, concluded)
     properties = [Property(name="micropython:" + key, value=_json(value)) for key, value in provenance.items()]
     properties.extend(Property(name=prop["name"], value=prop["value"]) for prop in item.get("properties", []))
     evidence = None
@@ -422,7 +489,8 @@ def _cyclonedx_component(item, identity):
         version=item["version"],
         purl=PackageURL.from_string(_purl(item)) if item.get("purl") else None,
         cpe=item.get("cpe"),
-        licenses=[LicenseExpression(declared, acknowledgement=LicenseAcknowledgement.DECLARED)] if declared else None,
+        licenses=([LicenseExpression(declared, acknowledgement=LicenseAcknowledgement.DECLARED)] if declared else
+                  [LicenseExpression(concluded, acknowledgement=LicenseAcknowledgement.CONCLUDED)] if concluded else None),
         evidence=evidence,
         properties=properties,
         external_references=[
@@ -437,17 +505,17 @@ def _cyclonedx_component(item, identity):
             })
         ],
         components=[
-            _cyclonedx_component(child, identity + "/" + _identity(index, child))
+            _cyclonedx_component(child, identity + "/" + _identity(index, child), conclusions)
             for index, child in enumerate(item.get("components", []))
         ],
     )
 
 
-def _write_cyclonedx(model, path):
+def _write_cyclonedx(model, path, conclusions):
     subject = model.get("subject", {})
     build_inputs = bool(subject.get("image"))
     components = [
-        _cyclonedx_component(item, _identity(index, item))
+        _cyclonedx_component(item, _identity(index, item), conclusions)
         for index, item in enumerate(model["components"])
     ]
     bom = Bom(
@@ -496,10 +564,11 @@ def write_sbom(model, path, format, *, root=None):
     root = Path(root) if root is not None else None
     original = model
     model = _portable_model(model, root if root is not None else Path(__file__).resolve().parent.parent)
+    conclusions = _safe_conclusions(model, original, root)
     extracted = _extracted_licences(model)
     if format == "spdx":
-        _write_spdx(model, path, extracted, original, root)
+        _write_spdx(model, path, extracted, original, root, conclusions)
     elif format == "cyclonedx":
-        _write_cyclonedx(model, path)
+        _write_cyclonedx(model, path, conclusions)
     else:
         raise ValueError(f"Unsupported SBOM format: {format}")

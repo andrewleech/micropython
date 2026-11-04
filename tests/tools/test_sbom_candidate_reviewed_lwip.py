@@ -9,6 +9,7 @@ import tempfile
 import unittest
 
 import yaml
+from spdx_tools.common.spdx_licensing import spdx_licensing
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -147,7 +148,8 @@ OF SUCH DAMAGE.
         document = json.loads(output.read_text(encoding="utf-8"))
         package = next(item for item in document["packages"] if item["name"] == "lwip")
         self.assertEqual(package["licenseDeclared"], "NOASSERTION")
-        self.assertEqual(package["licenseConcluded"], "NOASSERTION")
+        self.assertEqual(spdx_licensing.parse(package["licenseConcluded"]),
+                         spdx_licensing.parse("BSD-3-Clause AND LicenseRef-PPP-Komulainen"))
         self.assertNotIn("licenseInfoFromFiles", package)
         records = {item["fileName"]: item for item in document["files"]}
         for path, expression in self.SOURCES.items():
@@ -165,7 +167,6 @@ OF SUCH DAMAGE.
         details = {item["licenseId"]: item for item in document["hasExtractedLicensingInfos"]}
         self.assertIn("Tommi Komulainen", details[self.REF]["extractedText"])
         self.assertTrue(details[self.REF].get("seeAlsos"))
-        self.assertNotIn("BSD-3-Clause AND " + self.REF, json.dumps(package))
 
     def test_exact_pin_mismatch_blocks_reviewed_assertions(self):
         for declaration, revision in ((self.entry()["commit"], self.fixture_revision),

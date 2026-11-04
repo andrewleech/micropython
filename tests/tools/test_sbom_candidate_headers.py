@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -102,6 +103,56 @@ class TestFrozenSourceHeaders(unittest.TestCase):
              for item in component["file_licences"]],
             [(str(source), "MIT", "source SPDX header", False)],
         )
+
+    def test_absorbed_identifier_in_multiple_headers_is_a_conflict(self):
+        self.declarations()
+        source = self.write(
+            "package/mod.py",
+            "# SPDX-License-Identifier: MIT\n"
+            "# SPDX-License-Identifier: MIT OR (MIT AND Zlib)\npass\n",
+        )
+        component = self.component(source)
+        self.assertTrue(resolve_licences(self.root, [component]))
+        conflict = next(issue for issue in component["licence_issues"] if issue["kind"] == "metadata_conflict")
+        self.assertEqual(set(conflict["expressions"]), {"MIT", "MIT OR (MIT AND Zlib)"})
+        self.assertIsNone(component["licence_concluded"])
+
+    def test_absorbed_identifier_in_manifest_metadata_is_a_conflict(self):
+        self.declarations()
+        source = self.write("package/mod.py", "pass\n")
+        self.write(
+            "package/manifest.py",
+            'metadata(license="MIT")\nmetadata(license="MIT OR (MIT AND Zlib)")\n',
+        )
+        component = self.component(source)
+        self.assertTrue(resolve_licences(self.root, [component]))
+        conflict = next(issue for issue in component["licence_issues"] if issue["kind"] == "metadata_conflict")
+        self.assertEqual(set(conflict["expressions"]), {"MIT", "MIT OR (MIT AND Zlib)"})
+        self.assertIsNone(component["licence_concluded"])
+
+    def test_absorbed_identifier_in_nested_scope_is_not_lost(self):
+        self.write("package/nested/mod.py", "pass\n")
+        subprocess.run(["git", "-C", str(self.root), "init", "-q"], check=True)
+        subprocess.run(["git", "-C", str(self.root), "add", "package"], check=True)
+        subprocess.run([
+            "git", "-C", str(self.root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+            "-c", "commit.gpgsign=false", "commit", "-qm", "fixture",
+        ], check=True)
+        tree = subprocess.check_output(
+            ["git", "-C", str(self.root), "rev-parse", "HEAD:package"], text=True,
+        ).strip()
+        self.declarations(
+            {"name": "package", "packageFileName": "package", "licenseDeclared": "MIT",
+             "externalRefs": [{"referenceCategory": "PERSISTENT-ID", "referenceType": "gitoid",
+                               "referenceLocator": "gitoid:tree:sha1:" + tree}]},
+            {"name": "nested", "packageFileName": "package/nested/mod.py",
+             "licenseDeclared": "MIT OR (MIT AND Zlib)"},
+        )
+        component = self.component(self.root / "package")
+        self.assertTrue(resolve_licences(self.root, [component]))
+        issue = next(issue for issue in component["licence_issues"] if issue["kind"] == "nested_licence_scopes")
+        self.assertIn("Zlib", str(issue["declarations"]))
+        self.assertIsNone(component["licence_concluded"])
 
     def test_header_does_not_license_another_selected_file(self):
         self.declarations()

@@ -85,6 +85,7 @@ class TestCandidateConflicts(unittest.TestCase):
         item, documents = self.fixture()
         self.assertEqual(item["licence_declared"], "BSD-4-Clause")
         self.assertIsNone(item["licence"])
+        self.assertIsNone(item["licence_concluded"])
         self.assertEqual(item["licence_status"], "unresolved")
         self.assertEqual({issue["kind"] for issue in item["licence_issues"]}, {"licence_gap"})
         package, provenance, component, properties = self.serialized_component(documents)
@@ -104,6 +105,7 @@ class TestCandidateConflicts(unittest.TestCase):
     def test_pin_mismatch_does_not_serialize_partial_declaration(self):
         item, documents = self.fixture(mismatch=True)
         self.assertIsNone(item["licence_declared"])
+        self.assertIsNone(item["licence_concluded"])
         self.assertIsNone(item["licence"])
         self.assertEqual(item["licence_status"], "unresolved")
         self.assertIn("pin_mismatch", {issue["kind"] for issue in item["licence_issues"]})
