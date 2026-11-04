@@ -28,6 +28,7 @@
 #include <string.h>
 #include <stdint.h>
 
+#include "py/smallint.h"
 #include "py/runtime.h"
 #include "py/objtuple.h"
 #include "py/binary.h"
@@ -89,11 +90,22 @@ typedef struct _mp_obj_uctypes_struct_t {
     uint32_t flags;
 } mp_obj_uctypes_struct_t;
 
-static NORETURN void syntax_error(void) {
+static MP_NORETURN void syntax_error(void) {
     mp_raise_TypeError(MP_ERROR_TEXT("syntax error in uctypes descriptor"));
 }
 
 static mp_obj_t uctypes_struct_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+    // Because mpy-cross turns an expression like `uctypes.INT8` into a single
+    // constant integer load, the uctypes constant values must be consistent, no
+    // matter the OBJ_REPR and mp_int_t type.
+    //
+    // However, these constants are 31 bits (counting the sign bit) while
+    // OBJ_REPR_B with 32-bit mp_int_t provides only 30 bits of small integer, so
+    // this combination is unsupported.
+    //
+    // For more information, see https://github.com/micropython/micropython/issues/18105
+    MP_STATIC_ASSERT(MP_SMALL_INT_BITS >= 31);
+
     mp_arg_check_num(n_args, n_kw, 2, 3, false);
     mp_obj_uctypes_struct_t *o = mp_obj_malloc(mp_obj_uctypes_struct_t, type);
     o->addr = (void *)(uintptr_t)mp_obj_get_int_truncated(args[0]);
@@ -143,7 +155,7 @@ static inline mp_uint_t uctypes_struct_scalar_size(int val_type) {
 
 // Get size of aggregate type descriptor
 static mp_uint_t uctypes_struct_agg_size(mp_obj_tuple_t *t, int layout_type, mp_uint_t *max_field_size) {
-    if (t->len == 0) {
+    if (t->len < 2) {
         syntax_error();
     }
 
@@ -451,8 +463,8 @@ static mp_obj_t uctypes_struct_attr_op(mp_obj_t self_in, qstr attr, mp_obj_t set
                 if (self->flags == LAYOUT_NATIVE) {
                     set_aligned_basic(val_type & 6, self->addr + offset, val);
                 } else {
-                    mp_binary_set_int(GET_SCALAR_SIZE(val_type & 7), self->flags == LAYOUT_BIG_ENDIAN,
-                        self->addr + offset, val);
+                    size_t item_size = GET_SCALAR_SIZE(val_type & 7);
+                    mp_binary_set_int(item_size, self->addr + offset, item_size, val, self->flags == LAYOUT_BIG_ENDIAN);
                 }
                 return set_val; // just !MP_OBJ_NULL
             }
@@ -605,7 +617,7 @@ static mp_obj_t uctypes_struct_unary_op(mp_unary_op_t op, mp_obj_t self_in) {
                 uint agg_type = GET_TYPE(offset, AGG_TYPE_BITS);
                 if (agg_type == PTR) {
                     byte *p = *(void **)self->addr;
-                    return mp_obj_new_int((mp_int_t)(uintptr_t)p);
+                    return mp_obj_new_int_from_uint((uintptr_t)p);
                 }
             }
             MP_FALLTHROUGH
@@ -632,7 +644,7 @@ static mp_int_t uctypes_get_buffer(mp_obj_t self_in, mp_buffer_info_t *bufinfo, 
 static mp_obj_t uctypes_struct_addressof(mp_obj_t buf) {
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(buf, &bufinfo, MP_BUFFER_READ);
-    return mp_obj_new_int((mp_int_t)(uintptr_t)bufinfo.buf);
+    return mp_obj_new_int_from_uint((uintptr_t)bufinfo.buf);
 }
 MP_DEFINE_CONST_FUN_OBJ_1(uctypes_struct_addressof_obj, uctypes_struct_addressof);
 

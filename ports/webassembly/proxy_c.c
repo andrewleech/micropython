@@ -59,8 +59,9 @@ enum {
     PROXY_KIND_JS_INTEGER = 3,
     PROXY_KIND_JS_DOUBLE = 4,
     PROXY_KIND_JS_STRING = 5,
-    PROXY_KIND_JS_OBJECT = 6,
-    PROXY_KIND_JS_PYPROXY = 7,
+    PROXY_KIND_JS_OBJECT_EXISTING = 6,
+    PROXY_KIND_JS_OBJECT = 7,
+    PROXY_KIND_JS_PYPROXY = 8,
 };
 
 MP_DEFINE_CONST_OBJ_TYPE(
@@ -83,6 +84,9 @@ void proxy_c_init(void) {
     MP_STATE_PORT(proxy_c_dict) = mp_obj_new_dict(0);
     mp_obj_list_append(MP_STATE_PORT(proxy_c_ref), MP_OBJ_NULL);
     proxy_c_ref_next = PROXY_C_REF_NUM_STATIC;
+
+    void mp_obj_jsproxy_init(void);
+    mp_obj_jsproxy_init();
 }
 
 MP_REGISTER_ROOT_POINTER(mp_obj_t proxy_c_ref);
@@ -172,6 +176,8 @@ mp_obj_t proxy_convert_js_to_mp_obj_cside(uint32_t *value) {
         return s;
     } else if (value[0] == PROXY_KIND_JS_PYPROXY) {
         return proxy_c_get_obj(value[1]);
+    } else if (value[0] == PROXY_KIND_JS_OBJECT_EXISTING) {
+        return mp_obj_get_jsproxy(value[1]);
     } else {
         // PROXY_KIND_JS_OBJECT
         return mp_obj_new_jsproxy(value[1]);
@@ -202,7 +208,7 @@ void proxy_convert_mp_to_js_obj_cside(mp_obj_t obj, uint32_t *out) {
         out[2] = (uintptr_t)str;
     } else if (obj == mp_const_undefined) {
         kind = PROXY_KIND_MP_JSPROXY;
-        out[1] = 1;
+        out[1] = MP_OBJ_JSPROXY_REF_UNDEFINED;
     } else if (mp_obj_is_jsproxy(obj)) {
         kind = PROXY_KIND_MP_JSPROXY;
         out[1] = mp_obj_jsproxy_get_ref(obj);
@@ -257,12 +263,12 @@ void proxy_c_to_js_call(uint32_t c_ref, uint32_t n_args, uint32_t *args_value, u
         mp_obj_t obj = proxy_c_get_obj(c_ref);
         mp_obj_t member = mp_call_function_n_kw(obj, n_args, 0, args);
         nlr_pop();
-        external_call_depth_dec();
         proxy_convert_mp_to_js_obj_cside(member, out);
+        external_call_depth_dec(member);
     } else {
         // uncaught exception
-        external_call_depth_dec();
         proxy_convert_mp_to_js_exc_cside(nlr.ret_val, out);
+        external_call_depth_dec(nlr.ret_val);
     }
 }
 
@@ -285,12 +291,12 @@ void proxy_c_to_js_dir(uint32_t c_ref, uint32_t *out) {
             dir = mp_builtin_dir_obj.fun.var(1, args);
         }
         nlr_pop();
-        external_call_depth_dec();
         proxy_convert_mp_to_js_obj_cside(dir, out);
+        external_call_depth_dec(dir);
     } else {
         // uncaught exception
-        external_call_depth_dec();
         proxy_convert_mp_to_js_exc_cside(nlr.ret_val, out);
+        external_call_depth_dec(nlr.ret_val);
     }
 }
 
@@ -333,12 +339,12 @@ void proxy_c_to_js_lookup_attr(uint32_t c_ref, const char *attr_in, uint32_t *ou
             member = mp_load_attr(obj, attr);
         }
         nlr_pop();
-        external_call_depth_dec();
         proxy_convert_mp_to_js_obj_cside(member, out);
+        external_call_depth_dec(member);
     } else {
         // uncaught exception
-        external_call_depth_dec();
         proxy_convert_mp_to_js_exc_cside(nlr.ret_val, out);
+        external_call_depth_dec(nlr.ret_val);
     }
 }
 
@@ -364,11 +370,11 @@ static bool proxy_c_to_js_store_helper(uint32_t c_ref, const char *attr_in, uint
             mp_store_attr(obj, attr, value);
         }
         nlr_pop();
-        external_call_depth_dec();
+        external_call_depth_dec(MP_OBJ_NULL);
         return true;
     } else {
         // uncaught exception
-        external_call_depth_dec();
+        external_call_depth_dec(MP_OBJ_NULL);
         return false;
     }
 }
@@ -381,34 +387,33 @@ bool proxy_c_to_js_delete_attr(uint32_t c_ref, const char *attr_in) {
     return proxy_c_to_js_store_helper(c_ref, attr_in, NULL);
 }
 
-uint32_t proxy_c_to_js_get_type(uint32_t c_ref) {
+uint32_t proxy_c_to_js_get_type_and_data(uint32_t c_ref, uint32_t *out) {
     mp_obj_t obj = proxy_c_get_obj(c_ref);
     const mp_obj_type_t *type = mp_obj_get_type(obj);
-    if (type == &mp_type_tuple) {
-        return 1;
-    } else if (type == &mp_type_list) {
-        return 2;
+    mp_buffer_info_t bufinfo;
+    if (type == &mp_type_tuple || type == &mp_type_list) {
+        size_t len;
+        mp_obj_t *items;
+        mp_obj_get_array(obj, &len, &items);
+        out[0] = len;
+        out[1] = (uintptr_t)items;
+        if (type == &mp_type_tuple) {
+            return 1;
+        } else {
+            return 2;
+        }
     } else if (type == &mp_type_dict) {
+        mp_map_t *map = mp_obj_dict_get_map(obj);
+        out[0] = map->alloc;
+        out[1] = (uintptr_t)map->table;
         return 3;
-    } else {
+    } else if (mp_get_buffer(obj, &bufinfo, MP_BUFFER_READ)) {
+        out[0] = bufinfo.len;
+        out[1] = (uintptr_t)bufinfo.buf;
         return 4;
+    } else {
+        return 0;
     }
-}
-
-void proxy_c_to_js_get_array(uint32_t c_ref, uint32_t *out) {
-    mp_obj_t obj = proxy_c_get_obj(c_ref);
-    size_t len;
-    mp_obj_t *items;
-    mp_obj_get_array(obj, &len, &items);
-    out[0] = len;
-    out[1] = (uintptr_t)items;
-}
-
-void proxy_c_to_js_get_dict(uint32_t c_ref, uint32_t *out) {
-    mp_obj_t obj = proxy_c_get_obj(c_ref);
-    mp_map_t *map = mp_obj_dict_get_map(obj);
-    out[0] = map->alloc;
-    out[1] = (uintptr_t)map->table;
 }
 
 EM_JS(void, js_get_error_info, (int jsref, uint32_t * out_name, uint32_t * out_message), {
@@ -445,21 +450,22 @@ bool proxy_c_to_js_iternext(uint32_t c_ref, uint32_t *out) {
         mp_obj_t obj = proxy_c_get_obj(c_ref);
         mp_obj_t iter = mp_iternext_allow_raise(obj);
         if (iter == MP_OBJ_STOP_ITERATION) {
-            external_call_depth_dec();
+            external_call_depth_dec(MP_OBJ_NULL);
             nlr_pop();
             return false;
         }
         nlr_pop();
-        external_call_depth_dec();
         proxy_convert_mp_to_js_obj_cside(iter, out);
+        external_call_depth_dec(iter);
         return true;
     } else {
-        external_call_depth_dec();
         if (mp_obj_is_subclass_fast(MP_OBJ_FROM_PTR(((mp_obj_base_t *)nlr.ret_val)->type), MP_OBJ_FROM_PTR(&mp_type_StopIteration))) {
+            external_call_depth_dec(MP_OBJ_NULL);
             return false;
         } else {
             // uncaught exception
             proxy_convert_mp_to_js_exc_cside(nlr.ret_val, out);
+            external_call_depth_dec(nlr.ret_val);
             return true;
         }
     }
@@ -605,11 +611,11 @@ void proxy_c_to_js_resume(uint32_t c_ref, uint32_t *args) {
         mp_obj_t reject = proxy_convert_js_to_mp_obj_cside(args + 2 * 3);
         mp_obj_t ret = proxy_resume_execute(obj, mp_const_none, mp_const_none, resolve, reject);
         nlr_pop();
-        external_call_depth_dec();
         proxy_convert_mp_to_js_obj_cside(ret, args);
+        external_call_depth_dec(ret);
     } else {
         // uncaught exception
-        external_call_depth_dec();
         proxy_convert_mp_to_js_exc_cside(nlr.ret_val, args);
+        external_call_depth_dec(nlr.ret_val);
     }
 }
