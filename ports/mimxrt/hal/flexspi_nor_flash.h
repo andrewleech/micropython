@@ -44,11 +44,43 @@
 // Defined in boards flash_config.c
 extern flexspi_nor_config_t qspiflash_config;
 
+// DWT keeps running with IRQs masked, unlike interrupt-maintained millisecond ticks.
+typedef struct {
+    uint32_t last;
+    uint64_t remaining;
+} flexspi_nor_timeout_t;
+
+static inline __attribute__((always_inline)) void flexspi_nor_timeout_start(flexspi_nor_timeout_t *timeout, uint32_t ms) {
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    if (!(DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk)) {
+        DWT->LAR = 0xc5acce55;
+        DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    }
+    timeout->last = DWT->CYCCNT;
+    timeout->remaining = (uint64_t)(SystemCoreClock / 1000u) * ms;
+}
+
+static inline __attribute__((always_inline)) bool flexspi_nor_timeout_expired(flexspi_nor_timeout_t *timeout) {
+    uint32_t now = DWT->CYCCNT;
+    uint32_t elapsed = now - timeout->last;
+    timeout->last = now;
+    if (elapsed >= timeout->remaining) {
+        return true;
+    }
+    timeout->remaining -= elapsed;
+    return false;
+}
+
 status_t flexspi_nor_get_vendor_id(FLEXSPI_Type *base, uint8_t *vendorId);
 void flexspi_update_lut_clk(uint32_t freq_index);
+void flexspi_update_clk(uint32_t freq_index);
 status_t flexspi_nor_enable_quad_mode(FLEXSPI_Type *base);
+status_t flexspi_nor_reset(FLEXSPI_Type *base);
+// NOR/controller readiness is unknown; reset from RAM without resuming XIP.
+void flash_fatal_reset(void) __attribute__((noreturn));
 status_t flexspi_nor_flash_erase_sector(FLEXSPI_Type *base, uint32_t address);
 status_t flexspi_nor_flash_erase_block(FLEXSPI_Type *base, uint32_t address);
 status_t flexspi_nor_flash_page_program(FLEXSPI_Type *base, uint32_t address, const uint32_t *src, uint32_t size);
+status_t flexspi_nor_wait_bus_busy(FLEXSPI_Type *base);
 
 #endif // MICROPY_INCLUDED_MIMXRT_HAL_FLEXSPI_NOR_FLASH_H

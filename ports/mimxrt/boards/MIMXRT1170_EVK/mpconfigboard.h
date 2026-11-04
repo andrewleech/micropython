@@ -267,3 +267,22 @@
 #define MICROPY_BOARD_ROOT_POINTERS \
     struct _machine_i2s_obj_t *machine_i2s_obj[MICROPY_HW_I2S_NUM];
 #endif
+
+// Mboot is M7-only. Keep the end-of-flash M4 reservation and OpenAMP shared
+// memory layout intact while disabling unsigned M4 launch in the opt-in build.
+#if MICROPY_HW_ENABLE_MBOOT
+#define MICROPY_HW_MBOOT_PRIMARY_ADDR (0x30040000u)
+#define MICROPY_HW_MBOOT_PRIMARY_SIZE (0x200000u)
+#define MICROPY_HW_MBOOT_SECONDARY_ADDR (0x30240000u)
+#define MICROPY_HW_MBOOT_SECCNT_ADDR (0x30441000u)
+#define MICROPY_HW_MBOOT_FS_ADDR (0x30443000u)
+#define MICROPY_HW_MBOOT_FS_SIZE (MICROPY_HW_FLASH_SIZE - 0x100000u - 0x443000u)
+#define MICROPY_MBOOT_ROLLBACK_COUNTER (1)
+#define MICROPY_MBOOT_UPDATE_MODE (MICROPY_MBOOT_UPDATE_MODE_SWAP)
+#define MICROPY_MBOOT_SWAP_MODE (MICROPY_MBOOT_SWAP_MODE_OFFSET)
+#define MICROPY_MBOOT_DFU (1)
+#define MICROPY_MBOOT_DOUBLE_TAP (1)
+// LPGPR[3] is the Mboot double-tap word; keep it out of machine.mem_backup().
+#define MICROPY_HW_SNVS_LPGPR_SAFE_COUNT (3)
+#define MICROPY_MBOOT_FSLOAD_RAW (1)
+#endif

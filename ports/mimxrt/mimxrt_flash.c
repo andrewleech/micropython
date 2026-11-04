@@ -43,6 +43,31 @@ typedef struct _mimxrt_flash_obj_t {
     uint32_t flash_base;
     uint32_t flash_size;
 } mimxrt_flash_obj_t;
+#if MICROPY_VFS_ROM
+static mimxrt_flash_obj_t mimxrt_flash_romfs_obj;
+#endif
+
+static bool mimxrt_flash_is_immutable_romfs(const mimxrt_flash_obj_t *self) {
+    #if defined(MICROPY_HW_ENABLE_MBOOT) && MICROPY_HW_ENABLE_MBOOT && MICROPY_VFS_ROM
+    return self == &mimxrt_flash_romfs_obj;
+    #else
+    (void)self;
+    return false;
+    #endif
+}
+
+static bool mimxrt_flash_range(const mimxrt_flash_obj_t *self, mp_int_t block, mp_int_t offset, size_t len, uint32_t *offset_out) {
+    if (block < 0 || offset < 0) {
+        return false;
+    }
+    uint64_t start = (uint64_t)block * SECTOR_SIZE_BYTES + (uint64_t)offset;
+    if (start > self->flash_size || len > self->flash_size - start) {
+        return false;
+    }
+    *offset_out = (uint32_t)start;
+    return true;
+}
+
 
 static mimxrt_flash_obj_t mimxrt_flash_obj = {
     .base = { &mimxrt_flash_type }
@@ -81,14 +106,14 @@ static mp_obj_t mimxrt_flash_readblocks(size_t n_args, const mp_obj_t *args) {
     mimxrt_flash_obj_t *self = MP_OBJ_TO_PTR(args[0]);
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(args[2], &bufinfo, MP_BUFFER_WRITE);
-    // Calculate read offset from block number.
-    uint32_t offset = mp_obj_get_int(args[1]) * SECTOR_SIZE_BYTES;
-    // Add optional offset
-    if (n_args == 4) {
-        offset += mp_obj_get_int(args[3]);
+    mp_int_t block = mp_obj_get_int(args[1]);
+    mp_int_t offset_in_block = n_args == 4 ? mp_obj_get_int(args[3]) : 0;
+    uint32_t offset;
+    if (!mimxrt_flash_range(self, block, offset_in_block, bufinfo.len, &offset)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("flash read range outside device"));
     }
 
-    flash_read_block((self->flash_base + offset), (uint8_t *)bufinfo.buf, (uint32_t)bufinfo.len);
+    flash_read_block(self->flash_base + offset, (uint8_t *)bufinfo.buf, (uint32_t)bufinfo.len);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mimxrt_flash_readblocks_obj, 3, 4, mimxrt_flash_readblocks);
@@ -100,25 +125,37 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mimxrt_flash_readblocks_obj, 3, 4, mi
 static mp_obj_t mimxrt_flash_writeblocks(size_t n_args, const mp_obj_t *args) {
     status_t status;
     mimxrt_flash_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+    if (mimxrt_flash_is_immutable_romfs(self)) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ROMFS is part of the signed Mboot image"));
+    }
+
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(args[2], &bufinfo, MP_BUFFER_READ);
 
-    // Calculate read offset from block number.
-    uint32_t offset = mp_obj_get_int(args[1]) * SECTOR_SIZE_BYTES;
+    mp_int_t block = mp_obj_get_int(args[1]);
+    mp_int_t offset_in_block = n_args == 4 ? mp_obj_get_int(args[3]) : 0;
+    uint32_t offset;
+    size_t required_len = n_args == 3 && bufinfo.len < SECTOR_SIZE_BYTES ? SECTOR_SIZE_BYTES : bufinfo.len;
+    if (!mimxrt_flash_range(self, block, offset_in_block, required_len, &offset)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("flash write range outside device"));
+    }
 
     if (n_args == 3) {
         status = flash_erase_sector(self->flash_base + offset);
 
+        if (status == kStatus_Busy) {
+            mp_raise_OSError(MP_EBUSY);
+        }
         if (status != kStatus_Success) {
             mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("flash erase command failed with %d"), status);
         }
-    } else {
-        // Add optional offset
-        offset += mp_obj_get_int(args[3]);
     }
 
     status = flash_write_block(self->flash_base + offset, bufinfo.buf, bufinfo.len);
 
+    if (status == kStatus_Busy) {
+        mp_raise_OSError(MP_EBUSY);
+    }
     if (status != kStatus_Success) {
         mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("flash block write command failed with %d"), status);
     }
@@ -144,8 +181,19 @@ static mp_obj_t mimxrt_flash_ioctl(mp_obj_t self_in, mp_obj_t cmd_in, mp_obj_t a
         case MP_BLOCKDEV_IOCTL_BLOCK_SIZE:
             return MP_OBJ_NEW_SMALL_INT(SECTOR_SIZE_BYTES);
         case MP_BLOCKDEV_IOCTL_BLOCK_ERASE: {
-            uint32_t offset = mp_obj_get_int(arg_in) * SECTOR_SIZE_BYTES;
+            if (mimxrt_flash_is_immutable_romfs(self)) {
+                return MP_OBJ_NEW_SMALL_INT(-MP_EPERM);
+            }
+
+            mp_int_t block = mp_obj_get_int(arg_in);
+            uint32_t offset;
+            if (!mimxrt_flash_range(self, block, 0, SECTOR_SIZE_BYTES, &offset)) {
+                return MP_OBJ_NEW_SMALL_INT(-MP_EINVAL);
+            }
             status = flash_erase_sector(self->flash_base + offset);
+            if (status == kStatus_Busy) {
+                return MP_OBJ_NEW_SMALL_INT(-MP_EBUSY);
+            }
             return MP_OBJ_NEW_SMALL_INT(status != kStatus_Success);
         }
         default:

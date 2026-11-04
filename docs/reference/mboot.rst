@@ -39,6 +39,32 @@ Set ``MBOOT_PUBKEY=<public-key.pem>`` for both builds and ``MBOOT_SIGN_KEY=<priv
 
 The application targets ``sign-digest`` and ``sign-apply SIG=<signature-file>`` support signing on a separate machine. ``sign-digest`` writes ``firmware.digest``; ``sign-apply`` applies the signature and writes ``firmware.signed.bin``. Use ``MBOOT_SIGN_PUBKEY`` to select the public key for checking an externally supplied signature.
 
+MIMXRT opt-in builds
+~~~~~~~~~~~~~~~~~~~~
+
+Mboot build support is also available for ``SEEED_ARCH_MIX`` (RT1052) and ``MIMXRT1170_EVK`` (RT1176 M7). It is opt-in and leaves ordinary board builds on their existing boot paths. Initialize the mimxrt port dependencies and signing tools as described by the port build instructions, then build the bootloader and signed application for the same board::
+
+    make -C ports/mimxrt -f Makefile.mboot BOARD=SEEED_ARCH_MIX MBOOT_PUBKEY=<public-key.pem>
+    make -C ports/mimxrt BOARD=SEEED_ARCH_MIX MBOOT=1 MBOOT_ROMFS=<romfs-image> MBOOT_PUBKEY=<public-key.pem> MBOOT_SIGN_KEY=<private-key.pem>
+
+Replace ``SEEED_ARCH_MIX`` with ``MIMXRT1170_EVK`` for the RT1176 M7 build. ``MBOOT_ROMFS`` must name a valid ROMFS image no larger than the board's 512 KiB reserved size. The application build pads this image and links it into the signed application payload. Rebuild and sign the application whenever its ROMFS contents change; do not write a replacement ROMFS directly into a running Mboot application.
+
+All ARCH-MIX build roles use a 498 MHz core profile with a 1.2 V supply target for the fitted DVL5B device and 100 MHz FlexSPI for the IS25WP064A's six-dummy-cycle ``EBh`` reads, rated up to 104 MHz.
+
+Standalone MIMXRT Mboot also supports optional board LEDs. In a board's ``mpconfigboard.h``, define contiguous ``MBOOT_LED1_*`` through ``MBOOT_LED3_*`` GPIO descriptors for the LEDs it has: each descriptor supplies ``GPIO``, ``PIN``, ``MUX``, ``PAD_CONFIG`` and ``ACTIVE_LOW`` values. Slot 1 maps to alive and blinks at 50 ms intervals, slot 2 maps to USB active and slot 3 maps to error. Leave the descriptors undefined on boards without LEDs. These settings are used by the standalone Mboot build and do not use Python pin objects. The ARCH-MIX LED mapping and pad settings are described in ``ports/mimxrt/boards/SEEED_ARCH_MIX/deploy.md``.
+
+For first-image packaging, run the application ``initial`` target with the same board, ROMFS image and signing key arguments. Do not program the ordinary unsigned ``firmware.bin`` or ``firmware.hex`` as an Mboot application. Before programming ``firmware.initial.hex`` or ``firmware.initial.bin``, make a complete flash backup, verify that the board can be restored through an independent recovery path, and review the image, map and programmer commands against the board's flash layout. The build commands alone are not an installation or restore procedure. MIMXRT storage loading and layout-mismatch rejection lack hardware validation; the M4 core is not supported by this integration.
+
+The current map reserves 256 KiB for the bootloader, a 2 MiB primary slot, a 2 MiB plus 4 KiB offset-swap secondary slot, and 8 KiB for the security counter. The application filesystem begins at flash offset ``0x443000``. On ARCH-MIX the ordinary VFS starts at flash offset ``0x200000`` and overlaps the Mboot primary slot, secondary slot and security-counter area. Back up any needed files before an approved layout migration; the Mboot VFS starts after these regions. On the EVK the map leaves the final 1 MiB of its configured 16 MiB flash window reserved. These are Mboot-only settings.
+
+The primary slot contains the MCUboot header, the complete signed application including padded ROMFS, validation metadata and the swap trailer. Signing limits the image to ``0x1fe000`` bytes, leaving two 4 KiB sectors for the trailer. The NXP FCB, IVT and boot data belong only to the bootloader image.
+
+MIMXRT flash erase and program operations are blocking and mask interrupts while the flash is unavailable for instruction fetch. Each NOR-ready wait is limited to 10 seconds, each controller transfer to 100 ms, and controller reset and eDMA quiescence to 10 ms each; these are individual wait limits, not a total update deadline. The driver pauses eDMA during an operation and restores its configuration only when flash access is safe, so continuous DMA streams must tolerate this pause. Ethernet may remain enabled only with the port's fixed SRAM descriptor rings and buffers. Other enabled Ethernet rings or a released M4 core prevent writes. Unsafe bus-master state or a quiescence timeout returns ``EBUSY``.
+
+After a failed flash-status transfer, the driver retains the first error and performs bounded controller recovery and retries within the same 10-second readiness deadline. It returns ``EIO`` through Mboot only after confirming that the NOR is idle and the controller can safely resume instruction fetch. If that deadline expires or controller recovery fails, RAM-resident code resets the device through the port reset path without restoring interrupts, caches or DMA into unsafe flash access. Application flash waits do not feed ``machine.WDT``; auxiliary and bootloader watchdog service remains limited by these wait bounds.
+
+On the RT1170 EVK, resetting during early bootloader initialisation can leave the ROM stopped without USB enumeration. A full power cycle is required to recover from this state; SWD programming remains available. Do not rely on a software reset as the only recovery path. Physical double-reset entry on this board lacks hardware validation.
+
 For bootloader debugging, ``MICROPY_MBOOT_DIAGNOSTIC_WAIT=1`` enables an indefinite USB DFU gate after flash initialisation and layout checks, before flash scrubbing, security-counter initialisation, swap processing or application boot. It is disabled by default and should stay disabled in release builds. Enable it by passing ``CFLAGS_EXTRA=-DMICROPY_MBOOT_DIAGNOSTIC_WAIT=1`` to the bootloader make command.
 
 USB enumeration and ordinary USB resets do not release this gate. To continue boot processing without resetting the chip, send a vendor/interface USB control transfer to the DFU interface with ``bmRequestType=0x41``, ``bRequest=0x82``, ``wValue=0``, ``wIndex=0`` and no payload. A successful DFU download followed by its USB reset also releases the gate. Normal boot policy can still select recovery if the image or update state is not bootable. Every chip reset returns to the diagnostic gate.
@@ -55,7 +81,7 @@ Mboot does not update itself. To replace the bootloader or change the flash layo
 Entering recovery
 ~~~~~~~~~~~~~~~~~
 
-After installation, enter the bootloader with ``machine.bootloader()``, by resetting the board twice in quick succession if it has ``MICROPY_MBOOT_DOUBLE_TAP``, or by holding the user button (``MICROPY_HW_USRSW_PIN``) at reset.
+After installation, enter the bootloader with ``machine.bootloader()`` or reset twice in quick succession if the board defines ``MICROPY_MBOOT_DOUBLE_TAP``. On STM32, hold the user button (``MICROPY_HW_USRSW_PIN``) at reset. An MIMXRT board can force entry at reset by defining ``MICROPY_HW_MBOOT_ENTRY_FORCED()``; no MIMXRT board defines this hook yet.
 
 USB update
 ~~~~~~~~~~
@@ -128,4 +154,4 @@ Validation and diagnostics
 
 The board can select the cryptographic implementation, fault-injection hardening level and logging level. Signature validation of the primary image is enabled by default and should remain enabled in a product. ``mboot_layout.h`` documents these settings, their dependencies and defaults.
 
-``MICROPY_MBOOT_DOUBLE_TAP`` enters recovery when the board is reset a second time within ``MICROPY_MBOOT_DOUBLE_TAP_MS`` (350 ms by default) of the bootloader starting, as the UF2 bootloaders do. The bootloader leaves ``MICROPY_MBOOT_DOUBLE_TAP_MAGIC`` in a word that survives reset, supplied by the port through ``mboot_port_double_tap_word()``, and clears it when the window ends. Every boot that is not already going to recovery therefore waits for the whole window. The word is separate from the request and retention words, so taking a request does not touch it.
+``MICROPY_MBOOT_DOUBLE_TAP`` enters recovery when the board is reset a second time within ``MICROPY_MBOOT_DOUBLE_TAP_MS`` (350 ms by default) of the bootloader starting, as the UF2 bootloaders do. The bootloader leaves ``MICROPY_MBOOT_DOUBLE_TAP_MAGIC`` in a word that survives reset, supplied by the port through ``mboot_port_double_tap_word()``, and clears it when the window ends. Every boot that is not already going to recovery therefore waits for the whole window. The word is separate from the request and retention words, so taking a request does not touch it. On MIMXRT, it is ``SNVS->LPGPR[3]``, also used by TinyUF2. Set ``MICROPY_HW_SNVS_LPGPR_SAFE_COUNT`` so ``machine.mem_backup()`` does not use this word.

@@ -161,6 +161,81 @@ static uint8_t hw_addr_1[6]; // The MAC address field
 
 #endif // defined(ENET_1_PHY_ADDRESS)
 
+#if defined(MICROPY_HW_ENABLE_MBOOT) && MICROPY_HW_ENABLE_MBOOT
+static uint32_t eth_dma_address(const void *ptr) {
+    #if defined(FSL_FEATURE_MEMORY_HAS_ADDRESS_OFFSET) && FSL_FEATURE_MEMORY_HAS_ADDRESS_OFFSET
+    return MEMORY_ConvertMemoryMapAddress((uintptr_t)ptr, kMEMORY_Local2DMA);
+    #else
+    return (uint32_t)(uintptr_t)ptr;
+    #endif
+}
+
+bool eth_flash_access_safe(ENET_Type *base) {
+    volatile enet_rx_bd_struct_t *rx;
+    volatile enet_tx_bd_struct_t *tx;
+    uint8_t *rx_data;
+    uint8_t *tx_data;
+    #if defined(ENET_PHY_ADDRESS)
+    if (base == ENET) {
+        rx = g_rxBuffDescrip;
+        tx = g_txBuffDescrip;
+        rx_data = &g_rxDataBuff[0][0];
+        tx_data = &g_txDataBuff[0][0];
+    } else
+    #endif
+    #if defined(ENET_1_PHY_ADDRESS)
+    if (base == ENET_1) {
+        rx = g_rxBuffDescrip_1;
+        tx = g_txBuffDescrip_1;
+        rx_data = &g_rxDataBuff_1[0][0];
+        tx_data = &g_txDataBuff_1[0][0];
+    } else
+    #endif
+    {
+        return false;
+    }
+
+    const uint32_t buffer_size = SDK_SIZEALIGN(ENET_FRAME_MAX_FRAMELEN, ENET_BUFF_ALIGNMENT);
+    if (base->RDSR != eth_dma_address((const void *)rx) ||
+        base->TDSR != eth_dma_address((const void *)tx) || base->MRBR != buffer_size) {
+        return false;
+    }
+    #ifdef ENET_ENHANCEDBUFFERDESCRIPTOR_MODE
+    if (!(base->ECR & ENET_ECR_EN1588_MASK)) {
+        return false;
+    }
+    #else
+    if (base->ECR & ENET_ECR_EN1588_MASK) {
+        return false;
+    }
+    #endif
+    #if defined(FSL_FEATURE_ENET_HAS_AVB) && FSL_FEATURE_ENET_HAS_AVB
+    if (FSL_FEATURE_ENET_INSTANCE_HAS_AVBn(base) == 1 &&
+        ((base->DMACFG[0] | base->DMACFG[1]) & ENET_DMACFG_DMA_CLASS_EN_MASK)) {
+        return false;
+    }
+    #endif
+    // DMA changes status/length, not buffer pointers or ring wrap bits. With IRQs
+    // masked the port cannot reconfigure these fixed RAM rings or enqueue XIP data.
+    // ENET_SendFrame copies each outgoing frame into these RAM data buffers.
+    for (size_t i = 0; i < ENET_RXBD_NUM; ++i) {
+        uint16_t wrap = i == ENET_RXBD_NUM - 1 ? ENET_BUFFDESCRIPTOR_RX_WRAP_MASK : 0;
+        if (rx[i].buffer != eth_dma_address(rx_data + i * buffer_size) ||
+            (rx[i].control & ENET_BUFFDESCRIPTOR_RX_WRAP_MASK) != wrap) {
+            return false;
+        }
+    }
+    for (size_t i = 0; i < ENET_TXBD_NUM; ++i) {
+        uint16_t wrap = i == ENET_TXBD_NUM - 1 ? ENET_BUFFDESCRIPTOR_TX_WRAP_MASK : 0;
+        if (tx[i].buffer != eth_dma_address(tx_data + i * buffer_size) ||
+            tx[i].length > buffer_size || (tx[i].control & ENET_BUFFDESCRIPTOR_TX_WRAP_MASK) != wrap) {
+            return false;
+        }
+    }
+    return true;
+}
+#endif
+
 #define PHY_AUTONEGO_TIMEOUT_US (5000000)
 #define PHY_SETTLE_TIME_US      (1000)
 // Settle time must be 500000 for the 1G interface
