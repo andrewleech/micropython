@@ -279,12 +279,14 @@ def _write_spdx(model, path, extracted):
         else:
             relationships.append(Relationship("SPDXRef-MicroPython", RelationshipType.CONTAINS, identifier))
         annotations.append(Annotation(identifier, AnnotationType.OTHER, tool, now, _json(_provenance(item))))
-        for licence_id, detail in item.get("licence_details", {}).items():
-            entry = details.setdefault(licence_id, {"names": set(), "comments": set()})
+        for licence_id in item["licence_texts"]:
+            detail = item.get("licence_details", {}).get(licence_id, {})
+            entry = details.setdefault(licence_id, {"names": set(), "comments": set(), "urls": set()})
             if detail.get("name"):
                 entry["names"].add(detail["name"])
             if detail.get("comment"):
                 entry["comments"].add(detail["comment"])
+            entry["urls"].update(detail.get("seeAlso", ()))
     if model["issues"]:
         annotations.append(
             Annotation("SPDXRef-DOCUMENT", AnnotationType.OTHER, tool, now, _json({"issues": model["issues"]}))
@@ -299,7 +301,7 @@ def _write_spdx(model, path, extracted):
         licensing_info.append(
             ExtractedLicensingInfo(
                 identifier, text, license_name=names[0] if names else None,
-                comment="\n".join(comments) or None,
+                cross_references=sorted(detail.get("urls", ())), comment="\n".join(comments) or None,
             )
         )
     seed = _json(model)
@@ -332,13 +334,14 @@ def _cyclonedx_component(item, identity):
         licences = []
         for identifier, text in sorted(item["licence_texts"].items()):
             detail = item.get("licence_details", {}).get(identifier, {})
+            urls = detail.get("seeAlso", ())
             licence_properties = [Property(name="micropython:licence-id", value=identifier)]
             if detail.get("comment"):
                 licence_properties.append(Property(name="micropython:licence-comment", value=detail["comment"]))
             licences.append(
                 DisjunctiveLicense(
                     name=detail.get("name") or identifier, text=AttachedText(content=text),
-                    properties=licence_properties,
+                    url=XsUri(urls[0]) if urls else None, properties=licence_properties,
                 )
             )
         evidence = ComponentEvidence(licenses=licences)
@@ -357,6 +360,13 @@ def _cyclonedx_component(item, identity):
         external_references=[
             ExternalReference(type=ExternalReferenceType(ref["type"]), url=XsUri(ref["url"]))
             for ref in item.get("externalReferences", [])
+        ] + [
+            ExternalReference(type=ExternalReferenceType.LICENSE, url=XsUri(url))
+            for url in sorted({
+                url
+                for identifier in item["licence_texts"]
+                for url in item.get("licence_details", {}).get(identifier, {}).get("seeAlso", ())
+            })
         ],
         components=[
             _cyclonedx_component(child, identity + "/" + _identity(index, child))

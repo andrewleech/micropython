@@ -30,6 +30,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 from license_expression import ExpressionError, get_spdx_licensing
@@ -86,8 +87,22 @@ def _load(root):
             raise ValueError(f"{path}: invalid extracted licence text")
         if item["licenseId"] in texts:
             raise ValueError(f"{path}: duplicate extracted licence {item['licenseId']}")
+        if "seeAlso" in item:
+            urls = item["seeAlso"]
+            if not isinstance(urls, list):
+                raise ValueError(f"{path}: invalid seeAlso for {item['licenseId']}")
+            for url in urls:
+                try:
+                    parsed = urlsplit(url) if isinstance(url, str) else None
+                    valid = (parsed and parsed.scheme in ("http", "https") and parsed.hostname
+                             and parsed.port != 0 and not re.search(r"[\s\x00-\x1f\x7f\\]", url)
+                             and not re.search(r"%(?![0-9a-fA-F]{2})", url))
+                except ValueError:
+                    valid = False
+                if not valid:
+                    raise ValueError(f"{path}: invalid seeAlso URL for {item['licenseId']}: {url!r}")
         texts[item["licenseId"]] = item["extractedText"]
-        details[item["licenseId"]] = {key: item[key] for key in ("name", "comment") if key in item}
+        details[item["licenseId"]] = {key: item[key] for key in ("name", "comment", "seeAlso") if key in item}
     entries = []
     seen = set()
     for item in document["packages"]:
@@ -138,6 +153,116 @@ def _git(root, *args):
     except OSError:
         return None
     return result.stdout.strip() if result.returncode == 0 else None
+
+def _git_url(value):
+    """Normalize network Git URLs without treating different paths as equal."""
+    if not isinstance(value, str):
+        return None
+    scp = re.fullmatch(r"(?:[^/@:]+@)?([^/:]+):(.+)", value)
+    if scp and "://" not in value:
+        host, path = scp.groups()
+        port = None
+    else:
+        try:
+            parsed = urlsplit(value)
+            if parsed.scheme.lower() not in ("https", "http", "ssh", "git") or not parsed.hostname or parsed.query or parsed.fragment:
+                return None
+            host, path, port = parsed.hostname, parsed.path, parsed.port
+        except ValueError:
+            return None
+    path = path.strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    if not path or any(part in ("", ".", "..") for part in path.split("/")):
+        return None
+    return (host.lower(), port, path)
+
+
+def _external_declarations(root, texts):
+    path = root / "LICENSE.spdx.yaml"
+    if not path.is_file():
+        return {}
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    repositories = document.get("external_repositories", [])
+    if not isinstance(repositories, list):
+        raise ValueError(f"{path}: expected external_repositories list")
+    result = {}
+    for item in repositories:
+        if not isinstance(item, dict):
+            raise ValueError(f"{path}: invalid external repository")
+        url = _git_url(item.get("url"))
+        commit = item.get("commit")
+        if not url or not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+            raise ValueError(f"{path}: invalid external repository URL or commit")
+        key = (url, commit)
+        if key in result or not isinstance(item.get("licenses"), list):
+            raise ValueError(f"{path}: duplicate or invalid external repository {item.get('url')}")
+        scopes = []
+        seen = set()
+        for declaration in item["licenses"]:
+            if not isinstance(declaration, dict):
+                raise ValueError(f"{path}: invalid external licence declaration")
+            scope = declaration.get("path")
+            if (not isinstance(scope, str) or not scope or scope.startswith("/")
+                    or (scope != "." and any(part in ("", ".", "..") for part in scope.split("/")))):
+                raise ValueError(f"{path}: invalid external licence path {scope!r}")
+            if scope in seen:
+                raise ValueError(f"{path}: duplicate external licence path {scope}")
+            seen.add(scope)
+            expression = _expression(declaration.get("license"), texts)
+            if not expression:
+                raise ValueError(f"{path}: missing external licence for {scope}")
+            scopes.append({"scope": scope, "expression": expression})
+        result[key] = scopes
+    return result
+
+
+def _external_checkout(source, component, repo, checkout_cache, root_cache, reviewed):
+    """Return a verified checkout identity, or None if it cannot be trusted."""
+    if component.get("unreviewed") or component.get("identity_problems") or not source.exists():
+        return None
+    directory = source if source.is_dir() else source.parent
+    if directory not in root_cache:
+        top = _git(directory, "rev-parse", "--show-toplevel")
+        root_cache[directory] = Path(top).resolve() if top else None
+    checkout = root_cache[directory]
+    if not checkout or checkout == repo or not source.is_relative_to(checkout):
+        return None
+    relative = source.relative_to(checkout).as_posix()
+    if not _git(checkout, "ls-files", "--", relative):
+        return None
+    if checkout not in checkout_cache:
+        checkout_cache[checkout] = _verified_external_checkout(checkout, reviewed)
+    identity = checkout_cache[checkout]
+    if not identity or (component.get("revision") and component["revision"] != identity[2]):
+        return None
+    return identity
+
+
+def _verified_external_checkout(checkout, reviewed):
+    revision = _git(checkout, "rev-parse", "HEAD")
+    remote = _git_url(_git(checkout, "remote", "get-url", "origin"))
+    if (not remote or not revision or not re.fullmatch(r"[0-9a-f]{40}", revision)
+            or (remote, revision) not in reviewed):
+        return None
+    if _git(checkout, "status", "--porcelain", "--untracked-files=all") != "":
+        return None
+    current = checkout
+    while True:
+        parent_top = _git(current.parent, "rev-parse", "--show-toplevel")
+        if not parent_top:
+            break
+        parent = Path(parent_top).resolve()
+        if parent == current or not current.is_relative_to(parent):
+            return None
+        subpath = current.relative_to(parent).as_posix()
+        head = _git(current, "rev-parse", "HEAD")
+        if _git(parent, "ls-tree", "HEAD", "--", subpath) != f"160000 commit {head}\t{subpath}":
+            return None
+        if _git(parent, "status", "--porcelain", "--ignore-submodules=none", "--", subpath) != "":
+            return None
+        current = parent
+    return checkout, remote, revision
 
 
 def _pin_problem(root, entry):
@@ -263,7 +388,7 @@ def _micropython_lib_package(root, owner_root, directory, component, entries):
     return False
 
 
-def resolve_licences(repo, components, declaration_states=None, metadata_status=None):
+def resolve_licences(repo, components, declaration_states=None, metadata_status=None, external_cache=None):
     """Mutate components with declared licences and return unresolved issues."""
     root = Path(repo).resolve()
     declaration_states = declaration_states or {}
@@ -275,6 +400,16 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
             declarations[declaration_root] = ([], {}, {}) if status else _load(declaration_root)
         return declarations[declaration_root]
     pin_cache = {}
+    if external_cache is None:
+        external_cache = {}
+    checkout_cache = external_cache.setdefault("checkouts", {})
+    root_cache = external_cache.setdefault("roots", {})
+    repo_status, _ = declaration_states.get(root, (None, None))
+    if not repo_status:
+        _, repo_texts, repo_details = load_declaration(root)
+        external_declarations = _external_declarations(root, repo_texts)
+    else:
+        repo_texts, repo_details, external_declarations = {}, {}, {}
     issues = []
     for component in components:
         component_path = Path(component["path"])
@@ -409,9 +544,31 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
                           f"{source}: licence declaration is {declaration_status}; declaration review required",
                           source=str(source), identity_status=declaration_status,
                           declaration_sha256=declaration_digest)
-            matches = [entry for entry in component_entries if _covers(entry["scope"], relative)]
+            source_entries = component_entries
+            if external_declarations:
+                identity = _external_checkout(selected, component, root, checkout_cache, root_cache,
+                                              external_declarations)
+                if identity:
+                    checkout, remote, revision = identity
+                    external = external_declarations.get((remote, revision), [])
+                    if (checkout != root and checkout.is_relative_to(declaration_root)
+                            and not any(key in component_texts and component_texts[key] != value
+                                        for key, value in repo_texts.items())):
+                        prefix = checkout.relative_to(declaration_root).as_posix()
+                        prefix = "" if prefix == "." else prefix + "/"
+                        mapped = [
+                            {**item, "scope": (prefix.rstrip("/") or ".") if item["scope"] == "."
+                             else prefix + item["scope"], "external": True}
+                            for item in external
+                        ]
+                        source_entries = component_entries + mapped
+                        component_texts = {**component_texts, **repo_texts}
+                        component_details = {**component_details, **repo_details}
+            matches = [entry for entry in source_entries if _covers(entry["scope"], relative)]
             def scope_rank(entry):
                 scope = entry["scope"]
+                if scope == ".":
+                    return 0, 0, 0
                 prefix = _GLOB.split(scope, maxsplit=1)[0]
                 if prefix != scope:
                     prefix = prefix.rpartition("/")[0]
@@ -420,6 +577,15 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
 
             matches.sort(key=scope_rank, reverse=True)
             entry = matches[0] if matches else None
+            if entry:
+                for other in matches[1:]:
+                    if (other["scope"] == entry["scope"] and other.get("expression")
+                            and entry.get("expression")
+                            and not _equivalent(other["expression"], entry["expression"])):
+                        add_issue("metadata_conflict",
+                                  f"{source}: conflicting reviewed declarations at {entry['scope']}",
+                                  source=str(source), scope=entry["scope"],
+                                  expressions=[entry["expression"], other["expression"]])
             if entry and entry["scope"] == "." and local and (
                 owner_root != root or component.get("unreviewed")
             ):
@@ -466,15 +632,25 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
                         note += f" (source revision {component['revision']})"
                     if note not in comments:
                         comments.append(note)
+            external_exception = (
+                entry and entry.get("external") and declared
+                and any(other.get("external") and other.get("expression")
+                        and other["scope"] != entry["scope"]
+                        and _covers(other["scope"], entry["scope"])
+                        and not _equivalent(other["expression"], declared)
+                        for other in matches)
+            )
             scoped_conflict = (
                 provenance in ("source SPDX header", "source MIT header")
                 and source_license != "NOASSERTION"
                 and declared and declared != "NOASSERTION"
                 and not source_pin_invalid
                 and entry["scope"] != "."
-                and (entry["scope"] == relative or (
+                and (entry["scope"] == relative or external_exception or (
                     directory.is_relative_to(declaration_root)
-                    and scope_rank(entry) >= scope_rank({"scope": directory.relative_to(declaration_root).as_posix()})
+                    and (scope_rank(entry) > scope_rank({"scope": directory.relative_to(declaration_root).as_posix()})
+                         if entry.get("external") else
+                         scope_rank(entry) >= scope_rank({"scope": directory.relative_to(declaration_root).as_posix()}))
                 ))
                 and not _equivalent(source_license, declared)
             )
@@ -483,7 +659,27 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
                           f"{source}: {provenance} {source_license} conflicts with reviewed declaration "
                           f"{declared} at {entry['scope']}",
                           source=str(source), scope=entry["scope"], expressions=[source_license, declared])
+            metadata_conflict = (
+                not source_license and entry and entry.get("external") and declared
+                and explicit and explicit != "NOASSERTION" and declared != "NOASSERTION"
+                and not source_pin_invalid
+                and (entry["scope"] == relative or external_exception or (
+                    directory.is_relative_to(declaration_root)
+                    and scope_rank(entry) > scope_rank({
+                        "scope": directory.relative_to(declaration_root).as_posix()
+                    })
+                ))
+                and not _equivalent(explicit, declared)
+            )
+            if metadata_conflict:
+                add_issue("metadata_conflict",
+                          f"{source}: package metadata {explicit} conflicts with reviewed declaration "
+                          f"{declared} at {entry['scope']}",
+                          source=str(source), scope=entry["scope"], expressions=[explicit, declared])
             expression = source_license
+            if not expression and explicit and entry and entry.get("external"):
+                expression = explicit
+                provenance = "package metadata"
             if (not expression and explicit == "NOASSERTION" and (
                     not entry or entry["scope"] == "." or (
                         directory.is_relative_to(declaration_root)
@@ -493,7 +689,8 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
                     ))):
                 expression = explicit
                 provenance = "package metadata"
-            if not expression and declared and not source_pin_invalid and entry["scope"] != ".":
+            if (not expression and declared and not source_pin_invalid
+                    and (entry["scope"] != "." or entry.get("external"))):
                 expression = declared
                 provenance = f"reviewed declaration: {entry['scope']}"
             if not expression and explicit and source_pin_invalid:
@@ -520,7 +717,7 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
             if selected.is_dir():
                 prefix = "" if relative == "." else relative + "/"
                 nested = []
-                for candidate in component_entries:
+                for candidate in source_entries:
                     scope = candidate["scope"]
                     if scope == "." or candidate is entry:
                         continue
@@ -539,7 +736,7 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
                     continue
             file_licence["expression"] = expression
             file_licence["provenance"] = provenance
-            file_licence["trusted"] = bool(expression) and not scoped_conflict
+            file_licence["trusted"] = bool(expression) and not scoped_conflict and not metadata_conflict
             if not expression:
                 if not declaration_status:
                     add_issue("missing_assertion", f"{source}: no asserted licence; declaration review required",
@@ -547,10 +744,11 @@ def resolve_licences(repo, components, declaration_states=None, metadata_status=
                 continue
             if not any(_equivalent(expression, value) for value in expressions):
                 expressions.append(expression)
-            for symbol in _LICENSING.license_symbols(_LICENSING.parse(expression, strict=True)):
-                if _REF.fullmatch(symbol.key):
-                    used_texts[symbol.key] = file_texts[symbol.key]
-                    used_details[symbol.key] = component_details[symbol.key]
+            if file_licence["trusted"]:
+                for symbol in _LICENSING.license_symbols(_LICENSING.parse(expression, strict=True)):
+                    if _REF.fullmatch(symbol.key):
+                        used_texts[symbol.key] = file_texts[symbol.key]
+                        used_details[symbol.key] = component_details[symbol.key]
         component["licence_mixed"] = len(expressions) > 1
         component["licence_declared"] = (
             expressions[0] if len(expressions) == 1 and all(item["trusted"] for item in file_licences) else None

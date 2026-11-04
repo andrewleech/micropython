@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import json
 import re
 import subprocess
 import sys
@@ -796,6 +797,36 @@ def _source_state(root):
                 index += 1
     return tracked, changed
 
+def _idf_component_roots(compdbs):
+    """Read component boundaries from ESP-IDF build descriptions."""
+    roots = {}
+    for compdb in compdbs:
+        description = Path(compdb).resolve().parent / "project_description.json"
+        if not description.is_file():
+            continue
+        try:
+            data = json.loads(description.read_text(encoding="utf-8"))
+            idf = Path(data["idf_path"]).resolve()
+            info = data["build_component_info"]
+            if not isinstance(info, dict):
+                raise ValueError("build_component_info is not an object")
+            for name, component in info.items():
+                if not isinstance(name, str) or not isinstance(component, dict):
+                    raise ValueError("invalid component entry")
+                directory = component.get("dir")
+                if not isinstance(directory, str) or not Path(directory).is_absolute():
+                    raise ValueError(f"invalid directory for component {name}")
+                directory = Path(directory).resolve()
+                managed = directory.parent.name == "managed_components"
+                if directory.is_relative_to(idf / "components") or managed:
+                    identity = (name, idf if directory.is_relative_to(idf / "components") else None)
+                    if directory in roots and roots[directory] != identity:
+                        raise ValueError(f"conflicting metadata for component {directory}")
+                    roots[directory] = identity
+        except (OSError, UnicodeError, KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"{description}: invalid ESP-IDF build description: {exc}") from exc
+    return roots
+
 
 def _build_document(repo, args):
     inventory = _inventory(repo)
@@ -842,6 +873,7 @@ def _build_document(repo, args):
                 digest = hashlib.sha256(declaration.read_bytes()).hexdigest()
                 declaration_states[root] = (status, digest)
         return declaration_states[root]
+    declaration_state(repo)
 
     if not args.compdb:
         for entries in inventory.values():
@@ -859,7 +891,9 @@ def _build_document(repo, args):
             if root in explicit:
                 raise ValueError(f"duplicate explicit root: {root}")
             explicit[root] = root_name
-        roots = set(inventory) | set(explicit) | {repo}
+        idf_metadata = _idf_component_roots(args.compdb)
+        idf_components = {root: item[0] for root, item in idf_metadata.items()}
+        roots = set(inventory) | set(explicit) | set(idf_components) | {repo}
         depfile_evidence = []
         records = read_inputs(repo, args.compdb, args.exclude, args.frozen, depfile_evidence)
         for evidence in depfile_evidence:
@@ -882,11 +916,29 @@ def _build_document(repo, args):
         checkout_roots = {repo: repo}
         source_states = {}
         submodule_revisions = {}
+        idf_checkout_problems = {}
 
         def checkout_root(path):
             if path not in checkout_roots:
                 checkout_roots[path] = _checkout_root(path)
             return checkout_roots[path]
+
+        def idf_checkout_problem(checkout, owner):
+            """Check each nested checkout against its parent's Git link."""
+            while checkout != owner:
+                parent = checkout_root(checkout.parent)
+                if parent is None or not checkout.is_relative_to(parent):
+                    return f"{checkout}: parent checkout unavailable"
+                relative = checkout.relative_to(parent).as_posix()
+                try:
+                    expected = submodule_sha(parent, relative)
+                    actual = _revision(checkout)
+                except (OSError, subprocess.CalledProcessError):
+                    return f"{checkout}: submodule identity unavailable"
+                if not expected or actual != expected:
+                    return f"{checkout}: submodule HEAD {actual} does not match gitlink {expected or 'unavailable'}"
+                checkout = parent
+            return None
 
         def validate_submodule(root, item):
             if root not in submodule_revisions:
@@ -922,6 +974,7 @@ def _build_document(repo, args):
             if relative in changed:
                 return "dirty"
             return None
+        nested_idf_components = {}
         declarations = {}
         groups = {}
         for record in records:
@@ -933,6 +986,27 @@ def _build_document(repo, args):
             if root is None:
                 root = checkout_root(owner_path.parent) or owner_path.parent
             identity_problems = []
+            if root in idf_components and record["selection"] == "native":
+                idf_path = idf_metadata[root][1]
+                owner_checkout = checkout_root(idf_path) if idf_path else checkout_root(root)
+                source_checkout = checkout_root(source.parent)
+                if idf_path and not owner_checkout:
+                    problem = f"{idf_path}: IDF checkout unavailable"
+                    identity_problems.append(problem)
+                    if problem not in issues:
+                        issues.append(problem)
+                elif owner_checkout and source_checkout and source_checkout != owner_checkout:
+                    key = (source_checkout, owner_checkout)
+                    if key not in idf_checkout_problems:
+                        idf_checkout_problems[key] = idf_checkout_problem(*key)
+                    problem = idf_checkout_problems[key]
+                    if problem:
+                        identity_problems.append(problem)
+                        if problem not in issues:
+                            issues.append(problem)
+                    if source_checkout.is_relative_to(root):
+                        root = source_checkout
+                        nested_idf_components[root] = root.name
             for selected_path in (source, manifest):
                 if selected_path is None:
                     continue
@@ -955,13 +1029,16 @@ def _build_document(repo, args):
                     git_root = repo
                 else:
                     git_root = checkout_root(root)
+                problem = None
                 if git_root and selected_path.is_relative_to(git_root):
                     problem = source_problem(git_root, selected_path)
-                    if problem:
-                        message = f"{problem} selected source: {_display_path(repo, selected_path)}"
-                        if message not in issues:
-                            issues.append(message)
-                        identity_problems.append(message)
+                elif root in idf_components:
+                    problem = "unverified"
+                if problem:
+                    message = f"{problem} selected source: {_display_path(repo, selected_path)}"
+                    if message not in issues:
+                        issues.append(message)
+                    identity_problems.append(message)
             unreviewed = bool(identity_problems)
             if root == repo and record["selection"] == "native":
                 relative = source.relative_to(repo)
@@ -1095,10 +1172,11 @@ def _build_document(repo, args):
                         )
                     if not grouped_scope:
                         component["scope"] = scoped["scope"]
-                elif root in explicit:
+                elif root in explicit or root in idf_components or root in nested_idf_components:
                     git_root = checkout_root(root)
                     component = _component(
-                        explicit[root], _display_path(repo, root),
+                        explicit.get(root) or idf_components.get(root) or nested_idf_components[root],
+                        _display_path(repo, root),
                         revision=_revision(git_root) if git_root else None,
                     )
                 elif entries and not identity_problems:
@@ -1150,6 +1228,7 @@ def _build_document(repo, args):
             if evidence not in component["source_evidence"]:
                 component["source_evidence"].append(evidence)
         name = args.image
+    external_cache = {}
     for component in components:
         children = component.get("components", [])
         if args.compdb:
@@ -1173,17 +1252,27 @@ def _build_document(repo, args):
         items = [component] + component.get("components", [])
         for item in items:
             declaration_state(Path(item.get("declaration_root", repo)))
+        issues.extend(resolve_licences(repo, items, declaration_states=declaration_states,
+                                       metadata_status=metadata_status, external_cache=external_cache))
         if component.get("identity_problems"):
             component["licence_status"] = "unresolved"
             component["licence_declared"] = None
-            component["licence_issues"] = [
+            component["licence"] = None
+            component["licence_texts"] = {}
+            component["licence_details"] = {}
+            component["licence_mixed"] = False
+            for evidence in component["file_licences"]:
+                evidence["trusted"] = False
+                if evidence["provenance"] in ("source SPDX header", "source MIT header"):
+                    evidence["provenance"] += " (unverified source)"
+                else:
+                    evidence["expression"] = None
+                    evidence["provenance"] = None
+            component["licence_issues"].extend(
                 {"kind": "source_identity", "status": "unresolved", "message": problem}
                 for problem in component["identity_problems"]
-            ]
+            )
             component["licence_comments"].extend(component["identity_problems"])
-        else:
-            issues.extend(resolve_licences(repo, items, declaration_states=declaration_states,
-                                           metadata_status=metadata_status))
         for item in items:
             declaration_root = Path(item.get("declaration_root", repo))
             declaration = declaration_root / "LICENSE.spdx.yaml"
