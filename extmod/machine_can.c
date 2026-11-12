@@ -222,7 +222,11 @@ static mp_obj_t machine_can_deinit(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_can_deinit_obj, machine_can_deinit);
 
 static void machine_can_init_helper(machine_can_obj_t *self, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
-    enum { ARG_bitrate, ARG_mode, ARG_sample_point, ARG_sjw, ARG_tseg1, ARG_tseg2};
+    enum { ARG_bitrate, ARG_mode, ARG_sample_point, ARG_sjw, ARG_tseg1, ARG_tseg2,
+           #if MICROPY_PY_MACHINE_CAN_RXBUF
+           ARG_rxbuf,
+           #endif
+    };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_bitrate, MP_ARG_INT | MP_ARG_REQUIRED },
         { MP_QSTR_mode, MP_ARG_INT, {.u_int = MP_CAN_MODE_NORMAL} },
@@ -230,6 +234,9 @@ static void machine_can_init_helper(machine_can_obj_t *self, size_t n_args, cons
         { MP_QSTR_sjw, MP_ARG_INT, {.u_int = CAN_SJW_MIN } },
         { MP_QSTR_tseg1, MP_ARG_INT, {.u_int = -1} },
         { MP_QSTR_tseg2, MP_ARG_INT, {.u_int = -1} },
+        #if MICROPY_PY_MACHINE_CAN_RXBUF
+        { MP_QSTR_rxbuf, MP_ARG_INT, {.u_int = 0} },
+        #endif
     };
 
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
@@ -265,6 +272,14 @@ static void machine_can_init_helper(machine_can_obj_t *self, size_t n_args, cons
         // Probably can make these values more restrictive
         mp_raise_ValueError(MP_ERROR_TEXT("sample_point"));
     }
+
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    mp_int_t rxbuf = args[ARG_rxbuf].u_int;
+    if (rxbuf < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("rxbuf"));
+    }
+    self->rxbuf_len = (mp_uint_t)rxbuf;
+    #endif
 
     int f_clock = machine_can_port_f_clock(self);
 

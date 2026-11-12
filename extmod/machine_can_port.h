@@ -31,6 +31,13 @@
 #include "py/runtime.h"
 #include "shared/runtime/mpirq.h"
 
+#ifndef MICROPY_PY_MACHINE_CAN_RXBUF
+// Set by a port's mpconfigport.h if it supports CAN.init(rxbuf=N), a software
+// receive ring. Given a default here, ahead of machine_can_obj_t below, so
+// that ports without their own definition do not carry the rxbuf_len field.
+#define MICROPY_PY_MACHINE_CAN_RXBUF 0
+#endif
+
 // This header is included into both extmod/machine_can.c and port-specific
 // machine_can.c implementations and provides shared (static) function
 // declarations to both.
@@ -104,6 +111,12 @@ typedef struct _machine_can_obj_t {
     mp_irq_obj_t *mp_irq_obj;
     uint16_t mp_irq_trigger;
     mp_uint_t rx_error_flags;
+
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    // Requested depth of the port's software receive ring, in frames, set via
+    // CAN.init(rxbuf=N). 0 (the default) disables the ring.
+    mp_uint_t rxbuf_len;
+    #endif
 
     // Assumed some of these counters are updated from different port ISRs, etc. and some
     // are updated by calling machine_can_port_update_counters()
