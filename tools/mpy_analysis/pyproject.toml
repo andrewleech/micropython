@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mpy-analysis"
+version = "0.1.0"
+description = "Static analysis and SBOM tooling for MicroPython firmware projects"
+requires-python = ">=3.10"
+# compiledb generates the compilation databases; pinned because its entry format is what the
+# completeness check and the cppcheck inputs were proved against.
+# reuse is the REUSE tool, which checks the licence and origin declarations (REUSE.toml) of the
+# code copied into an analysed repository; pinned so what it checks does not move between runs.
+# Its charset-normalizer extra gives it an encoding detector that needs no system library: without
+# one, reuse finds libmagic or refuses to start, and the build image has no libmagic.
+dependencies = [
+    "mpy-build-inputs==0.1.0",
+    "compiledb==0.10.7",
+    "reuse[charset-normalizer]==6.2.0",
+    "license-expression>=30.4,<31",
+    "jsonschema[format]>=4.18,<5",
+    "referencing>=0.30,<1",
+    "tomli>=2; python_version < '3.11'",
+    "pyelftools>=0.25",
+    "PyYAML>=6,<7",
+]
+
+# The analysed project calls these; it does not carry them. A project installs this package from
+# its MicroPython checkout and calls these entry points; it holds its own analysis policy.
+[project.scripts]
+sast-install-tools = "mpy_analysis.install:main"
+sast-cppcheck-inputs = "mpy_analysis.cppcheck_inputs:main"
+sast-cppcheck-coverage = "mpy_analysis.coverage:main"
+sast-codechecker-coverage = "mpy_analysis.codechecker_coverage:main"
+sast-fanalyzer = "mpy_analysis.fanalyzer:main"
+sast-run = "mpy_analysis.runner:main"
+sast-check-fixtures = "mpy_analysis.fixtures:main"
+sast-sbom = "mpy_analysis.sbom:main"
+sast-sbom-policy = "mpy_analysis.sbom_policy:main"
+sast-link-evidence = "mpy_analysis.link_evidence:main"
+
+[tool.setuptools]
+packages = ["mpy_analysis"]
+
+[tool.setuptools.package-data]
+mpy_analysis = ["data/*", "data/licenses/*.xml", "data/pysa/*/*.pysa", "data/pysa/*/*.json", "data/fixtures/*.py"]

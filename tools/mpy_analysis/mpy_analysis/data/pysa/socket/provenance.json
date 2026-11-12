@@ -1,0 +1,14 @@
+{
+  "family": "socket",
+  "model_version": 1,
+  "micropython_revision": "09f5bb447504a058376c62fe991b3613531837e6",
+  "sources": [
+    {"path": "ports/unix/modsocket.c", "lines": "284-327", "behavior": "recv returns network bytes; recvfrom returns a tuple with payload bytes at index zero and peer address at index one"},
+    {"path": "extmod/modsocket.c", "lines": "279-354", "behavior": "recv/recvfrom obtain payload bytes from the NIC protocol"}
+  ],
+  "typing_signature_reference": "micropython-unix-stubs==1.29.0.post1 socket.pyi socket.recv(self, bufsize, /) and socket.recvfrom(self, bufsize, /)",
+  "required_capabilities": ["socket.socket.recv", "socket.socket.recvfrom"],
+  "taint_kinds": {"sources": ["UserControlled"], "sinks": []},
+  "sanitizers": [],
+  "coverage_gaps": ["Unverified against supported target-aware Pyrefly/Pysa output", "Unix runtime also accepts flags omitted by the pinned socket stubs", "recvfrom address is not included in the payload source model", "Socket stream reads and readinto buffer mutations are not modelled", "No claim for arbitrary micropython-lib socket wrappers or aliases"]
+}

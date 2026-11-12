@@ -1,0 +1,40 @@
+{
+  "schema": "mpy-deployment/v1",
+  "name": "example-nucleo-h563zi-build-outputs",
+  "target": "arm-none-eabi",
+  "members": [
+    {
+      "id": "application",
+      "kind": "firmware-image",
+      "path": "app/firmware.bin",
+      "sha256": "ac789a5c50d4782cc0694efca8815ae0e8b66a8778c988a1dddfeb5f5f623b60",
+      "image": "application"
+    },
+    {
+      "id": "mboot",
+      "kind": "bootloader-image",
+      "path": "mboot/firmware.bin",
+      "sha256": "e135a8d88484bdaaa3a152633a20c53ee44de128709eed432eb989fc01c194f9",
+      "image": "mboot"
+    }
+  ],
+  "runtime_fetch": {"mode": "none"},
+  "exclusions": [
+    {
+      "path": "app/firmware.dfu",
+      "reason": "DFU packaging of the application image above; the raw binary is the deployed member"
+    },
+    {
+      "path": "app/firmware.hex",
+      "reason": "Intel HEX packaging of the application image above; the raw binary is the deployed member"
+    },
+    {
+      "path": "mboot/firmware.dfu",
+      "reason": "DFU packaging of the mboot image above; the raw binary is the deployed member"
+    },
+    {
+      "path": "mboot/firmware.hex",
+      "reason": "Intel HEX packaging of the mboot image above; the raw binary is the deployed member"
+    }
+  ]
+}

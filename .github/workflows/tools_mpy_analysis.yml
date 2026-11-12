@@ -1,0 +1,131 @@
+name: mpy_analysis tools
+
+on:
+  push:
+  pull_request:
+    paths:
+      - '.github/workflows/tools_mpy_analysis.yml'
+      - 'tools/ci.sh'
+      - 'tools/mpy_analysis/**'
+      - 'tools/mpy_build_inputs/**'
+      - 'lib/**'
+      - 'LICENSE'
+      - 'py/mpconfig.h'
+      - 'ports/unix/**'
+      - 'ports/stm32/**'
+      - 'ports/esp32/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    # Every library checkout must be present: the version and licence drift checks fail
+    # instead of skipping when one is missing.
+    runs-on: ubuntu-latest
+    env:
+      MPY_REQUIRE_SUBMODULES: 1
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+    - name: Fetch every submodule
+      run: git submodule update --init --recursive
+    - name: Install the tools
+      run: pip install ./tools/mpy_build_inputs ./tools/mpy_analysis pytest
+    - name: Run the regressions
+      # The two suites each have a conftest.py, so they run as separate pytest sessions.
+      run: |
+        PYTHONPATH=tools/mpy_analysis:tools python -m pytest -q tools/mpy_analysis/tests
+        PYTHONPATH=tools python -m pytest -q tools/mpy_build_inputs/tests
+
+  sbom_unix:
+    # Each sbom_* job builds a port, derives link evidence from the build and generates both
+    # SBOM formats (see tools/ci.sh). The SPDX output must pass the reference validator, the
+    # summary must report no gaps and the firmware-complete policy must hold.
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+    - name: Fetch the libraries
+      run: git submodule update --init --recursive
+    - name: Install packages
+      run: tools/ci.sh mpy_analysis_setup mpy_analysis_unix_setup
+    - name: Build and generate the SBOMs
+      run: tools/ci.sh mpy_analysis_sbom_unix
+    - name: Upload Unix SBOM and build outputs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-unix
+        path: ports/unix/build-standard/
+        include-hidden-files: true
+
+  sbom_stm32:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+    - name: Fetch the libraries
+      run: git submodule update --init --recursive
+    - name: Install packages
+      run: tools/ci.sh mpy_analysis_setup stm32_setup
+    - name: Build and generate the SBOMs
+      run: |
+        export PATH=$(tools/ci.sh stm32_path):$PATH
+        tools/ci.sh mpy_analysis_sbom_stm32
+    - name: Upload STM32 SBOM and build outputs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-stm32
+        path: |
+          ports/stm32/build-NUCLEO_H563ZI/
+          ports/stm32/mboot/build-NUCLEO_H563ZI/
+        include-hidden-files: true
+
+  sbom_esp32:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+    - name: Fetch the libraries
+      run: git submodule update --init --recursive
+    - name: Setup ESP-IDF
+      uses: ./.github/actions/setup_esp32
+      with:
+        idf_ver: v5.4.1
+        ccache_key: sbom
+    - name: Install packages
+      run: tools/ci.sh mpy_analysis_setup
+    - name: Build and generate the SBOMs
+      run: tools/ci.sh mpy_analysis_sbom_esp32
+    - name: Upload ESP32 SBOM and build outputs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-esp32
+        path: ports/esp32/build-ESP32_GENERIC/
+        include-hidden-files: true
+
+  sast_tools:
+    # The pinned scanners must install (cppcheck is built from its release tag, CodeChecker and
+    # clang are hash-checked downloads).
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+    - name: Install packages
+      run: tools/ci.sh mpy_analysis_setup
+    - name: Install the analysers
+      run: tools/ci.sh mpy_analysis_sast_setup

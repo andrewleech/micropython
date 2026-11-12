@@ -1,0 +1,14 @@
+{
+  "family": "execfile",
+  "model_version": 1,
+  "micropython_revision": "09f5bb447504a058376c62fe991b3613531837e6",
+  "sources": [
+    {"path": "py/builtinevex.c", "lines": "140-177,192-197", "behavior": "execfile creates a lexer from the named file and compiles/executes it; optional context arguments must be actual dicts"},
+    {"path": "py/modbuiltins.c", "lines": "700-702", "behavior": "execfile registration is gated by MICROPY_PY_BUILTINS_EXECFILE"}
+  ],
+  "typing_signature_reference": "micropython-stdlib-stubs==1.29.0.post2 stdlib/builtins.pyi execfile(filename, globals, locals, /)",
+  "required_capabilities": ["MICROPY_PY_BUILTINS_EXECFILE", "MICROPY_PY_BUILTINS_EVAL_EXEC"],
+  "taint_kinds": {"sources": [], "sinks": ["RemoteCodeExecution"]},
+  "sanitizers": [],
+  "coverage_gaps": ["Unverified against supported target-aware Pyrefly/Pysa output", "Optional capability must be verified for the selected firmware", "A controlled path is a possible file-execution risk, not proof of attacker-controlled file contents"]
+}

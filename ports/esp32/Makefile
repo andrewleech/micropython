@@ -41,6 +41,7 @@ DEVICE += $(PORT_ARG) $(BAUD_ARG)
 
 PYTHON ?= python3
 
+
 .PHONY: all clean deploy erase submodules FORCE
 
 CMAKE_ARGS =
@@ -103,6 +104,10 @@ all:
 		$(BUILD)/micropython.bin \
 		$(BUILD)/firmware.bin \
 		$(BUILD)/micropython.uf2
+.PHONY: sbom
+sbom:
+	$(Q)$(abspath ../../tools/mpy_analysis/make_sbom.sh) esp32 "$(abspath $(BUILD))" "$(MAKE)" \
+		"$(BOARD)" "$(BOARD_VARIANT)" "$(IDF_DIR)"
 
 $(BUILD)/bootloader/bootloader.bin $(BUILD)/partition_table/partition-table.bin $(BUILD)/micropython.bin: FORCE
 
