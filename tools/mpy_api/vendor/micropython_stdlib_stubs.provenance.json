@@ -1,0 +1,290 @@
+{
+ "upstream": {
+  "name": "micropython-stdlib-stubs",
+  "version": "1.29.0.post2",
+  "wheel_sha256": "bdcd54d9896d8e1d455b3a99995d82a8399e1e2c9cb94eacabe278e5c2397783",
+  "source": "https://github.com/josverl/micropython-stubs",
+  "licence": "MIT; typeshed-derived files under LICENSE_typeshed"
+ },
+ "files": {
+  "stdlib/__future__.pyi": {
+   "pristine_sha256": "a88c160e68dac375c28ae94a628281401fde2632f1c1e7ac50ac017699204245",
+   "trim": "915 bytes reduced to 404; version guards folded for Python 3.12 on Linux, docstrings removed, from-imports split to one name each, declarations removed by ablation"
+  },
+  "stdlib/_collections_abc.pyi": {
+   "pristine_sha256": "91fa25b3cfa30142e7537ed6fc75762497cd303670611037b921db29fb682cdc",
+   "trim": "3330 bytes reduced to 2884; version guards folded for Python 3.12 on Linux, docstrings removed, from-imports split to one name each, declarations removed by ablation"
+  },
+  "stdlib/_typeshed/__init__.pyi": {
+   "pristine_sha256": "5baecd021495dcd1754789daef773debaa253aa33734785e12edd9fbc3e544ed",
+   "trim": "12563 bytes reduced to 2638; version guards folded for Python 3.12 on Linux, docstrings removed, from-imports split to one name each, declarations removed by ablation; reduced by ablation to the protocols and aliases the checkers and the builtins template read; the os.PathLike and dataclasses imports are gone with their users"
+  },
+  "stdlib/abc.pyi": {
+   "pristine_sha256": "6c65bcacfc6b16d281e2c992969c922815202efb8620bc48aab8442f06c64e2c",
+   "trim": "1988 bytes reduced to 1709; version guards folded for Python 3.12 on Linux, docstrings removed, from-imports split to one name each, declarations removed by ablation; get_cache_token and update_abstractmethods removed"
+  },
+  "stdlib/array.pyi": {
+   "pristine_sha256": "b84e79112a8cf9b5403db954f7f41cd05d3a98155b0de969a6aa60d4215fb5b2",
+   "trim": "10744 bytes reduced to 644; version guards folded for Python 3.12 on Linux, docstrings removed, from-imports split to one name each, declarations removed by ablation; reduced to the array constructor and the members the samples use; a template for the generated array class, whose constructor the generator leaves unresolved"
+  },
+  "stdlib/builtins.pyi": {
+   "pristine_sha256": "bc9d6a1fea4f6ac425727719580a3965528f4271dbce8f26ffae4064d6a90f9c",
+   "trim": "94431 bytes reduced to 63947; version guards folded for Python 3.12 on Linux, docstrings removed, from-imports split to one name each, declarations removed by ablation; open and compile removed together with their io and _ast imports"
+  },
+  "stdlib/collections/__init__.pyi": {
+   "pristine_sha256": "cafc148a5d2d47c0fbb620c010cf8d4da88a222fe8a2b32fc3e6ff3fed434eb3",
+   "trim": "28515 bytes reduced to 1146; version guards folded for Python 3.12 on Linux, docstrings removed, from-imports split to one name each, declarations removed by ablation; reduced by ablation to the classes the checkers resolve through typing aliases and the constructors a build may lack"
+  },
+  "stdlib/collections/abc.pyi": {
+   "pristine_sha256": "90189900dd153dff2aa642276e3a8a65145ed0f5eb67b8f1366086b38a3950e7",
+   "trim": "79 bytes reduced to 31; version guards folded for Python 3.12 on Linux, docstrings removed, from-imports split to one name each, declarations removed by ablation"
+  },
+  "stdlib/io.pyi": {
+   "pristine_sha256": "0792d5e3becb4343db9beb1aea7b333b646d5cde87f3bdb3de92be4424a05804",
+   "trim": "12133 bytes reduced to 206; version guards folded for Python 3.12 on Linux, docstrings removed, from-imports split to one name each, declarations removed by ablation; reduced to the StringIO and BytesIO constructors"
+  },
+  "stdlib/sys/__init__.pyi": {
+   "pristine_sha256": "79dccf9c3b633ad931822f73620a19d92ecb73fa9aa65e79a7258add235303d3",
+   "trim": "20139 bytes reduced to 0; version guards folded for Python 3.12 on Linux, docstrings removed, from-imports split to one name each, declarations removed by ablation; emptied; mypy requires the module to exist"
+  },
+  "stdlib/types.pyi": {
+   "pristine_sha256": "f4e4a46337aa09802e017c9e2716b2b7bc28af42860f4fa3fcdf880eca0b3c50",
+   "trim": "21899 bytes reduced to 1008; version guards folded for Python 3.12 on Linux, docstrings removed, from-imports split to one name each, declarations removed by ablation; FrameType removed"
+  },
+  "stdlib/typing.pyi": {
+   "pristine_sha256": "55fcd563406c1129cf5422df503424fb3a7f2bd5c5e5949a6bba824ec9e6a72d",
+   "trim": "39199 bytes reduced to 30529; version guards folded for Python 3.12 on Linux, docstrings removed, from-imports split to one name each, declarations removed by ablation; Any = object() replaced by class Any; contextlib imports redirected to _mpy_pack._contextlib; re.Match and re.Pattern imports removed; the frame, code, running and await members of Generator, Coroutine and AsyncGenerator removed"
+  },
+  "stdlib/typing_extensions.pyi": {
+   "pristine_sha256": "665d9b70f150fb03dc0f277def3d30ec99613ac5dc807847ea3ddb3cc28d834f",
+   "trim": "18473 bytes reduced to 10706; version guards folded for Python 3.12 on Linux, docstrings removed, from-imports split to one name each, declarations removed by ablation; contextlib imports redirected to _mpy_pack._contextlib; type[Warning] replaced by type[Exception]; typing.Match and typing.Pattern re-exports removed; CapsuleType and Doc removed"
+  },
+  "stubs/mypy-extensions/mypy_extensions.pyi": {
+   "pristine_sha256": "2c8539096ac2c89e86f31a8c33f3f77f3b673b6cb5efb5b04a4d075e4fe5fb83",
+   "trim": "9102 bytes reduced to 374; version guards folded for Python 3.12 on Linux, docstrings removed, from-imports split to one name each, declarations removed by ablation; reduced to its comments; mypy only requires the file to exist"
+  }
+ },
+ "removed": {
+  "_mpy_shed/IRQs.pyi": "54dae7e4c6a3b402c4dcd3521ae89d2b20434b7dd2793b04c1749e3c65c9b892",
+  "_mpy_shed/__init__.pyi": "6222c713491fb46c6e47aad31551cca0cdb28348709cef5f94f854322a0b7aa9",
+  "_mpy_shed/_collections_abc.pyi": "aad86cc2173ffb5e61f05ef815bf41bbe68a5dc83076228d6a29243e735e32fb",
+  "_mpy_shed/_mp_available.pyi": "7570cd5391ca558a531a3815eabe88fdbc03b65d95ba61f0a17ebbc86972bd8e",
+  "_mpy_shed/_mpy_builtins.pyi": "be68572f04c83e28514ef587671a899baedab133bdaac0dd76ab73da139cb0d9",
+  "_mpy_shed/blockdevice.pyi": "a13e6bf3028505071db3ab86b7857abe84599d8520d876835c46e9b7c5305977",
+  "_mpy_shed/buffer_mp.pyi": "3fb4860df4fc8b44ade66863f47c07ffa27a5a83f61eaf5986c87893a3dfd81b",
+  "_mpy_shed/collections/__init__.pyi": "74a9486ce265a0bfd9087be99f85d41cc7358cc10865015520011d89c3c3376a",
+  "_mpy_shed/collections/abc.pyi": "ce0a2f03c9f5d69622dcac89249787bde1b41b72a99efb258ea439422aed0e99",
+  "_mpy_shed/io_modes.pyi": "14c6bfb72c2055bd9c88ed7dacc830092b2ecb2dab0a2263a8d92f82b25beb12",
+  "_mpy_shed/io_mp.pyi": "5cc62b3ad263ba45c34b16b362b6802cdfee94815fc8a0c50cc7411cd42d6d44",
+  "_mpy_shed/mp_implementation.pyi": "2efc7a77ba75e9e55d22150210f212c81428d4c9a846c7723d729adf9d53649b",
+  "_mpy_shed/mp_mem.pyi": "51f88e8a79b3e8b17f4b7b679c4d7a6906999f2eab4c93f608fc0ce4b6a495f9",
+  "_mpy_shed/neopixelbase.pyi": "7c77c69090ab9f52685aedbfb204881eeee281da9f2f11e339cd7995468115e4",
+  "_mpy_shed/os_vfs.pyi": "ee9a8f339a0cb933cc6641d8f6b3ca7c2e3c25fe340c71810e813cff7bf9dd3b",
+  "_mpy_shed/pathlike.pyi": "916e8cf66d5e90d968852d86c6b5941dfbb558e25caf8c80002b9e14a5e05218",
+  "_mpy_shed/subscriptable.pyi": "9ca54d84d8e29ebcc561a4740ea13b704c8dde3a89b2f8714e7b30cd11a67406",
+  "_mpy_shed/time_mp.pyi": "08a8df295938fb1fdae608275f81a0777bd48c7bc5d5805b047b93c33bd93ef8",
+  "stdlib/VERSIONS": "98cdc04af1488cba86e06272a9e66dea144012bf01e6b7914fb7429ad6d8603c",
+  "stdlib/_ast.pyi": "10c7b044d461a990d194829ef5943ec1b5291f27394b997f7c11ae3d930d4366",
+  "stdlib/_asyncio.pyi": "bc85926805889f2032d8cc63621b2461dc2e0035114855cd29154651f2947753",
+  "stdlib/_codecs.pyi": "88872b710545c3c46246d6f39bf00e027378c72fe0417772c798d5aac1297b94",
+  "stdlib/_decimal.pyi": "e574fd5106a40708543dc965dc58b6bf57305ce131597ee6c2a64499b6cc3b4a",
+  "stdlib/_typeshed/dbapi.pyi": "4ce877d08b0e99119e67b40841a2e43ab84f46dcef93fc849ddb3906cd7601e3",
+  "stdlib/_typeshed/importlib.pyi": "892475490ac8807dfd759c2ed68d0cd2a93c66cc515249f80ed1b6fcae6d3b8a",
+  "stdlib/_typeshed/xml.pyi": "5b873d3dc1f0ef7ec55287b370f0247d1ba8301fbeed4a7bb8a959d1284d206d",
+  "stdlib/asyncio/__init__.pyi": "7b22728b1eedf7bd2bc8ba4008e91bb93a94f00200f5b88de64a9cfcbbdf8f98",
+  "stdlib/asyncio/base_events.pyi": "99bd5241b261bc03449b8ce5a0bee71245313b058ba012d5607ceaba49b2d855",
+  "stdlib/asyncio/base_futures.pyi": "eb894c2bff18110428c519cdfb63804332a7131f45f55550e0628840a7aa1711",
+  "stdlib/asyncio/base_tasks.pyi": "fb5d4958b1b9cd7b31d14fbc610e3e29994642afc911c72cb66d724d5ee75869",
+  "stdlib/asyncio/constants.pyi": "6905adf3d51f5e9d2b64cdbd3900c0186946ce278eafa74043a9e5492e608c05",
+  "stdlib/asyncio/coroutines.pyi": "b25a3e28b0a7cdcb015d03e1dd10a09294d9f72ec79c5d41714d96c3cf7a3525",
+  "stdlib/asyncio/events.pyi": "3cceb48c3a27e72d7d368394124e8a847fbab2fe27df4c788af297db1aae3db1",
+  "stdlib/asyncio/exceptions.pyi": "b12888a1c9a8e19831b7bfe7fbb9acf85b61b494c29840b875b36e374475d4f7",
+  "stdlib/asyncio/format_helpers.pyi": "c6fbbf39b0e67ad8440334c985f7da8ae5d31904c6fea53eff3e0fff4a1427db",
+  "stdlib/asyncio/locks.pyi": "309579a803aa24d8b6fae3bf46ebe1be868c117db98ffec628cf9c5ad2ece5ca",
+  "stdlib/asyncio/log.pyi": "fbe50998399bbaa9b511dadc056e5cf78937a73a0dc2564a8ecaa7f9c912a4f0",
+  "stdlib/asyncio/micropython.pyi": "c8a00745d4da2c95d808f3c94d67faafd93b6225b5d61797d356080f35b89e18",
+  "stdlib/asyncio/mixins.pyi": "963024a0382494c51a6c55c113a93eccbcbf914107f9a6dac34bf2529d6e2296",
+  "stdlib/asyncio/proactor_events.pyi": "cd09e32a5f89759ab3ea9e0bf95c921baac38dbd3f0c5d2bf3bb7021d696b2f3",
+  "stdlib/asyncio/protocols.pyi": "84bb5c3e78aedda254d8bdbb4da4da78ac694e978b499f98c420c65260feda5a",
+  "stdlib/asyncio/queues.pyi": "33bd6c0ab5ac943748956119438524f69d936d99aff861d6009b462c54d803fa",
+  "stdlib/asyncio/readme.md": "0a652ba6cc2d2bc78b6b21f3a1fc4b1030f03d8af28b25652b71b6b76cbd0baa",
+  "stdlib/asyncio/runners.pyi": "b6aeb8147f18800ee540f5aff7f1b00ef62cba16ec3fd4a93a297de2b736a28c",
+  "stdlib/asyncio/selector_events.pyi": "fb8d08252f89f4cb2a73029bf52912b0efb9fbaefd3bfee870fc0e650678e320",
+  "stdlib/asyncio/sslproto.pyi": "64126c0183fb6069cc4d9751be8b6109ff3a2c0773af215991ff5746526c6502",
+  "stdlib/asyncio/staggered.pyi": "430832826d56779c9d0f543d230bb5942ab9b87465d2afe9e7071afc70fb6ac9",
+  "stdlib/asyncio/streams.pyi": "eda41812dabdc6e6b5699af65763cd1ef692fdb2cdae10a891d7fa3f75452da5",
+  "stdlib/asyncio/tasks.pyi": "529650d4afa2d3ed0a89cc92bfafc0bc9d369cb8e5a10522619113cb2af7205a",
+  "stdlib/asyncio/threads.pyi": "dcb4b48742863ca2030650ada4d5478244fd716cccf5e56ee3fee8da1a81dc03",
+  "stdlib/asyncio/timeouts.pyi": "f9679bc1e1768fa8c74ac349ac71975a7fb62c4fdf5715c8c060d542ce018760",
+  "stdlib/asyncio/transports.pyi": "7853719ea8b0356becb4acdbe5a3066c8bd6c5a20074d5f99ac20e5aa65fc6fa",
+  "stdlib/asyncio/trsock.pyi": "52a2bb3a644f0407e49a8ec312ed9742146fd969d5eb8d7ffe6573e71c3f1d09",
+  "stdlib/enum.pyi": "50a56e17965b107c39723554f1b32c9d86f22626d3185672364c96f219e7f3e4",
+  "stdlib/json/__init__.pyi": "c53f2f9d47e39cb6bb501c5525781873af11f0a4b9ed36fa6acba4894788927a",
+  "stdlib/os/__init__.pyi": "eb31bc5373e1180251182c39caf2a322496d874de40db5b8d675e35716f9eafc",
+  "stdlib/re.pyi": "8652a78c786b8e288d5cc80e6f32f3d67dc65342e591257c789819b70844b3cd",
+  "stdlib/sre_compile.pyi": "c61cd226e79389a51d9f639e41b43bc4fa83116122b437d103d9fbeac2149bde",
+  "stdlib/sre_constants.pyi": "59d8f77ee4853dbe2b23004a40389ebeb23a500d3f8fb0458b87bbe1adcafa5f",
+  "stdlib/sre_parse.pyi": "5a9c0b44b1462c6ae407940c77bfcce132b961facbbcc1fc5a76b82954ff440c",
+  "stdlib/ssl.pyi": "cc514f26d8be08c6244780ab65246c77a55ef97a3a9fe4cbc7bf8f844ef5e9a5",
+  "stdlib/struct.pyi": "1af972344b5e5bf3b4dd8beaeb1439aa627face040e2da67b87f8e2e4022d39d"
+ },
+ "support_residue": [
+  {
+   "name": "__future__",
+   "module": "__future__",
+   "form": "bootstrap-module",
+   "checker": "mypy, pyright",
+   "failure": "without the module, a program with `from __future__ import annotations` fails: mypy \"Cannot find implementation or library stub for module named \\\"__future__\\\"\", pyright \"Import \\\"__future__\\\" could not be resolved\""
+  },
+  {
+   "name": "collections",
+   "module": "typing",
+   "form": "kept-import",
+   "checker": "mypy",
+   "failure": "without `import collections` in typing.pyi, mypy reports `from typing_extensions import OrderedDict` as \"Module \\\"typing_extensions\\\" has no attribute \\\"OrderedDict\\\"\""
+  },
+  {
+   "name": "ellipsis",
+   "module": "builtins",
+   "form": "forced-name",
+   "checker": "mypy",
+   "failure": "without builtins.ellipsis mypy stops with INTERNAL ERROR, KeyError \"Could not find builtin symbol 'ellipsis'\", on any program"
+  },
+  {
+   "name": "ChainMap",
+   "module": "collections",
+   "form": "forced-name",
+   "checker": "mypy, Pyrefly",
+   "failure": "without collections.ChainMap mypy reports \"Module \\\"typing\\\" has no attribute \\\"ChainMap\\\"\" and Pyrefly panics, LookupAnswer::get failed to find key, collections KeyExport(Name(\"ChainMap\")), on a program that imports or uses typing.ChainMap"
+  },
+  {
+   "name": "Counter",
+   "module": "collections",
+   "form": "forced-name",
+   "checker": "mypy, Pyrefly",
+   "failure": "without collections.Counter mypy reports \"Module \\\"typing\\\" has no attribute \\\"Counter\\\"\" and Pyrefly panics, LookupAnswer::get failed to find key, collections KeyExport(Name(\"Counter\")), on a program that imports or uses typing.Counter"
+  },
+  {
+   "name": "defaultdict",
+   "module": "collections",
+   "form": "forced-name",
+   "checker": "mypy, Pyrefly",
+   "failure": "without collections.defaultdict mypy reports \"Module \\\"typing\\\" has no attribute \\\"DefaultDict\\\"\" and Pyrefly panics, LookupAnswer::get failed to find key, collections KeyExport(Name(\"defaultdict\")), on a program that imports or uses typing.DefaultDict"
+  },
+  {
+   "name": "sys",
+   "module": "sys",
+   "form": "bootstrap-module",
+   "checker": "mypy",
+   "failure": "a build without a sys module: mypy stops with \"Failed to find builtin module sys, perhaps typeshed is broken?\""
+  },
+  {
+   "name": "BaseException",
+   "module": "builtins",
+   "form": "bare-class",
+   "checker": "mypy, Pyrefly",
+   "failure": "a build without builtins.BaseException: Pyrefly panics, Stdlib missing class `BaseException`, on a program with a `raise` or an `except` clause, and mypy stops, KeyError \"Could not find builtin symbol 'BaseException'\", on a program that raises an exception class"
+  },
+  {
+   "name": "bool",
+   "module": "builtins",
+   "form": "bare-class",
+   "checker": "Pyrefly",
+   "failure": "a build without builtins.bool: Pyrefly panics, Stdlib missing class `bool`, on any program"
+  },
+  {
+   "name": "bytes",
+   "module": "builtins",
+   "form": "bare-class",
+   "checker": "mypy, Pyrefly",
+   "failure": "a build without builtins.bytes: mypy stops, KeyError \"Could not find builtin symbol 'bytes'\", and Pyrefly panics, Stdlib missing class `bytes`, on a program with a bytes literal"
+  },
+  {
+   "name": "complex",
+   "module": "builtins",
+   "form": "bare-class",
+   "checker": "mypy, Pyrefly",
+   "failure": "a build without builtins.complex: mypy stops, KeyError \"Could not find builtin symbol 'complex'\", and Pyrefly panics, Stdlib missing class `complex`, on a program with a complex literal such as `1j`"
+  },
+  {
+   "name": "dict",
+   "module": "builtins",
+   "form": "bare-class",
+   "checker": "mypy, Pyrefly",
+   "failure": "a build without builtins.dict: mypy stops, AssertionError \"Cannot find builtins.dict to add __annotations__\", and Pyrefly panics, Stdlib missing class `dict`, on any program"
+  },
+  {
+   "name": "float",
+   "module": "builtins",
+   "form": "bare-class",
+   "checker": "mypy, Pyrefly",
+   "failure": "a build without builtins.float: mypy stops, KeyError \"Could not find builtin symbol 'float'\", and Pyrefly panics, Stdlib missing class `float`, on a program with a float literal"
+  },
+  {
+   "name": "int",
+   "module": "builtins",
+   "form": "bare-class",
+   "checker": "mypy, Pyrefly",
+   "failure": "a build without builtins.int: generation stops, merged builtins reads names nothing defines: int; without that check mypy stops, AssertionError \"builtins.int\", on any program and Pyrefly panics, Stdlib missing class `int`, on a program with an integer literal"
+  },
+  {
+   "name": "list",
+   "module": "builtins",
+   "form": "bare-class",
+   "checker": "mypy, Pyrefly",
+   "failure": "a build without builtins.list: mypy stops, AssertionError \"Cannot find builtins.list to add __path__\", on any program, and Pyrefly panics, Stdlib missing class `list`, on a program with a list annotation, a slice or a set comprehension"
+  },
+  {
+   "name": "object",
+   "module": "builtins",
+   "form": "bare-class",
+   "checker": "Pyrefly",
+   "failure": "a build without builtins.object: Pyrefly panics, Stdlib missing class `object`, on a program with a slice, a set comprehension or a class definition"
+  },
+  {
+   "name": "set",
+   "module": "builtins",
+   "form": "bare-class",
+   "checker": "mypy, Pyrefly",
+   "failure": "a build without builtins.set: mypy stops, KeyError \"Could not find builtin symbol 'set'\", and Pyrefly panics, Stdlib missing class `set`, on a program with a set literal or a set comprehension"
+  },
+  {
+   "name": "slice",
+   "module": "builtins",
+   "form": "bare-class",
+   "checker": "mypy, Pyrefly",
+   "failure": "a build without builtins.slice: mypy stops, KeyError \"Could not find builtin symbol 'slice'\", and Pyrefly panics, Stdlib missing class `slice`, on a program with a slice such as `x[1:2]`"
+  },
+  {
+   "name": "str",
+   "module": "builtins",
+   "form": "bare-class",
+   "checker": "mypy, Pyrefly",
+   "failure": "a build without builtins.str: generation stops, merged builtins reads names nothing defines: str; without that check mypy stops, AssertionError \"builtins.str\", and Pyrefly panics, Stdlib missing class `str`, on any program"
+  },
+  {
+   "name": "tuple",
+   "module": "builtins",
+   "form": "bare-class",
+   "checker": "mypy, Pyrefly",
+   "failure": "a build without builtins.tuple: mypy stops, AssertionError \"builtins.tuple\", on any program, and Pyrefly panics, Stdlib missing class `tuple`, on some programs"
+  },
+  {
+   "name": "type",
+   "module": "builtins",
+   "form": "bare-class",
+   "checker": "mypy, Pyrefly",
+   "failure": "a build without builtins.type: mypy stops, KeyError \"Could not find builtin symbol 'type'\", on any program, and Pyrefly panics, Stdlib missing class `type`, on a program calling `object()`"
+  }
+ ],
+ "overlay": {
+  "stdlib/_mpy_pack/__init__.pyi": {
+   "derived_from": "none, an empty package marker written for the pack",
+   "licence": "MIT, as mpy-api"
+  },
+  "stdlib/_mpy_pack/_contextlib.pyi": {
+   "derived_from": "typeshed stdlib/contextlib.pyi",
+   "licence": "Apache-2.0, see LICENSE_typeshed"
+  }
+ }
+}

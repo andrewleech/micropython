@@ -18,6 +18,7 @@ skip = """
 ./ports/psoc-edge/boards/*/bsp-cfg,\
 ./ports/stm32/usbhost,\
 ./tests,\
+./tools/mpy_api/vendor,\
 ACKNOWLEDGEMENTS,\
 """
 
@@ -28,6 +29,7 @@ extend-exclude = [
   "esp-idf",
   "pico-sdk",
   "emsdk",
+  "tools/mpy_api/vendor",
   "tests/cpydiff/syntax_assign_expr.py" # intentionally incorrect CPython code
 ]
 # Include Python source files that don't end with .py

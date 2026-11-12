@@ -1,0 +1,2729 @@
+{
+  "schema_version": 1,
+  "kind": "mpy-api-pyi-enrichment",
+  "tree": "tree",
+  "producer": {
+    "name": "micropython-stubber",
+    "version": "1.29.0",
+    "source": {
+      "uri": "https://github.com/Josverl/micropython-stubber",
+      "revision": "65cf4c1f5716c0effbc448bd3930030cb34e76bc"
+    }
+  },
+  "sources": [
+    {
+      "id": "micropython-documentation",
+      "role": "documentation",
+      "uri": "https://github.com/micropython/micropython/tree/9e348d293c58ee6d2b8a581be3a199c2b7e2f145/docs/library",
+      "revision": "9e348d293c58ee6d2b8a581be3a199c2b7e2f145",
+      "version": "v1.30.0-preview-147-g9e348d293",
+      "content_sha256": null,
+      "evidence": [
+        {
+          "path": "provenance.json",
+          "bytes": 74547,
+          "sha256": "53afe1a8a708bbcadaa83608b74644d66b00821fa209478ef5021a93be671f71"
+        },
+        {
+          "path": "evidence/upstream-docstubs-tree.json",
+          "bytes": 43773,
+          "sha256": "826fb59a5622f888c6e0fce1c98fe497abc3f32ab479f32e8730b0525feedfb8"
+        },
+        {
+          "path": "evidence/get-doc-stubs.yml",
+          "bytes": 3398,
+          "sha256": "b1771d75853948ab79dd9f28fb845fc9d0cd01706d74032db1eb75f71d07a4cd"
+        },
+        {
+          "path": "evidence/micropython-stubber-METADATA",
+          "bytes": 21129,
+          "sha256": "6b3597f5606790845c9296c7c63fb3f846d7ac3f3d02cc8519dfcf6e3994092d"
+        },
+        {
+          "path": "evidence/micropython-stubber-RECORD",
+          "bytes": 9134,
+          "sha256": "932f1c6aaaffc9e50e833b80b772e5cca8751a6fca7913247725094f8621e862"
+        },
+        {
+          "path": "evidence/stubs_from_docs.py",
+          "bytes": 3597,
+          "sha256": "eba1042ebc1a84d1217975cf7110ffd099e4f91ed43a8d717f5bbe01b36c9ca0"
+        },
+        {
+          "path": "evidence/get_docstubs_cmd.py",
+          "bytes": 5148,
+          "sha256": "0a98708b21e79b686c7b1a8a39469a7dbea207abf80ece979c5bb4858bcd7515"
+        },
+        {
+          "path": "evidence/modcat.py",
+          "bytes": 4868,
+          "sha256": "ac2bc5022d9bdf1f249c7a67e5e640ef7590384b153b2d39b7236890dcdbe52a"
+        },
+        {
+          "path": "tree/docstubs/modules.json",
+          "bytes": 12589,
+          "sha256": "25b26587ce43559bd65f96fc555740e850686a21b708fe612f1b9aa8665b1b58"
+        }
+      ]
+    },
+    {
+      "id": "jos-curated-reference",
+      "role": "released-reference",
+      "uri": "https://github.com/Josverl/micropython-stubs/tree/b7428e135a09d7a563b2d58d1c9664961e06c8e3/reference/micropython",
+      "revision": "b7428e135a09d7a563b2d58d1c9664961e06c8e3",
+      "version": "curated reference at b7428e135a09d7a563b2d58d1c9664961e06c8e3",
+      "content_sha256": null,
+      "evidence": [
+        {
+          "path": "provenance.json",
+          "bytes": 74547,
+          "sha256": "53afe1a8a708bbcadaa83608b74644d66b00821fa209478ef5021a93be671f71"
+        },
+        {
+          "path": "evidence/upstream-reference-tree.json",
+          "bytes": 39793,
+          "sha256": "09c8092ebe8110f67c0b86d4fd374d5d751642960a6e49c52459c3eda2b0fec0"
+        }
+      ]
+    },
+    {
+      "id": "jos-typing-support",
+      "role": "released-reference",
+      "uri": "https://github.com/Josverl/micropython-stubs/tree/b7428e135a09d7a563b2d58d1c9664961e06c8e3/reference/_mpy_shed",
+      "revision": "b7428e135a09d7a563b2d58d1c9664961e06c8e3",
+      "version": "typing support at b7428e135a09d7a563b2d58d1c9664961e06c8e3",
+      "content_sha256": null,
+      "evidence": [
+        {
+          "path": "provenance.json",
+          "bytes": 74547,
+          "sha256": "53afe1a8a708bbcadaa83608b74644d66b00821fa209478ef5021a93be671f71"
+        },
+        {
+          "path": "evidence/upstream-helpers-tree.json",
+          "bytes": 4570,
+          "sha256": "4b4eb7d3d3a42c86bf58e5b7e228a8dcb004dfc2f0f78d5008e5274f6f5aeb69"
+        }
+      ]
+    },
+    {
+      "id": "typeshed-derived",
+      "role": "released-reference",
+      "uri": "https://github.com/Josverl/micropython-stubs/tree/b7428e135a09d7a563b2d58d1c9664961e06c8e3/publish/micropython-stdlib-stubs",
+      "revision": "b7428e135a09d7a563b2d58d1c9664961e06c8e3",
+      "version": "typeshed-derived support; upstream typeshed d262beb07502cda412db2179fb406d45d1a9486f",
+      "content_sha256": null,
+      "evidence": [
+        {
+          "path": "provenance.json",
+          "bytes": 74547,
+          "sha256": "53afe1a8a708bbcadaa83608b74644d66b00821fa209478ef5021a93be671f71"
+        },
+        {
+          "path": "evidence/typeshed_commit.txt",
+          "bytes": 202,
+          "sha256": "edbdfff43b84c7063c880187b45097b3bae9906c7cbaff015ed73286c0e7ac76"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "docstubs/_thread/__init__.pyi",
+      "bytes": 711,
+      "sha256": "c4b0673d2a5fce9f27095b066c155e83b501d8d8f81332aa3ceec55b19915668",
+      "module": "_thread",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/aioespnow/__init__.pyi",
+      "bytes": 1622,
+      "sha256": "aca45749bcf9eccbfa98bc03ac6df04fc7ff061b93d54ce82aac73dc6ab15493",
+      "module": "aioespnow",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/array/__init__.pyi",
+      "bytes": 7910,
+      "sha256": "64234d1453120625af347374c8369381d64049aa8037ca5ddbb95483c5c41ded",
+      "module": "array",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/asyncio/__init__.pyi",
+      "bytes": 1208,
+      "sha256": "7a65db9739b94cc56e172aadc643cf1c7d38958823770bb85c9c6925dd623680",
+      "module": "asyncio",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/asyncio/core.pyi",
+      "bytes": 4150,
+      "sha256": "f95ce83179b271837121e64fc184fab20bcdfb5b7290736de4580010b5cc97b7",
+      "module": "asyncio.core",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/asyncio/event.pyi",
+      "bytes": 2450,
+      "sha256": "3745568873fc1b44d732e15de55a43f838c4216f3118e717957c943a7e869eb8",
+      "module": "asyncio.event",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/asyncio/funcs.pyi",
+      "bytes": 1481,
+      "sha256": "7f3e87f72975b5e635a35c462ef8ea5d5ec18f8a7df851e2b03b129cadf2aff4",
+      "module": "asyncio.funcs",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/asyncio/lock.pyi",
+      "bytes": 1559,
+      "sha256": "cf1116900a8a25d41d3aed95a45d6c19bcca342ea88f754f6251318468b78bfc",
+      "module": "asyncio.lock",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/asyncio/stream.pyi",
+      "bytes": 10248,
+      "sha256": "6c1d771cb55fe49114df9d1b14749d8ea9de6e05a2e953e913286cccd7f312b5",
+      "module": "asyncio.stream",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/asyncio/task.pyi",
+      "bytes": 87,
+      "sha256": "c8fcdb7c41f8573885ff6a71ca8eefacda771e1ebf38f2cb51ce45915dc42f75",
+      "module": "asyncio.task",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/binascii/__init__.pyi",
+      "bytes": 1893,
+      "sha256": "1fe3e2c815c44dc399a15c61a56a9397c5e40ccb72c2b334ce6b4d5a04f10891",
+      "module": "binascii",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/bluetooth/__init__.pyi",
+      "bytes": 46968,
+      "sha256": "4727bf2b69c1dce8a8d6aaf5cc92426325da310108c0008a1c7265477e121ef3",
+      "module": "bluetooth",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/btree/__init__.pyi",
+      "bytes": 9006,
+      "sha256": "1b4cc7315eacb97863a26b0582f17c1b126f29e52fe4f68edca327f9a85a307c",
+      "module": "btree",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/cmath/__init__.pyi",
+      "bytes": 1966,
+      "sha256": "64a14f32c7567e425b4864651f49f137f1455ee908b43b99f2ad743e32932a30",
+      "module": "cmath",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/collections/__init__.pyi",
+      "bytes": 4784,
+      "sha256": "3881d27b30cbea7cb71ae52e1732d17ea1815f2d5d396dbf002790cc9d9b6da2",
+      "module": "collections",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/cryptolib/__init__.pyi",
+      "bytes": 3582,
+      "sha256": "3dab038825782201f72ba9831230c7f1b8a8eeaea54b97ac12bf43a723d71796",
+      "module": "cryptolib",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/deflate/__init__.pyi",
+      "bytes": 3402,
+      "sha256": "ce1209723c7a716bd1db39b99cfce7deba460b9d519fa2395057b903934e9ad4",
+      "module": "deflate",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/errno/__init__.pyi",
+      "bytes": 2689,
+      "sha256": "dd04939a00dc95c2e2deeb2d8663024d271a1a876d89d485ce982e9c0b93f43f",
+      "module": "errno",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/esp/__init__.pyi",
+      "bytes": 12220,
+      "sha256": "28029bca62f76881fe70af89215c549a638c06357f93927f8919b9f152d1ec0d",
+      "module": "esp",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/esp32/__init__.pyi",
+      "bytes": 35950,
+      "sha256": "9899bc40c92e1f690b0219a5f685a0f27accac52a19fbf9a4ffd6707cff2f5cf",
+      "module": "esp32",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/espnow/__init__.pyi",
+      "bytes": 27740,
+      "sha256": "805944810c40a7e9e6848554b0c6ef8ec21d69a549e07ba163eef4f4eab52e48",
+      "module": "espnow",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/framebuf/__init__.pyi",
+      "bytes": 9949,
+      "sha256": "8ee1e4d5a575b5b7bf409625714a581d3180d4e9b073de3ad68447562f9d426a",
+      "module": "framebuf",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/gc/__init__.pyi",
+      "bytes": 4677,
+      "sha256": "c07efe3fe452fa39de854f2eae8bc9138f19de012c5fc9276d441d48c7627c41",
+      "module": "gc",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/gzip/__init__.pyi",
+      "bytes": 2015,
+      "sha256": "e246c8becb2d4be72231bdbe260f09e906f17a529fc1e297e156928ed86c4894",
+      "module": "gzip",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/hashlib/__init__.pyi",
+      "bytes": 3620,
+      "sha256": "9cf9dc547ec5de9f07f54b9a4ef6e4eb88a53584773df00434d812799e92bf70",
+      "module": "hashlib",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/heapq/__init__.pyi",
+      "bytes": 1195,
+      "sha256": "038e1b61151c6db4e5a04ebadbe6d893e9bac20fa822c11e1d828734b70912a4",
+      "module": "heapq",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/io/__init__.pyi",
+      "bytes": 12654,
+      "sha256": "c3a35ac5def251042439bc9a7c63f96e1a7bc163a21dbd6b3b19a9505d11621b",
+      "module": "io",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/json/__init__.pyi",
+      "bytes": 2308,
+      "sha256": "8990882eb700ab408c6b12f806a1fe75b73902b97462da6d063f2269ef6bf34d",
+      "module": "json",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/lcd160cr/__init__.pyi",
+      "bytes": 21658,
+      "sha256": "d2244f6f44ce3fdef3e4b318cd4b692abd3a103430ff7fa04dd4bbbbe52c5017",
+      "module": "lcd160cr",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/ADC.pyi",
+      "bytes": 4143,
+      "sha256": "d8034bad063e45912a6e922fa0d86cae123c5e07d5450bc3b6182dde29f900f8",
+      "module": "machine.ADC",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/ADCBlock.pyi",
+      "bytes": 1831,
+      "sha256": "6d5923cf25007583078882b3cf37c8b449dddccaa0b1b5f40b64f7c6cc48ddbd",
+      "module": "machine.ADCBlock",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/ADCWiPy.pyi",
+      "bytes": 1816,
+      "sha256": "3b1c2bb3e875430d366e748bb257b701f19c35e6ee82f6b5c2a688ce8c37d4a1",
+      "module": "machine.ADCWiPy",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/CAN.pyi",
+      "bytes": 23720,
+      "sha256": "400bd2b1acde5474bea357fea4ffa50336dee6ad58d9958fd4ec95958cbd747f",
+      "module": "machine.CAN",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/Counter.pyi",
+      "bytes": 8907,
+      "sha256": "83862b66399b29a4e23de0375e73ccedd8bbe1716aba32ad46f04c5b70222a59",
+      "module": "machine.Counter",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/DAC.pyi",
+      "bytes": 1422,
+      "sha256": "1b750b168f7a3a8ad45ee9a45c7e5242563cbdaa60ae4337159f472c33e13fb1",
+      "module": "machine.DAC",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/Encoder.pyi",
+      "bytes": 7871,
+      "sha256": "6e4e4ac94e6ecf9258edac4e3ff879071d1de73ef436027608a97f791b13dd6e",
+      "module": "machine.Encoder",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/I2C.pyi",
+      "bytes": 11137,
+      "sha256": "3493a03e3e00e2a6cf1c3239bc56f8bb34ff14974b3149df03bf955278d9694e",
+      "module": "machine.I2C",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/I2CTarget.pyi",
+      "bytes": 4889,
+      "sha256": "c42013a64c5089adaa513141f16011f262bd24cec4c0a7a1b0490a2a06e611db",
+      "module": "machine.I2CTarget",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/I2S.pyi",
+      "bytes": 6833,
+      "sha256": "ee371e20e2158b1776c66cd4583760bfca666c1e1c86a2249f64d322a6eeae3a",
+      "module": "machine.I2S",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/PWM.pyi",
+      "bytes": 5813,
+      "sha256": "95c4f4882a6a43251f13de34902fccc2364a26b5e3c5f2a82bd93690e8943d76",
+      "module": "machine.PWM",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/Pin.pyi",
+      "bytes": 18973,
+      "sha256": "744e240438dfca1e39e2364a8a6a08f857d0c764d30142dd0f4ff688a1afc110",
+      "module": "machine.Pin",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/RTC.pyi",
+      "bytes": 12717,
+      "sha256": "dc87d07e6e1a900d6108b4b8b8252fdb894bd9381ef5688eabbd755270d2cf6e",
+      "module": "machine.RTC",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/SD.pyi",
+      "bytes": 1776,
+      "sha256": "40f82e3807ac1ba2007b30fd28c4c597c12a928e83c7a07c48cb0ddf080f35a4",
+      "module": "machine.SD",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/SDCard.pyi",
+      "bytes": 8026,
+      "sha256": "7a38b71d18e1b8ca518e1a4dadc4bd007dfcf17485e4747aee243f261886fbe9",
+      "module": "machine.SDCard",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/SPI.pyi",
+      "bytes": 10717,
+      "sha256": "1ba2f66b7d773a84f94598da875e9a6329b1fe077ee0d47ef5910239f2c81817",
+      "module": "machine.SPI",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/Signal.pyi",
+      "bytes": 7459,
+      "sha256": "79ea53cc0d39400a0010040ae49ad54a2b41f940199d4e721293568ed1d7eba3",
+      "module": "machine.Signal",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/Timer.pyi",
+      "bytes": 6068,
+      "sha256": "66ded2d629668882bb2a55dd95d911e73bc2755a0ad82d25052472035d715711",
+      "module": "machine.Timer",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/TimerWiPy.pyi",
+      "bytes": 5599,
+      "sha256": "5413169b4f597b2dc92edff713b2be22ed04fe25ab16cab609b2adbc46e72a28",
+      "module": "machine.TimerWiPy",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/UART.pyi",
+      "bytes": 20603,
+      "sha256": "48aa7c4468520f447ecbc2975503d807e3b2664e38f11d8cb42e0fbefd1c9942",
+      "module": "machine.UART",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/USBDevice.pyi",
+      "bytes": 10616,
+      "sha256": "fcaa684d3821d26c66de6df32c161408e084de89134b690104ba206d3732268a",
+      "module": "machine.USBDevice",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/WDT.pyi",
+      "bytes": 1405,
+      "sha256": "5bc195b93c157ef4eba862b67aa20618978ddd3ec5d67e7b30937db9ef571135",
+      "module": "machine.WDT",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/machine/__init__.pyi",
+      "bytes": 18441,
+      "sha256": "a8d49e0eeda1edba47fcb26b5b645f16d9b09b8b85d6b0eedebdd9b4c69fb289",
+      "module": "machine",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/marshal/__init__.pyi",
+      "bytes": 1213,
+      "sha256": "785ba3347dd9e73259bf3e397065e1f291c0d062655a861c96b1c8ece7a01f97",
+      "module": "marshal",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/math/__init__.pyi",
+      "bytes": 5755,
+      "sha256": "9e20996fec43b21429eff4f45a77befb242c3d2737b16be0b5dded7a0a8aa2fc",
+      "module": "math",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/micropython/__init__.pyi",
+      "bytes": 19049,
+      "sha256": "625d48c5ff7dacea131802460fdf0a454ab1c635c8f47942733f510b4166dc93",
+      "module": "micropython",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/mimxrt/Flash.pyi",
+      "bytes": 911,
+      "sha256": "e823ba86a7751d946e37c188a093ab8ce2c0cf8d0d7c13816acc96e390f83bb8",
+      "module": "mimxrt.Flash",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/mimxrt/__init__.pyi",
+      "bytes": 490,
+      "sha256": "a0fc0279a3953d07f69e2a746a04d3bd2cac6c231f85ec9fb82c669478e52b76",
+      "module": "mimxrt",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/neopixel/__init__.pyi",
+      "bytes": 2549,
+      "sha256": "e11faa38c6c7d5981091c096025ceefcda93eeefadc7df22d8fb100ba5a3c546",
+      "module": "neopixel",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/network/LAN.pyi",
+      "bytes": 3149,
+      "sha256": "2cbd16a3e784709f265e49c9618c30ecdb83af832db500b0335471f05decd676",
+      "module": "network.LAN",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/network/PPP.pyi",
+      "bytes": 3028,
+      "sha256": "ae10182490098b2e4c0ea80483d0890562880512fb78cfe4421426a55cf734b4",
+      "module": "network.PPP",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/network/USBD_NCM.pyi",
+      "bytes": 1562,
+      "sha256": "9b0fc6be26b7c04645a3d5b5b75caa0cd0ae9edb93410e4f1d1c656a72208b99",
+      "module": "network.USBD_NCM",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/network/WIZNET5K.pyi",
+      "bytes": 1935,
+      "sha256": "c8eda40243cefcb5e79e8f2a3ac3e34ba3331421ca8dfee507a6879f97f8bd7f",
+      "module": "network.WIZNET5K",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/network/WLAN.pyi",
+      "bytes": 19860,
+      "sha256": "89cd15f0eccade767dbd718ae8b821474c5a8223ce9e6fa4726aa13886053b79",
+      "module": "network.WLAN",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/network/WLANWiPy.pyi",
+      "bytes": 7661,
+      "sha256": "1dfc400e1a8bceecf703cdeca77930b33ee0ef89347bbdf0fda977a4dfa1b66b",
+      "module": "network.WLANWiPy",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/network/__init__.pyi",
+      "bytes": 14448,
+      "sha256": "dead12cfef8d2c81acb4f8c4a355ed58c831b6bbe87d98ff45e8e1eaf403e525",
+      "module": "network",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/openamp/__init__.pyi",
+      "bytes": 5484,
+      "sha256": "904624c7ab64c1083c27ca8d4282b5b944081922361bd7d7d8121df735a6478e",
+      "module": "openamp",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/os/__init__.pyi",
+      "bytes": 8120,
+      "sha256": "6388342cdc6c8ec7f512ff144515bd2f679a154d22c9592b2f19e6d63666e05c",
+      "module": "os",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/platform/__init__.pyi",
+      "bytes": 1882,
+      "sha256": "5f58d240cffed780a47007cbb6524ad830313597b6c3925b43a3c4cefac8de16",
+      "module": "platform",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/ADC.pyi",
+      "bytes": 6141,
+      "sha256": "23dc5d61624220788bd5a4ea8f8816a2037e86e269926892d09db91b4c5698e0",
+      "module": "pyb.ADC",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/Accel.pyi",
+      "bytes": 1327,
+      "sha256": "1ec79b0dd377da9319ad07bea743a7de2737b02cbda3253c2fef6c79128df3b7",
+      "module": "pyb.Accel",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/CAN.pyi",
+      "bytes": 28377,
+      "sha256": "f7084f85e6cf2a875b53afd116fb584bf7360dfcea44b381cf3a5c7af829e7d1",
+      "module": "pyb.CAN",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/DAC.pyi",
+      "bytes": 5343,
+      "sha256": "93342bafdacc5370d7f08fc7674155c3ccb8ba7f4566b417793194aa93a8b6df",
+      "module": "pyb.DAC",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/ExtInt.pyi",
+      "bytes": 4049,
+      "sha256": "deabc6825d2977a03c1894c2886a950cf712e6c40f578446ef09bef735e290a3",
+      "module": "pyb.ExtInt",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/Flash.pyi",
+      "bytes": 4043,
+      "sha256": "a24eafe9f45cd5d5e845423e9f31aacbdb8a0a92af27ba283a15194e8f0cab28",
+      "module": "pyb.Flash",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/I2C.pyi",
+      "bytes": 9362,
+      "sha256": "07456ef29bb3e9ca2a5ea74b0fda869fb5b061db88b7231aad8d1c3ca6c809c3",
+      "module": "pyb.I2C",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/LCD.pyi",
+      "bytes": 3471,
+      "sha256": "4ff63a1380931d0874cdb26b0f517bb983ce4ab327b1a6d53c120948e5936fe8",
+      "module": "pyb.LCD",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/LED.pyi",
+      "bytes": 2217,
+      "sha256": "bccf4f4540d3d2224d039794ff627abf241d3a008aca954c6c8793c7d4780fd4",
+      "module": "pyb.LED",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/Pin.pyi",
+      "bytes": 10407,
+      "sha256": "5d8f23fdc002bd8177d80a62e3f58eaba41de20a29f8ec5e99379a7d9417208e",
+      "module": "pyb.Pin",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/RTC.pyi",
+      "bytes": 4867,
+      "sha256": "ce5b2c4f66616f8c317195c6431d87654a8bb853d56b4a7523510186515c3294",
+      "module": "pyb.RTC",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/SPI.pyi",
+      "bytes": 10990,
+      "sha256": "ea8652cc8a05be9816797cd0d6bfce164883a61ab5ac9d1f4c8a42df5997878d",
+      "module": "pyb.SPI",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/Servo.pyi",
+      "bytes": 5042,
+      "sha256": "034a5e0178d395d7d12649b2a2b5afe354d66a7a182fdcedde1239afe111e214",
+      "module": "pyb.Servo",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/Switch.pyi",
+      "bytes": 1488,
+      "sha256": "bbc8fd65a619cb20e118cf9b6bad26c92145c8ac559184165f9580803160cc11",
+      "module": "pyb.Switch",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/Timer.pyi",
+      "bytes": 46815,
+      "sha256": "c3b31ff28b8c659873f8542d96cd5a85852d734b05f56cb7e180c129158231fb",
+      "module": "pyb.Timer",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/UART.pyi",
+      "bytes": 11542,
+      "sha256": "d84044b1cf6814306930a39f020bc1efd1cccae2e3c89c2b56cc2243502bf13c",
+      "module": "pyb.UART",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/USB_HID.pyi",
+      "bytes": 2005,
+      "sha256": "25f1a100f02bba8040a03bb2fefdd0ff73c24dc4a76c0544cf9adddd3c8ad15b",
+      "module": "pyb.USB_HID",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/USB_VCP.pyi",
+      "bytes": 6583,
+      "sha256": "159d82423d2da5c4d5e2b8b662bb53165bd5fa96b2b6aa95c136a1cc043a970d",
+      "module": "pyb.USB_VCP",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/pyb/__init__.pyi",
+      "bytes": 25111,
+      "sha256": "a5e378f1ea9c3e17d206f3dfca8c8cc7e8fd7e8a96be2cecd9e727532794117d",
+      "module": "pyb",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/random/__init__.pyi",
+      "bytes": 3729,
+      "sha256": "c0632be622b97f3f69058b8afb75d80b173ea5a331f06d1570bc0ea6243228b4",
+      "module": "random",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/rp2/DMA.pyi",
+      "bytes": 7712,
+      "sha256": "f8805a3c48b4bd9f208605029d5ac502a28358ed4fa34cd0d637f81ac9c9e317",
+      "module": "rp2.DMA",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/rp2/Flash.pyi",
+      "bytes": 2934,
+      "sha256": "c0cca339119e7b7088abeb1cb219fdbe4f20d08108bc719907b823428117a6d5",
+      "module": "rp2.Flash",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/rp2/PIO.pyi",
+      "bytes": 4259,
+      "sha256": "d9486ebd05048f15c43f8bd292f28fbd46c5b97f6bb8ba466f6cd93fc243f19e",
+      "module": "rp2.PIO",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/rp2/StateMachine.pyi",
+      "bytes": 6509,
+      "sha256": "33508dec1ab63f9814915317bb901f17153510c3e074b1cc5b86722cdc01172c",
+      "module": "rp2.StateMachine",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/rp2/__init__.pyi",
+      "bytes": 7853,
+      "sha256": "91dab4c126a146ffb1d5339dadfcb17884f3f1186ab3c35e5ea4ea64f0623c0a",
+      "module": "rp2",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/rp2/asm_pio.pyi",
+      "bytes": 1321,
+      "sha256": "e5c31c1df5e47c2b416c6680c2d43341746738189f0def3626010e39027d176d",
+      "module": "rp2.asm_pio",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/rp2/asm_pio_rp2040.pyi",
+      "bytes": 23535,
+      "sha256": "3952c313392459bf011a8e3e36062ce3cd45ef1fd93dd47d50f224c53dde13eb",
+      "module": "rp2.asm_pio_rp2040",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/rp2/asm_pio_rp2350.pyi",
+      "bytes": 3736,
+      "sha256": "e205f9261ff936265e8512e6c18c4994891d2b61db92518f34451b0eaed505a9",
+      "module": "rp2.asm_pio_rp2350",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/select/__init__.pyi",
+      "bytes": 4544,
+      "sha256": "b97682f1b54f0e405685575e6b810721d6d0d2c02f3ce19b908255c600a88841",
+      "module": "select",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/socket/__init__.pyi",
+      "bytes": 18716,
+      "sha256": "75895560e719deca2ff075948b2e4b2eaa4843d0b23b7ae0d4e424b560cd1228",
+      "module": "socket",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/ssl/__init__.pyi",
+      "bytes": 8861,
+      "sha256": "6cb91e7bbcce097a79485f6ffa58c2d0300442612f7b16213c33e6aab93eb59e",
+      "module": "ssl",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/stm/__init__.pyi",
+      "bytes": 3872,
+      "sha256": "f2441fea32c2042656f7654fc69928a9af20eac33bb365557e6b4e9861496e10",
+      "module": "stm",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/string/templatelib.pyi",
+      "bytes": 2299,
+      "sha256": "5cd2ecc3f4bd36b848411f114cd8b2cdf59c7c0a5c0faa31044d0131601057b6",
+      "module": "string.templatelib",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/struct/__init__.pyi",
+      "bytes": 4699,
+      "sha256": "3ab6ef502c32a03f43e7da18f8cf3cfee2b54bfdfdb1c904375824e1a9564da9",
+      "module": "struct",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/sys/__init__.pyi",
+      "bytes": 7641,
+      "sha256": "37985327932ed3d45e1a95f6597befc11a5def54ea966d707588cd333d4f35e0",
+      "module": "sys",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/time/__init__.pyi",
+      "bytes": 14046,
+      "sha256": "9d5399c37db36264e06f73cbd1aa343f2d1455ebf691a8c8dfee72a8a45bc82e",
+      "module": "time",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/uarray.pyi",
+      "bytes": 93,
+      "sha256": "e60b645dbe2cf8159ea584459a0d3284af0db73052a2abd35f5c532310245ed2",
+      "module": "uarray",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/uasyncio.pyi",
+      "bytes": 97,
+      "sha256": "0755578e6fdefeebb5ee173479cade5dbe7d4a53e169fd571ee21ca30f054460",
+      "module": "uasyncio",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/ubinascii.pyi",
+      "bytes": 99,
+      "sha256": "5ad89fb05fb2213628df0dbb55c94575cabaaae627789f92e77a0b2f96698786",
+      "module": "ubinascii",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/ubluetooth.pyi",
+      "bytes": 101,
+      "sha256": "a127b2bfcfd1d1b39fc0d45e5d21e2dd60161d57a4507ec5d8d8a7c4dcad4c14",
+      "module": "ubluetooth",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/ucryptolib.pyi",
+      "bytes": 101,
+      "sha256": "44b1089616cc134c420f75fed34025b33354e011a440cc9327078868a2c95fc7",
+      "module": "ucryptolib",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/uctypes/__init__.pyi",
+      "bytes": 4937,
+      "sha256": "7be35a229cb9f43c2f22e203639233f5431fd5ec9dd660bd833d3dc585ee070a",
+      "module": "uctypes",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/uerrno.pyi",
+      "bytes": 93,
+      "sha256": "316e34e74c7f63d4e38ccf6e30554a0d232eac380cd8c708e26bbe48c9c210e1",
+      "module": "uerrno",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/uhashlib.pyi",
+      "bytes": 97,
+      "sha256": "a53be80494d5473ee502d36a01938855581b3c2012cd3b30b76f74b26dc21ae9",
+      "module": "uhashlib",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/uheapq.pyi",
+      "bytes": 93,
+      "sha256": "373f7ed31ab642ce8edadc632ca33e4ac3c591001a0d006b753f6a0cff161b23",
+      "module": "uheapq",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/uio.pyi",
+      "bytes": 87,
+      "sha256": "a4e5c97a7a3ab9c5bcf8d356d302c825f88da2bbad0dfc0c40efe76fca56f9de",
+      "module": "uio",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/ujson.pyi",
+      "bytes": 91,
+      "sha256": "f5b69f0acfca8b707bac030277bdaea13b22bb4e707a5d7a34437c93a20183c3",
+      "module": "ujson",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/umachine.pyi",
+      "bytes": 97,
+      "sha256": "2d8885d80c7377b55ad63aedec12d74518800893ec531112a1fa0a477610faa0",
+      "module": "umachine",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/uos.pyi",
+      "bytes": 87,
+      "sha256": "60829a30722364c3b5a7fa9ed9057c524dc3cbd0ef70cab067fc0cd390df8374",
+      "module": "uos",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/uplatform.pyi",
+      "bytes": 99,
+      "sha256": "cc9b925bf2ab1648d3d6d83f16f983b7ec8a5809212d15318335b9ff208d8033",
+      "module": "uplatform",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/urandom.pyi",
+      "bytes": 95,
+      "sha256": "5be2ae3291ac7502d0efbb8c35cadabb39741cc04c42dedbdd2b22205cd2206e",
+      "module": "urandom",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/ure.pyi",
+      "bytes": 87,
+      "sha256": "abca1311efd499c70af23f59c28304d569f3f23f32bacd1f85393c2084d0036c",
+      "module": "ure",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/uselect.pyi",
+      "bytes": 95,
+      "sha256": "08b558fb703118f5b918097944becb241fb005bc82ca6947b6e69e33767956da",
+      "module": "uselect",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/usocket.pyi",
+      "bytes": 95,
+      "sha256": "46b0617643c6561ab317c630bd7143f8de3f7146ca05fb789c7ceea6e0e4d5e8",
+      "module": "usocket",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/ussl.pyi",
+      "bytes": 89,
+      "sha256": "c85450fe8e68bbc26fe1c9d7f18cab1ce4542c6c9a0d82e29c30607c97e444af",
+      "module": "ussl",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/ustruct.pyi",
+      "bytes": 95,
+      "sha256": "ba6e7955e56734fef974eef228cde858e4b24f5cb422ad122a002a98be4e968d",
+      "module": "ustruct",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/usys.pyi",
+      "bytes": 89,
+      "sha256": "c22ba7a3ba9a7fd3fcbe7d63d4f1471f04fb97aaaff8bdfc97b60d2c1bdaddcb",
+      "module": "usys",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/utime.pyi",
+      "bytes": 91,
+      "sha256": "1d383cc18d6c8b7721496505e628799729d1aa4af7fc3f00e4d1bd549b1f6b89",
+      "module": "utime",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/uwebsocket.pyi",
+      "bytes": 101,
+      "sha256": "c418cddce28853dae1292b9241e9d1a6f992d83aa91d811a1a562fe385d2f2d9",
+      "module": "uwebsocket",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/uzlib.pyi",
+      "bytes": 91,
+      "sha256": "a8dff93eede9fe9985b4a73ab6b77a35142c0a79627afd0ead6f5f8066b05262",
+      "module": "uzlib",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/vfs/__init__.pyi",
+      "bytes": 12430,
+      "sha256": "323d47a098861e685ce3610a0baeb06dacf0fb5fe283a02c6136ff203103cca2",
+      "module": "vfs",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/weakref/__init__.pyi",
+      "bytes": 3515,
+      "sha256": "737f425c7ad687e2a3714f06a6740ad53ef02a5e4ea4a1cca7eb75c081aadf84",
+      "module": "weakref",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/wipy/__init__.pyi",
+      "bytes": 854,
+      "sha256": "e33af6425f9ec6a95239379ce3b81e45b7e0e0f5e94df77bb70f0334578656e2",
+      "module": "wipy",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/wm8960/__init__.pyi",
+      "bytes": 10385,
+      "sha256": "17a70bf4f78b8e9e009d380b929f0c804c43fd7e1f748d573353cb9e3333ecf8",
+      "module": "wm8960",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/zephyr/DiskAccess.pyi",
+      "bytes": 1652,
+      "sha256": "677fc849271fefc709dc07827852623eb7faa92f43b41be5b14f7b4805c114bc",
+      "module": "zephyr.DiskAccess",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/zephyr/Display.pyi",
+      "bytes": 2197,
+      "sha256": "9822edd2b8843addba93a1464c1e4149878e730062308f49e8ac0ab42f8f488a",
+      "module": "zephyr.Display",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/zephyr/FlashArea.pyi",
+      "bytes": 3355,
+      "sha256": "f2aa58b7c406f272458ef833aae394fe36db2a5f78ff75df00b0eccb8196af27",
+      "module": "zephyr.FlashArea",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/zephyr/PinCtrl.pyi",
+      "bytes": 1246,
+      "sha256": "8b3c15d76329ba3676baeba8bf98f69d64037110ae1c9ae6f32e3eaf67782f43",
+      "module": "zephyr.PinCtrl",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/zephyr/PinMux.pyi",
+      "bytes": 371,
+      "sha256": "20ed0ffaf3cac9cc1210f12093e3443658d4d4dfdd3c5a5231c522f74d8430be",
+      "module": "zephyr.PinMux",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/zephyr/__init__.pyi",
+      "bytes": 2495,
+      "sha256": "4da3b7681b5b735f3a2b4341aa74bc1832ce06e9c635b5beb0aae531e3ddf843",
+      "module": "zephyr",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/zephyr/zsensor.pyi",
+      "bytes": 6851,
+      "sha256": "1c566fc8ddc83332a392360ebd9e53d06c0f314175d2d18a843f94642157e56d",
+      "module": "zephyr.zsensor",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "docstubs/zlib/__init__.pyi",
+      "bytes": 4074,
+      "sha256": "56e745ab39fed63d3243e047872900ab93c9457c121d3a555c6e60fe5fde8c3b",
+      "module": "zlib",
+      "source_ids": [
+        "micropython-documentation",
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "reference/_asyncio/__init__.pyi",
+      "bytes": 5366,
+      "sha256": "61998727194c1bba181cbab27b15a73263d5519e6dea2f965d7d3f63d4831bdd",
+      "module": "_asyncio",
+      "source_ids": [
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "reference/_espnow/__init__.pyi",
+      "bytes": 7413,
+      "sha256": "4aab23efef0bb30a63052d9f5f14aca843ec62cd42c7c805e449322808882df2",
+      "module": "_espnow",
+      "source_ids": [
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "reference/_rp2/__init__.pyi",
+      "bytes": 677,
+      "sha256": "85c169067232675efdc1ba833b79e63d3c3c42f048a05106ea9f6c2cd242f9e8",
+      "module": "_rp2",
+      "source_ids": [
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "reference/alif/__init__.pyi",
+      "bytes": 469,
+      "sha256": "4e4a3b031d94bf6331d39f93823c271ef0dbc75e67cdb44e373ed5fde4434fa8",
+      "module": "alif",
+      "source_ids": [
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "reference/flashbdev/flashbdev.pyi",
+      "bytes": 186,
+      "sha256": "477c35b400d2d595d524687e8b25577435029e6bb748c12283dc1144561e84c6",
+      "module": "flashbdev.flashbdev",
+      "source_ids": [
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "reference/jsffi/__init__.pyi",
+      "bytes": 5049,
+      "sha256": "677b3a8245e1cf31a4128a3f3c6bdef646abc36efd14bd5b65740670fc690d88",
+      "module": "jsffi",
+      "source_ids": [
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "reference/music/__init__.pyi",
+      "bytes": 2180,
+      "sha256": "7ad4263e6315048048e62374f58ab6af202f5dd61a68c97b437f6d98aeba5d94",
+      "module": "music",
+      "source_ids": [
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "reference/nrf/__init__.pyi",
+      "bytes": 2368,
+      "sha256": "8a56f1acbfd5ab1659fdb28c77efe5d02f99b2932369cf9658a64ba90a4da01f",
+      "module": "nrf",
+      "source_ids": [
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "reference/onewire/__init__.pyi",
+      "bytes": 1631,
+      "sha256": "1a5bec9bd7b9c69588b647bff9aa82cdb986d5af57a702a11c60749c1ffe6b19",
+      "module": "onewire",
+      "source_ids": [
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "reference/tls/__init__.pyi",
+      "bytes": 4419,
+      "sha256": "c6b27fcb0c5abc695ba5593da9352390410331e850df79bf807dd123a7eca1a8",
+      "module": "tls",
+      "source_ids": [
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "reference/ubluepy/__init__.pyi",
+      "bytes": 7284,
+      "sha256": "f42768d8793aebbf6a198f72efb1ea2ef92a12bb0245d67450fb7e9449cbef94",
+      "module": "ubluepy",
+      "source_ids": [
+        "jos-curated-reference"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/IRQs.pyi",
+      "bytes": 1235,
+      "sha256": "8e3028c1b03c2ff1a2fce560c53f223491ba234271c8ab80274443c0391961b6",
+      "module": "_mpy_shed.IRQs",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/__init__.pyi",
+      "bytes": 5063,
+      "sha256": "966f7e7a007df7f1094abd3367dfdc71935dc61ac8232d3716a57eb7b09e73ff",
+      "module": "_mpy_shed",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/_collections_abc.pyi",
+      "bytes": 3143,
+      "sha256": "81b0e4c299ae29e7ee593e44beee8088debf6d81e62f7e2820e8b4b69e11a3e3",
+      "module": "_mpy_shed._collections_abc",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/_mp_available.pyi",
+      "bytes": 1182,
+      "sha256": "9bdbe89cb44c3b8a6b0983922bd406a43b4a91063e13db241c93eb4565c798a6",
+      "module": "_mpy_shed._mp_available",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/_mpy_builtins.pyi",
+      "bytes": 2744,
+      "sha256": "5f005711ebdfabd77b066d3f0b25a3d9e54be1e8dcbd7913d6a27a57697dce6a",
+      "module": "_mpy_shed._mpy_builtins",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/blockdevice.pyi",
+      "bytes": 9864,
+      "sha256": "bd98813b949ea93ed371d92323910d9ebb0eec2b8ba68d1f50b5472d5a64db36",
+      "module": "_mpy_shed.blockdevice",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/buffer_mp.pyi",
+      "bytes": 442,
+      "sha256": "9769eed6137df410acbeba093910ebe6764c2426eedfe88d419151be0b504028",
+      "module": "_mpy_shed.buffer_mp",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/collections/__init__.pyi",
+      "bytes": 23885,
+      "sha256": "a337d4f94e73bfc655e2fba9176954d68e27fed23b3dca661e589f15d64def5e",
+      "module": "_mpy_shed.collections",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/collections/abc.pyi",
+      "bytes": 82,
+      "sha256": "73c7b4f574a301d94dfdd7fa6dbd56b8c18b0b8f053956bfa39eb69095ca835c",
+      "module": "_mpy_shed.collections.abc",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/io_modes.pyi",
+      "bytes": 1909,
+      "sha256": "3cb28dd7704c675143457c7a8354a9af0448ee119c874ff1e25dca868584a3a5",
+      "module": "_mpy_shed.io_modes",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/io_mp.pyi",
+      "bytes": 2297,
+      "sha256": "499b12133fd40315c9c9bdf435ed3da7c21b182b6d8a627c33d8dace10c04b99",
+      "module": "_mpy_shed.io_mp",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/mp_implementation.pyi",
+      "bytes": 1034,
+      "sha256": "d4ecbbdd54c88fb4fbb6fdcbcb2e542c33d28757f151853ca0b782d41d551b3d",
+      "module": "_mpy_shed.mp_implementation",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/mp_mem.pyi",
+      "bytes": 578,
+      "sha256": "94b401adb8a54841f90b3ef42544adb2a417558bf5af22c9f8f880b663c19258",
+      "module": "_mpy_shed.mp_mem",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/neopixelbase.pyi",
+      "bytes": 595,
+      "sha256": "26983ab4d09b78c9764c4857dce1ebc917ac8e0fd5ae67f8e7190b5477720f0a",
+      "module": "_mpy_shed.neopixelbase",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/os_vfs.pyi",
+      "bytes": 4179,
+      "sha256": "ca0f7c6ae792c3ff1e8ea737a1607e701eb5399e0e56078b177dbb7fffdf66d5",
+      "module": "_mpy_shed.os_vfs",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/pathlike.pyi",
+      "bytes": 667,
+      "sha256": "9795fd8990c1844e4fd38b674132b40aaee2eadd93f68c20b62a28d456dc6289",
+      "module": "_mpy_shed.pathlike",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/subscriptable.pyi",
+      "bytes": 627,
+      "sha256": "4f19f2a17add2d21105518b230e93f5a661ced9aa12d6c01439fe46412c2697e",
+      "module": "_mpy_shed.subscriptable",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "_mpy_shed/time_mp.pyi",
+      "bytes": 1593,
+      "sha256": "45d180d3e25074e9f5a7259e50ba0f80845772130623c950be833db2868b6d31",
+      "module": "_mpy_shed.time_mp",
+      "source_ids": [
+        "jos-typing-support",
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "MicroPython-MIT",
+        "JosVerlinde-MIT",
+        "typeshed-licences"
+      ]
+    },
+    {
+      "path": "typeshed/_typeshed/__init__.pyi",
+      "bytes": 12202,
+      "sha256": "ad2f409b900534eb7bde260b09b6c87e730e14c9836117cfc03dcf8bd2e4897f",
+      "module": "_typeshed",
+      "source_ids": [
+        "typeshed-derived"
+      ],
+      "license_ids": [
+        "JosStdlib-MIT",
+        "typeshed-licences"
+      ]
+    }
+  ],
+  "licenses": [
+    {
+      "id": "MicroPython-MIT",
+      "expression": "MIT",
+      "copyright": "Copyright (c) 2013-2026 Damien P. George",
+      "notices": [
+        {
+          "path": "notices/LICENSE.MicroPython",
+          "bytes": 3419,
+          "sha256": "80d3459978572b5bbb1dd274a98b01a625aeff467588ad69cefdf7eb607c1306"
+        }
+      ],
+      "modified": false
+    },
+    {
+      "id": "JosVerlinde-MIT",
+      "expression": "MIT",
+      "copyright": "Copyright (c) 2020-2025 Jos Verlinde",
+      "notices": [
+        {
+          "path": "notices/LICENSE.micropython-stubs",
+          "bytes": 1084,
+          "sha256": "022af6d8f0edc20f988a107eb23c325a905fccd47808f219792dd32b78a0523f"
+        },
+        {
+          "path": "notices/LICENSE.micropython-stubber",
+          "bytes": 1542,
+          "sha256": "db3b0e5e562097d5bbfd71977277005c861fbd2565c8d715072702ea18652a10"
+        }
+      ],
+      "modified": false
+    },
+    {
+      "id": "JosStdlib-MIT",
+      "expression": "MIT",
+      "copyright": "Copyright (c) 2023 Jos Verlinde",
+      "notices": [
+        {
+          "path": "notices/LICENSE.micropython-stdlib-stubs",
+          "bytes": 12828,
+          "sha256": "4fd610fb7d49f1091013b0b3a8343efa048a21f6e2d506abed85ed7afd8be9ee"
+        }
+      ],
+      "modified": false
+    },
+    {
+      "id": "typeshed-licences",
+      "expression": "Apache-2.0 AND MIT",
+      "copyright": "Typeshed contributors; Copyright (c) 2015 Jukka Lehtosalo and contributors",
+      "notices": [
+        {
+          "path": "notices/LICENSE.typeshed",
+          "bytes": 12657,
+          "sha256": "295f8538c94ae5c3043301cf7cff1c852dab6a786a8ddee471e061b40d5ecabe"
+        }
+      ],
+      "modified": false
+    }
+  ],
+  "target": null
+}

@@ -1,0 +1,101 @@
+########################################################################################################################################
+# This will attempt to retrieve and generate stubs from MicroPython documentation
+########################################################################################################################################
+# Check out repos in this structure
+# micropython-stubs
+# +-- stubs
+# +-- repos
+#     +-- micropython
+#      -- micropython-lib
+# repro structure needed to allow automatic PR creation to work
+########################################################################################################################################
+name: get-doc-stubs
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 22 * * *" # Run every day at 22:00
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/get-doc-stubs.yml
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: 1
+
+jobs:
+  ########################################################################################################################################
+  list-versions-doc:
+    # 'Get a matrix for the latest versions of micropython'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: ./.github/actions/get-mpversions
+        id: dynamic
+    outputs:
+      versions: ${{ steps.dynamic.outputs.versions }}
+
+  ########################################################################################################################################
+  get-micropython-doc-stubs:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: list-versions-doc
+    strategy:
+      matrix: ${{ fromJSON(needs.list-versions-doc.outputs.versions) }}
+      max-parallel: 1
+
+    # Most scripts will be run from the stubber, set that as default
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout stubs repo
+        uses: actions/checkout@v4
+
+      # make Python work
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.13
+          # cache: "pip"
+
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          # Note: https://github.com/marketplace/actions/astral-sh-setup-uv#activate-environment
+          activate-environment: true
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      - name: Install Python dependencies (doc only)
+        working-directory: ${{github.workspace}}
+        run: |
+          uv pip install -U -r pyproject.toml --extra stubber
+
+      # micropython as a sub-module
+      - name: "clone and checkout micropython ${{ matrix.version }}"
+        run: |
+          stubber clone
+          stubber switch ${{ matrix.version }}
+
+      ######################################
+      # This is where the actual work starts
+      ######################################
+
+      - name: Generate document stubs for ${{ matrix.version }}
+        run: |
+          # get any recent updates first
+          git pull origin main --rebase --autostash
+          # get the latest docs, and enrich from the reference-stubs
+          stubber get-docstubs --enrich
+
+      - name: commit
+        uses: ./.github/actions/commit
+        with:
+          message: "Update docstubs stubs for ${{ matrix.version }}"
