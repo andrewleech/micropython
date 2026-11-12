@@ -149,6 +149,11 @@ Methods
         be a writable buffer for an ``OUT`` direction transfer, or a readable
         buffer with data for an ``IN`` direction transfer.
 
+      Vendor-type control requests are delivered to this callback for both the
+      Device and Interface recipients, with the same stage/return semantics as
+      above. The recipient and any target interface number can be read from
+      the request's ``bmRequestType`` and ``wIndex`` fields.
+
     - ``xfer_cb`` - This callback is called whenever a non-control
       transfer submitted by calling :func:`USBDevice.submit_xfer` completes.
 
