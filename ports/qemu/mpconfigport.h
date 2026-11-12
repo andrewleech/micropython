@@ -30,6 +30,10 @@
 
 #define MICROPY_CONFIG_ROM_LEVEL    (MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES)
 
+// The asyncio REPL needs pollable stdin, which the semihosting console does
+// not provide; use the blocking REPL.
+#define MICROPY_REPL_ASYNCIO        (0)
+
 #if defined(__ARM_ARCH_ISA_ARM)
 #define MICROPY_EMIT_ARM            (1)
 #define MICROPY_EMIT_INLINE_THUMB   (1)

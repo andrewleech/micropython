@@ -36,6 +36,15 @@ typedef enum {
 extern pyexec_mode_kind_t pyexec_mode_kind;
 
 #define PYEXEC_FORCED_EXIT (0x100)
+// Returned by the event-driven REPL when MICROPY_REPL_ASYNCIO is enabled and a
+// complete friendly-REPL line contains a top-level await: the line is compiled
+// to a coroutine left in MP_STATE_VM(repl_pending_coro) for the asyncio driver
+// to await on the event loop, after which it calls pyexec_event_repl_resume().
+#define PYEXEC_ASYNC_PENDING (0x200)
+// ORed into repl_event()'s return while the REPL is in raw mode, so the asyncio
+// driver feeds input synchronously (without yielding) and a concurrent task's
+// stdout cannot corrupt a raw/raw-paste transfer.
+#define PYEXEC_RAW_ACTIVE (0x400)
 
 #if MICROPY_PYEXEC_ENABLE_EXIT_CODE_HANDLING
 #define PYEXEC_NORMAL_EXIT (0)
@@ -50,6 +59,12 @@ extern pyexec_mode_kind_t pyexec_mode_kind;
 
 int pyexec_raw_repl(void);
 int pyexec_friendly_repl(void);
+#if MICROPY_REPL_ASYNCIO
+int pyexec_asyncio_repl(void);
+#endif
+#if MICROPY_REPL_ASYNCIO_BREAKPOINT
+int pyexec_repl_breakpoint(void);
+#endif
 int pyexec_file(const char *filename);
 int pyexec_file_if_exists(const char *filename);
 int pyexec_frozen_module(const char *name, bool allow_keyboard_interrupt);
@@ -57,6 +72,15 @@ int pyexec_vstr(vstr_t *str, bool allow_keyboard_interrupt);
 void pyexec_event_repl_init(void);
 int pyexec_event_repl_process_char(int c);
 extern uint8_t pyexec_repl_active;
+#if MICROPY_REPL_ASYNCIO
+// When true, the event-driven friendly REPL defers execution of any complete
+// line containing "await" back to the caller (PYEXEC_ASYNC_PENDING) instead of
+// running it synchronously.  Set by the asyncio REPL driver.
+extern bool pyexec_event_repl_async;
+// Re-prompt and reset line state after the driver has executed a deferred
+// (PYEXEC_ASYNC_PENDING) line on the event loop.
+void pyexec_event_repl_resume(void);
+#endif
 
 #if MICROPY_REPL_INFO
 mp_obj_t pyb_set_repl_info(mp_obj_t o_value);

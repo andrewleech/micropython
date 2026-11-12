@@ -22,6 +22,9 @@ ACKNOWLEDGEMENTS,\
 """
 
 [tool.ruff]
+# Apply exclude/extend-exclude even when files are passed explicitly on the
+# command line, as tools/pre-push-check.sh does with the changed-file list.
+force-exclude = true
 # Exclude third-party code from linting and formatting
 extend-exclude = [
   "lib",
@@ -48,6 +51,7 @@ exclude = [  # Ruff finds Python SyntaxError in these files
   "tests/basics/string_tstring_operations.py",
   "tests/basics/string_tstring_parser1.py",
   "tests/cmdline/cmd_compile_only_error.py",
+  "tests/cmdline/repl_asyncio_intr.py",
   "tests/cmdline/repl_autocomplete.py",
   "tests/cmdline/repl_autocomplete_underscore.py",
   "tests/cmdline/repl_autoindent.py",

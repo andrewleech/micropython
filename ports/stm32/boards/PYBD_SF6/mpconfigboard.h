@@ -38,6 +38,11 @@
 #define MICROPY_HW_BOARD_NAME       "PYBD-SF6W"
 #define MICROPY_HW_MCU_NAME         "STM32F767IIK"
 
+// The SF2 base config disables the asyncio REPL for the flash-tight 512 KiB
+// SF2/SF3; SF6 has 2 MiB of internal flash, so re-enable it here.
+#undef MICROPY_REPL_ASYNCIO
+#define MICROPY_REPL_ASYNCIO        (1)
+
 // HSE is 25MHz, run SYS at 144MHz
 #define MICROPY_HW_CLK_PLLM         (25)
 #define MICROPY_HW_CLK_PLLN         (288)

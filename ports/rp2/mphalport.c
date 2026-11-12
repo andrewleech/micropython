@@ -75,6 +75,13 @@ uintptr_t mp_hal_stdio_poll(uintptr_t poll_flags) {
     #if MICROPY_PY_OS_DUPTERM
     ret |= mp_os_dupterm_poll(poll_flags);
     #endif
+    #if MICROPY_HW_ENABLE_UART_REPL || MICROPY_HW_USB_CDC || MICROPY_PY_OS_DUPTERM_NOTIFY
+    // The UART REPL, USB CDC and dupterm-notify sources all feed stdin_ringbuf;
+    // report readable so a poll-driven REPL (asyncio reading sys.stdin) wakes.
+    if ((poll_flags & MP_STREAM_POLL_RD) && ringbuf_avail(&stdin_ringbuf) > 0) {
+        ret |= MP_STREAM_POLL_RD;
+    }
+    #endif
     return ret;
 }
 
