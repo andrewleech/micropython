@@ -141,6 +141,10 @@
 #define MICROPY_PY_MACHINE_I2C_TARGET_HARD_IRQ  (1)
 #endif
 #define MICROPY_PY_MACHINE_CAN_INCLUDEFILE      "ports/alif/machine_can.c"
+// Enable the CAN-owned receive ring and bulk reads.
+#ifndef MICROPY_PY_MACHINE_CAN_RXBUF
+#define MICROPY_PY_MACHINE_CAN_RXBUF            (1)
+#endif
 // Function to determine if the given can_id is reserved for system use or not.
 #ifndef MICROPY_HW_CAN_IS_RESERVED
 #define MICROPY_HW_CAN_IS_RESERVED(can_id) (false)

@@ -31,6 +31,7 @@
 #include "canfd.h"
 #include "sys_ctrl_canfd.h"
 #include "RTE_Device.h"
+#include "irq.h"
 #include "py/runtime.h"
 #include "py/mperrno.h"
 #include "py/mphal.h"
@@ -114,6 +115,61 @@ static machine_can_port_t canfd_port = {
 
 static mp_int_t machine_can_send_next(machine_can_port_t *port);
 
+// Convert a frame canfd_receive() copied into 'xfer' to the port-agnostic id, flags and length.
+static void can_decode_rx_msg(const canfd_transfer_t *xfer, mp_uint_t *id, mp_uint_t *flags, size_t *dlen) {
+    *id = xfer->rx_header.id;
+    *flags = (xfer->rx_header.rtr ? CAN_MSG_FLAG_RTR : 0) |
+        (xfer->rx_header.frame_type ? CAN_MSG_FLAG_EXT_ID : 0);
+    // The raw DLC can be 9 to 15, which means 8 data bytes.
+    mp_uint_t dlc = xfer->rx_header.dlc;
+    *dlen = dlc > MP_CAN_MAX_LEN ? MP_CAN_MAX_LEN : dlc;
+}
+
+// Drain hardware into the CAN-owned ring from the receive interrupt, recv()
+// and recv_into(). Never allocates. A full ring masks RIE until a consumer
+// makes room.
+//
+// canfd_receive() is only called once canfd_rx_msg_available() is true, as it
+// does not check availability itself.
+#if MICROPY_PY_MACHINE_CAN_RXBUF
+static void machine_can_port_rx_fill(machine_can_obj_t *self) {
+    machine_can_port_t *port = self->port;
+    CANFD_Type *canfd = port->canfd_base;
+
+    while (machine_can_rx_has_room(self) && canfd_rx_msg_available(canfd)) {
+        machine_can_rx_entry_t *entry = machine_can_rx_head(self);
+        canfd_transfer_t xfer;
+        xfer.rx_count = MP_CAN_MAX_LEN;
+        xfer.rx_ptr = entry->data;
+        canfd_receive(canfd, &xfer);
+
+        mp_uint_t id;
+        mp_uint_t flags;
+        size_t len;
+        can_decode_rx_msg(&xfer, &id, &flags, &len);
+        machine_can_rx_commit(self, id, flags, len);
+    }
+
+    // Rearm the message-available interrupt once there is room, otherwise mask
+    // it. The ring needs it whether or not IRQ_RX is set.
+    if (machine_can_rx_has_room(self)) {
+        canfd->CANFD_RTIE |= CANFD_RTIE_RIE;
+    } else {
+        canfd->CANFD_RTIE &= ~CANFD_RTIE_RIE;
+    }
+}
+#endif
+
+#if MICROPY_PY_MACHINE_CAN_RXBUF
+static mp_uint_t machine_can_port_rx_lock(machine_can_obj_t *self) {
+    return raise_irq_pri(IRQ_PRI_CAN);
+}
+
+static void machine_can_port_rx_unlock(machine_can_obj_t *self, mp_uint_t state) {
+    restore_irq_pri(state);
+}
+#endif
+
 void CANFD_IRQHandler(void) {
     // Just one CAN device at index 0
     machine_can_obj_t *self = MP_STATE_PORT(machine_can_objs[0]);
@@ -128,6 +184,10 @@ void CANFD_IRQHandler(void) {
         // State & Error interrupts
         if (irq_event & CANFD_RBUF_OVERRUN_EVENT) {
             port->num_rx_overrun++;
+            self->rx_error_flags |= CAN_RECV_ERR_OVERRUN;
+        }
+        if (irq_event & CANFD_RBUF_FULL_EVENT) {
+            self->rx_error_flags |= CAN_RECV_ERR_FULL;
         }
         machine_can_state_t temp_state = port->can_state;
         if (canfd_error_passive_mode(port->canfd_base)) {
@@ -165,7 +225,18 @@ void CANFD_IRQHandler(void) {
 
         // Data RX and TX interrupts.
         if (irq_event & CANFD_RBUF_AVAILABLE_EVENT) {
-            irq_flags |= MP_CAN_IRQ_RX;
+            #if MICROPY_PY_MACHINE_CAN_RXBUF
+            if (machine_can_rx_ring_active(self)) {
+                // The ring is filled here and the IRQ is raised only when it
+                // goes from empty to non-empty.
+                if (machine_can_rx_irq(self)) {
+                    irq_flags |= MP_CAN_IRQ_RX;
+                }
+            } else
+            #endif
+            {
+                irq_flags |= MP_CAN_IRQ_RX;
+            }
         }
         if (irq_event & CANFD_PRIMARY_BUF_TX_COMPLETE_EVENT) {
             irq_flags |= (MP_CAN_IRQ_TX | (port->id_sent << 16));
@@ -272,6 +343,12 @@ static void machine_can_update_irqs(machine_can_obj_t *self) {
     struct machine_can_port *port = self->port;
     uint16_t triggers = self->mp_irq_trigger;
 
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    // The ring needs the message-available interrupt even without an IRQ_RX trigger.
+    if ((triggers & MP_CAN_IRQ_RX) || machine_can_rx_ring_active(self)) {
+        port->canfd_base->CANFD_RTIE |= CANFD_RTIE_RIE;
+    } else
+    #endif
     if (triggers & MP_CAN_IRQ_RX) {
         port->canfd_base->CANFD_RTIE |= CANFD_RTIE_RIE;
     } else {
@@ -298,9 +375,10 @@ static mp_uint_t machine_can_port_irq_flags(machine_can_obj_t *self) {
 static void machine_can_port_init(machine_can_obj_t *self) {
     struct machine_can_port *port = self->port;
 
-    if (port == NULL) {
+    bool first_init = (port == NULL);
+
+    if (first_init) {
         port = &canfd_port;
-        self->port = port;
 
         // port is in static RAM and not cleared unless there is a
         // power cycle. Thus clearing the filter is required.
@@ -309,6 +387,16 @@ static void machine_can_port_init(machine_can_obj_t *self) {
         port->canfd_base = (CANFD_Type *)CANFD_BASE;
         port->canfd_cnt_base = (CANFD_CNT_Type *)CANFD_CNT_BASE;
         port->can_state = MP_CAN_STATE_STOPPED;
+    }
+
+    // Allocations can raise, so they happen before any hardware is acquired.
+    if (port->irq_flags_buffer.buf == NULL) {
+        ringbuf_alloc(&(port->irq_flags_buffer), CAN_IRQ_RINGBUF_LEN);
+    }
+
+    if (first_init) {
+        // Nothing below can fail, so the object counts as initialised.
+        self->port = port;
 
         // Both 160M and HFOSC clocks must be enabled even if only one
         // of them is used.
@@ -376,10 +464,16 @@ static void machine_can_port_init(machine_can_obj_t *self) {
     // Enable RX interrupt except CANFD_RTIE_RIE
     port->canfd_base->CANFD_RTIE =
         (CANFD_RTIE_ROIE | CANFD_RTIE_RFIE | CANFD_RTIE_RAFIE);
+    // The ring needs the message-available interrupt even without an IRQ_RX trigger.
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    if ((self->mp_irq_trigger & MP_CAN_IRQ_RX) || machine_can_rx_ring_active(self)) {
+        port->canfd_base->CANFD_RTIE |= CANFD_RTIE_RIE;
+    }
+    #else
     if (self->mp_irq_trigger & MP_CAN_IRQ_RX) {
         port->canfd_base->CANFD_RTIE |= CANFD_RTIE_RIE;
     }
-    canfd_disable_tx_interrupts(port->canfd_base);
+    #endif
     canfd_enable_error_interrupts(port->canfd_base);
 
     // Enable the MCU interrupts for CANFD.
@@ -408,6 +502,7 @@ static void machine_can_port_deinit(machine_can_obj_t *self) {
         canfd_clock_disable();
         port->is_enabled = false;
         port->can_state = MP_CAN_STATE_STOPPED;
+
         self->port = NULL;
     }
 }
@@ -588,11 +683,7 @@ static bool machine_can_port_recv(machine_can_obj_t *self, void *data, size_t *d
         // Invokes interrupt mode send function
         canfd_receive(port->canfd_base, &port->data_transfer);
 
-        *id = port->data_transfer.rx_header.id;
-        *flags = (port->data_transfer.rx_header.rtr ? CAN_MSG_FLAG_RTR : 0) |
-            (port->data_transfer.rx_header.frame_type ? CAN_MSG_FLAG_EXT_ID : 0);
-        *dlen = port->data_transfer.rx_header.dlc;
-
+        can_decode_rx_msg(&port->data_transfer, id, flags, dlen);
         return true;
     } else {
         return false;
