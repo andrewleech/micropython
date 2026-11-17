@@ -45,6 +45,120 @@
 
 #define CAN_CLASSIC_MAX_LEN 8
 
+#if MICROPY_PY_MACHINE_CAN_RXBUF
+// Release the software receive ring.
+static void machine_can_rx_free(machine_can_obj_t *self) {
+    if (self->rx_ring != NULL) {
+        m_del(machine_can_rx_entry_t, self->rx_ring, self->rx_ring_len);
+    }
+    self->rx_ring = NULL;
+    self->rx_ring_len = 0;
+    self->rx_ring_head = 0;
+    self->rx_ring_tail = 0;
+}
+
+// Set up the receive ring. Raises MemoryError if allocation fails.
+static void machine_can_rx_setup(machine_can_obj_t *self, mp_uint_t rxbuf) {
+    machine_can_rx_free(self);
+    if (rxbuf > 0) {
+        // One slot is kept empty to tell a full ring from an empty one.
+        self->rx_ring = m_new(machine_can_rx_entry_t, rxbuf + 1);
+        self->rx_ring_len = rxbuf + 1;
+    }
+}
+
+// Return the writable head slot, or NULL when the ring is full.
+static machine_can_rx_entry_t *machine_can_rx_head(machine_can_obj_t *self) {
+    if (self->rx_ring == NULL || !machine_can_rx_has_room(self)) {
+        return NULL;
+    }
+    return &self->rx_ring[self->rx_ring_head];
+}
+
+// Commit the frame written directly into the current head slot.
+static void machine_can_rx_commit(machine_can_obj_t *self, mp_uint_t id, mp_uint_t flags, size_t len) {
+    assert(len <= MP_CAN_MAX_LEN);
+    assert(machine_can_rx_has_room(self));
+    machine_can_rx_entry_t *entry = &self->rx_ring[self->rx_ring_head];
+    entry->id = id;
+    entry->flags = flags;
+    entry->len = len;
+    if (++self->rx_ring_head == self->rx_ring_len) {
+        self->rx_ring_head = 0;
+    }
+}
+
+// Called from the receive interrupt. Returns true if the ring went from empty
+// to non-empty, when an IRQ_RX callback is due.
+static bool machine_can_rx_irq(machine_can_obj_t *self) {
+    bool was_empty = machine_can_rx_ring_empty(self);
+    machine_can_port_rx_fill(self);
+    return was_empty && !machine_can_rx_ring_empty(self);
+}
+
+// Consume the tail slot. Caller holds the receive lock.
+static void machine_can_rx_release_locked(machine_can_obj_t *self, mp_uint_t *errors) {
+    bool was_full = !machine_can_rx_has_room(self);
+    *errors = self->rx_error_flags;
+    self->rx_error_flags = 0;
+    if (++self->rx_ring_tail == self->rx_ring_len) {
+        self->rx_ring_tail = 0;
+    }
+    if (was_full) {
+        machine_can_port_rx_fill(self);
+    }
+}
+
+// Consume one frame from the ring. Caller holds the receive lock.
+static bool machine_can_rx_pop_locked(machine_can_obj_t *self, void *data, size_t *dlen, mp_uint_t *id, mp_uint_t *flags, mp_uint_t *errors) {
+    if (machine_can_rx_ring_empty(self)) {
+        return false;
+    }
+    machine_can_rx_entry_t *entry = &self->rx_ring[self->rx_ring_tail];
+    *id = entry->id;
+    *flags = entry->flags;
+    *dlen = entry->len;
+    if (entry->len != 0) {
+        memcpy(data, entry->data, entry->len);
+    }
+    machine_can_rx_release_locked(self, errors);
+    return true;
+}
+
+// Pop one frame from the software ring, for recv().
+static bool machine_can_rx_pop(machine_can_obj_t *self, void *data, size_t *dlen, mp_uint_t *id, mp_uint_t *flags, mp_uint_t *errors) {
+    mp_uint_t state = machine_can_port_rx_lock(self);
+    if (machine_can_rx_ring_empty(self)) {
+        machine_can_port_rx_fill(self);
+    }
+    bool received = machine_can_rx_pop_locked(self, data, dlen, id, flags, errors);
+    machine_can_port_rx_unlock(self, state);
+    return received;
+}
+
+// Number of frames waiting in the software ring.
+static mp_uint_t machine_can_rx_pending(machine_can_obj_t *self) {
+    mp_uint_t state = machine_can_port_rx_lock(self);
+    mp_uint_t head = self->rx_ring_head;
+    mp_uint_t tail = self->rx_ring_tail;
+    machine_can_port_rx_unlock(self, state);
+    return head >= tail ? head - tail : self->rx_ring_len - tail + head;
+}
+
+// Discard buffered frames after the port has restarted the controller.
+static void machine_can_rx_restart(machine_can_obj_t *self) {
+    mp_uint_t state = machine_can_port_rx_lock(self);
+    self->rx_ring_head = 0;
+    self->rx_ring_tail = 0;
+    self->rx_error_flags = 0;
+    machine_can_port_rx_unlock(self, state);
+    if (machine_can_rx_ring_active(self)) {
+        machine_can_update_irqs(self);
+
+    }
+}
+#endif
+
 // The port provides implementations of the static machine_can_port.h functions in this file.
 #include MICROPY_PY_MACHINE_CAN_INCLUDEFILE
 
@@ -217,12 +331,19 @@ static mp_obj_t machine_can_deinit(mp_obj_t self_in) {
         machine_can_port_deinit(self);
         self->port = NULL;
     }
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    machine_can_rx_free(self);
+    #endif
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_can_deinit_obj, machine_can_deinit);
 
 static void machine_can_init_helper(machine_can_obj_t *self, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
-    enum { ARG_bitrate, ARG_mode, ARG_sample_point, ARG_sjw, ARG_tseg1, ARG_tseg2};
+    enum { ARG_bitrate, ARG_mode, ARG_sample_point, ARG_sjw, ARG_tseg1, ARG_tseg2,
+           #if MICROPY_PY_MACHINE_CAN_RXBUF
+           ARG_rxbuf,
+           #endif
+    };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_bitrate, MP_ARG_INT | MP_ARG_REQUIRED },
         { MP_QSTR_mode, MP_ARG_INT, {.u_int = MP_CAN_MODE_NORMAL} },
@@ -230,6 +351,9 @@ static void machine_can_init_helper(machine_can_obj_t *self, size_t n_args, cons
         { MP_QSTR_sjw, MP_ARG_INT, {.u_int = CAN_SJW_MIN } },
         { MP_QSTR_tseg1, MP_ARG_INT, {.u_int = -1} },
         { MP_QSTR_tseg2, MP_ARG_INT, {.u_int = -1} },
+        #if MICROPY_PY_MACHINE_CAN_RXBUF
+        { MP_QSTR_rxbuf, MP_ARG_INT, {.u_int = 0} },
+        #endif
     };
 
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
@@ -266,10 +390,25 @@ static void machine_can_init_helper(machine_can_obj_t *self, size_t n_args, cons
         mp_raise_ValueError(MP_ERROR_TEXT("sample_point"));
     }
 
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    mp_int_t rxbuf = args[ARG_rxbuf].u_int;
+    if (rxbuf < 0 || (size_t)rxbuf >= SIZE_MAX / sizeof(machine_can_rx_entry_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("rxbuf"));
+    }
+    #endif
+
     int f_clock = machine_can_port_f_clock(self);
 
     // This function will also set tseg1 and tseg2 if they are -1
     int brp = calculate_brp(bitrate_nom, f_clock, &tseg1, &tseg2, sample_point, false);
+    if (self->port != NULL) {
+        machine_can_port_deinit(self);
+        self->port = NULL;
+    }
+
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    machine_can_rx_setup(self, (mp_uint_t)rxbuf);
+    #endif
 
     // Set up the hardware
     self->bitrate = bitrate_nom;
@@ -279,11 +418,21 @@ static void machine_can_init_helper(machine_can_obj_t *self, size_t n_args, cons
     self->sjw = sjw;
     self->mode = mode;
     memset(&self->counters, 0, sizeof(self->counters));
+    self->rx_error_flags = 0;
 
-    if (self->port != NULL) {
-        machine_can_port_deinit(self);
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    // Release the ring if the port cannot be initialised.
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        machine_can_port_init(self);
+        nlr_pop();
+    } else {
+        machine_can_rx_free(self);
+        nlr_jump(nlr.ret_val);
     }
+    #else
     machine_can_port_init(self);
+    #endif
 }
 
 // Raise an exception if the CAN controller is not initialised
@@ -339,6 +488,7 @@ static mp_obj_t machine_can_make_new(const mp_obj_type_t *type, size_t n_args, s
     machine_can_obj_t *self = MP_STATE_PORT(machine_can_objs)[can_idx];
     if (self == NULL) {
         self = mp_obj_malloc(machine_can_obj_t, &machine_can_type);
+        memset((byte *)self + sizeof(self->base), 0, sizeof(*self) - sizeof(self->base));
         self->can_idx = can_idx;
         MP_STATE_PORT(machine_can_objs)[can_idx] = self;
     }
@@ -486,8 +636,17 @@ static mp_obj_t machine_can_recv(size_t n_args, const mp_obj_t *args) {
         }
     }
 
-    // Call the port-specific receive function
-    if (!machine_can_port_recv(self, data, &dlen, &id, &flags, &errors)) {
+    // Call the port-specific receive function, or consume the common ring.
+    bool received;
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    if (self->rx_ring != NULL) {
+        received = machine_can_rx_pop(self, data, &dlen, &id, &flags, &errors);
+    } else
+    #endif
+    {
+        received = machine_can_port_recv(self, data, &dlen, &id, &flags, &errors);
+    }
+    if (!received) {
         return mp_const_none; // Nothing to return
     }
 
@@ -519,6 +678,58 @@ static mp_obj_t machine_can_recv(size_t n_args, const mp_obj_t *args) {
     return MP_OBJ_FROM_PTR(result);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_can_recv_obj, 1, 2, machine_can_recv);
+#if MICROPY_PY_MACHINE_CAN_RXBUF
+// Write complete fixed-size records from the common receive ring.
+static mp_obj_t machine_can_recv_into(mp_obj_t self_in, mp_obj_t buffer_in) {
+    machine_can_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    machine_can_check_initialised(self);
+    if (self->rx_ring == NULL) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("receive ring is disabled"));
+    }
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer_raise(buffer_in, &bufinfo, MP_BUFFER_WRITE);
+    if (bufinfo.len < MACHINE_CAN_RX_RECORD_SIZE) {
+        mp_raise_ValueError(MP_ERROR_TEXT("buffer too small"));
+    }
+
+    size_t capacity = bufinfo.len / MACHINE_CAN_RX_RECORD_SIZE;
+    uint8_t *out = bufinfo.buf;
+    mp_uint_t written = 0;
+    while (written < capacity) {
+        mp_uint_t state = machine_can_port_rx_lock(self);
+        if (machine_can_rx_ring_empty(self)) {
+            machine_can_port_rx_fill(self);
+        }
+        if (machine_can_rx_ring_empty(self)) {
+            machine_can_port_rx_unlock(self, state);
+            break;
+        }
+        machine_can_rx_entry_t *entry = &self->rx_ring[self->rx_ring_tail];
+        uint8_t *record = out + written * MACHINE_CAN_RX_RECORD_SIZE;
+        uint32_t id = entry->id;
+        uint16_t flags = entry->flags;
+        record[0] = id;
+        record[1] = id >> 8;
+        record[2] = id >> 16;
+        record[3] = id >> 24;
+        record[4] = flags;
+        record[5] = flags >> 8;
+        record[6] = entry->len;
+        size_t data_len = (flags & CAN_MSG_FLAG_RTR) ? 0 : entry->len;
+        if (data_len != 0) {
+            memcpy(record + MACHINE_CAN_RX_RECORD_HEADER, entry->data, data_len);
+        }
+        memset(record + MACHINE_CAN_RX_RECORD_HEADER + data_len, 0, MP_CAN_MAX_LEN - data_len);
+        mp_uint_t errors;
+        machine_can_rx_release_locked(self, &errors);
+        record[7] = errors;
+        ++written;
+        machine_can_port_rx_unlock(self, state);
+    }
+    return mp_obj_new_int_from_uint(written * MACHINE_CAN_RX_RECORD_SIZE);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(machine_can_recv_into_obj, machine_can_recv_into);
+#endif
 
 static mp_obj_t machine_can_set_filters(mp_obj_t self_in, mp_obj_t filters) {
     machine_can_obj_t *self = MP_OBJ_TO_PTR(self_in);
@@ -589,6 +800,10 @@ static mp_obj_t machine_can_get_counters(size_t n_args, const mp_obj_t *args) {
     mp_obj_list_t *list = mp_obj_list_optional_arg(n_args > 1 ? args[1] : mp_const_none, 8);
     machine_can_check_initialised(self);
     machine_can_port_update_counters(self);
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    // The port reports frames in the hardware, add those in the software ring.
+    counters->rx_pending += machine_can_rx_pending(self);
+    #endif
 
     // Note: the members of 'counters' are laid out in the same order,
     // so compiler should be able to infer some kind of loop here...
@@ -634,6 +849,9 @@ static mp_obj_t machine_can_restart(mp_obj_t self_in) {
     machine_can_obj_t *self = MP_OBJ_TO_PTR(self_in);
     machine_can_check_initialised(self);
     machine_can_port_restart(self);
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    machine_can_rx_restart(self);
+    #endif
     memset(&self->counters, 0, sizeof(self->counters));
     return mp_const_none;
 }
@@ -694,11 +912,18 @@ static const mp_rom_map_elem_t machine_can_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_send), MP_ROM_PTR(&machine_can_send_obj) },
     { MP_ROM_QSTR(MP_QSTR_cancel_send), MP_ROM_PTR(&machine_can_cancel_send_obj) },
     { MP_ROM_QSTR(MP_QSTR_recv), MP_ROM_PTR(&machine_can_recv_obj) },
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    { MP_ROM_QSTR(MP_QSTR_recv_into), MP_ROM_PTR(&machine_can_recv_into_obj) },
+    #endif
     { MP_ROM_QSTR(MP_QSTR_set_filters), MP_ROM_PTR(&machine_can_set_filters_obj) },
     { MP_ROM_QSTR(MP_QSTR_state), MP_ROM_PTR(&machine_can_state_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_counters), MP_ROM_PTR(&machine_can_get_counters_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_timings), MP_ROM_PTR(&machine_can_get_timings_obj) },
     { MP_ROM_QSTR(MP_QSTR_restart), MP_ROM_PTR(&machine_can_restart_obj) },
+
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    { MP_ROM_QSTR(MP_QSTR_RX_RECORD_SIZE), MP_ROM_INT(MACHINE_CAN_RX_RECORD_SIZE) },
+    #endif
 
     // Mode enum constants
     { MP_ROM_QSTR(MP_QSTR_MODE_NORMAL), MP_ROM_INT(MP_CAN_MODE_NORMAL) },

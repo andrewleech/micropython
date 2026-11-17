@@ -1,0 +1,18 @@
+--- instance0 ---
+fresh allocation failure
+ring capacity
+fill drain wrap 1
+restart 1
+fill drain wrap 2
+restart 2
+fill drain wrap 3
+restart 3
+fill drain wrap 5
+restart 5
+poll without callback
+receive data ownership
+invalid reinit preserves receiver
+allocation failure reinit
+extended full payload and RTR
+--- instance1 ---
+sent OK
