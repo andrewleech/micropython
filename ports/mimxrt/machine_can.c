@@ -210,14 +210,33 @@ __attribute__((section(".ram_functions"))) static void machine_can_handler(CAN_T
         uint64_t mb_status_flags = FLEXCAN_GetMbStatusFlags(port->can_inst, UINT64_MAX);
 
         // Check the FIFO interrupt flags
-        if (mb_status_flags & (uint32_t)kFLEXCAN_RxFifoFrameAvlFlag) {
-            irq_flags |= MP_CAN_IRQ_RX;
+        bool ring_filled = false;
+        // The flag is set while the interrupt is masked (callback pending or ring full), so
+        // an overflow interrupt must not raise IRQ_RX again for the same frame.
+        if ((mb_status_flags & (uint32_t)kFLEXCAN_RxFifoFrameAvlFlag)
+            && (port->can_inst->IMASK1 & (uint32_t)kFLEXCAN_RxFifoFrameAvlFlag)) {
             // Disable RX interrupts to avoid IRQ loops. It will be re-enabled by
             // receive or setting the trigger.The Overflow-Interrupt is handled here and is kept.
             FLEXCAN_DisableMbInterrupts(port->can_inst, kFLEXCAN_RxFifoFrameAvlFlag);
+            #if MICROPY_PY_MACHINE_CAN_RXBUF
+            if (machine_can_rx_ring_active(self)) {
+                // machine_can_port_rx_fill() rearms the interrupt. Only raise
+                // IRQ_RX when the ring goes from empty to non-empty.
+                ring_filled = true;
+                if (machine_can_rx_irq(self)) {
+                    irq_flags |= MP_CAN_IRQ_RX;
+                }
+            } else
+            #endif
+            {
+                irq_flags |= MP_CAN_IRQ_RX;
+            }
         }
-        if (mb_status_flags & (uint32_t)kFLEXCAN_RxFifoOverflowFlag) {
+        // machine_can_port_rx_fill() has already counted and cleared any overflow it saw.
+        if (!ring_filled && (mb_status_flags & (uint32_t)kFLEXCAN_RxFifoOverflowFlag)) {
             ++port->num_rx_overrun;
+            // Clearing the flag stops the interrupt; latch it so the next recv() reports it.
+            self->rx_error_flags |= CAN_RECV_ERR_OVERRUN;
             FLEXCAN_ClearMbStatusFlags(port->can_inst, kFLEXCAN_RxFifoOverflowFlag);
         }
         // Check the TX MB interrupt flags.
@@ -289,7 +308,6 @@ static void machine_can_port_init(machine_can_obj_t *self) {
 
     if (port == NULL) {
         port = m_new_obj(machine_can_port_t);
-        self->port = port;
         mp_uint_t can_hw_id = can_index_table[self->can_idx];  // the hw can number 1..n
         port->can_inst = can_base_ptr_table[can_hw_id];
         port->can_hw_id = can_hw_id;
@@ -321,6 +339,9 @@ static void machine_can_port_init(machine_can_obj_t *self) {
         CLOCK_EnableClock(kCLOCK_Lpuart1);
         #endif // FSL_FEATURE_CCM_HAS_ERRATA_50235
     }
+
+    // Everything that can raise has succeeded, so the object counts as initialised.
+    self->port = port;
 
     // (Re-)configuration after init().
     port->flexcan_config->disableSelfReception = true;
@@ -406,6 +427,13 @@ static void machine_can_port_init(machine_can_obj_t *self) {
         kFLEXCAN_BusOffInterruptEnable | kFLEXCAN_ErrorInterruptEnable |
         kFLEXCAN_RxWarningInterruptEnable | kFLEXCAN_TxWarningInterruptEnable);
     FLEXCAN_EnableMbInterrupts(port->can_inst, kFLEXCAN_RxFifoOverflowFlag);
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    if (machine_can_rx_ring_active(self)) {
+        // The ring is filled by the receive interrupt, which is otherwise
+        // only enabled when an IRQ handler is set.
+        FLEXCAN_EnableMbInterrupts(port->can_inst, kFLEXCAN_RxFifoFrameAvlFlag);
+    }
+    #endif
 
     mp_uint_t instance = FLEXCAN_GetInstance(port->can_inst);
     EnableIRQ(((IRQn_Type [])CAN_Rx_Warning_IRQS)[instance]);
@@ -499,7 +527,13 @@ static void machine_can_update_irqs(machine_can_obj_t *self) {
     FLEXCAN_DisableMbInterrupts(port->can_inst,
         irq_tx_mask | (kFLEXCAN_RxFifoOverflowFlag | kFLEXCAN_RxFifoWarningFlag | kFLEXCAN_RxFifoFrameAvlFlag));
     // enable the MB RX Interrupts, if enabled. TX interrupts will be enabled when sending
-    if (self->mp_irq_obj->handler != mp_const_none) {
+    bool want_rx_notify = (self->mp_irq_obj != NULL && self->mp_irq_obj->handler != mp_const_none);
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    want_rx_notify = want_rx_notify || machine_can_rx_ring_active(self);
+    #endif
+    // The overflow interrupt feeds the overrun counter, so it stays enabled.
+    FLEXCAN_EnableMbInterrupts(port->can_inst, kFLEXCAN_RxFifoOverflowFlag);
+    if (want_rx_notify) {
         FLEXCAN_EnableMbInterrupts(port->can_inst, kFLEXCAN_RxFifoFrameAvlFlag);
     }
 }
@@ -509,7 +543,14 @@ static mp_uint_t machine_can_port_irq_flags(machine_can_obj_t *self) {
     struct machine_can_port *port = self->port;
     mp_int_t irq_flags = 0;
     uint64_t mb_status_flags = FLEXCAN_GetMbStatusFlags(port->can_inst, UINT64_MAX);
-
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    if (machine_can_rx_ring_active(self)) {
+        // Frames moved to the ring are not pending in the hardware FIFO.
+        if (!machine_can_rx_ring_empty(self)) {
+            irq_flags |= MP_CAN_IRQ_RX;
+        }
+    } else
+    #endif
     if ((uint32_t)mb_status_flags & kFLEXCAN_RxFifoFrameAvlFlag) {
         irq_flags |= MP_CAN_IRQ_RX;
     }
@@ -642,6 +683,76 @@ static bool machine_can_port_cancel_send(machine_can_obj_t *self, mp_uint_t idx)
     return (cs_start == CAN_CS_CODE(kFLEXCAN_TxMbDataOrRemote)) && (cs_start != can_cs_code);
 }
 
+// Convert a received frame to the port-agnostic id, flags and length, writing its data.
+static void can_decode_rx_frame(const flexcan_frame_t *frame, uint8_t *data, mp_uint_t *id, mp_uint_t *flags, size_t *dlen) {
+    // data is guaranteed to have a size of 8 bytes at least.
+    // So this amount can be copied regardless of the actual frame length.
+    data[0] = frame->dataByte0;
+    data[1] = frame->dataByte1;
+    data[2] = frame->dataByte2;
+    data[3] = frame->dataByte3;
+    data[4] = frame->dataByte4;
+    data[5] = frame->dataByte5;
+    data[6] = frame->dataByte6;
+    data[7] = frame->dataByte7;
+    // The raw DLC can be 9 to 15, which means 8 data bytes.
+    *dlen = frame->length > MP_CAN_MAX_LEN ? MP_CAN_MAX_LEN : frame->length;
+    *flags = (frame->format ? CAN_MSG_FLAG_EXT_ID : 0) |
+        (frame->type ? CAN_MSG_FLAG_RTR : 0);
+    *id = (frame->id & 0x3fffffff) >> (frame->format ? 0 : 18);
+}
+
+// Drain the hardware Rx FIFO into the CAN-owned ring from the receive
+// interrupt, recv() and recv_into(). Never allocates. A full ring leaves
+// the receive interrupt masked until a consumer makes room.
+#if MICROPY_PY_MACHINE_CAN_RXBUF
+static void machine_can_port_rx_fill(machine_can_obj_t *self) {
+    struct machine_can_port *port = self->port;
+    CAN_Type *can = port->can_inst;
+
+    for (;;) {
+        uint32_t mb_status_flags = FLEXCAN_GetMbStatusFlags(can,
+            kFLEXCAN_RxFifoOverflowFlag | kFLEXCAN_RxFifoWarningFlag | kFLEXCAN_RxFifoFrameAvlFlag);
+        if (mb_status_flags & kFLEXCAN_RxFifoOverflowFlag) {
+            self->rx_error_flags |= CAN_RECV_ERR_OVERRUN;
+            port->num_rx_overrun++;
+            FLEXCAN_ClearMbStatusFlags(can, kFLEXCAN_RxFifoOverflowFlag);
+        }
+        if (mb_status_flags & kFLEXCAN_RxFifoWarningFlag) {
+            self->rx_error_flags |= CAN_RECV_ERR_FULL;
+        }
+        bool pending = (mb_status_flags & kFLEXCAN_RxFifoFrameAvlFlag) != 0;
+        if (!machine_can_rx_has_room(self) || !pending) {
+            if (!pending) {
+                FLEXCAN_EnableMbInterrupts(can, kFLEXCAN_RxFifoFrameAvlFlag);
+            }
+            return;
+        }
+        flexcan_frame_t rx_frame;
+        machine_can_rx_entry_t *entry = machine_can_rx_head(self);
+        status_t status = FLEXCAN_ReadRxFifo(can, &rx_frame);
+        FLEXCAN_ClearMbStatusFlags(can, kFLEXCAN_RxFifoWarningFlag | kFLEXCAN_RxFifoFrameAvlFlag);
+        assert(status == kStatus_Success);
+        (void)status;
+        mp_uint_t id;
+        mp_uint_t flags;
+        size_t len;
+        can_decode_rx_frame(&rx_frame, entry->data, &id, &flags, &len);
+        machine_can_rx_commit(self, id, flags, len);
+    }
+}
+#endif
+
+#if MICROPY_PY_MACHINE_CAN_RXBUF
+static mp_uint_t machine_can_port_rx_lock(machine_can_obj_t *self) {
+    return disable_irq();
+}
+
+static void machine_can_port_rx_unlock(machine_can_obj_t *self, mp_uint_t state) {
+    enable_irq(state);
+}
+#endif
+
 static bool machine_can_port_recv(machine_can_obj_t *self, void *data, size_t *dlen, mp_uint_t *id, mp_uint_t *flags, mp_uint_t *errors) {
     struct machine_can_port *port = self->port;
 
@@ -655,13 +766,14 @@ static bool machine_can_port_recv(machine_can_obj_t *self, void *data, size_t *d
     if ((mb_status_flags & kFLEXCAN_RxFifoWarningFlag)) {
         err_fifo |= CAN_RECV_ERR_FULL;
     }
-    *errors = err_fifo;
+    *errors = err_fifo | self->rx_error_flags;
 
     if (!(mb_status_flags & kFLEXCAN_RxFifoFrameAvlFlag)) {
         return false;
     }
     flexcan_frame_t rx_frame;
     status_t status = FLEXCAN_ReadRxFifo(port->can_inst, &rx_frame);
+    self->rx_error_flags = 0;
 
     FLEXCAN_ClearMbStatusFlags(port->can_inst, kFLEXCAN_RxFifoOverflowFlag | kFLEXCAN_RxFifoWarningFlag | kFLEXCAN_RxFifoFrameAvlFlag);
     FLEXCAN_EnableMbInterrupts(port->can_inst, kFLEXCAN_RxFifoFrameAvlFlag);
@@ -669,21 +781,7 @@ static bool machine_can_port_recv(machine_can_obj_t *self, void *data, size_t *d
     if (status != kStatus_Success) {
         return false;
     }
-    uint8_t *rx_data = (uint8_t *)data;
-    // rx_data is guaranteed to have a size of 8 bytes at least.
-    // So this amount can be copied regardless of the actual frame length.
-    rx_data[0] = rx_frame.dataByte0;
-    rx_data[1] = rx_frame.dataByte1;
-    rx_data[2] = rx_frame.dataByte2;
-    rx_data[3] = rx_frame.dataByte3;
-    rx_data[4] = rx_frame.dataByte4;
-    rx_data[5] = rx_frame.dataByte5;
-    rx_data[6] = rx_frame.dataByte6;
-    rx_data[7] = rx_frame.dataByte7;
-    *dlen = rx_frame.length;
-    *flags = (rx_frame.format ? CAN_MSG_FLAG_EXT_ID : 0) |
-        (rx_frame.type ? CAN_MSG_FLAG_RTR : 0);
-    *id = (rx_frame.id & 0x3fffffff) >> (rx_frame.format ? 0 : 18);
+    can_decode_rx_frame(&rx_frame, (uint8_t *)data, id, flags, dlen);
 
     return true;
 }
