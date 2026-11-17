@@ -364,7 +364,7 @@ void can_disable_rx_interrupts(CAN_HandleTypeDef *can, can_rx_fifo_t fifo) {
 void can_enable_rx_interrupts(CAN_HandleTypeDef *can, can_rx_fifo_t fifo, bool enable_msg_received) {
     uint32_t ints = (fifo == CAN_RX_FIFO0) ? FDCAN_IT_RX_FIFO0_MASK : FDCAN_IT_RX_FIFO1_MASK;
     if (!enable_msg_received) {
-        ints &= FDCAN_IT_RX_NEW_MESSAGE_MASK;
+        ints &= ~FDCAN_IT_RX_NEW_MESSAGE_MASK;
     }
     HAL_FDCAN_ActivateNotification(can, ints, 0);
 }

@@ -29,6 +29,7 @@
 #include <stdbool.h>
 #include "extmod/machine_can_port.h"
 #include "can.h"
+#include "irq.h"
 #include "py/runtime.h"
 #include "py/mperrno.h"
 #include "py/mphal.h"
@@ -116,6 +117,9 @@ static void machine_can_port_init(machine_can_obj_t *self) {
         self->port = NULL;
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("CAN init failed"));
     }
+
+    // Restore the interrupt enables.
+    machine_can_update_irqs(self);
 }
 
 static void machine_can_port_cancel_all_tx(machine_can_obj_t *self) {
@@ -203,24 +207,66 @@ static bool machine_can_port_cancel_send(machine_can_obj_t *self, mp_uint_t idx)
     return can_cancel_transmit(&self->port->h, idx);
 }
 
+// Convert a received frame to the port-agnostic id, flags and length.
+static void can_decode_rx_msg(const CanRxMsgTypeDef *msg, mp_uint_t *id, mp_uint_t *flags, size_t *dlen) {
+    // CanRxMsgTypeDef is different for Classic vs FD
+    #if MICROPY_HW_ENABLE_FDCAN
+    *flags = ((msg->IdType == FDCAN_EXTENDED_ID) ? CAN_MSG_FLAG_EXT_ID : 0) |
+        ((msg->RxFrameType == FDCAN_REMOTE_FRAME) ? CAN_MSG_FLAG_RTR : 0);
+    *id = msg->Identifier;
+    *dlen = msg->DataLength; // Lower layer has converted to bytes already
+    #else
+    *flags = (msg->IDE ? CAN_MSG_FLAG_EXT_ID : 0) |
+        (msg->RTR ? CAN_MSG_FLAG_RTR : 0);
+    *id = msg->IDE ? msg->ExtId : msg->StdId;
+    *dlen = msg->DLC;
+    #endif
+}
+
+// rx_fill checks the FIFO pending state before calling can_receive(), so the
+// bxCAN driver does not wait or run the scheduler from an ISR.
+#if MICROPY_PY_MACHINE_CAN_RXBUF
+static void machine_can_port_rx_fill(machine_can_obj_t *self) {
+    CAN_HandleTypeDef *can = &self->port->h;
+
+    for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
+        while (machine_can_rx_has_room(self) && can_is_rx_pending(can, fifo)) {
+            CanRxMsgTypeDef msg;
+            machine_can_rx_entry_t *entry = machine_can_rx_head(self);
+            int res = can_receive(can, fifo, &msg, entry->data, 0);
+            assert(res == 0); // A frame is known to be pending, so this cannot time out
+            if (res != 0) {
+                break;
+            }
+            mp_uint_t id;
+            mp_uint_t flags;
+            size_t len;
+            can_decode_rx_msg(&msg, &id, &flags, &len);
+            // Room was checked above; only one producer can advance the head.
+            machine_can_rx_commit(self, id, flags, len);
+        }
+        // Keep error notifications enabled while the ring is full and frames
+        // remain in the hardware FIFO.
+        can_enable_rx_interrupts(can, fifo, machine_can_rx_has_room(self) || !can_is_rx_pending(can, fifo));
+    }
+}
+
+static mp_uint_t machine_can_port_rx_lock(machine_can_obj_t *self) {
+    return raise_irq_pri(IRQ_PRI_CAN);
+}
+
+static void machine_can_port_rx_unlock(machine_can_obj_t *self, mp_uint_t state) {
+    restore_irq_pri(state);
+}
+#endif
+
 static bool machine_can_port_recv(machine_can_obj_t *self, void *data, size_t *dlen, mp_uint_t *id, mp_uint_t *flags, mp_uint_t *errors) {
     CAN_HandleTypeDef *can = &self->port->h;
     CanRxMsgTypeDef msg;
 
     for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
         if (can_receive(can, fifo, &msg, data, 0) == 0) {
-            // CanRxMsgTypeDef is different for Classic vs FD
-            #if MICROPY_HW_ENABLE_FDCAN
-            *flags = ((msg.IdType == FDCAN_EXTENDED_ID) ? CAN_MSG_FLAG_EXT_ID : 0) |
-                ((msg.RxFrameType == FDCAN_REMOTE_FRAME) ? CAN_MSG_FLAG_RTR : 0);
-            *id = msg.Identifier;
-            *dlen = msg.DataLength; // Lower layer has converted to bytes already
-            #else
-            *flags = (msg.IDE ? CAN_MSG_FLAG_EXT_ID : 0) |
-                (msg.RTR ? CAN_MSG_FLAG_RTR : 0);
-            *id = msg.IDE ? msg.ExtId : msg.StdId;
-            *dlen = msg.DLC;
-            #endif
+            can_decode_rx_msg(&msg, id, flags, dlen);
 
             *errors = self->rx_error_flags;
             self->rx_error_flags = 0;
@@ -237,8 +283,11 @@ static bool machine_can_port_recv(machine_can_obj_t *self, void *data, size_t *d
 static void machine_can_update_irqs(machine_can_obj_t *self) {
     uint16_t triggers = self->mp_irq_trigger;
 
+    // The ring needs the receive interrupt even without an IRQ_RX trigger.
+    bool want_rx_notify = (triggers & MP_CAN_IRQ_RX) || machine_can_rx_ring_active(self);
+
     for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
-        if (triggers & MP_CAN_IRQ_RX) {
+        if (want_rx_notify) {
             can_enable_rx_interrupts(&self->port->h, fifo, true);
         } else {
             can_disable_rx_interrupts(&self->port->h, fifo);
@@ -247,6 +296,7 @@ static void machine_can_update_irqs(machine_can_obj_t *self) {
 
     // Note: TX complete interrupt is always enabled to manage the internal queue state
 }
+
 
 static void machine_can_port_clear_filters(machine_can_obj_t *self) {
     #if MICROPY_HW_ENABLE_FDCAN
@@ -398,11 +448,20 @@ static mp_uint_t machine_can_port_irq_flags(machine_can_obj_t *self) {
         self->port->irq_state_pending = false;
     }
 
-    // Check for RX
     if (self->mp_irq_trigger & MP_CAN_IRQ_RX) {
-        for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
-            if (can_is_rx_pending(can, fifo)) {
+        #if MICROPY_PY_MACHINE_CAN_RXBUF
+        // Software-ring frames are absent from the hardware FIFOs.
+        if (machine_can_rx_ring_active(self)) {
+            if (!machine_can_rx_ring_empty(self)) {
                 flags |= MP_CAN_IRQ_RX;
+            }
+        } else
+        #endif
+        {
+            for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
+                if (can_is_rx_pending(can, fifo)) {
+                    flags |= MP_CAN_IRQ_RX;
+                }
             }
         }
     }
@@ -425,7 +484,7 @@ static mp_uint_t machine_can_port_irq_flags(machine_can_obj_t *self) {
 void machine_can_irq_handler(uint can_id,  can_int_t interrupt) {
     assert(can_id > 0);
     machine_can_obj_t *self = MP_STATE_PORT(machine_can_objs)[can_id - 1];
-    if (self == NULL) {
+    if (self == NULL || self->port == NULL) {
         return; // Should only hit this code path if pyb.CAN has enabled interrupt
     }
     struct machine_can_port *port = self->port;
@@ -443,7 +502,17 @@ void machine_can_irq_handler(uint can_id,  can_int_t interrupt) {
             counters->rx_overruns++;
             break;
         case CAN_INT_MESSAGE_RECEIVED:
-            call_irq = call_irq || (self->mp_irq_trigger & MP_CAN_IRQ_RX);
+            #if MICROPY_PY_MACHINE_CAN_RXBUF
+            if (machine_can_rx_ring_active(self)) {
+                // Call the IRQ only when the ring goes from empty to non-empty.
+                if (machine_can_rx_irq(self)) {
+                    call_irq = call_irq || (self->mp_irq_trigger & MP_CAN_IRQ_RX);
+                }
+            } else
+            #endif
+            {
+                call_irq = call_irq || (self->mp_irq_trigger & MP_CAN_IRQ_RX);
+            }
             break;
 
         // Error states
