@@ -57,7 +57,6 @@ static void machine_can_rx_free(machine_can_obj_t *self) {
     self->rx_ring_tail = 0;
 }
 
-// Set up the receive ring. Raises MemoryError if allocation fails.
 static void machine_can_rx_setup(machine_can_obj_t *self, mp_uint_t rxbuf) {
     machine_can_rx_free(self);
     if (rxbuf > 0) {

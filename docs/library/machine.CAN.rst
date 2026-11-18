@@ -37,6 +37,10 @@ Constructor
    - All other arguments are passed to :func:`CAN.init`. At least one argument (``bitrate``)
      must be provided.
 
+   Future versions of this class may also accept port-specific keyword arguments
+   here which configure the hardware. Currently no such keyword arguments are
+   implemented.
+
    Example
    ^^^^^^^
 
@@ -45,35 +49,30 @@ Constructor
       from machine import CAN
       can = CAN(1, 500_000)
 
+.. Add a table of port-specific keyword arguments here, once they exist
+
 Receive buffer
 --------------
 
-``rxbuf`` sets the capacity of the CAN receive ring in frames. ``rxbuf=0``
-disables the software ring, so
-`CAN.recv` uses the port's unbuffered hardware receive behaviour. With
-``rxbuf=N`` where N is non-zero, `CAN.recv` and `CAN.recv_into` consume frames
-from the same ring and share its pending receive-error state.
+``rxbuf`` is disabled by default. Set ``rxbuf=N`` to enable a queue of N frames.
 
-Receive buffering is enabled by default on all ports that support ``machine.CAN``.
-It can be disabled when building the firmware.
-
-The ring uses ``(N + 1) * CAN.RX_RECORD_SIZE`` bytes, plus allocator and CAN
-object overhead. A record is 16 bytes on builds with a maximum payload of 8
-bytes and 72 bytes on builds with a maximum payload of 64 bytes.
+The receive ring uses ``(N + 1) * CAN.RX_RECORD_SIZE`` bytes, plus object and
+allocator overhead. ``CAN.RX_RECORD_SIZE`` is 16 bytes on classic-only builds
+and 72 bytes on CAN FD-capable builds.
 
 ``CAN.IRQ_RX`` is notified when the ring changes from empty to non-empty.
 Either receive method can free space and allow receive interrupts to resume.
-`CAN.restart` clears the ring; deinitialisation and reinitialisation release
-and recreate its storage.
+`CAN.restart` clears the ring.
 
-If the software ring is full, queued frames are preserved and the driver stops
-draining the hardware FIFO until space is available. If the hardware FIFO then
-overflows, the overrun counter and pending receive error state are updated.
-Receive errors are attached to the next successfully consumed frame, and are
-consumed once. That frame may have been queued before the loss occurred; the
-error does not identify the position of any lost frame. ``CAN.RECV_ERR_FULL``
-reports a full hardware FIFO where more messages may be lost;
-``CAN.RECV_ERR_OVERRUN`` reports that one or more messages were lost.
+If the receive ring is full, queued frames are preserved. The driver stops
+draining the hardware FIFO until space is available.
+
+If the hardware FIFO overflows, the overrun counter and pending receive error
+state are updated. Errors are attached to the next successfully consumed frame.
+Each error is reported once. The frame may have been queued before the loss.
+The error does not identify where any frame was lost.
+``CAN.RECV_ERR_FULL`` reports a full hardware FIFO where more messages may be
+lost. ``CAN.RECV_ERR_OVERRUN`` reports that one or more messages were lost.
 
 Methods
 -------
@@ -262,7 +261,7 @@ Methods
    allocation inside the function.
 
    If no messages have been received by the CAN controller, this function
-   returns ``None``. Calls after deinitialisation raise ``OSError``.
+   returns ``None``.
 
    .. note:: `CAN.set_filters` must be called before any messages can be received by
              the controller. To receive all messages, call ``set_filters(None)``.
@@ -622,12 +621,11 @@ behaviour.
 .. data:: CAN.RECV_ERR_FULL
 
 The hardware FIFO reached its full condition. Additional incoming messages may
-be lost. This flag is distinct from `CAN.RECV_ERR_OVERRUN`.
+be lost.
 
 .. data:: CAN.RECV_ERR_OVERRUN
 
 One or more incoming messages were lost because the hardware FIFO overflowed.
-This flag is distinct from `CAN.RECV_ERR_FULL`.
 
 IRQ values
 ^^^^^^^^^^

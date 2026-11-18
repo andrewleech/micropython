@@ -297,7 +297,6 @@ static void machine_can_update_irqs(machine_can_obj_t *self) {
     // Note: TX complete interrupt is always enabled to manage the internal queue state
 }
 
-
 static void machine_can_port_clear_filters(machine_can_obj_t *self) {
     #if MICROPY_HW_ENABLE_FDCAN
     for (int f = 0; f < CAN_HW_MAX_STD_FILTER; f++) {
@@ -448,6 +447,7 @@ static mp_uint_t machine_can_port_irq_flags(machine_can_obj_t *self) {
         self->port->irq_state_pending = false;
     }
 
+    // Check for RX
     if (self->mp_irq_trigger & MP_CAN_IRQ_RX) {
         #if MICROPY_PY_MACHINE_CAN_RXBUF
         // Software-ring frames are absent from the hardware FIFOs.
