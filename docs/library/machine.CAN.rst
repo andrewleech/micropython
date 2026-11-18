@@ -37,9 +37,6 @@ Constructor
    - All other arguments are passed to :func:`CAN.init`. At least one argument (``bitrate``)
      must be provided.
 
-   Some ports accept additional, port-specific keyword arguments here which
-   configure the hardware. See `can-port-kwargs`.
-
    Example
    ^^^^^^^
 
@@ -48,39 +45,40 @@ Constructor
       from machine import CAN
       can = CAN(1, 500_000)
 
-.. _can-port-kwargs:
+Receive buffer
+--------------
 
-Port-specific keyword arguments
---------------------------------
+``rxbuf`` sets the capacity of the CAN receive ring in frames. ``rxbuf=0``
+disables the software ring, so
+`CAN.recv` uses the port's unbuffered hardware receive behaviour. With
+``rxbuf=N`` where N is non-zero, `CAN.recv` and `CAN.recv_into` consume frames
+from the same ring and share its pending receive-error state.
 
-- ``rxbuf``, available on **STM32**, **MIMXRT** and **Alif**, sets the capacity
-  of the CAN receive ring in frames. ``rxbuf=0`` disables the software ring, so
-  `CAN.recv` uses the port's unbuffered hardware receive behaviour. With
-  ``rxbuf=N`` where N is non-zero, `CAN.recv` and `CAN.recv_into` consume frames
-  from the same ring and share its pending receive-error state.
+Receive buffering is enabled by default on all ports that support ``machine.CAN``.
+It can be disabled when building the firmware.
 
-  The ring uses ``(N + 1) * CAN.RX_RECORD_SIZE`` bytes, plus allocator and CAN
-  object overhead. A record is 16 bytes on builds with a maximum payload of 8
-  bytes and 72 bytes on builds with a maximum payload of 64 bytes.
+The ring uses ``(N + 1) * CAN.RX_RECORD_SIZE`` bytes, plus allocator and CAN
+object overhead. A record is 16 bytes on builds with a maximum payload of 8
+bytes and 72 bytes on builds with a maximum payload of 64 bytes.
 
-  ``CAN.IRQ_RX`` is notified when the ring changes from empty to non-empty.
-  Either receive method can free space and allow receive interrupts to resume.
-  `CAN.restart` clears the ring; deinitialisation and reinitialisation release
-  and recreate its storage.
+``CAN.IRQ_RX`` is notified when the ring changes from empty to non-empty.
+Either receive method can free space and allow receive interrupts to resume.
+`CAN.restart` clears the ring; deinitialisation and reinitialisation release
+and recreate its storage.
 
-  If the software ring is full, queued frames are preserved and the driver stops
-  draining the hardware FIFO until space is available. If the hardware FIFO then
-  overflows, the overrun counter and pending receive error state are updated.
-  Receive errors are attached to the next successfully consumed frame, and are
-  consumed once. That frame may have been queued before the loss occurred; the
-  error does not identify the position of any lost frame. ``CAN.RECV_ERR_FULL``
-  reports a full hardware FIFO where more messages may be lost;
-  ``CAN.RECV_ERR_OVERRUN`` reports that one or more messages were lost.
+If the software ring is full, queued frames are preserved and the driver stops
+draining the hardware FIFO until space is available. If the hardware FIFO then
+overflows, the overrun counter and pending receive error state are updated.
+Receive errors are attached to the next successfully consumed frame, and are
+consumed once. That frame may have been queued before the loss occurred; the
+error does not identify the position of any lost frame. ``CAN.RECV_ERR_FULL``
+reports a full hardware FIFO where more messages may be lost;
+``CAN.RECV_ERR_OVERRUN`` reports that one or more messages were lost.
 
 Methods
 -------
 
-.. method:: CAN.init(bitrate, mode=CAN.MODE_NORMAL, sample_point=75, sjw=1, tseg1=None, tseg2=None)
+.. method:: CAN.init(bitrate, mode=CAN.MODE_NORMAL, sample_point=75, sjw=1, tseg1=None, tseg2=None, rxbuf=0)
 
    Initialise the CAN bus with the given parameters:
 
@@ -287,12 +285,10 @@ Methods
    - Index 2 is an integer with zero or more of the bits defined in
      `can-flags` set. It indicates metadata about the received message.
    - Index 3 is an integer with zero or more of the bits defined in
-     `can-recv-errors` set. With a receive ring enabled, receive errors are
-     attached to the next successfully consumed frame and consumed once. Empty
-     reads do not clear pending errors. The frame may have been queued before
-     the loss occurred, and the error does not identify the position of a lost
-     frame. With ``rxbuf=0``, receive-error reporting follows the port's
-     unbuffered hardware receive behaviour.
+     `can-recv-errors` set. Any non-zero value indicates potential issues when
+     receiving CAN messages. By default, these flags are reset inside the
+     controller each time this function returns. With a receive ring enabled,
+     errors are reported on the next successfully consumed frame.
 
    Remote Transmission Requests
    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -324,24 +320,11 @@ Methods
    trailing capacity that does not fit a complete record is left untouched.
 
    ``recv_into`` requires a receive ring enabled with non-zero ``rxbuf``.
-   Otherwise it raises ``RuntimeError`` and does not consume a hardware frame.
-   Calls after deinitialisation raise ``OSError``.
+   Otherwise it raises ``RuntimeError``.
 
-   `CAN.recv` and `CAN.recv_into` consume records from the same queue. Mixing
-   them sequentially preserves frame order and record boundaries. No partial
-   record is returned or retained between calls. The methods do not support
-   concurrent consumers.
-
-   Each record is ``CAN.RX_RECORD_SIZE`` bytes. It contains a little-endian
-   ``id:uint32`` at offset 0, ``flags:uint16`` at offset 4, ``len:uint8`` at
-   offset 6, an error bitmap at offset 7, and payload bytes at offset 8. Error
-   bits use the receive error flags defined under `can-recv-errors`. Payload
-   data is zero-padded to the record size; RTR payload bytes are all zero.
-
-   A bulk call consumes records until its destination capacity is reached or
-   the receive ring is empty. Receive interrupts may refill the ring during the
-   call. It uses preallocated caller memory and does not allocate while
-   consuming records.
+   Unlike `CAN.recv`, which returns a list of message fields, ``recv_into``
+   writes fixed-size binary records to the supplied buffer. The example shows
+   how to decode each record. ``CAN.RX_RECORD_SIZE`` gives the record size.
 
    Example::
 
