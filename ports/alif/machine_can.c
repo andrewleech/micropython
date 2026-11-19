@@ -125,9 +125,8 @@ static void can_decode_rx_msg(const canfd_transfer_t *xfer, mp_uint_t *id, mp_ui
     *dlen = dlc > MP_CAN_MAX_LEN ? MP_CAN_MAX_LEN : dlc;
 }
 
-// Drain hardware into the CAN-owned ring from the receive interrupt, recv()
-// and recv_into(). Never allocates. A full ring masks RIE until a consumer
-// makes room.
+// Drain hardware into the CAN-owned ring from the receive interrupt and recv().
+// Never allocates. A full ring masks RIE until a consumer makes room.
 //
 // canfd_receive() is only called once canfd_rx_msg_available() is true, as it
 // does not check availability itself.

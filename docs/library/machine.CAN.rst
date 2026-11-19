@@ -56,12 +56,12 @@ Receive buffer
 
 ``rxbuf`` is disabled by default. Set ``rxbuf=N`` to enable a queue of N frames.
 
-The receive ring uses ``(N + 1) * CAN.RX_RECORD_SIZE`` bytes, plus object and
-allocator overhead. ``CAN.RX_RECORD_SIZE`` is 16 bytes on classic-only builds
-and 72 bytes on CAN FD-capable builds.
+The receive ring uses ``(N + 1)`` internal slots, plus object and allocator
+overhead. Each slot uses 16 bytes on classic-only builds and 72 bytes on
+CAN FD-capable builds.
 
 ``CAN.IRQ_RX`` is notified when the ring changes from empty to non-empty.
-Either receive method can free space and allow receive interrupts to resume.
+`CAN.recv` frees space and allows receive interrupts to resume.
 `CAN.restart` clears the ring.
 
 If the receive ring is full, queued frames are preserved. The driver stops
@@ -310,33 +310,6 @@ Methods
                time.sleep_ms(1)  # not a good pattern, use the irq instead!
 
 
-.. method:: CAN.recv_into(buffer)
-
-   Copy as many complete oldest receive records as fit into the writable
-   *buffer*, and return the number of bytes written. This method is nonblocking
-   and returns ``0`` when the ring is empty. The buffer must have room for at
-   least one complete record; a smaller buffer raises ``ValueError``. Any
-   trailing capacity that does not fit a complete record is left untouched.
-
-   ``recv_into`` requires a receive ring enabled with non-zero ``rxbuf``.
-   Otherwise it raises ``RuntimeError``.
-
-   Unlike `CAN.recv`, which returns a list of message fields, ``recv_into``
-   writes fixed-size binary records to the supplied buffer. The example shows
-   how to decode each record. ``CAN.RX_RECORD_SIZE`` gives the record size.
-
-   Example::
-
-      buffer = bytearray(8 * CAN.RX_RECORD_SIZE)
-      written = can.recv_into(buffer)
-      for offset in range(0, written, CAN.RX_RECORD_SIZE):
-          record = memoryview(buffer)[offset:offset + CAN.RX_RECORD_SIZE]
-          can_id = int.from_bytes(record[0:4], "little")
-          flags = int.from_bytes(record[4:6], "little")
-          length = record[6]
-          errors = record[7]
-          payload = record[8:8 + length]
-
 .. method:: CAN.irq(handler=None, trigger=0, hard=False)
 
    Sets an interrupt *handler* function to be called when one or more of the
@@ -496,11 +469,6 @@ Constants
    message queue of the controller. The "transmit buffer indexes" used by
    :func:`CAN.send()`, :func:`CAN.cancel_send()` and `machine_can_irq_flags`
    will be in this range.
-
-.. data:: CAN.RX_RECORD_SIZE
-
-   Size in bytes of a receive record: 8 plus the maximum payload length of the
-   build. It is available on ports that support the ``rxbuf`` receive ring.
 
 .. _can-modes:
 

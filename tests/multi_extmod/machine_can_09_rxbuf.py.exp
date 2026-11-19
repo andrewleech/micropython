@@ -1,6 +1,7 @@
 --- instance0 ---
 fresh allocation failure
 ring capacity
+reinit clears pending overrun
 fill drain wrap 1
 restart 1
 fill drain wrap 2

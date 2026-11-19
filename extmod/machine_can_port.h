@@ -95,7 +95,6 @@ typedef struct {
 } machine_can_counters_t;
 
 #if MICROPY_PY_MACHINE_CAN_RXBUF
-// Multi-byte fields use native byte order in the owned ring.
 typedef struct _machine_can_rx_entry_t {
     uint32_t id;
     uint16_t flags;
@@ -104,11 +103,8 @@ typedef struct _machine_can_rx_entry_t {
     uint8_t data[MP_CAN_MAX_LEN];
 } machine_can_rx_entry_t;
 
-#define MACHINE_CAN_RX_RECORD_HEADER (8)
-#define MACHINE_CAN_RX_RECORD_SIZE   (MACHINE_CAN_RX_RECORD_HEADER + MP_CAN_MAX_LEN)
-
 MP_STATIC_ASSERT(offsetof(machine_can_rx_entry_t, data) == 8);
-MP_STATIC_ASSERT(sizeof(machine_can_rx_entry_t) == MACHINE_CAN_RX_RECORD_SIZE);
+MP_STATIC_ASSERT(sizeof(machine_can_rx_entry_t) == 8 + MP_CAN_MAX_LEN);
 #endif
 
 typedef struct _machine_can_obj_t {
@@ -244,10 +240,10 @@ static mp_obj_t machine_can_port_get_additional_timings(machine_can_obj_t *self,
 //
 // For each hardware frame, check machine_can_rx_has_room() before reading it,
 // write payload bytes directly into machine_can_rx_head(self)->data, then call
-// machine_can_rx_commit() with the frame metadata. Called from the receive ISR,
-// recv(), and recv_into(). Fill an empty ring before consumption; after a
-// consumer releases a slot, refill only if the ring was full. Rearm the receive
-// interrupt unless frames remain waiting for room. Must not allocate.
+// machine_can_rx_commit() with the frame metadata. Called from the receive ISR
+// and recv(). Fill an empty ring before consumption; after a consumer releases
+// a slot, refill only if the ring was full. Rearm the receive interrupt unless
+// frames remain waiting for room. Must not allocate.
 static void machine_can_port_rx_fill(machine_can_obj_t *self);
 
 // Critical section excluding the receive interrupt, used around updates of

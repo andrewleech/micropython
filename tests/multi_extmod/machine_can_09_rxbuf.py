@@ -1,5 +1,6 @@
 from machine import CAN
 import gc
+import micropython
 import time
 import sys
 
@@ -76,8 +77,11 @@ def overflow_depth(can, capacity, value):
         if counters[7]:
             first = can.recv()
             assert first is not None and first[3] & CAN.RECV_ERR_OVERRUN
-            while can.recv() is not None:
-                pass
+            while True:
+                frame = can.recv()
+                if frame is None:
+                    break
+                assert not frame[3] & CAN.RECV_ERR_OVERRUN
             wait_pending(can, 0)
             time.sleep_ms(20)
             return count - 1, value
@@ -112,6 +116,26 @@ def instance0():
         actual, value = overflow_depth(can, capacity, value)
         assert actual == depth + capacity
     print("ring capacity")
+    # Reinitialisation discards a pending overrun and queued frames.
+    configure(can, 1)
+    for count in range(128):
+        multitest.broadcast("send {}".format(value))
+        multitest.wait("sent {}".format(value))
+        time.sleep_ms(20)
+        multitest.broadcast("received {}".format(value))
+        value += 1
+        if can.get_counters()[7]:
+            break
+    else:
+        assert False, "hardware receive overflow was not reported"
+    configure(can, 3)
+    request_frame(can, value, 1)
+    result = can.recv()
+    assert result is not None and result[3] == 0
+    assert bytes(result[1]) == bytes([value % 256])
+    wait_pending(can, 0)
+    value += 1
+    print("reinit clears pending overrun")
     configure(can, 1)
 
     for capacity in (1, 2, 3, 5):
@@ -182,7 +206,12 @@ def instance0():
     assert first is not None
     request_frame(can, value + 1, 1)
     result = [0, memoryview(bytearray(64)), 0, 0]
-    assert can.recv(result) is result
+    micropython.heap_lock()
+    try:
+        reused = can.recv(result)
+    finally:
+        micropython.heap_unlock()
+    assert reused is result
     assert (result[0], bytes(result[1]), result[2], result[3]) == (
         ID,
         bytes([(value + 1) % 256]),
@@ -196,13 +225,14 @@ def instance0():
     print("receive data ownership")
 
     # Pre-teardown validation must leave the old controller functional.
+    request_frame(can, value, 1)
     for invalid in (-1, 0x7FFFFFFF):
         try:
             can.init(BITRATE, rxbuf=invalid)
             assert False
         except ValueError:
             pass
-    request_frame(can, value, 1)
+    # The frame queued before the invalid calls remains available.
     receive_frame(can, value)
     wait_pending(can, 0)
     value += 1
@@ -231,8 +261,7 @@ def instance0():
     can.set_filters(None)
     for index, (can_id, payload, flags) in enumerate(SPECIAL_FRAMES):
         request_frame(can, -index - 1, 1)
-        result = can.recv()
-        assert result is not None
+        assert can.recv(result) is result
         expected_data = bytes(len(payload)) if flags & CAN.FLAG_RTR else payload
         assert (result[0], bytes(result[1]), result[2], result[3]) == (
             can_id,

@@ -703,8 +703,8 @@ static void can_decode_rx_frame(const flexcan_frame_t *frame, uint8_t *data, mp_
 }
 
 // Drain the hardware Rx FIFO into the CAN-owned ring from the receive
-// interrupt, recv() and recv_into(). Never allocates. A full ring leaves
-// the receive interrupt masked until a consumer makes room.
+// interrupt and recv(). Never allocates. A full ring leaves the receive
+// interrupt masked until a consumer makes room.
 #if MICROPY_PY_MACHINE_CAN_RXBUF
 static void machine_can_port_rx_fill(machine_can_obj_t *self) {
     struct machine_can_port *port = self->port;

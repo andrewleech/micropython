@@ -677,58 +677,6 @@ static mp_obj_t machine_can_recv(size_t n_args, const mp_obj_t *args) {
     return MP_OBJ_FROM_PTR(result);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_can_recv_obj, 1, 2, machine_can_recv);
-#if MICROPY_PY_MACHINE_CAN_RXBUF
-// Write complete fixed-size records from the common receive ring.
-static mp_obj_t machine_can_recv_into(mp_obj_t self_in, mp_obj_t buffer_in) {
-    machine_can_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    machine_can_check_initialised(self);
-    if (self->rx_ring == NULL) {
-        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("receive ring is disabled"));
-    }
-    mp_buffer_info_t bufinfo;
-    mp_get_buffer_raise(buffer_in, &bufinfo, MP_BUFFER_WRITE);
-    if (bufinfo.len < MACHINE_CAN_RX_RECORD_SIZE) {
-        mp_raise_ValueError(MP_ERROR_TEXT("buffer too small"));
-    }
-
-    size_t capacity = bufinfo.len / MACHINE_CAN_RX_RECORD_SIZE;
-    uint8_t *out = bufinfo.buf;
-    mp_uint_t written = 0;
-    while (written < capacity) {
-        mp_uint_t state = machine_can_port_rx_lock(self);
-        if (machine_can_rx_ring_empty(self)) {
-            machine_can_port_rx_fill(self);
-        }
-        if (machine_can_rx_ring_empty(self)) {
-            machine_can_port_rx_unlock(self, state);
-            break;
-        }
-        machine_can_rx_entry_t *entry = &self->rx_ring[self->rx_ring_tail];
-        uint8_t *record = out + written * MACHINE_CAN_RX_RECORD_SIZE;
-        uint32_t id = entry->id;
-        uint16_t flags = entry->flags;
-        record[0] = id;
-        record[1] = id >> 8;
-        record[2] = id >> 16;
-        record[3] = id >> 24;
-        record[4] = flags;
-        record[5] = flags >> 8;
-        record[6] = entry->len;
-        size_t data_len = (flags & CAN_MSG_FLAG_RTR) ? 0 : entry->len;
-        if (data_len != 0) {
-            memcpy(record + MACHINE_CAN_RX_RECORD_HEADER, entry->data, data_len);
-        }
-        memset(record + MACHINE_CAN_RX_RECORD_HEADER + data_len, 0, MP_CAN_MAX_LEN - data_len);
-        mp_uint_t errors;
-        machine_can_rx_release_locked(self, &errors);
-        record[7] = errors;
-        ++written;
-        machine_can_port_rx_unlock(self, state);
-    }
-    return mp_obj_new_int_from_uint(written * MACHINE_CAN_RX_RECORD_SIZE);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(machine_can_recv_into_obj, machine_can_recv_into);
-#endif
 
 static mp_obj_t machine_can_set_filters(mp_obj_t self_in, mp_obj_t filters) {
     machine_can_obj_t *self = MP_OBJ_TO_PTR(self_in);
@@ -911,18 +859,11 @@ static const mp_rom_map_elem_t machine_can_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_send), MP_ROM_PTR(&machine_can_send_obj) },
     { MP_ROM_QSTR(MP_QSTR_cancel_send), MP_ROM_PTR(&machine_can_cancel_send_obj) },
     { MP_ROM_QSTR(MP_QSTR_recv), MP_ROM_PTR(&machine_can_recv_obj) },
-    #if MICROPY_PY_MACHINE_CAN_RXBUF
-    { MP_ROM_QSTR(MP_QSTR_recv_into), MP_ROM_PTR(&machine_can_recv_into_obj) },
-    #endif
     { MP_ROM_QSTR(MP_QSTR_set_filters), MP_ROM_PTR(&machine_can_set_filters_obj) },
     { MP_ROM_QSTR(MP_QSTR_state), MP_ROM_PTR(&machine_can_state_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_counters), MP_ROM_PTR(&machine_can_get_counters_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_timings), MP_ROM_PTR(&machine_can_get_timings_obj) },
     { MP_ROM_QSTR(MP_QSTR_restart), MP_ROM_PTR(&machine_can_restart_obj) },
-
-    #if MICROPY_PY_MACHINE_CAN_RXBUF
-    { MP_ROM_QSTR(MP_QSTR_RX_RECORD_SIZE), MP_ROM_INT(MACHINE_CAN_RX_RECORD_SIZE) },
-    #endif
 
     // Mode enum constants
     { MP_ROM_QSTR(MP_QSTR_MODE_NORMAL), MP_ROM_INT(MP_CAN_MODE_NORMAL) },
