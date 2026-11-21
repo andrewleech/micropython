@@ -623,16 +623,19 @@ static mp_obj_t machine_can_recv(size_t n_args, const mp_obj_t *args) {
     mp_uint_t id = 0;
     mp_uint_t flags = 0;
     mp_uint_t errors = 0;
-    mp_obj_array_t *data_memoryview;
+    mp_buffer_info_t dest;
     bool use_arg_as_result = n_args > 1 && args[1] != mp_const_none;
     mp_obj_list_t *result = mp_obj_list_optional_arg(use_arg_as_result ? args[1] : mp_const_none, RECV_ARG_LEN);
     mp_obj_t *items = result->items;
 
-    // Validate the memoryview item if list passed in arg
+    // Validate the memoryview item if list passed in arg, before a frame is
+    // consumed. The buffer protocol applies any slice offset and rejects a
+    // read-only view.
     if (use_arg_as_result) {
         if (!mp_obj_is_type(items[RECV_ARG_DATA], &mp_type_memoryview)) {
             mp_raise_TypeError(NULL);
         }
+        mp_get_buffer_raise(items[RECV_ARG_DATA], &dest, MP_BUFFER_WRITE);
     }
 
     // Call the port-specific receive function, or consume the common ring.
@@ -654,21 +657,20 @@ static mp_obj_t machine_can_recv(size_t n_args, const mp_obj_t *args) {
         // Make the result memoryview large enough for the entire result buffer, not the recv result
         // ... it will be resized further down
         // (Potentially wasteful, but means the result can be safely reused as arg to a subsequent call)
-        void *backing_buf = m_malloc(MP_CAN_MAX_LEN);
-        items[RECV_ARG_DATA] = mp_obj_new_memoryview('B', MP_CAN_MAX_LEN, backing_buf);
+        dest.buf = m_malloc(MP_CAN_MAX_LEN);
+        items[RECV_ARG_DATA] = mp_obj_new_memoryview('B', MP_CAN_MAX_LEN, dest.buf);
     }
-    // TODO: length check any memoryview 'result' that was passed in as arg?
-    // (may not be possible as I don't think memoryview records the size of its backing buffer)
-
-    data_memoryview = MP_OBJ_TO_PTR(items[RECV_ARG_DATA]); // type of obj was checked already
+    // A memoryview passed in must have room for the longest frame the
+    // controller can receive: its length is set to each frame's length, so it
+    // cannot record the capacity.
 
     if ((flags & CAN_MSG_FLAG_RTR) == 0) {
-        memcpy(data_memoryview->items, data, dlen);
+        memcpy(dest.buf, data, dlen);
     } else {
         // Remote request, return a memoryview of 0s with correct length
-        memset(data_memoryview->items, 0, dlen);
+        memset(dest.buf, 0, dlen);
     }
-    data_memoryview->len = dlen;
+    ((mp_obj_array_t *)MP_OBJ_TO_PTR(items[RECV_ARG_DATA]))->len = dlen;
 
     items[RECV_ARG_ID] = MP_OBJ_NEW_SMALL_INT(id);
     items[RECV_ARG_FLAGS] = MP_OBJ_NEW_SMALL_INT(flags);

@@ -255,10 +255,11 @@ Methods
 
    This function takes a single optional argument, if provided then it must be a
    list of at least 4 elements where the second element is a `memoryview` object
-   that refers to a `bytearray` or similar object that has enough capacity to hold
-   any received CAN message (8 bytes for CAN Classic, 64 bytes for CAN FD). The
-   provided list will be returned as a successful result, and avoids memory
-   allocation inside the function.
+   that refers to a writable `bytearray` or similar object that has enough
+   capacity to hold any received CAN message (8 bytes for CAN Classic, 64 bytes
+   for CAN FD). The `memoryview` may be a slice, so message data can be received
+   directly into part of a larger buffer. The provided list will be returned as
+   a successful result, and avoids memory allocation inside the function.
 
    If no messages have been received by the CAN controller, this function
    returns ``None``.
