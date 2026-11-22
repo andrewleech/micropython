@@ -51,10 +51,33 @@ Constructor
 
 .. Add a table of port-specific keyword arguments here, once they exist
 
+Receive buffer
+--------------
+
+``rxbuf`` is disabled by default. Set ``rxbuf=N`` to enable a queue of N frames.
+
+The receive ring uses ``(N + 1)`` internal slots, plus object and allocator
+overhead. Each slot uses 16 bytes on classic-only builds and 72 bytes on
+CAN FD-capable builds.
+
+``CAN.IRQ_RX`` is notified when the ring changes from empty to non-empty.
+`CAN.recv` frees space and allows receive interrupts to resume.
+`CAN.restart` clears the ring.
+
+If the receive ring is full, queued frames are preserved. The driver stops
+draining the hardware FIFO until space is available.
+
+If the hardware FIFO overflows, the overrun counter and pending receive error
+state are updated. Errors are attached to the next successfully consumed frame.
+Each error is reported once. The frame may have been queued before the loss.
+The error does not identify where any frame was lost.
+``CAN.RECV_ERR_FULL`` reports a full hardware FIFO where more messages may be
+lost. ``CAN.RECV_ERR_OVERRUN`` reports that one or more messages were lost.
+
 Methods
 -------
 
-.. method:: CAN.init(bitrate, mode=CAN.MODE_NORMAL, sample_point=75, sjw=1, tseg1=None, tseg2=None)
+.. method:: CAN.init(bitrate, mode=CAN.MODE_NORMAL, sample_point=75, sjw=1, tseg1=None, tseg2=None, rxbuf=0)
 
    Initialise the CAN bus with the given parameters:
 
@@ -232,10 +255,11 @@ Methods
 
    This function takes a single optional argument, if provided then it must be a
    list of at least 4 elements where the second element is a `memoryview` object
-   that refers to a `bytearray` or similar object that has enough capacity to hold
-   any received CAN message (8 bytes for CAN Classic, 64 bytes for CAN FD). The
-   provided list will be returned as a successful result, and avoids memory
-   allocation inside the function.
+   that refers to a writable `bytearray` or similar object that has enough
+   capacity to hold any received CAN message (8 bytes for CAN Classic, 64 bytes
+   for CAN FD). The `memoryview` may be a slice, so message data can be received
+   directly into part of a larger buffer. The provided list will be returned as
+   a successful result, and avoids memory allocation inside the function.
 
    If no messages have been received by the CAN controller, this function
    returns ``None``.
@@ -262,8 +286,9 @@ Methods
      `can-flags` set. It indicates metadata about the received message.
    - Index 3 is an integer with zero or more of the bits defined in
      `can-recv-errors` set. Any non-zero value indicates potential issues when
-     receiving CAN messages. These flags are reset inside the controller each
-     time this function returns.
+     receiving CAN messages. By default, these flags are reset inside the
+     controller each time this function returns. With a receive ring enabled,
+     errors are reported on the next successfully consumed frame.
 
    Remote Transmission Requests
    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -373,6 +398,9 @@ Methods
             number of pending RX messages. They will report a
             number > 0, if messages are pending.
 
+  .. note:: If ``rxbuf`` is used, the pending RX count includes frames in the
+            software receive ring.
+
 .. method:: CAN.get_timings(list=None /)
 
    Returns a list of elements indicating the current timings configured in the
@@ -414,6 +442,9 @@ Methods
 
    Calling this function also cancels any messages waiting to be sent. No
    `IRQ_TX` interrupts are delivered for these messages.
+
+   A software receive ring configured with ``rxbuf`` is cleared. Frames in the
+   hardware receive FIFO may also be cleared.
 
    Note that this function may or may not cause the controller to exit the
    "Error Passive" state, depending whether the controller hardware zeroes
@@ -546,17 +577,24 @@ Message Flags
 Receive Error Flags
 ^^^^^^^^^^^^^^^^^^^
 
-The result of :func:`CAN.recv()` includes an integer value made up of zero or
-more of these flags bitwise ORed together. If set, these flags indicate
-potential general issues with receiving CAN messages.
+The error value returned by `CAN.recv` contains zero or more of the following
+flags, combined with bitwise OR.
+
+With ``rxbuf`` enabled, both receive methods use a shared pending-error latch.
+Errors are attached to the next successfully consumed frame and consumed once;
+empty reads do not clear them. That frame may have been queued before the loss
+occurred, and the error does not identify the position of any lost frame. With
+``rxbuf=0``, receive-error reporting follows `CAN.recv`'s unbuffered hardware
+behaviour.
 
 .. data:: CAN.RECV_ERR_FULL
 
-The hardware FIFO where this message was received is full, and additional incoming messages may be lost.
+The hardware FIFO reached its full condition. Additional incoming messages may
+be lost.
 
 .. data:: CAN.RECV_ERR_OVERRUN
 
-The hardware FIFO where this message was received is full, and one or more incoming messages has been lost.
+One or more incoming messages were lost because the hardware FIFO overflowed.
 
 IRQ values
 ^^^^^^^^^^

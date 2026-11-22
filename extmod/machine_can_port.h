@@ -31,6 +31,11 @@
 #include "py/runtime.h"
 #include "shared/runtime/mpirq.h"
 
+#ifndef MICROPY_PY_MACHINE_CAN_RXBUF
+// Set by a port that supports CAN.init(rxbuf=N).
+#define MICROPY_PY_MACHINE_CAN_RXBUF (0)
+#endif
+
 // This header is included into both extmod/machine_can.c and port-specific
 // machine_can.c implementations and provides shared (static) function
 // declarations to both.
@@ -89,6 +94,19 @@ typedef struct {
     mp_uint_t rx_overruns;
 } machine_can_counters_t;
 
+#if MICROPY_PY_MACHINE_CAN_RXBUF
+typedef struct _machine_can_rx_entry_t {
+    uint32_t id;
+    uint16_t flags;
+    uint8_t len;
+    uint8_t reserved;
+    uint8_t data[MP_CAN_MAX_LEN];
+} machine_can_rx_entry_t;
+
+MP_STATIC_ASSERT(offsetof(machine_can_rx_entry_t, data) == 8);
+MP_STATIC_ASSERT(sizeof(machine_can_rx_entry_t) == 8 + MP_CAN_MAX_LEN);
+#endif
+
 typedef struct _machine_can_obj_t {
     mp_obj_base_t base;
     mp_uint_t can_idx;
@@ -105,12 +123,45 @@ typedef struct _machine_can_obj_t {
     uint16_t mp_irq_trigger;
     mp_uint_t rx_error_flags;
 
+    #if MICROPY_PY_MACHINE_CAN_RXBUF
+    machine_can_rx_entry_t *rx_ring;
+    mp_uint_t rx_ring_len;   // Allocated slots including the one kept empty
+    mp_uint_t rx_ring_head;  // Index of the next slot to write
+    mp_uint_t rx_ring_tail;  // Index of the next slot to read
+    #endif
+
     // Assumed some of these counters are updated from different port ISRs, etc. and some
     // are updated by calling machine_can_port_update_counters()
     machine_can_counters_t counters;
 
     struct machine_can_port *port;
 } machine_can_obj_t;
+
+#if MICROPY_PY_MACHINE_CAN_RXBUF
+// True if received frames are stored in the software ring instead of being
+// read from the hardware by recv().
+static inline bool machine_can_rx_ring_active(const machine_can_obj_t *self) {
+    return self->rx_ring != NULL;
+}
+
+static inline bool machine_can_rx_ring_empty(const machine_can_obj_t *self) {
+    return self->rx_ring_head == self->rx_ring_tail;
+}
+
+// True if machine_can_rx_head() can provide a writable slot.
+static inline bool machine_can_rx_has_room(const machine_can_obj_t *self) {
+    mp_uint_t next = self->rx_ring_head + 1;
+    return self->rx_ring != NULL && (next == self->rx_ring_len ? 0 : next) != self->rx_ring_tail;
+}
+#else
+static inline bool machine_can_rx_ring_active(const machine_can_obj_t *self) {
+    return false;
+}
+
+static inline bool machine_can_rx_ring_empty(const machine_can_obj_t *self) {
+    return true;
+}
+#endif
 
 // Indexes for recv result list
 typedef enum {
@@ -183,6 +234,23 @@ static void machine_can_port_update_counters(machine_can_obj_t *self);
 
 // Hook for port to fill in the final item of the get_timings() result list with controller-specific values
 static mp_obj_t machine_can_port_get_additional_timings(machine_can_obj_t *self, mp_obj_t optional_arg);
+
+#if MICROPY_PY_MACHINE_CAN_RXBUF
+// The port must also provide these hooks if it sets MICROPY_PY_MACHINE_CAN_RXBUF.
+//
+// For each hardware frame, check machine_can_rx_has_room() before reading it,
+// write payload bytes directly into machine_can_rx_head(self)->data, then call
+// machine_can_rx_commit() with the frame metadata. Called from the receive ISR
+// and recv(). Fill an empty ring before consumption; after a consumer releases
+// a slot, refill only if the ring was full. Rearm the receive interrupt unless
+// frames remain waiting for room. Must not allocate.
+static void machine_can_port_rx_fill(machine_can_obj_t *self);
+
+// Critical section excluding the receive interrupt, used around updates of
+// the software ring. Returns the state to pass to machine_can_port_rx_unlock().
+static mp_uint_t machine_can_port_rx_lock(machine_can_obj_t *self);
+static void machine_can_port_rx_unlock(machine_can_obj_t *self, mp_uint_t state);
+#endif
 
 // This function is only optionally defined by the port. If macro CAN_PORT_PRINT_FUNCTION is not set
 // then a default machine_can_print function will be used.

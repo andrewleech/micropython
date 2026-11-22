@@ -131,6 +131,10 @@
 #endif
 #endif
 #define MICROPY_PY_MACHINE_CAN_INCLUDEFILE "ports/stm32/machine_can.c"
+// Enable CAN.init(rxbuf=N) with a CAN-owned receive ring and bulk reads.
+#ifndef MICROPY_PY_MACHINE_CAN_RXBUF
+#define MICROPY_PY_MACHINE_CAN_RXBUF (1)
+#endif
 #define MICROPY_PY_MACHINE_DHT_READINTO (1)
 // Backup memory via BKPSRAM or RTC BKP registers.
 #if MICROPY_HW_ENABLE_RTC

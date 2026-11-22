@@ -229,12 +229,14 @@ bool can_init(CAN_HandleTypeDef *can, int can_id, can_tx_mode_t tx_mode, uint32_
     uint32_t pin_pull = MP_HAL_PIN_PULL_UP;
     for (int i = 0; i < 2; ++i) {
         if (!mp_hal_pin_config_alt(pins[i], pin_mode, pin_pull, AF_FN_CAN, can_id)) {
+            can_deinit(can);
             return false;
         }
     }
 
     // initialise hardware, catching bad configuration errors.
     if (HAL_FDCAN_Init(can) != HAL_OK) {
+        can_deinit(can);
         return false;
     }
 
@@ -243,6 +245,7 @@ bool can_init(CAN_HandleTypeDef *can, int can_id, can_tx_mode_t tx_mode, uint32_
 
     // The configuration registers are locked after CAN is started.
     if (HAL_FDCAN_Start(can) != HAL_OK) {
+        can_deinit(can);
         return false;
     }
 
@@ -271,6 +274,7 @@ bool can_init(CAN_HandleTypeDef *can, int can_id, can_tx_mode_t tx_mode, uint32_
             break;
         #endif
         default:
+            can_deinit(can);
             return false;
     }
     // FDCAN IT 0
@@ -360,7 +364,7 @@ void can_disable_rx_interrupts(CAN_HandleTypeDef *can, can_rx_fifo_t fifo) {
 void can_enable_rx_interrupts(CAN_HandleTypeDef *can, can_rx_fifo_t fifo, bool enable_msg_received) {
     uint32_t ints = (fifo == CAN_RX_FIFO0) ? FDCAN_IT_RX_FIFO0_MASK : FDCAN_IT_RX_FIFO1_MASK;
     if (!enable_msg_received) {
-        ints &= FDCAN_IT_RX_NEW_MESSAGE_MASK;
+        ints &= ~FDCAN_IT_RX_NEW_MESSAGE_MASK;
     }
     HAL_FDCAN_ActivateNotification(can, ints, 0);
 }
