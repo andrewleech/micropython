@@ -49,6 +49,7 @@
 #endif
 
 #define TX_EMPTY UINT32_MAX
+#define MACHINE_CAN_RX_FIFO CAN_RX_FIFO0
 
 struct machine_can_port {
     CAN_HandleTypeDef h;
@@ -229,26 +230,25 @@ static void can_decode_rx_msg(const CanRxMsgTypeDef *msg, mp_uint_t *id, mp_uint
 static void machine_can_port_rx_fill(machine_can_obj_t *self) {
     CAN_HandleTypeDef *can = &self->port->h;
 
-    for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
-        while (machine_can_rx_has_room(self) && can_is_rx_pending(can, fifo)) {
-            CanRxMsgTypeDef msg;
-            machine_can_rx_entry_t *entry = machine_can_rx_head(self);
-            int res = can_receive(can, fifo, &msg, entry->data, 0);
-            assert(res == 0); // A frame is known to be pending, so this cannot time out
-            if (res != 0) {
-                break;
-            }
-            mp_uint_t id;
-            mp_uint_t flags;
-            size_t len;
-            can_decode_rx_msg(&msg, &id, &flags, &len);
-            // Room was checked above; only one producer can advance the head.
-            machine_can_rx_commit(self, id, flags, len);
+    const can_rx_fifo_t fifo = MACHINE_CAN_RX_FIFO;
+    while (machine_can_rx_has_room(self) && can_is_rx_pending(can, fifo)) {
+        CanRxMsgTypeDef msg;
+        machine_can_rx_entry_t *entry = machine_can_rx_head(self);
+        int res = can_receive(can, fifo, &msg, entry->data, 0);
+        assert(res == 0); // A frame is known to be pending, so this cannot time out
+        if (res != 0) {
+            break;
         }
-        // Keep error notifications enabled while the ring is full and frames
-        // remain in the hardware FIFO.
-        can_enable_rx_interrupts(can, fifo, machine_can_rx_has_room(self) || !can_is_rx_pending(can, fifo));
+        mp_uint_t id;
+        mp_uint_t flags;
+        size_t len;
+        can_decode_rx_msg(&msg, &id, &flags, &len);
+        // Room was checked above; only one producer can advance the head.
+        machine_can_rx_commit(self, id, flags, len);
     }
+    // Keep error notifications enabled while the ring is full and frames
+    // remain in the hardware FIFO.
+    can_enable_rx_interrupts(can, fifo, machine_can_rx_has_room(self) || !can_is_rx_pending(can, fifo));
 }
 
 static mp_uint_t machine_can_port_rx_lock(machine_can_obj_t *self) {
@@ -264,18 +264,18 @@ static bool machine_can_port_recv(machine_can_obj_t *self, void *data, size_t *d
     CAN_HandleTypeDef *can = &self->port->h;
     CanRxMsgTypeDef msg;
 
-    for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
-        if (can_receive(can, fifo, &msg, data, 0) == 0) {
-            can_decode_rx_msg(&msg, id, flags, dlen);
+    const can_rx_fifo_t fifo = MACHINE_CAN_RX_FIFO;
 
-            *errors = self->rx_error_flags;
-            self->rx_error_flags = 0;
+    if (can_receive(can, fifo, &msg, data, 0) == 0) {
+        can_decode_rx_msg(&msg, id, flags, dlen);
 
-            // Re-enable any interrupts that were disabled in RX IRQ handlers
-            can_enable_rx_interrupts(can, fifo, self->mp_irq_trigger & MP_CAN_IRQ_RX);
+        *errors = self->rx_error_flags;
+        self->rx_error_flags = 0;
 
-            return true;
-        }
+        // Re-enable any interrupts that were disabled in RX IRQ handlers
+        can_enable_rx_interrupts(can, fifo, self->mp_irq_trigger & MP_CAN_IRQ_RX);
+
+        return true;
     }
     return false;
 }
@@ -286,12 +286,10 @@ static void machine_can_update_irqs(machine_can_obj_t *self) {
     // The ring needs the receive interrupt even without an IRQ_RX trigger.
     bool want_rx_notify = (triggers & MP_CAN_IRQ_RX) || machine_can_rx_ring_active(self);
 
-    for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
-        if (want_rx_notify) {
-            can_enable_rx_interrupts(&self->port->h, fifo, true);
-        } else {
-            can_disable_rx_interrupts(&self->port->h, fifo);
-        }
+    if (want_rx_notify) {
+        can_enable_rx_interrupts(&self->port->h, MACHINE_CAN_RX_FIFO, true);
+    } else {
+        can_disable_rx_interrupts(&self->port->h, MACHINE_CAN_RX_FIFO);
     }
 
     // Note: TX complete interrupt is always enabled to manage the internal queue state
@@ -329,8 +327,8 @@ static void machine_can_port_set_filter(machine_can_obj_t *self, int filter_idx,
         // already accounted for in filter_idx due to CAN_FILTERS_STD_EXT_SEPARATE.
         .FilterIndex = filter_idx,
         .FilterType = FDCAN_FILTER_MASK,
-        // Round-robin between FIFO1 and FIFO0
-        .FilterConfig = (filter_idx & 1) ? FDCAN_FILTER_TO_RXFIFO1 : FDCAN_FILTER_TO_RXFIFO0,
+        // Route all filters to FIFO0 to preserve arrival order.
+        .FilterConfig = FDCAN_FILTER_TO_RXFIFO0,
         .FilterID1 = can_id,
         .FilterID2 = mask,
     };
@@ -357,9 +355,9 @@ static void machine_can_port_set_filter(machine_can_obj_t *self, int filter_idx,
         .FilterScale = CAN_FILTERSCALE_32BIT,
         .FilterMode = CAN_FILTERMODE_IDMASK,
         .FilterNumber = filter_idx,
-        // Apply the filters round-robin to each FIFO, as each filter in bxCAN is
-        // associated with only one FIFO.
-        .FilterFIFOAssignment = filter_idx % 2,
+        // Assign all filters to FIFO0 to preserve arrival order, as each filter in
+        // bxCAN is associated with only one FIFO.
+        .FilterFIFOAssignment = 0,
         .BankNumber = CAN_HW_MAX_FILTER, // Assign same number of filters to CAN2 as CAN1
     };
 
@@ -411,7 +409,7 @@ static void machine_can_port_update_counters(machine_can_obj_t *self) {
     counters->tec = hw_counters.tec;
     counters->rec = hw_counters.rec;
     counters->tx_pending = hw_counters.tx_pending;
-    counters->rx_pending = hw_counters.rx_fifo0_pending + hw_counters.rx_fifo1_pending;
+    counters->rx_pending = hw_counters.rx_fifo0_pending;
 
     // Other fields in 'counters' are updated from ISR directly
 }
@@ -450,19 +448,15 @@ static mp_uint_t machine_can_port_irq_flags(machine_can_obj_t *self) {
     // Check for RX
     if (self->mp_irq_trigger & MP_CAN_IRQ_RX) {
         #if MICROPY_PY_MACHINE_CAN_RXBUF
-        // Software-ring frames are absent from the hardware FIFOs.
+        // Software-ring frames are absent from the hardware FIFO.
         if (machine_can_rx_ring_active(self)) {
             if (!machine_can_rx_ring_empty(self)) {
                 flags |= MP_CAN_IRQ_RX;
             }
         } else
         #endif
-        {
-            for (can_rx_fifo_t fifo = CAN_RX_FIFO0; fifo <= CAN_RX_FIFO1; fifo++) {
-                if (can_is_rx_pending(can, fifo)) {
-                    flags |= MP_CAN_IRQ_RX;
-                }
-            }
+        if (can_is_rx_pending(can, MACHINE_CAN_RX_FIFO)) {
+            flags |= MP_CAN_IRQ_RX;
         }
     }
 
