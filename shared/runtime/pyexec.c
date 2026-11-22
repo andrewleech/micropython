@@ -54,6 +54,11 @@ static bool repl_display_debugging_info = 0;
 #define EXEC_FLAG_SOURCE_IS_FILENAME    (1 << 5)
 #define EXEC_FLAG_SOURCE_IS_READER      (1 << 6)
 #define EXEC_FLAG_NO_INTERRUPT          (1 << 7)
+#define EXEC_FLAG_ASYNC_REPL            (1 << 8)
+
+#if MICROPY_REPL_ASYNCIO && !MICROPY_COMP_ALLOW_TOP_LEVEL_AWAIT
+#error "MICROPY_REPL_ASYNCIO requires MICROPY_COMP_ALLOW_TOP_LEVEL_AWAIT"
+#endif
 
 // parses, compiles and executes the code in the lexer
 // frees the lexer before returning
@@ -122,6 +127,17 @@ static int parse_compile_execute(const void *source, mp_parse_input_kind_t input
             mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("script compilation not supported"));
             #endif
         }
+
+        #if MICROPY_REPL_ASYNCIO
+        if ((exec_flags & EXEC_FLAG_ASYNC_REPL) && mp_obj_get_type(module_fun) == &mp_type_gen_wrap) {
+            // REPL input with top-level await compiled to a coroutine: create it
+            // and hand it to the asyncio driver to run on the event loop, rather
+            // than running it to completion here.
+            MP_STATE_VM(repl_pending_coro) = mp_call_function_0(module_fun);
+            nlr_pop();
+            return PYEXEC_ASYNC_PENDING;
+        }
+        #endif
 
         // execute code
         if (!(exec_flags & EXEC_FLAG_NO_INTERRUPT)) {
@@ -324,7 +340,7 @@ static int do_reader_stdin(int c) {
     return parse_compile_execute(&reader, MP_PARSE_FILE_INPUT, exec_flags);
 }
 
-#if MICROPY_REPL_EVENT_DRIVEN
+#if MICROPY_REPL_EVENT_DRIVEN || MICROPY_REPL_ASYNCIO
 
 typedef struct _repl_t {
     // This structure originally also held current REPL line,
@@ -345,12 +361,25 @@ void pyexec_event_repl_init(void) {
     MP_STATE_VM(repl_line) = vstr_new(32);
     repl.cont_line = false;
     repl.paste_mode = false;
-    // no prompt before printing friendly REPL banner or entering raw REPL
-    readline_init(MP_STATE_VM(repl_line), "");
+    #if MICROPY_REPL_ASYNCIO
+    // A fresh session always starts synchronous; the asyncio driver sets this
+    // once it starts deferring top-level-await lines to the event loop.
+    pyexec_event_repl_async = false;
+    #endif
     if (pyexec_mode_kind == PYEXEC_MODE_RAW_REPL) {
+        // no prompt before entering raw REPL
+        readline_init(MP_STATE_VM(repl_line), "");
         pyexec_raw_repl_process_char(CHAR_CTRL_A);
     } else {
-        pyexec_friendly_repl_process_char(CHAR_CTRL_B);
+        // Print the friendly REPL banner (no leading newline, matching the
+        // blocking REPL) followed by the first prompt.
+        mp_hal_stdout_tx_str(MICROPY_BANNER_NAME_AND_VERSION);
+        mp_hal_stdout_tx_str("; " MICROPY_BANNER_MACHINE);
+        mp_hal_stdout_tx_str("\r\n");
+        #if MICROPY_PY_BUILTINS_HELP
+        mp_hal_stdout_tx_str("Type \"help()\" for more information.\r\n");
+        #endif
+        readline_init(MP_STATE_VM(repl_line), mp_repl_get_ps1());
     }
 }
 
@@ -396,7 +425,10 @@ static int pyexec_raw_repl_process_char(int c) {
         return PYEXEC_FORCED_EXIT;
     }
 
+    // Switch to original terminal mode to execute code, eg to support keyboard interrupt (SIGINT).
+    mp_hal_stdio_mode_orig();
     int ret = parse_compile_execute(MP_STATE_VM(repl_line), MP_PARSE_FILE_INPUT, EXEC_FLAG_PRINT_EOF | EXEC_FLAG_SOURCE_IS_VSTR);
+    mp_hal_stdio_mode_raw();
     if (ret & PYEXEC_FORCED_EXIT) {
         return ret;
     }
@@ -408,6 +440,25 @@ reset:
     return 0;
 }
 
+#if MICROPY_REPL_ASYNCIO
+// Compile and run one complete friendly-REPL line under the asyncio driver.
+// A line whose top-level await compiled to a coroutine is deferred to the driver
+// (PYEXEC_ASYNC_PENDING); anything else runs synchronously in cooked terminal
+// mode so Ctrl-C raises KeyboardInterrupt.
+static int repl_exec_line(mp_parse_input_kind_t input_kind) {
+    mp_uint_t exec_flags = EXEC_FLAG_ALLOW_DEBUGGING | EXEC_FLAG_IS_REPL | EXEC_FLAG_SOURCE_IS_VSTR;
+    if (!pyexec_event_repl_async) {
+        return parse_compile_execute(MP_STATE_VM(repl_line), input_kind, exec_flags);
+    }
+    mp_compile_allow_top_level_await = true;
+    mp_hal_stdio_mode_orig();
+    int ret = parse_compile_execute(MP_STATE_VM(repl_line), input_kind, exec_flags | EXEC_FLAG_ASYNC_REPL);
+    mp_hal_stdio_mode_raw();
+    mp_compile_allow_top_level_await = false;
+    return ret;
+}
+#endif
+
 static int pyexec_friendly_repl_process_char(int c) {
     if (repl.paste_mode) {
         if (c == CHAR_CTRL_C) {
@@ -417,7 +468,14 @@ static int pyexec_friendly_repl_process_char(int c) {
         } else if (c == CHAR_CTRL_D) {
             // end of input
             mp_hal_stdout_tx_str("\r\n");
+            #if MICROPY_REPL_ASYNCIO
+            int ret = repl_exec_line(MP_PARSE_FILE_INPUT);
+            if (ret == PYEXEC_ASYNC_PENDING) {
+                return ret;
+            }
+            #else
             int ret = parse_compile_execute(MP_STATE_VM(repl_line), MP_PARSE_FILE_INPUT, EXEC_FLAG_ALLOW_DEBUGGING | EXEC_FLAG_IS_REPL | EXEC_FLAG_SOURCE_IS_VSTR);
+            #endif
             if (ret & PYEXEC_FORCED_EXIT) {
                 return ret;
             }
@@ -425,7 +483,7 @@ static int pyexec_friendly_repl_process_char(int c) {
         } else {
             // add char to buffer and echo
             vstr_add_byte(MP_STATE_VM(repl_line), c);
-            if (c == '\r') {
+            if (c == '\r' || c == '\n') {
                 mp_hal_stdout_tx_str("\r\n=== ");
             } else {
                 char buf[1] = {c};
@@ -460,9 +518,11 @@ static int pyexec_friendly_repl_process_char(int c) {
             mp_hal_stdout_tx_str("\r\n");
             goto input_restart;
         } else if (ret == CHAR_CTRL_D) {
-            // exit for a soft reset
+            // Ctrl-D: signal exit.  Reset (not free) the line so the buffer
+            // survives for reuse if the caller re-prompts instead of exiting
+            // (e.g. a persistent asyncio REPL).
             mp_hal_stdout_tx_str("\r\n");
-            vstr_clear(MP_STATE_VM(repl_line));
+            vstr_reset(MP_STATE_VM(repl_line));
             return PYEXEC_FORCED_EXIT;
         } else if (ret == CHAR_CTRL_E) {
             // paste mode
@@ -476,6 +536,12 @@ static int pyexec_friendly_repl_process_char(int c) {
 
         if (ret < 0) {
             return 0;
+        }
+
+        if (vstr_len(MP_STATE_VM(repl_line)) == 0) {
+            // Empty line: re-prompt without executing (avoids a spurious
+            // SyntaxError from compiling an empty source).
+            goto input_restart;
         }
 
         if (!mp_repl_continue_with_input(vstr_null_terminated_str(MP_STATE_VM(repl_line)))) {
@@ -510,12 +576,22 @@ static int pyexec_friendly_repl_process_char(int c) {
         }
 
     exec:;
-        int ret = parse_compile_execute(MP_STATE_VM(repl_line), MP_PARSE_SINGLE_INPUT, EXEC_FLAG_ALLOW_DEBUGGING | EXEC_FLAG_IS_REPL | EXEC_FLAG_SOURCE_IS_VSTR);
-        if (ret & PYEXEC_FORCED_EXIT) {
-            return ret;
+        #if MICROPY_REPL_ASYNCIO
+        int exec_ret = repl_exec_line(MP_PARSE_SINGLE_INPUT);
+        if (exec_ret == PYEXEC_ASYNC_PENDING) {
+            return exec_ret;
+        }
+        #else
+        int exec_ret = parse_compile_execute(MP_STATE_VM(repl_line), MP_PARSE_SINGLE_INPUT, EXEC_FLAG_ALLOW_DEBUGGING | EXEC_FLAG_IS_REPL | EXEC_FLAG_SOURCE_IS_VSTR);
+        #endif
+        if (exec_ret & PYEXEC_FORCED_EXIT) {
+            return exec_ret;
         }
 
     input_restart:
+        // If the GC is locked at this point there is no way out except a reset,
+        // so force the GC to be unlocked to help the user debug what went wrong.
+        MP_STATE_THREAD(gc_lock_depth) = 0;
         vstr_reset(MP_STATE_VM(repl_line));
         repl.cont_line = false;
         repl.paste_mode = false;
@@ -539,15 +615,61 @@ int pyexec_event_repl_process_char(int c) {
 
 MP_REGISTER_ROOT_POINTER(vstr_t * repl_line);
 
-#else // MICROPY_REPL_EVENT_DRIVEN
-
-#if !MICROPY_HAL_HAS_STDIO_MODE_SWITCH
-// If the port doesn't need any stdio mode switching calls then provide trivial ones.
-static inline void mp_hal_stdio_mode_raw(void) {
+#if MICROPY_REPL_ASYNCIO
+bool pyexec_event_repl_async;
+void pyexec_event_repl_resume(void) {
+    // Re-prompt after the asyncio driver has awaited a deferred
+    // (PYEXEC_ASYNC_PENDING) coroutine on the event loop.
+    MP_STATE_VM(repl_pending_coro) = MP_OBJ_NULL;
+    // As in pyexec_friendly_repl_process_char: don't let a GC lock left by the
+    // awaited coroutine strand the REPL.
+    MP_STATE_THREAD(gc_lock_depth) = 0;
+    vstr_reset(MP_STATE_VM(repl_line));
+    repl.cont_line = false;
+    repl.paste_mode = false;
+    readline_init(MP_STATE_VM(repl_line), mp_repl_get_ps1());
 }
-static inline void mp_hal_stdio_mode_orig(void) {
-}
+MP_REGISTER_ROOT_POINTER(mp_obj_t repl_pending_coro);
 #endif
+
+#endif // MICROPY_REPL_EVENT_DRIVEN || MICROPY_REPL_ASYNCIO
+
+#if !MICROPY_REPL_EVENT_DRIVEN
+
+#if MICROPY_REPL_ASYNCIO
+// Blocking raw REPL, used after a soft reset while the host is still in raw
+// REPL mode: a feed loop over the event-driven raw REPL core, so the raw
+// REPL protocol isn't implemented a second time for ports that also carry
+// the asyncio REPL.
+int pyexec_raw_repl(void) {
+    mp_hal_stdio_mode_raw();
+
+    pyexec_mode_kind = PYEXEC_MODE_RAW_REPL;
+    pyexec_event_repl_init();
+
+    int ret = 0;
+    for (;;) {
+        int c = mp_hal_stdin_rx_chr();
+        if (c == CHAR_CTRL_B) {
+            // Change to friendly REPL: return to the caller, which prints
+            // the banner. Handled here rather than by the core, whose
+            // in-place mode switch prints the banner itself and would
+            // otherwise produce it a second time.
+            mp_hal_stdout_tx_str("\r\n");
+            pyexec_mode_kind = PYEXEC_MODE_FRIENDLY_REPL;
+            break;
+        }
+        ret = pyexec_raw_repl_process_char(c);
+        if (ret != 0) {
+            break;
+        }
+    }
+
+    mp_hal_stdio_mode_orig();
+    return ret;
+}
+
+#else // !MICROPY_REPL_ASYNCIO
 
 int pyexec_raw_repl(void) {
     vstr_t line;
@@ -616,7 +738,18 @@ raw_repl_reset:
     }
 }
 
+#endif // MICROPY_REPL_ASYNCIO
+
 int pyexec_friendly_repl(void) {
+    #if MICROPY_REPL_ASYNCIO
+    // arepl is the REPL: it runs the asyncio event loop and prints its own
+    // banner and prompt via repl_event_init().  It is frozen so it always
+    // loads, and the blocking friendly REPL below is not compiled.  Ctrl-D
+    // returns 0, which maps to a forced soft reset.
+    int ret = pyexec_asyncio_repl();
+    return ret == 0 ? PYEXEC_FORCED_EXIT : ret;
+    #else
+
     vstr_t line;
     vstr_init(&line, 32);
 
@@ -730,9 +863,104 @@ friendly_repl_reset:
         }
         mp_hal_stdio_mode_raw();
     }
+    #endif // !MICROPY_REPL_ASYNCIO
 }
 
-#endif // MICROPY_REPL_EVENT_DRIVEN
+#endif // !MICROPY_REPL_EVENT_DRIVEN
+
+#if MICROPY_REPL_ASYNCIO_BREAKPOINT
+// Blocking breakpoint REPL: no banner, Ctrl-D returns to caller.
+// Terminal raw mode must be set by caller (e.g. from arepl).
+// Uses readline push/pop for reentrant state.
+int pyexec_repl_breakpoint(void) {
+    vstr_t line;
+    vstr_init(&line, 32);
+
+    // readline_push() returns false when a save is already active (nested
+    // breakpoint); only the outermost caller owns the restore.
+    bool pushed = readline_push();
+
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) != 0) {
+        // Unwind readline state on an escaping exception and re-raise, so the
+        // single-level save slot can't leak (rl_saved_valid stuck set).
+        vstr_clear(&line);
+        if (pushed) {
+            readline_pop();
+        }
+        nlr_jump(nlr.ret_val);
+    }
+
+    for (;;) {
+    breakpoint_input_restart:
+        vstr_reset(&line);
+        int ret = readline(&line, mp_repl_get_ps1());
+
+        if (ret == CHAR_CTRL_C) {
+            mp_hal_stdout_tx_str("\r\n");
+            continue;
+        } else if (ret == CHAR_CTRL_D) {
+            // Exit breakpoint, return to caller.
+            mp_hal_stdout_tx_str("\r\n");
+            break;
+        } else if (ret == CHAR_CTRL_A || ret == CHAR_CTRL_B || ret == CHAR_CTRL_E) {
+            // Ignore raw REPL, banner reset, and paste mode in breakpoint.
+            mp_hal_stdout_tx_str("\r\n");
+            continue;
+        } else if (vstr_len(&line) == 0) {
+            continue;
+        } else {
+            // Multi-line continuation.
+            while (mp_repl_continue_with_input(vstr_null_terminated_str(&line))) {
+                vstr_add_byte(&line, '\n');
+                ret = readline(&line, mp_repl_get_ps2());
+                if (ret == CHAR_CTRL_C) {
+                    mp_hal_stdout_tx_str("\r\n");
+                    goto breakpoint_input_restart;
+                } else if (ret == CHAR_CTRL_D) {
+                    break;
+                }
+            }
+        }
+
+        mp_hal_stdio_mode_orig();
+        ret = parse_compile_execute(&line, MP_PARSE_SINGLE_INPUT,
+            EXEC_FLAG_ALLOW_DEBUGGING | EXEC_FLAG_IS_REPL | EXEC_FLAG_SOURCE_IS_VSTR);
+        mp_hal_stdio_mode_raw();
+        if (ret & PYEXEC_FORCED_EXIT) {
+            break;
+        }
+    }
+
+    nlr_pop();
+    vstr_clear(&line);
+    if (pushed) {
+        readline_pop();
+    }
+    return 0;
+}
+#endif // MICROPY_REPL_ASYNCIO_BREAKPOINT
+
+#if MICROPY_REPL_ASYNCIO
+int pyexec_asyncio_repl(void) {
+    static const char boot_code[] =
+        "import asyncio.arepl\n"  // binds asyncio too
+        "asyncio.new_event_loop()\n"
+        "asyncio.create_task(asyncio.arepl.task())\n"
+        "asyncio.get_event_loop().run_forever()\n";
+    // Wrap boot_code in a read-only vstr for parse_compile_execute.
+    // EXEC_FLAG_SOURCE_IS_VSTR uses the vstr as-is without modification or
+    // freeing; fixed_buf makes an accidental mutation fail loudly rather than
+    // m_renew a ROM pointer.
+    vstr_t vstr = {0};
+    vstr.buf = (char *)boot_code;
+    vstr.len = sizeof(boot_code) - 1;
+    vstr.fixed_buf = true;
+    return parse_compile_execute(&vstr, MP_PARSE_FILE_INPUT,
+        EXEC_FLAG_SOURCE_IS_VSTR | EXEC_FLAG_ALLOW_DEBUGGING);
+}
+#endif
+
 #endif // MICROPY_ENABLE_COMPILER
 
 int pyexec_file(const char *filename) {

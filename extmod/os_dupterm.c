@@ -86,6 +86,14 @@ uintptr_t mp_os_dupterm_poll(uintptr_t poll_flags) {
         }
 
         if (ret != MP_STREAM_ERROR) {
+            if (ret & (MP_STREAM_POLL_HUP | MP_STREAM_POLL_ERR | MP_STREAM_POLL_NVAL)) {
+                // A closed or errored slot won't recover: drop it so it can't wake a
+                // poll-driven reader (like asyncio.arepl) into a stranding read, and so
+                // os.dupterm() reports it gone.  Not closed here, to keep poll cheap;
+                // the dropped reference lets the stream's finaliser close it.
+                MP_STATE_VM(dupterm_objs[idx]) = MP_OBJ_NULL;
+                continue;
+            }
             poll_flags_out |= ret;
             if (poll_flags_out == poll_flags) {
                 // Finish early if all requested flags are set

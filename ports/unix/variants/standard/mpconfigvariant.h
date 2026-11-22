@@ -29,3 +29,7 @@
 
 // Enable extra Unix features.
 #include "../mpconfigvariant_common.h"
+
+// Keep test coverage of the asyncio REPL breakpoint() debugger, which
+// defaults off below MICROPY_CONFIG_ROM_LEVEL_EVERYTHING.
+#define MICROPY_REPL_ASYNCIO_BREAKPOINT (1)
