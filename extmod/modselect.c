@@ -53,7 +53,7 @@
 
 // Longest single wait, bounding the latency of Ctrl-C and scheduled callbacks.
 #ifndef MICROPY_PY_SELECT_WSAPOLL_SLICE_MS
-#define MICROPY_PY_SELECT_WSAPOLL_SLICE_MS (20)
+#define MICROPY_PY_SELECT_WSAPOLL_SLICE_MS (200)
 #endif
 // Sockets per wait; any beyond this are only probed once per ioctl call period.
 #ifndef MICROPY_PY_SELECT_WSAPOLL_MAX
