@@ -73,7 +73,7 @@
 // - like CPython, most of the error codes raised as OSError will be the WSA error codes, not errno.
 // - places where EAGAIN is turned into MP_ETIMEOUT are generally not needed on windows since the
 //   socket calls already return WSAETIMEDOUT.
-// - makefile() and poll functionality are not implemented.
+// - makefile() is not implemented; poll is done with WSAPoll().
 
 typedef int sock_len_t;
 typedef int socket_size_t;
@@ -273,11 +273,12 @@ static mp_uint_t socket_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_t arg, i
         #ifndef _WIN32
         case MP_STREAM_GET_FILENO:
             return self->fd;
+        #endif
 
         #if MICROPY_PY_SELECT
         case MP_STREAM_POLL: {
             mp_uint_t ret = 0;
-            uint8_t pollevents = 0;
+            short pollevents = 0;
             if (arg & MP_STREAM_POLL_RD) {
                 pollevents |= POLLIN;
             }
@@ -285,7 +286,11 @@ static mp_uint_t socket_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_t arg, i
                 pollevents |= POLLOUT;
             }
             struct pollfd pfd = { .fd = self->fd, .events = pollevents };
+            #ifdef _WIN32
+            if (WSAPoll(&pfd, 1, 0) > 0) {
+            #else
             if (poll(&pfd, 1, 0) > 0) {
+            #endif
                 if (pfd.revents & POLLIN) {
                     ret |= MP_STREAM_POLL_RD;
                 }
@@ -304,7 +309,6 @@ static mp_uint_t socket_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_t arg, i
             }
             return ret;
         }
-        #endif
         #endif
 
         default:
