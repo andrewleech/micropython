@@ -147,6 +147,19 @@ int mp_hal_wake_event_wait_tv(struct timeval *tv) {
     return ret;
 }
 
+int mp_hal_wake_event_fd(void) {
+    // Re-read for the same reason the wait does: a thread outliving the main one
+    // can reach this after deinitialisation, when there is no descriptor to give.
+    return wake_event_fd;
+}
+
+void mp_hal_wake_event_drain(void) {
+    int fd = wake_event_fd;
+    if (fd >= 0) {
+        wake_event_drain(fd);
+    }
+}
+
 void mp_hal_wake_event_wait_ms(mp_uint_t timeout_ms) {
     if (timeout_ms == MP_HAL_WAKE_EVENT_FOREVER) {
         mp_hal_wake_event_wait_tv(NULL);
