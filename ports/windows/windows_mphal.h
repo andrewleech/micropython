@@ -29,6 +29,13 @@
 
 #define MICROPY_HAL_HAS_VT100 (0)
 
+// A socket that becomes readable whenever mp_hal_signal_event() is raised, for waits that
+// can only block on sockets (WSAPoll).  Returns a SOCKET, or (uintptr_t)-1 if there is
+// none.  Drain it after it reads ready, never before the wait it should end.
+#define MICROPY_HAL_HAS_WAKE_SOCKET (1)
+uintptr_t mp_hal_wake_socket(void);
+void mp_hal_wake_socket_drain(void);
+
 void mp_hal_move_cursor_back(unsigned int pos);
 void mp_hal_erase_line_from_cursor(unsigned int n_chars_to_erase);
 
