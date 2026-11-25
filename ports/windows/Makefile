@@ -81,9 +81,15 @@ SRC_C = \
 	vfs_rom_ioctl.c \
 	$(wildcard $(VARIANT_DIR)/*.c)
 
+# Allow variant mpconfigvariant.mk files to supply additional source files
+# without losing them to SRC_C's plain `=` reassignment above.  Variants set
+# EXTRA_SRC_C += /abs/path/to/file.c (e.g. for shared sources living
+# outside the in-tree variant directory).
+SRC_C += $(EXTRA_SRC_C)
+
 # romfs_trailer.c lives in variants/common/ (out-of-tree).
-# SRC_C uses plain = above so variant .mk SRC_C += lines are discarded.
-# We append explicitly here, after SRC_C is set, so it always lands in the build.
+# Kept explicit in addition to EXTRA_SRC_C so it always lands in the build
+# even for variants that don't set EXTRA_SRC_C.
 SRC_C += $(PICOLET_RUNTIME_ROOT)/variants/common/romfs_trailer.c
 
 SHARED_SRC_C += $(addprefix shared/,\
