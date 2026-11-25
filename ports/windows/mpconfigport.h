@@ -156,6 +156,9 @@
 #ifndef MICROPY_PY_SYS_PATH_ARGV_DEFAULTS
 #define MICROPY_PY_SYS_PATH_ARGV_DEFAULTS (0)
 #endif
+#ifndef MICROPY_PY_SOCKET
+#define MICROPY_PY_SOCKET           (1)
+#endif
 #define MICROPY_PY_SYS_EXIT         (1)
 #ifndef MICROPY_PY_SYS_ATEXIT
 #define MICROPY_PY_SYS_ATEXIT       (1)
