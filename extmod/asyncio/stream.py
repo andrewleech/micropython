@@ -102,6 +102,7 @@ def open_connection(host, port, ssl=None, server_hostname=None):
 
     ai = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)[0]  # TODO this is blocking!
     s = socket.socket(ai[0], ai[1], ai[2])
+    raw_socket = s
     s.setblocking(False)
     try:
         s.connect(ai[-1])
@@ -120,6 +121,17 @@ def open_connection(host, port, ssl=None, server_hostname=None):
         s.setblocking(False)
     ss = Stream(s)
     yield core._io_queue.queue_write(s)
+    # Windows reports a failed nonblocking connect via SO_ERROR after poll
+    # wakes. Do not consume SO_ERROR on other ports, whose socket APIs vary.
+    # Before Windows 10 2004, WSAPoll may never signal a failed connect;
+    # callers need a timeout when running on those versions.
+    import sys
+
+    if sys.platform == "win32":
+        error = raw_socket.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+        if error:
+            s.close()
+            raise OSError(error)
     return ss, ss
 
 

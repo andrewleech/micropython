@@ -36,6 +36,13 @@
 uintptr_t mp_hal_wake_socket(void);
 void mp_hal_wake_socket_drain(void);
 
+// Non-blocking pipe operations for the Windows standard stream objects.
+mp_uint_t mp_hal_stdio_read(void *buf, mp_uint_t size, int *errcode);
+mp_uint_t mp_hal_stdio_write(const void *buf, mp_uint_t size, int *errcode);
+mp_uint_t mp_hal_stdio_poll_fd(int fd, mp_uint_t flags);
+bool mp_hal_stdio_has_signal(int fd);
+int mp_hal_stdio_flush(void);
+
 void mp_hal_move_cursor_back(unsigned int pos);
 void mp_hal_erase_line_from_cursor(unsigned int n_chars_to_erase);
 

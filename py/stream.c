@@ -32,6 +32,10 @@
 #include "py/stream.h"
 #include "py/runtime.h"
 
+#if defined(_WIN32) && MICROPY_VFS_POSIX
+bool mp_vfs_posix_stdio_print(void *stream, const char *buf, size_t len);
+#endif
+
 // This file defines generic Python stream read/write methods which
 // dispatch to the underlying stream interface of an object.
 
@@ -269,6 +273,11 @@ mp_obj_t mp_stream_write(mp_obj_t self_in, const void *buf, size_t len, byte fla
 
 // This is used to adapt a stream object to an mp_print_t interface
 void mp_stream_write_adaptor(void *self, const char *buf, size_t len) {
+    #if defined(_WIN32) && MICROPY_VFS_POSIX
+    if (mp_vfs_posix_stdio_print(self, buf, len)) {
+        return;
+    }
+    #endif
     mp_stream_write(MP_OBJ_FROM_PTR(self), buf, len, MP_STREAM_RW_WRITE);
 }
 

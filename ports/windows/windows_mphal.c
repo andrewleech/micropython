@@ -24,10 +24,18 @@
  * THE SOFTWARE.
  */
 
+#ifdef __MINGW32__
+#if !defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0600
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
+#endif
+#endif
 
 #include "py/runtime.h"
 #include "py/mphal.h"
 #include "py/mpthread.h"
+#include "py/stream.h"
+#include "py/mperrno.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -190,14 +198,13 @@ static int esc_seq_chr() {
     return 0;
 }
 
-int mp_hal_stdin_rx_chr(void) {
-    // currently processing escape seq?
+// Console input remains on the calling thread so the existing REPL key handling
+// and console-mode changes retain their original behaviour.
+static int console_stdin_rx_chr(void) {
     const int ret = esc_seq_chr();
     if (ret) {
         return ret;
     }
-
-    // poll until key which we handle is pressed
     assure_stdin_handle();
     BOOL status;
     DWORD num_read;
@@ -225,11 +232,324 @@ int mp_hal_stdin_rx_chr(void) {
     }
 }
 
-mp_uint_t mp_hal_stdout_tx_strn(const char *str, size_t len) {
+// Synchronous Windows pipes cannot be included in WSAPoll.  Two native workers
+// bridge them to bounded queues and signal the existing scheduler wake socket.
+// Their storage is process-lifetime: a reader can remain blocked in ReadFile at
+// shutdown, and must never touch freed state.
+#define STDIO_QUEUE_SIZE (16384)
+typedef struct {
+    char data[STDIO_QUEUE_SIZE];
+    size_t head, count;
+    HANDLE thread;
+    bool eof, failed;
+} stdio_queue_t;
+
+static INIT_ONCE stdio_once = INIT_ONCE_STATIC_INIT;
+static CRITICAL_SECTION stdio_lock;
+static CONDITION_VARIABLE stdio_changed;
+static stdio_queue_t stdin_queue, stdout_queue;
+static bool stdio_stopping;
+static bool stdin_is_console, stdout_is_pipe;
+static HANDLE stdout_handle;
+
+static BOOL CALLBACK stdio_init_once(PINIT_ONCE once, PVOID parameter, PVOID *context) {
+    (void)once; (void)parameter; (void)context;
+    InitializeCriticalSection(&stdio_lock);
+    InitializeConditionVariable(&stdio_changed);
+    if (!std_in) {
+        std_in = GetStdHandle(STD_INPUT_HANDLE);
+    }
+    DWORD mode;
+    stdin_is_console = GetConsoleMode(std_in, &mode);
+    stdout_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    stdout_is_pipe = GetFileType(stdout_handle) == FILE_TYPE_PIPE;
+    return TRUE;
+}
+
+static void stdio_init(void) {
+    InitOnceExecuteOnce(&stdio_once, stdio_init_once, NULL, NULL);
+}
+
+// Called with stdio_lock held; shutdown takes the same lock before closing the
+// wake handles, so a late pipe completion cannot signal a closed handle.
+static void stdio_notify(void) {
+    WakeAllConditionVariable(&stdio_changed);
+    if (!stdio_stopping) {
+        mp_hal_signal_event();
+    }
+}
+
+static DWORD WINAPI stdin_worker(void *arg) {
+    (void)arg;
+    char buf[4096];
+    for (;;) {
+        EnterCriticalSection(&stdio_lock);
+        while (stdin_queue.count == STDIO_QUEUE_SIZE && !stdio_stopping) {
+            SleepConditionVariableCS(&stdio_changed, &stdio_lock, INFINITE);
+        }
+        if (stdio_stopping) {
+            LeaveCriticalSection(&stdio_lock);
+            return 0;
+        }
+        DWORD want = STDIO_QUEUE_SIZE - stdin_queue.count;
+        if (want > sizeof(buf)) {
+            want = sizeof(buf);
+        }
+        LeaveCriticalSection(&stdio_lock);
+        DWORD n = 0;
+        BOOL ok = ReadFile(std_in, buf, want, &n, NULL);
+        DWORD error = ok ? ERROR_SUCCESS : GetLastError();
+        EnterCriticalSection(&stdio_lock);
+        if (stdio_stopping) {
+            LeaveCriticalSection(&stdio_lock);
+            return 0;
+        }
+        if (!ok || n == 0) {
+            stdin_queue.eof = ok || error == ERROR_BROKEN_PIPE || error == ERROR_HANDLE_EOF
+                || error == ERROR_NO_DATA;
+            stdin_queue.failed = !stdin_queue.eof;
+            stdio_notify();
+            LeaveCriticalSection(&stdio_lock);
+            return 0;
+        }
+        size_t tail = (stdin_queue.head + stdin_queue.count) % STDIO_QUEUE_SIZE;
+        size_t first = STDIO_QUEUE_SIZE - tail;
+        if (first > n) {
+            first = n;
+        }
+        memcpy(stdin_queue.data + tail, buf, first);
+        memcpy(stdin_queue.data, buf + first, n - first);
+        stdin_queue.count += n;
+        stdio_notify();
+        LeaveCriticalSection(&stdio_lock);
+    }
+}
+
+static DWORD WINAPI stdout_worker(void *arg) {
+    (void)arg;
+    EnterCriticalSection(&stdio_lock);
+    for (;;) {
+        while (stdout_queue.count == 0 && !stdio_stopping) {
+            SleepConditionVariableCS(&stdio_changed, &stdio_lock, INFINITE);
+        }
+        if (stdio_stopping) {
+            break;
+        }
+        DWORD n = STDIO_QUEUE_SIZE - stdout_queue.head;
+        if (n > stdout_queue.count) {
+            n = stdout_queue.count;
+        }
+        const char *data = stdout_queue.data + stdout_queue.head;
+        LeaveCriticalSection(&stdio_lock);
+        DWORD written = 0;
+        BOOL ok = WriteFile(stdout_handle, data, n, &written, NULL);
+        EnterCriticalSection(&stdio_lock);
+        if (!ok || written == 0) {
+            stdout_queue.failed = true;
+            stdio_notify();
+            break;
+        }
+        stdout_queue.head = (stdout_queue.head + written) % STDIO_QUEUE_SIZE;
+        stdout_queue.count -= written;
+        stdio_notify();
+    }
+    LeaveCriticalSection(&stdio_lock);
+    return 0;
+}
+
+static bool stdio_start(stdio_queue_t *queue, LPTHREAD_START_ROUTINE worker) {
+    if (queue->thread == NULL && !queue->failed) {
+        queue->thread = CreateThread(NULL, 0, worker, NULL, 0, NULL);
+        if (queue->thread == NULL) {
+            queue->failed = true;
+        }
+    }
+    return !queue->failed;
+}
+
+mp_uint_t mp_hal_stdio_read(void *buf, mp_uint_t size, int *errcode) {
+    if (size == 0) {
+        return 0;
+    }
+    stdio_init();
+    if (stdin_is_console) {
+        MP_THREAD_GIL_EXIT();
+        int n = read(STDIN_FILENO, buf, size);
+        MP_THREAD_GIL_ENTER();
+        if (n < 0) {
+            *errcode = errno;
+            return MP_STREAM_ERROR;
+        }
+        return n;
+    }
+    EnterCriticalSection(&stdio_lock);
+    stdio_start(&stdin_queue, stdin_worker);
+    if (stdin_queue.count == 0) {
+        if (stdin_queue.failed) {
+            *errcode = MP_EIO;
+            size = MP_STREAM_ERROR;
+        } else if (!stdin_queue.eof) {
+            *errcode = MP_EAGAIN;
+            size = MP_STREAM_ERROR;
+        } else {
+            size = 0;
+        }
+    } else {
+        if (size > stdin_queue.count) {
+            size = stdin_queue.count;
+        }
+        size_t first = STDIO_QUEUE_SIZE - stdin_queue.head;
+        if (first > size) {
+            first = size;
+        }
+        memcpy(buf, stdin_queue.data + stdin_queue.head, first);
+        memcpy((char *)buf + first, stdin_queue.data, size - first);
+        stdin_queue.head = (stdin_queue.head + size) % STDIO_QUEUE_SIZE;
+        stdin_queue.count -= size;
+        WakeAllConditionVariable(&stdio_changed);
+    }
+    LeaveCriticalSection(&stdio_lock);
+    return size;
+}
+
+mp_uint_t mp_hal_stdio_write(const void *buf, mp_uint_t size, int *errcode) {
+    if (size == 0) {
+        return 0;
+    }
+    stdio_init();
+    if (!stdout_is_pipe) {
+        MP_THREAD_GIL_EXIT();
+        int n = write(STDOUT_FILENO, buf, size);
+        MP_THREAD_GIL_ENTER();
+        if (n < 0) {
+            *errcode = errno;
+            return MP_STREAM_ERROR;
+        }
+        return n;
+    }
+    EnterCriticalSection(&stdio_lock);
+    if (!stdio_start(&stdout_queue, stdout_worker)) {
+        *errcode = MP_EPIPE;
+        size = MP_STREAM_ERROR;
+    } else if (stdout_queue.count == STDIO_QUEUE_SIZE) {
+        *errcode = MP_EAGAIN;
+        size = MP_STREAM_ERROR;
+    } else {
+        size_t available = STDIO_QUEUE_SIZE - stdout_queue.count;
+        if (size > available) {
+            size = available;
+        }
+        size_t tail = (stdout_queue.head + stdout_queue.count) % STDIO_QUEUE_SIZE;
+        size_t first = STDIO_QUEUE_SIZE - tail;
+        if (first > size) {
+            first = size;
+        }
+        memcpy(stdout_queue.data + tail, buf, first);
+        memcpy(stdout_queue.data, (const char *)buf + first, size - first);
+        stdout_queue.count += size;
+        WakeAllConditionVariable(&stdio_changed);
+    }
+    LeaveCriticalSection(&stdio_lock);
+    return size;
+}
+
+bool mp_hal_stdio_has_signal(int fd) {
+    stdio_init();
+    return (fd == STDIN_FILENO && !stdin_is_console)
+        || (fd == STDOUT_FILENO && stdout_is_pipe);
+}
+
+mp_uint_t mp_hal_stdio_poll_fd(int fd, mp_uint_t flags) {
+    stdio_init();
+    mp_uint_t ret = 0;
+    EnterCriticalSection(&stdio_lock);
+    if (fd == STDIN_FILENO) {
+        if (stdin_is_console) {
+            if ((flags & MP_STREAM_POLL_RD) && (cur_esc_seq || WaitForSingleObject(std_in, 0) == WAIT_OBJECT_0)) {
+                ret |= MP_STREAM_POLL_RD;
+            }
+        } else {
+            if (!stdio_start(&stdin_queue, stdin_worker)) {
+                ret |= MP_STREAM_POLL_ERR;
+            }
+            if ((flags & MP_STREAM_POLL_RD) && (stdin_queue.count || stdin_queue.eof)) {
+                ret |= MP_STREAM_POLL_RD;
+            }
+            if (stdin_queue.eof && stdin_queue.count == 0) {
+                ret |= MP_STREAM_POLL_HUP;
+            }
+        }
+    } else if (fd == STDOUT_FILENO && stdout_is_pipe) {
+        if (!stdio_start(&stdout_queue, stdout_worker)) {
+            ret |= MP_STREAM_POLL_ERR;
+        } else if ((flags & MP_STREAM_POLL_WR) && stdout_queue.count < STDIO_QUEUE_SIZE) {
+            ret |= MP_STREAM_POLL_WR;
+        }
+    } else if (flags & MP_STREAM_POLL_WR) {
+        ret |= MP_STREAM_POLL_WR;
+    }
+    LeaveCriticalSection(&stdio_lock);
+    return ret;
+}
+
+int mp_hal_stdio_flush(void) {
+    stdio_init();
+    EnterCriticalSection(&stdio_lock);
     MP_THREAD_GIL_EXIT();
-    int ret = write(STDOUT_FILENO, str, len);
+    while (stdout_queue.count && !stdout_queue.failed) {
+        SleepConditionVariableCS(&stdio_changed, &stdio_lock, INFINITE);
+    }
+    bool failed = stdout_queue.failed;
+    LeaveCriticalSection(&stdio_lock);
     MP_THREAD_GIL_ENTER();
-    return ret < 0 ? 0 : ret; // return the number of bytes written, so in case of an error in the syscall, return 0
+    return failed ? -1 : 0;
+}
+
+int mp_hal_stdin_rx_chr(void) {
+    stdio_init();
+    if (stdin_is_console) {
+        return console_stdin_rx_chr();
+    }
+    char c;
+    int err;
+    for (;;) {
+        mp_uint_t n = mp_hal_stdio_read(&c, 1, &err);
+        if (n == 1) {
+            return (unsigned char)c;
+        }
+        if (n == 0 || err != MP_EAGAIN) {
+            return CHAR_CTRL_C;
+        }
+        EnterCriticalSection(&stdio_lock);
+        MP_THREAD_GIL_EXIT();
+        if (!stdin_queue.count && !stdin_queue.eof && !stdin_queue.failed) {
+            SleepConditionVariableCS(&stdio_changed, &stdio_lock, INFINITE);
+        }
+        LeaveCriticalSection(&stdio_lock);
+        MP_THREAD_GIL_ENTER();
+    }
+}
+
+mp_uint_t mp_hal_stdout_tx_strn(const char *str, size_t len) {
+    size_t done = 0;
+    while (done < len) {
+        int err = 0;
+        mp_uint_t n = mp_hal_stdio_write(str + done, len - done, &err);
+        if (n != MP_STREAM_ERROR) {
+            done += n;
+        } else if (err != MP_EAGAIN) {
+            break;
+        } else {
+            EnterCriticalSection(&stdio_lock);
+            MP_THREAD_GIL_EXIT();
+            if (stdout_queue.count == STDIO_QUEUE_SIZE && !stdout_queue.failed) {
+                SleepConditionVariableCS(&stdio_changed, &stdio_lock, INFINITE);
+            }
+            LeaveCriticalSection(&stdio_lock);
+            MP_THREAD_GIL_ENTER();
+        }
+    }
+    return done;
 }
 
 void mp_hal_stdout_tx_strn_cooked(const char *str, size_t len) {
@@ -285,8 +605,10 @@ static HANDLE wake_event = NULL;
 // INVALID_SOCKET if it couldn't be created, in which case the select module falls
 // back to bounded waits.
 static SOCKET wake_sock = INVALID_SOCKET;
-// Set while a datagram is in flight, so a burst of raises sends a single one.
-static volatile LONG wake_sock_pending = 0;
+// Serialise draining, signalling and closure.  A signal after a drain must
+// enqueue a new datagram, never be consumed by the preceding drain.
+static SRWLOCK wake_lock = SRWLOCK_INIT;
+static bool wake_sock_pending;
 
 static void wake_socket_init(void) {
     WSADATA wsa;
@@ -317,16 +639,14 @@ uintptr_t mp_hal_wake_socket(void) {
 }
 
 void mp_hal_wake_socket_drain(void) {
-    SOCKET s = wake_sock;
-    if (s == INVALID_SOCKET) {
-        return;
+    AcquireSRWLockExclusive(&wake_lock);
+    if (wake_sock != INVALID_SOCKET) {
+        char buf[16];
+        while (recv(wake_sock, buf, sizeof(buf), 0) > 0) {
+        }
+        wake_sock_pending = false;
     }
-    // Clear first: a raise after this sends a fresh datagram, which is either drained
-    // below or wakes the next wait spuriously, but is never lost.
-    InterlockedExchange(&wake_sock_pending, 0);
-    char buf[16];
-    while (recv(s, buf, sizeof(buf), 0) > 0) {
-    }
+    ReleaseSRWLockExclusive(&wake_lock);
 }
 
 void mp_hal_wake_event_init(void) {
@@ -339,8 +659,20 @@ void mp_hal_wake_event_init(void) {
 }
 
 void mp_hal_wake_event_deinit(void) {
-    // Cleared before closing, so a concurrent raise is dropped rather than
-    // signalled on a reused handle.
+    // Flush before stopping the writer. The reader may stay blocked in ReadFile;
+    // process-lifetime storage and the stopping flag make a late return safe.
+    mp_hal_stdio_flush();
+    EnterCriticalSection(&stdio_lock);
+    stdio_stopping = true;
+    WakeAllConditionVariable(&stdio_changed);
+    LeaveCriticalSection(&stdio_lock);
+    if (stdout_queue.thread != NULL) {
+        MP_THREAD_GIL_EXIT();
+        WaitForSingleObject(stdout_queue.thread, INFINITE);
+        MP_THREAD_GIL_ENTER();
+        CloseHandle(stdout_queue.thread);
+    }
+    AcquireSRWLockExclusive(&wake_lock);
     HANDLE h = wake_event;
     wake_event = NULL;
     CloseHandle(h);
@@ -349,18 +681,21 @@ void mp_hal_wake_event_deinit(void) {
     if (s != INVALID_SOCKET) {
         closesocket(s);
     }
+    ReleaseSRWLockExclusive(&wake_lock);
 }
 
 void mp_hal_signal_event(void) {
-    HANDLE h = wake_event;
-    if (h != NULL) {
-        SetEvent(h);
+    AcquireSRWLockExclusive(&wake_lock);
+    if (wake_event != NULL) {
+        SetEvent(wake_event);
     }
-    SOCKET s = wake_sock;
-    if (s != INVALID_SOCKET && InterlockedExchange(&wake_sock_pending, 1) == 0) {
-        // Non-blocking, and a full buffer means a wake is already queued.
-        send(s, "", 1, 0);
+    if (wake_sock != INVALID_SOCKET && !wake_sock_pending) {
+        // Do not latch a failed send: the next signal must be able to retry.
+        if (send(wake_sock, "", 1, 0) == 1) {
+            wake_sock_pending = true;
+        }
     }
+    ReleaseSRWLockExclusive(&wake_lock);
 }
 
 // INFINITE is the all-ones DWORD, so a finite wait of 49 days stops one

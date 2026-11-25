@@ -28,6 +28,7 @@
 #include "py/mpthread.h"
 #include "py/runtime.h"
 #include "py/stream.h"
+#include "py/mperrno.h"
 #include "extmod/vfs_posix.h"
 
 #if MICROPY_VFS_POSIX
@@ -46,6 +47,38 @@ typedef struct _mp_obj_vfs_posix_file_t {
     int fd;
 } mp_obj_vfs_posix_file_t;
 
+#ifdef _WIN32
+extern mp_obj_vfs_posix_file_t mp_sys_stdin_obj, mp_sys_stdout_obj, mp_sys_stderr_obj;
+#if MICROPY_PY_SYS_STDIO_BUFFER
+extern mp_obj_vfs_posix_file_t mp_sys_stdin_buffer_obj, mp_sys_stdout_buffer_obj, mp_sys_stderr_buffer_obj;
+#endif
+
+static int windows_stdio_fd(mp_obj_vfs_posix_file_t *o) {
+    if (o == &mp_sys_stdin_obj
+        #if MICROPY_PY_SYS_STDIO_BUFFER
+        || o == &mp_sys_stdin_buffer_obj
+        #endif
+        ) {
+        return STDIN_FILENO;
+    }
+    if (o == &mp_sys_stdout_obj
+        #if MICROPY_PY_SYS_STDIO_BUFFER
+        || o == &mp_sys_stdout_buffer_obj
+        #endif
+        ) {
+        return STDOUT_FILENO;
+    }
+    if (o == &mp_sys_stderr_obj
+        #if MICROPY_PY_SYS_STDIO_BUFFER
+        || o == &mp_sys_stderr_buffer_obj
+        #endif
+        ) {
+        return STDERR_FILENO;
+    }
+    return -1;
+}
+#endif
+
 #if MICROPY_CPYTHON_COMPAT
 static void check_fd_is_open(const mp_obj_vfs_posix_file_t *o) {
     if (o->fd < 0) {
@@ -54,6 +87,23 @@ static void check_fd_is_open(const mp_obj_vfs_posix_file_t *o) {
 }
 #else
 #define check_fd_is_open(o)
+#endif
+
+#ifdef _WIN32
+// The print adaptor has no way to return a short write to its caller. Keep
+// print lossless by waiting for queue space, without changing ordinary stream
+// writes, which asyncio needs to remain non-blocking.
+bool mp_vfs_posix_stdio_print(void *stream, const char *buf, size_t len) {
+    mp_obj_vfs_posix_file_t *o = stream;
+    if (windows_stdio_fd(o) != STDOUT_FILENO) {
+        return false;
+    }
+    check_fd_is_open(o);
+    if (mp_hal_stdout_tx_strn(buf, len) != len) {
+        mp_raise_OSError(MP_EPIPE);
+    }
+    return true;
+}
 #endif
 
 static void vfs_posix_file_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
@@ -118,6 +168,11 @@ static MP_DEFINE_CONST_FUN_OBJ_1(vfs_posix_file_fileno_obj, vfs_posix_file_filen
 static mp_uint_t vfs_posix_file_read(mp_obj_t o_in, void *buf, mp_uint_t size, int *errcode) {
     mp_obj_vfs_posix_file_t *o = MP_OBJ_TO_PTR(o_in);
     check_fd_is_open(o);
+    #ifdef _WIN32
+    if (windows_stdio_fd(o) == STDIN_FILENO) {
+        return mp_hal_stdio_read(buf, size, errcode);
+    }
+    #endif
     ssize_t r;
     MP_HAL_RETRY_SYSCALL(r, read(o->fd, buf, size), {
         *errcode = err;
@@ -129,6 +184,11 @@ static mp_uint_t vfs_posix_file_read(mp_obj_t o_in, void *buf, mp_uint_t size, i
 static mp_uint_t vfs_posix_file_write(mp_obj_t o_in, const void *buf, mp_uint_t size, int *errcode) {
     mp_obj_vfs_posix_file_t *o = MP_OBJ_TO_PTR(o_in);
     check_fd_is_open(o);
+    #ifdef _WIN32
+    if (windows_stdio_fd(o) == STDOUT_FILENO) {
+        return mp_hal_stdio_write(buf, size, errcode);
+    }
+    #endif
     #if MICROPY_PY_OS_DUPTERM
     if (o->fd <= STDERR_FILENO) {
         mp_hal_stdout_tx_strn(buf, size);
@@ -149,6 +209,15 @@ static mp_uint_t vfs_posix_file_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_
     switch (request) {
         case MP_STREAM_FLUSH: {
             check_fd_is_open(o);
+            #ifdef _WIN32
+            if (windows_stdio_fd(o) == STDOUT_FILENO) {
+                if (mp_hal_stdio_flush() != 0) {
+                    *errcode = MP_EPIPE;
+                    return MP_STREAM_ERROR;
+                }
+                return 0;
+            }
+            #endif
             int ret;
             // fsync(stdin/stdout/stderr) may fail with EINVAL (or ENOTSUP on macos or EBADF
             // on windows), because the OS doesn't buffer these except for instance when they
@@ -200,6 +269,12 @@ static mp_uint_t vfs_posix_file_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_
             return 0;
         }
         case MP_STREAM_CLOSE:
+            #ifdef _WIN32
+            if (o->fd >= 0 && windows_stdio_fd(o) == STDOUT_FILENO && mp_hal_stdio_flush() != 0) {
+                *errcode = MP_EPIPE;
+                return MP_STREAM_ERROR;
+            }
+            #endif
             if (o->fd >= 0) {
                 MP_THREAD_GIL_EXIT();
                 close(o->fd);
@@ -207,12 +282,40 @@ static mp_uint_t vfs_posix_file_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_
             }
             o->fd = -1;
             return 0;
+        #ifdef _WIN32
+        case MP_STREAM_SET_EVENT_SOURCE: {
+            check_fd_is_open(o);
+            int fd = windows_stdio_fd(o);
+            if (fd >= 0 && mp_hal_stdio_has_signal(fd)) {
+                // Windows workers signal the shared wake event directly; no
+                // per-registration callback or lifetime management is needed.
+                mp_stream_event_source_t *source = (mp_stream_event_source_t *)arg;
+                source->fd = -1;
+                source->fd_events = 0;
+                source->flags = MP_STREAM_EVENT_SOURCE_SIGNAL;
+                return 0;
+            }
+            *errcode = MP_EINVAL;
+            return MP_STREAM_ERROR;
+        }
+        #endif
         case MP_STREAM_GET_FILENO:
+            #ifdef _WIN32
+            if (windows_stdio_fd(o) >= 0) {
+                *errcode = MP_EINVAL;
+                return MP_STREAM_ERROR;
+            }
+            #endif
             check_fd_is_open(o);
             return o->fd;
         #if MICROPY_PY_SELECT && !MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
         case MP_STREAM_POLL: {
             #ifdef _WIN32
+            check_fd_is_open(o);
+            int fd = windows_stdio_fd(o);
+            if (fd >= 0) {
+                return mp_hal_stdio_poll_fd(fd, arg);
+            }
             mp_raise_NotImplementedError(MP_ERROR_TEXT("poll on file not available on win32"));
             #else
             check_fd_is_open(o);

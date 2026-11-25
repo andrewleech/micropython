@@ -222,6 +222,12 @@ static mp_uint_t socket_read(mp_obj_t o_in, void *buf, mp_uint_t size, int *errc
     mp_obj_socket_t *o = MP_OBJ_TO_PTR(o_in);
     socket_size_t r;
     MP_HAL_RETRY_SYSCALL(r, read_socket(o->fd, buf, size), {
+        // Stream helpers recognise MP_EAGAIN, not Winsock's native code.
+        #ifdef _WIN32
+        if (err == WSAEWOULDBLOCK) {
+            err = MP_EAGAIN;
+        }
+        #endif
         // On blocking socket, we get EAGAIN in case SO_RCVTIMEO/SO_SNDTIMEO
         // timed out, and need to convert that to ETIMEDOUT.
         if (err == EAGAIN && o->blocking) {
@@ -238,6 +244,11 @@ static mp_uint_t socket_write(mp_obj_t o_in, const void *buf, mp_uint_t size, in
     mp_obj_socket_t *o = MP_OBJ_TO_PTR(o_in);
     socket_size_t r;
     MP_HAL_RETRY_SYSCALL(r, write_socket(o->fd, buf, size), {
+        #ifdef _WIN32
+        if (err == WSAEWOULDBLOCK) {
+            err = MP_EAGAIN;
+        }
+        #endif
         // On blocking socket, we get EAGAIN in case SO_RCVTIMEO/SO_SNDTIMEO
         // timed out, and need to convert that to ETIMEDOUT.
         if (err == EAGAIN && o->blocking) {
@@ -276,6 +287,12 @@ static mp_uint_t socket_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_t arg, i
 
         #if MICROPY_PY_SELECT
         case MP_STREAM_POLL: {
+            #ifdef _WIN32
+            // WSAPoll rejects INVALID_SOCKET rather than reporting POLLNVAL.
+            if (self->fd == -1) {
+                return MP_STREAM_POLL_NVAL;
+            }
+            #endif
             mp_uint_t ret = 0;
             short pollevents = 0;
             if (arg & MP_STREAM_POLL_RD) {
@@ -346,6 +363,15 @@ static mp_obj_t socket_connect(mp_obj_t self_in, mp_obj_t addr_in) {
         MP_THREAD_GIL_ENTER();
         if (r == -1) {
             int err = socket_errno;
+            #ifdef _WIN32
+            // Winsock uses WSAEWOULDBLOCK for the initial nonblocking
+            // connect and WSAEALREADY for a subsequent call while pending.
+            // asyncio recognises the MicroPython EINPROGRESS value.
+            if (!self->blocking && (err == WSAEWOULDBLOCK
+                || err == WSAEINPROGRESS || err == WSAEALREADY)) {
+                err = MP_EINPROGRESS;
+            }
+            #endif
             if (self->blocking) {
                 if (err == socket_eintr) {
                     mp_handle_pending(MP_HANDLE_PENDING_CALLBACKS_AND_EXCEPTIONS);
@@ -566,6 +592,24 @@ static mp_obj_t socket_setsockopt(size_t n_args, const mp_obj_t *args) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(socket_setsockopt_obj, 4, 4, socket_setsockopt);
+#ifdef _WIN32
+// Winsock SO_ERROR is an integer WSA error code and reading it clears the
+// pending error. This is needed after a nonblocking connect becomes writable.
+static mp_obj_t socket_getsockopt(mp_obj_t self_in, mp_obj_t level_in, mp_obj_t option_in) {
+    mp_obj_socket_t *self = MP_OBJ_TO_PTR(self_in);
+    int level = mp_obj_get_int(level_in);
+    int option = mp_obj_get_int(option_in);
+    int value = 0;
+    sock_len_t len = sizeof(value);
+    MP_THREAD_GIL_EXIT();
+    int result = getsockopt(self->fd, level, option, (char *)&value, &len);
+    int err = result == SOCKET_ERROR ? WSAGetLastError() : 0;
+    MP_THREAD_GIL_ENTER();
+    RAISE_ERRNO(result, err);
+    return mp_obj_new_int(value);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(socket_getsockopt_obj, socket_getsockopt);
+#endif
 
 static mp_obj_t socket_setblocking(mp_obj_t self_in, mp_obj_t flag_in) {
     mp_obj_socket_t *self = MP_OBJ_TO_PTR(self_in);
@@ -714,6 +758,9 @@ static const mp_rom_map_elem_t socket_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_sendall), MP_ROM_PTR(&socket_sendall_obj) },
     { MP_ROM_QSTR(MP_QSTR_sendto), MP_ROM_PTR(&socket_sendto_obj) },
     { MP_ROM_QSTR(MP_QSTR_setsockopt), MP_ROM_PTR(&socket_setsockopt_obj) },
+    #ifdef _WIN32
+    { MP_ROM_QSTR(MP_QSTR_getsockopt), MP_ROM_PTR(&socket_getsockopt_obj) },
+    #endif
     { MP_ROM_QSTR(MP_QSTR_setblocking), MP_ROM_PTR(&socket_setblocking_obj) },
     { MP_ROM_QSTR(MP_QSTR_settimeout), MP_ROM_PTR(&socket_settimeout_obj) },
     { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&mp_stream_close_obj) },

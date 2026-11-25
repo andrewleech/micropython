@@ -50,6 +50,7 @@
 #define _WIN32_WINNT 0x0600 // for WSAPoll
 #endif
 #include <winsock2.h>
+#include <limits.h>
 
 // Longest single wait when the port has no wake socket (MICROPY_HAL_HAS_WAKE_SOCKET) to end
 // it early, bounding the latency of Ctrl-C and scheduled callbacks.
@@ -118,6 +119,9 @@ typedef struct _poll_obj_t {
     // pollfd->revents when the fd itself is authoritative for readiness (see pollfd below).
     // Storage distinct from any fd-level mask, so neither can clobber the other.
     mp_uint_t events;
+    #if MICROPY_PY_SELECT_WSAPOLL && !MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
+    bool event_armed;
+    #endif
     mp_uint_t revents;
 
     #if MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
@@ -455,6 +459,9 @@ static void poll_set_add_obj(poll_set_t *poll_set, const mp_obj_t *obj, mp_uint_
             #else
             const mp_stream_p_t *stream_p = mp_get_stream_raise(obj[i], MP_STREAM_OP_IOCTL);
             poll_obj->ioctl = stream_p->ioctl;
+            #if MICROPY_PY_SELECT_WSAPOLL
+            poll_obj->event_armed = false;
+            #endif
             #endif
 
             elem = mp_map_lookup(&poll_set->map, key, MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
@@ -680,16 +687,47 @@ static mp_uint_t poll_set_resolve_readiness(poll_set_t *poll_set) {
 }
 #endif // MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
 
-#if MICROPY_PY_SELECT_WSAPOLL
+#if MICROPY_PY_SELECT_WSAPOLL && !MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
+static void poll_set_wsapoll_signal(void *ctx) {
+    (void)ctx;
+    mp_hal_signal_event();
+}
+
+// Registrations last only for this wait: poll objects have no finalizer to
+// unregister a source when the poll set itself is garbage-collected.
+static void poll_set_wsapoll_disarm(poll_set_t *poll_set) {
+    for (mp_uint_t i = 0; i < poll_set->map.alloc; ++i) {
+        if (!mp_map_slot_is_filled(&poll_set->map, i)) {
+            continue;
+        }
+        poll_obj_t *obj = MP_OBJ_TO_PTR(poll_set->map.table[i].value);
+        if (obj->event_armed) {
+            obj->event_armed = false;
+            mp_stream_event_source_t source = {
+                .op = MP_STREAM_EVENT_OP_UNREGISTER, .fd = -1,
+            };
+            int err;
+            nlr_buf_t nlr;
+            if (nlr_push(&nlr) == 0) {
+                obj->ioctl(obj->obj, MP_STREAM_SET_EVENT_SOURCE, (uintptr_t)&source, &err);
+                nlr_pop();
+            }
+        }
+    }
+}
 // Block until a socket in the set is ready, or ms elapses (ms == -1 means no timeout).
-// Sockets are recognised by answering MP_STREAM_GET_FILENO with their SOCKET handle; no
-// other stream on this port implements that ioctl. If the set holds anything else, those
-// objects can only be probed by polling, so the wait is capped at the ioctl call period.
+// Sockets answer MP_STREAM_GET_FILENO. A signal-backed stream can use the
+// wake socket; unrecognised streams and sockets beyond the cap need probing.
 // The port's wake socket, if it has one, is polled too: anything that raises
 // mp_hal_signal_event() (a scheduled callback, Ctrl-C, a reader thread) ends the wait, so
 // the caller services it at once.  Without one the wait is capped at
 // MICROPY_PY_SELECT_WSAPOLL_SLICE_MS instead.
 static void poll_set_wsapoll_wait(poll_set_t *poll_set, mp_uint_t ms) {
+    nlr_buf_t wait_nlr;
+    if (nlr_push(&wait_nlr) != 0) {
+        poll_set_wsapoll_disarm(poll_set);
+        nlr_jump(wait_nlr.ret_val);
+    }
     WSAPOLLFD fds[MICROPY_PY_SELECT_WSAPOLL_MAX + 1];
     int nfds = 0;
     bool others = false;
@@ -713,7 +751,31 @@ static void poll_set_wsapoll_wait(poll_set_t *poll_set, mp_uint_t ms) {
         poll_obj_t *poll_obj = MP_OBJ_TO_PTR(poll_set->map.table[i].value);
         int err;
         mp_uint_t handle = poll_obj->ioctl(poll_obj->obj, MP_STREAM_GET_FILENO, 0, &err);
-        if (handle == MP_STREAM_ERROR || nfds - first == MICROPY_PY_SELECT_WSAPOLL_MAX) {
+        if (handle == MP_STREAM_ERROR) {
+            bool signalled = false;
+            if (wake != INVALID_SOCKET) {
+                mp_stream_event_source_t source = {
+                    .cb = poll_set_wsapoll_signal, .ctx = NULL,
+                    .events = poll_obj_get_events(poll_obj),
+                    .op = MP_STREAM_EVENT_OP_REGISTER, .fd = -1,
+                };
+                nlr_buf_t nlr;
+                if (nlr_push(&nlr) == 0) {
+                    mp_uint_t result = poll_obj->ioctl(poll_obj->obj,
+                        MP_STREAM_SET_EVENT_SOURCE, (uintptr_t)&source, &err);
+                    if (result != MP_STREAM_ERROR) {
+                        poll_obj->event_armed = true;
+                        signalled = (source.flags & MP_STREAM_EVENT_SOURCE_SIGNAL) != 0;
+                    }
+                    nlr_pop();
+                }
+            }
+            if (!signalled) {
+                others = true;
+            }
+            continue;
+        }
+        if (nfds - first == MICROPY_PY_SELECT_WSAPOLL_MAX) {
             others = true;
             continue;
         }
@@ -729,19 +791,27 @@ static void poll_set_wsapoll_wait(poll_set_t *poll_set, mp_uint_t ms) {
     if (ms > cap) {
         ms = cap;
     }
-    if (nfds == first) {
-        mp_event_wait_ms(ms);
-        return;
+    // Registration follows the initial readiness sweep. Re-probe after arming
+    // so a transition between the sweep and registration cannot be missed.
+    // Do not drain the wake socket between this probe and the blocking wait.
+    if (poll_set_poll_once(poll_set, NULL) == 0) {
+        if (nfds == first) {
+            mp_event_wait_ms(ms);
+        } else {
+            // A finite timeout must not become a negative infinite wait.
+            int wait_ms = ms == (mp_uint_t)-1 ? -1 : ms > INT_MAX ? INT_MAX : (int)ms;
+            MP_THREAD_GIL_EXIT();
+            WSAPoll(fds, nfds, wait_ms);
+            MP_THREAD_GIL_ENTER();
+            #ifdef MICROPY_HAL_HAS_WAKE_SOCKET
+            if (wake != INVALID_SOCKET && fds[0].revents != 0) {
+                mp_hal_wake_socket_drain();
+            }
+            #endif
+        }
     }
-    MP_THREAD_GIL_EXIT();
-    // The result is ignored: the caller re-probes every object with MP_STREAM_POLL.
-    WSAPoll(fds, nfds, ms);
-    MP_THREAD_GIL_ENTER();
-    #ifdef MICROPY_HAL_HAS_WAKE_SOCKET
-    if (wake != INVALID_SOCKET && fds[0].revents != 0) {
-        mp_hal_wake_socket_drain();
-    }
-    #endif
+    nlr_pop();
+    poll_set_wsapoll_disarm(poll_set);
 }
 #endif
 
@@ -866,7 +936,7 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
     for (;;) {
         // poll the objects
         mp_uint_t n_ready = poll_set_poll_once(poll_set, rwx_num);
-        uint32_t elapsed = mp_hal_ticks_ms() - start_ticks;
+        mp_uint_t elapsed = mp_hal_ticks_ms() - start_ticks;
         if (n_ready > 0 || (has_timeout && elapsed >= timeout)) {
             return n_ready;
         }
