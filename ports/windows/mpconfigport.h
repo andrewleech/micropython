@@ -159,6 +159,9 @@
 #ifndef MICROPY_PY_SOCKET
 #define MICROPY_PY_SOCKET           (1)
 #endif
+#ifndef MICROPY_PY_SELECT_WSAPOLL
+#define MICROPY_PY_SELECT_WSAPOLL   (1)
+#endif
 #define MICROPY_PY_SYS_EXIT         (1)
 #ifndef MICROPY_PY_SYS_ATEXIT
 #define MICROPY_PY_SYS_ATEXIT       (1)

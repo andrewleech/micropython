@@ -270,10 +270,9 @@ static mp_uint_t socket_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_t arg, i
             self->fd = -1;
             return 0;
 
-        #ifndef _WIN32
         case MP_STREAM_GET_FILENO:
+            // On Windows this is the SOCKET handle (see MICROPY_PY_SELECT_WSAPOLL).
             return self->fd;
-        #endif
 
         #if MICROPY_PY_SELECT
         case MP_STREAM_POLL: {

@@ -35,6 +35,37 @@
 
 #if MICROPY_PY_SELECT
 
+// Windows only: wait for sockets with WSAPoll() in the non-POSIX poll loop instead of
+// sleeping until the timeout. Requires the port's sockets to answer MP_STREAM_GET_FILENO
+// with their SOCKET handle, and no other stream to do so.
+#ifndef MICROPY_PY_SELECT_WSAPOLL
+#define MICROPY_PY_SELECT_WSAPOLL (0)
+#endif
+
+#if MICROPY_PY_SELECT_WSAPOLL
+#ifdef __MINGW32__
+#ifdef _WIN32_WINNT
+#undef _WIN32_WINNT
+#endif
+#define _WIN32_WINNT 0x0600 // for WSAPoll
+#endif
+#include <winsock2.h>
+
+// Longest single wait when the port has no wake socket (MICROPY_HAL_HAS_WAKE_SOCKET) to end
+// it early, bounding the latency of Ctrl-C and scheduled callbacks.
+#ifndef MICROPY_PY_SELECT_WSAPOLL_SLICE_MS
+#define MICROPY_PY_SELECT_WSAPOLL_SLICE_MS (200)
+#endif
+// Sockets per wait; any beyond this are only probed once per ioctl call period.
+#ifndef MICROPY_PY_SELECT_WSAPOLL_MAX
+#define MICROPY_PY_SELECT_WSAPOLL_MAX (32)
+#endif
+
+#ifndef MICROPY_PY_SELECT_IOCTL_CALL_PERIOD_MS
+#define MICROPY_PY_SELECT_IOCTL_CALL_PERIOD_MS (1)
+#endif
+#endif
+
 #if MICROPY_PY_SELECT_SELECT && MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
 #error "select.select is not supported with MICROPY_PY_SELECT_POSIX_OPTIMISATIONS"
 #endif
@@ -649,6 +680,71 @@ static mp_uint_t poll_set_resolve_readiness(poll_set_t *poll_set) {
 }
 #endif // MICROPY_PY_SELECT_POSIX_OPTIMISATIONS
 
+#if MICROPY_PY_SELECT_WSAPOLL
+// Block until a socket in the set is ready, or ms elapses (ms == -1 means no timeout).
+// Sockets are recognised by answering MP_STREAM_GET_FILENO with their SOCKET handle; no
+// other stream on this port implements that ioctl. If the set holds anything else, those
+// objects can only be probed by polling, so the wait is capped at the ioctl call period.
+// The port's wake socket, if it has one, is polled too: anything that raises
+// mp_hal_signal_event() (a scheduled callback, Ctrl-C, a reader thread) ends the wait, so
+// the caller services it at once.  Without one the wait is capped at
+// MICROPY_PY_SELECT_WSAPOLL_SLICE_MS instead.
+static void poll_set_wsapoll_wait(poll_set_t *poll_set, mp_uint_t ms) {
+    WSAPOLLFD fds[MICROPY_PY_SELECT_WSAPOLL_MAX + 1];
+    int nfds = 0;
+    bool others = false;
+    #ifdef MICROPY_HAL_HAS_WAKE_SOCKET
+    // Only the thread that runs scheduled callbacks may consume the wake.
+    SOCKET wake = mp_sched_thread_can_run_callbacks() ? (SOCKET)mp_hal_wake_socket() : INVALID_SOCKET;
+    #else
+    SOCKET wake = INVALID_SOCKET;
+    #endif
+    if (wake != INVALID_SOCKET) {
+        fds[nfds].fd = wake;
+        fds[nfds].events = POLLIN;
+        fds[nfds].revents = 0;
+        nfds++;
+    }
+    int first = nfds;
+    for (mp_uint_t i = 0; i < poll_set->map.alloc; ++i) {
+        if (!mp_map_slot_is_filled(&poll_set->map, i)) {
+            continue;
+        }
+        poll_obj_t *poll_obj = MP_OBJ_TO_PTR(poll_set->map.table[i].value);
+        int err;
+        mp_uint_t handle = poll_obj->ioctl(poll_obj->obj, MP_STREAM_GET_FILENO, 0, &err);
+        if (handle == MP_STREAM_ERROR || nfds - first == MICROPY_PY_SELECT_WSAPOLL_MAX) {
+            others = true;
+            continue;
+        }
+        mp_uint_t ev = poll_obj_get_events(poll_obj);
+        fds[nfds].fd = (SOCKET)handle;
+        fds[nfds].events = ((ev & MP_STREAM_POLL_RD) ? POLLIN : 0) | ((ev & MP_STREAM_POLL_WR) ? POLLOUT : 0);
+        fds[nfds].revents = 0;
+        nfds++;
+    }
+
+    mp_uint_t cap = others ? MICROPY_PY_SELECT_IOCTL_CALL_PERIOD_MS
+        : wake != INVALID_SOCKET ? (mp_uint_t)-1 : MICROPY_PY_SELECT_WSAPOLL_SLICE_MS;
+    if (ms > cap) {
+        ms = cap;
+    }
+    if (nfds == first) {
+        mp_event_wait_ms(ms);
+        return;
+    }
+    MP_THREAD_GIL_EXIT();
+    // The result is ignored: the caller re-probes every object with MP_STREAM_POLL.
+    WSAPoll(fds, nfds, ms);
+    MP_THREAD_GIL_ENTER();
+    #ifdef MICROPY_HAL_HAS_WAKE_SOCKET
+    if (wake != INVALID_SOCKET && fds[0].revents != 0) {
+        mp_hal_wake_socket_drain();
+    }
+    #endif
+}
+#endif
+
 static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size_t *rwx_num, mp_uint_t timeout) {
     mp_uint_t start_ticks = mp_hal_ticks_ms();
     bool has_timeout = timeout != (mp_uint_t)-1;
@@ -774,11 +870,16 @@ static mp_uint_t poll_set_poll_until_ready_or_timeout(poll_set_t *poll_set, size
         if (n_ready > 0 || (has_timeout && elapsed >= timeout)) {
             return n_ready;
         }
+        #if MICROPY_PY_SELECT_WSAPOLL
+        poll_set_wsapoll_wait(poll_set, has_timeout ? timeout - elapsed : (mp_uint_t)-1);
+        mp_event_handle_nowait();
+        #else
         if (has_timeout) {
             mp_event_wait_ms(timeout - elapsed);
         } else {
             mp_event_wait_indefinite();
         }
+        #endif
     }
 
     #endif
