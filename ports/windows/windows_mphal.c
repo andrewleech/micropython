@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <winsock2.h>
 #include <windows.h>
 #include <unistd.h>
 #include <bcrypt.h>
@@ -278,7 +279,58 @@ void msec_sleep(double msec) {
 // nothing waiting latches for the next wait, and repeated raises coalesce.
 static HANDLE wake_event = NULL;
 
+// A loopback UDP socket connected to itself, so a raise can also end a WSAPoll() wait,
+// which can't wait on a HANDLE.  Sending to it is what makes it readable; the
+// select module polls it alongside its own sockets and drains it afterwards.
+// INVALID_SOCKET if it couldn't be created, in which case the select module falls
+// back to bounded waits.
+static SOCKET wake_sock = INVALID_SOCKET;
+// Set while a datagram is in flight, so a burst of raises sends a single one.
+static volatile LONG wake_sock_pending = 0;
+
+static void wake_socket_init(void) {
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        return;
+    }
+    SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == INVALID_SOCKET) {
+        return;
+    }
+    struct sockaddr_in addr = {0};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    int len = sizeof(addr);
+    u_long nonblocking = 1;
+    if (bind(s, (struct sockaddr *)&addr, sizeof(addr)) != 0
+        || getsockname(s, (struct sockaddr *)&addr, &len) != 0
+        || connect(s, (struct sockaddr *)&addr, sizeof(addr)) != 0
+        || ioctlsocket(s, FIONBIO, &nonblocking) != 0) {
+        closesocket(s);
+        return;
+    }
+    wake_sock = s;
+}
+
+uintptr_t mp_hal_wake_socket(void) {
+    return (uintptr_t)wake_sock;
+}
+
+void mp_hal_wake_socket_drain(void) {
+    SOCKET s = wake_sock;
+    if (s == INVALID_SOCKET) {
+        return;
+    }
+    // Clear first: a raise after this sends a fresh datagram, which is either drained
+    // below or wakes the next wait spuriously, but is never lost.
+    InterlockedExchange(&wake_sock_pending, 0);
+    char buf[16];
+    while (recv(s, buf, sizeof(buf), 0) > 0) {
+    }
+}
+
 void mp_hal_wake_event_init(void) {
+    wake_socket_init();
     wake_event = CreateEvent(NULL, FALSE, FALSE, NULL);
     if (wake_event == NULL) {
         fprintf(stderr, "FATAL: cannot create wake event: %lu\n", (unsigned long)GetLastError());
@@ -292,12 +344,22 @@ void mp_hal_wake_event_deinit(void) {
     HANDLE h = wake_event;
     wake_event = NULL;
     CloseHandle(h);
+    SOCKET s = wake_sock;
+    wake_sock = INVALID_SOCKET;
+    if (s != INVALID_SOCKET) {
+        closesocket(s);
+    }
 }
 
 void mp_hal_signal_event(void) {
     HANDLE h = wake_event;
     if (h != NULL) {
         SetEvent(h);
+    }
+    SOCKET s = wake_sock;
+    if (s != INVALID_SOCKET && InterlockedExchange(&wake_sock_pending, 1) == 0) {
+        // Non-blocking, and a full buffer means a wake is already queued.
+        send(s, "", 1, 0);
     }
 }
 
