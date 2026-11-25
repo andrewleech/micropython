@@ -553,6 +553,8 @@ MP_NOINLINE int main_(int argc, char **argv) {
 
     mp_init();
 
+    mp_hal_wake_event_init();
+
     #if MICROPY_ENABLE_COMPILER
     #if MICROPY_EMIT_NATIVE
     // Set default emitter options
@@ -903,6 +905,8 @@ done_execution:;
     #if defined(MICROPY_UNIX_COVERAGE)
     gc_sweep_all();
     #endif
+
+    mp_hal_wake_event_deinit();
 
     mp_deinit();
 
