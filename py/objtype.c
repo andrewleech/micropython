@@ -47,6 +47,7 @@
 static mp_obj_t mp_obj_new_type(qstr name, mp_obj_t bases_tuple, mp_obj_t locals_dict);
 static mp_obj_t mp_obj_is_subclass(mp_obj_t object, mp_obj_t classinfo);
 static mp_obj_t static_class_method_make_new(const mp_obj_type_t *self_in, size_t n_args, size_t n_kw, const mp_obj_t *args);
+static mp_obj_t type_make_new(const mp_obj_type_t *type_in, size_t n_args, size_t n_kw, const mp_obj_t *args);
 
 /******************************************************************************/
 // instance object
@@ -319,6 +320,14 @@ static mp_obj_t mp_obj_instance_make_new(const mp_obj_type_t *self, size_t n_arg
         // constructor to give a chance for the Python __init__() method to call
         // said native constructor.
 
+        if (native_base == &mp_type_type) {
+            // A metaclass without __new__: create the class with type now,
+            // then call the metaclass __init__ on it like the __new__ case below.
+            o = MP_OBJ_TO_PTR(type_make_new(&mp_type_type, n_args, n_kw, args));
+            lookup.obj = NULL;
+            native_base = NULL;
+        }
+
     } else {
         // Call Python class __new__ function with all args to create an instance
         mp_obj_t new_ret;
@@ -358,7 +367,7 @@ static mp_obj_t mp_obj_instance_make_new(const mp_obj_type_t *self, size_t n_arg
     mp_obj_class_lookup(&lookup, self);
     if (init_fn[0] != MP_OBJ_NULL) {
         if (lookup.obj == NULL) {
-            // Bind the metaclass __init__ to the class returned by __new__.
+            // Bind the metaclass __init__ to the newly created class.
             init_fn[1] = MP_OBJ_FROM_PTR(o);
         }
         mp_obj_t init_ret;

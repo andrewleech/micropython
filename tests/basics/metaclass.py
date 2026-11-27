@@ -66,3 +66,23 @@ class E(metaclass=NewOnlyMeta):
 
 
 print(E.x, E().x)
+
+
+# metaclass with __init__ but no __new__
+class InitOnlyMeta(type):
+    def __init__(cls, name, bases, dct):
+        print("InitOnlyMeta.__init__", name, len(bases))
+        super().__init__(name, bases, dct)
+        cls.label = name.lower()
+
+
+class F(metaclass=InitOnlyMeta):
+    def __init__(self):
+        print("F.__init__")
+
+
+class G(F):
+    pass
+
+
+print(type(F()) is F, type(G()) is G, issubclass(G, F), F.label, G.label)
