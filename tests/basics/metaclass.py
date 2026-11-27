@@ -86,3 +86,20 @@ class G(F):
 
 
 print(type(F()) is F, type(G()) is G, issubclass(G, F), F.label, G.label)
+
+
+# super() lookups of a missing attribute from a metaclass method
+class SuperMeta(type):
+    def __init__(cls, name, bases, dct):
+        try:
+            super().missing
+        except AttributeError:
+            print("AttributeError")
+        try:
+            super().missing()
+        except AttributeError:
+            print("AttributeError")
+
+
+class H(metaclass=SuperMeta):
+    pass
