@@ -66,12 +66,17 @@ static mp_obj_t mp_builtin___build_class__(size_t n_args, const mp_obj_t *args, 
     if (key_elem != NULL) {
         // metaclass specified in `class B(metaclass=A)`
         meta = key_elem->value;
+        // The type of all classes in MicroPython is `type` instead of the
+        // metaclass, so record the metaclass for subclasses to inherit.
+        mp_obj_dict_store(class_locals, MP_OBJ_NEW_QSTR(MP_QSTR___metaclass__), meta);
     } else if (n_args == 2) {
         // no explicit bases, so use 'type'
         meta = MP_OBJ_FROM_PTR(&mp_type_type);
     } else {
-        // use type of first base object
-        meta = MP_OBJ_FROM_PTR(mp_obj_get_type(args[2]));
+        // use the metaclass recorded on the first base, else its type
+        mp_obj_t dest[2];
+        mp_load_method_maybe(args[2], MP_QSTR___metaclass__, dest);
+        meta = dest[0] != MP_OBJ_NULL ? dest[0] : MP_OBJ_FROM_PTR(mp_obj_get_type(args[2]));
     }
 
     // TODO do proper metaclass resolution for multiple base objects
