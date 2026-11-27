@@ -1332,6 +1332,13 @@ typedef time_t mp_timestamp_t;
 #define MICROPY_PY_METACLASS_ORDERED (MICROPY_PY_COLLECTIONS_ORDEREDDICT && MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
 #endif
 
+// Whether to find a class's metaclass from all of its bases, using the most
+// derived one and raising TypeError on a conflict.  Otherwise only the
+// first base is used.
+#ifndef MICROPY_PY_METACLASS_RESOLUTION
+#define MICROPY_PY_METACLASS_RESOLUTION (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
+#endif
+
 // Support for async/await/async for/async with
 #ifndef MICROPY_PY_ASYNC_AWAIT
 #define MICROPY_PY_ASYNC_AWAIT (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_CORE_FEATURES)
