@@ -49,3 +49,20 @@ class D(B):
 for cls in (A, B, C, D):
     obj = cls()
     print(type(obj) is cls, isinstance(obj, B), repr(obj).startswith("<"))
+
+
+# metaclass with __new__ but no __init__
+class NewOnlyMeta(type):
+    def __new__(meta, name, bases, dct):
+        print("NewOnlyMeta.__new__", name)
+        if hasattr(type, "__new__"):
+            return type.__new__(meta, name, bases, dct)
+        else:
+            return type(name, bases, dct)
+
+
+class E(metaclass=NewOnlyMeta):
+    x = 1
+
+
+print(E.x, E().x)

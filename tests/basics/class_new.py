@@ -64,3 +64,17 @@ class C:
 
 c = C()
 print(isinstance(c, Dummy))
+
+
+# Variation of the above, __new__ returns a class, __init__ should not be called
+
+class D:
+    def __new__(cls):
+        print("D.__new__")
+        return Dummy
+
+    def __init__(self):
+        # Should not be called in this test
+        print("D.__init__")
+
+print(D() is Dummy)
