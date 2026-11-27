@@ -1339,6 +1339,12 @@ typedef time_t mp_timestamp_t;
 #define MICROPY_PY_METACLASS_RESOLUTION (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
 #endif
 
+// Whether to provide type.__new__, so a metaclass __new__ can call
+// super().__new__(meta, name, bases, dct).
+#ifndef MICROPY_PY_METACLASS_TYPE_NEW
+#define MICROPY_PY_METACLASS_TYPE_NEW (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
+#endif
+
 // Support for async/await/async for/async with
 #ifndef MICROPY_PY_ASYNC_AWAIT
 #define MICROPY_PY_ASYNC_AWAIT (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_CORE_FEATURES)

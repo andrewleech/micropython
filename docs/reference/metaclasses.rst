@@ -69,6 +69,10 @@ renesas-ra, rp2, stm32 and webassembly ports and the unix standard variant.
     and raising ``TypeError`` on a conflict.  Otherwise only the first base
     is used.
 
+``MICROPY_PY_METACLASS_TYPE_NEW``
+    Provides ``type.__new__(meta, name, bases, dct)``, so a metaclass
+    ``__new__`` can call ``super().__new__(meta, name, bases, dct)``.
+
 Differences to CPython
 ----------------------
 
@@ -82,8 +86,8 @@ Differences to CPython
 - ``__prepare__`` is not called; the class namespace is always a ``dict``.
 - A metaclass ``__call__`` is not used when a class is called to create an
   instance.
-- ``type.__new__`` is not provided, so a metaclass ``__new__`` cannot call
-  ``super().__new__(meta, name, bases, dct)``.
+- ``type.__new__`` ignores its first argument, as the type of the new class
+  is always ``type``.
 - Keyword arguments in a class definition, other than ``metaclass``, are
   ignored.
 - Methods and properties defined on a metaclass cannot be used from its

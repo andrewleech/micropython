@@ -1174,6 +1174,25 @@ static void type_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     }
 }
 
+#if MICROPY_PY_METACLASS_TYPE_NEW
+// type.__new__(meta, name, bases, dct), for use by a metaclass __new__.  The
+// type of all classes in MicroPython is `type`, so meta is not used.
+static mp_obj_t type___new__(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    return mp_obj_new_type(mp_obj_str_get_qstr(args[1]), args[2], args[3]);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(type___new___fun_obj, 4, 4, type___new__);
+static MP_DEFINE_CONST_STATICMETHOD_OBJ(type___new___obj, MP_ROM_PTR(&type___new___fun_obj));
+
+static const mp_rom_map_elem_t type_locals_dict_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___new__), MP_ROM_PTR(&type___new___obj) },
+};
+static MP_DEFINE_CONST_DICT(type_locals_dict, type_locals_dict_table);
+#define TYPE_LOCALS_DICT , locals_dict, &type_locals_dict
+#else
+#define TYPE_LOCALS_DICT
+#endif
+
 MP_DEFINE_CONST_OBJ_TYPE(
     mp_type_type,
     MP_QSTR_type,
@@ -1182,6 +1201,7 @@ MP_DEFINE_CONST_OBJ_TYPE(
     print, type_print,
     call, type_call,
     attr, type_attr
+    TYPE_LOCALS_DICT
     );
 
 static mp_obj_t mp_obj_new_type(qstr name, mp_obj_t bases_tuple, mp_obj_t locals_dict) {
