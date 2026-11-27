@@ -73,6 +73,11 @@ renesas-ra, rp2, stm32 and webassembly ports and the unix standard variant.
     Provides ``type.__new__(meta, name, bases, dct)``, so a metaclass
     ``__new__`` can call ``super().__new__(meta, name, bases, dct)``.
 
+``MICROPY_PY_METACLASS_KWARGS``
+    Other keyword arguments in a class definition, such as
+    ``class A(Base, size=3)``, are passed to the metaclass.  Otherwise they
+    are ignored.
+
 Differences to CPython
 ----------------------
 
@@ -88,8 +93,8 @@ Differences to CPython
   instance.
 - ``type.__new__`` ignores its first argument, as the type of the new class
   is always ``type``.
-- Keyword arguments in a class definition, other than ``metaclass``, are
-  ignored.
+- Keyword arguments in the definition of a class without a metaclass are
+  ignored, as ``__init_subclass__`` is not supported.
 - Methods and properties defined on a metaclass cannot be used from its
   classes, and metaclass special methods such as ``__len__`` and
   ``__iter__`` are not used for ``len(cls)`` or iteration over a class.
