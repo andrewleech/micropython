@@ -1,7 +1,7 @@
 """
 categories: Core,Classes
 description: MicroPython doesn't support parameterized ``__init_subclass__`` class customization.
-cause: MicroPython does not currently implement PEP 487. Keyword arguments in a class definition, other than ``metaclass``, are ignored.
+cause: MicroPython does not currently implement PEP 487. Keyword arguments in a class definition are only passed to a metaclass, when ``MICROPY_PY_METACLASS_KWARGS`` is enabled.
 workaround: Use class variables or another mechanism to specify base-class customizations.
 """
 

@@ -1345,6 +1345,12 @@ typedef time_t mp_timestamp_t;
 #define MICROPY_PY_METACLASS_TYPE_NEW (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
 #endif
 
+// Whether keyword arguments in a class definition, other than metaclass,
+// are passed to the metaclass.  Otherwise they are ignored.
+#ifndef MICROPY_PY_METACLASS_KWARGS
+#define MICROPY_PY_METACLASS_KWARGS (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
+#endif
+
 // Support for async/await/async for/async with
 #ifndef MICROPY_PY_ASYNC_AWAIT
 #define MICROPY_PY_ASYNC_AWAIT (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_CORE_FEATURES)

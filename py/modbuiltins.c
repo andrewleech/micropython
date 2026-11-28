@@ -109,11 +109,29 @@ static mp_obj_t mp_builtin___build_class__(size_t n_args, const mp_obj_t *args, 
     }
 
     // create the new class using a call to the meta object
-    mp_obj_t meta_args[3];
+    mp_obj_t meta_args_buf[3];
+    mp_obj_t *meta_args = meta_args_buf;
+    size_t n_kw = 0;
+    #if MICROPY_PY_METACLASS_KWARGS
+    // pass any other keyword arguments to a metaclass, type ignores them
+    if (meta != MP_OBJ_FROM_PTR(&mp_type_type)) {
+        n_kw = kwargs->used - (key_elem != NULL);
+    }
+    if (n_kw != 0) {
+        meta_args = m_new(mp_obj_t, 3 + 2 * n_kw);
+        mp_obj_t *kw = meta_args + 3;
+        for (size_t i = 0; i < kwargs->alloc; ++i) {
+            if (mp_map_slot_is_filled(kwargs, i) && &kwargs->table[i] != key_elem) {
+                *kw++ = kwargs->table[i].key;
+                *kw++ = kwargs->table[i].value;
+            }
+        }
+    }
+    #endif
     meta_args[0] = args[1]; // class name
     meta_args[1] = mp_obj_new_tuple(n_args - 2, args + 2); // tuple of bases
     meta_args[2] = class_locals; // dict of members
-    mp_obj_t new_class = mp_call_function_n_kw(meta, 3, 0, meta_args);
+    mp_obj_t new_class = mp_call_function_n_kw(meta, 3, n_kw, meta_args);
 
     // store into cell if needed
     if (cell != mp_const_none) {
