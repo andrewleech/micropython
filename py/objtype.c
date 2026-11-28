@@ -47,6 +47,7 @@
 static mp_obj_t mp_obj_new_type(qstr name, mp_obj_t bases_tuple, mp_obj_t locals_dict);
 static mp_obj_t mp_obj_is_subclass(mp_obj_t object, mp_obj_t classinfo);
 static mp_obj_t static_class_method_make_new(const mp_obj_type_t *self_in, size_t n_args, size_t n_kw, const mp_obj_t *args);
+static mp_obj_t type_make_new(const mp_obj_type_t *type_in, size_t n_args, size_t n_kw, const mp_obj_t *args);
 
 /******************************************************************************/
 // instance object
@@ -175,7 +176,7 @@ static void mp_obj_class_lookup(struct class_lookup_data *lookup, const mp_obj_t
                 } else {
                     mp_obj_instance_t *obj = lookup->obj;
                     mp_obj_t obj_obj;
-                    if (obj != NULL && mp_obj_is_native_type(type) && type != &mp_type_object /* object is not a real type */) {
+                    if (obj != NULL && mp_obj_is_native_type(type) && type != &mp_type_object /* object is not a real type */ && type != &mp_type_type /* obj is a class, which has no native sub-object */) {
                         // If we're dealing with native base class, then it applies to native sub-object
                         obj_obj = obj->subobj[0];
                         #if MICROPY_BUILTIN_METHOD_CHECK_SELF_ARG
@@ -205,7 +206,7 @@ static void mp_obj_class_lookup(struct class_lookup_data *lookup, const mp_obj_t
         // Previous code block takes care about attributes defined in .locals_dict,
         // but some attributes of native types may be handled using .load_attr method,
         // so make sure we try to lookup those too.
-        if (lookup->obj != NULL && !lookup->is_type && mp_obj_is_native_type(type) && type != &mp_type_object /* object is not a real type */) {
+        if (lookup->obj != NULL && !lookup->is_type && mp_obj_is_native_type(type) && type != &mp_type_object /* object is not a real type */ && type != &mp_type_type /* obj is a class */) {
             mp_load_method_maybe(lookup->obj->subobj[0], lookup->attr, lookup->dest);
             if (lookup->dest[0] != MP_OBJ_NULL) {
                 return;
@@ -311,13 +312,19 @@ static mp_obj_t mp_obj_instance_make_new(const mp_obj_type_t *self, size_t n_arg
         // Either there is no __new__() method defined or there is a native
         // constructor.  In both cases create a blank instance.
         o = mp_obj_new_instance(self, &native_base);
-        lookup.obj = o;
 
         // Since type->make_new() implements both __new__() and __init__() in
         // one go, of which the latter may be overridden by the Python subclass,
         // we defer (see the end of this function) the call of the native
         // constructor to give a chance for the Python __init__() method to call
         // said native constructor.
+
+        if (native_base == &mp_type_type) {
+            // A metaclass without __new__: create the class with type now,
+            // then call the metaclass __init__ on it like the __new__ case below.
+            o = MP_OBJ_TO_PTR(type_make_new(&mp_type_type, n_args, n_kw, args));
+            native_base = NULL;
+        }
 
     } else {
         // Call Python class __new__ function with all args to create an instance
@@ -338,29 +345,25 @@ static mp_obj_t mp_obj_instance_make_new(const mp_obj_type_t *self, size_t n_arg
         // instance's __init__() method will not be invoked."
         // The exception is a metaclass __new__ that returns a class: the type
         // of all classes in MicroPython is `type` instead of the metaclass.
-        o = MP_OBJ_TO_PTR(new_ret);
-        if (mp_obj_get_type(new_ret) == self) {
-            lookup.obj = o;
-        } else if (!mp_obj_is_type(new_ret, &mp_type_type)
-                   || !mp_obj_is_subclass_fast(MP_OBJ_FROM_PTR(self), MP_OBJ_FROM_PTR(&mp_type_type))) {
+        const mp_obj_type_t *ret_type = mp_obj_get_type(new_ret);
+        if (ret_type != self && (ret_type != &mp_type_type
+                                 || !mp_obj_is_subclass_fast(MP_OBJ_FROM_PTR(self), MP_OBJ_FROM_PTR(&mp_type_type)))) {
             return new_ret;
         }
-        // Otherwise lookup.obj stays NULL: the class has no native sub-object,
-        // so the __init__ lookup must not reach the native `type` base.
+
+        // The instance returned by __new__() becomes the new object
+        o = MP_OBJ_TO_PTR(new_ret);
     }
 
     // now call Python class __init__ function with all args
     // This method has a chance to call super().__init__() to construct a
     // possible native base class.
     init_fn[0] = init_fn[1] = MP_OBJ_NULL;
+    lookup.obj = o;
     lookup.attr = MP_QSTR___init__;
     lookup.slot_offset = 0;
     mp_obj_class_lookup(&lookup, self);
     if (init_fn[0] != MP_OBJ_NULL) {
-        if (lookup.obj == NULL) {
-            // Bind the metaclass __init__ to the class returned by __new__.
-            init_fn[1] = MP_OBJ_FROM_PTR(o);
-        }
         mp_obj_t init_ret;
         if (n_args == 0 && n_kw == 0) {
             init_ret = mp_call_method_n_kw(0, 0, init_fn);
@@ -1353,7 +1356,9 @@ static mp_obj_t super_make_new(const mp_obj_type_t *type_in, size_t n_args, size
     // If the second argument is a type, issubclass(type2, type) must be true (this is useful for classmethods)."
     const mp_obj_type_t *second_arg_type = mp_obj_get_type(args[1]);
     mp_obj_t second_arg_obj = second_arg_type == &mp_type_type ? args[1] : MP_OBJ_FROM_PTR(second_arg_type);
-    if (mp_obj_is_subclass(second_arg_obj, args[0]) == mp_const_false) {
+    // A class passed with a metaclass can't be checked: its type is `type`.
+    if ((second_arg_type != &mp_type_type || !mp_obj_is_subclass_fast(args[0], MP_OBJ_FROM_PTR(&mp_type_type)))
+        && mp_obj_is_subclass(second_arg_obj, args[0]) == mp_const_false) {
         mp_raise_TypeError(NULL);
     }
 

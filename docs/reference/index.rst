@@ -33,5 +33,6 @@ implementation and the best practices to use them.
    filesystem.rst
    romfs.rst
    unicode_support.rst
+   metaclasses.rst
    pyboard.py.rst
    micropython2_migration.rst
