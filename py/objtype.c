@@ -311,6 +311,7 @@ static mp_obj_t mp_obj_instance_make_new(const mp_obj_type_t *self, size_t n_arg
         // Either there is no __new__() method defined or there is a native
         // constructor.  In both cases create a blank instance.
         o = mp_obj_new_instance(self, &native_base);
+        lookup.obj = o;
 
         // Since type->make_new() implements both __new__() and __init__() in
         // one go, of which the latter may be overridden by the Python subclass,
@@ -335,26 +336,31 @@ static mp_obj_t mp_obj_instance_make_new(const mp_obj_type_t *self, size_t n_arg
         // https://docs.python.org/3.4/reference/datamodel.html#object.__new__
         // "If __new__() does not return an instance of cls, then the new
         // instance's __init__() method will not be invoked."
-        // But give metaclasses a pass since the type of all classes in
-        // MicroPython are `type` instead of the metaclass.
-        const mp_obj_type_t *ret_type = mp_obj_get_type(new_ret);
-        if (ret_type != self && ret_type != &mp_type_type) {
+        // The exception is a metaclass __new__ that returns a class: the type
+        // of all classes in MicroPython is `type` instead of the metaclass.
+        o = MP_OBJ_TO_PTR(new_ret);
+        if (mp_obj_get_type(new_ret) == self) {
+            lookup.obj = o;
+        } else if (!mp_obj_is_type(new_ret, &mp_type_type)
+                   || !mp_obj_is_subclass_fast(MP_OBJ_FROM_PTR(self), MP_OBJ_FROM_PTR(&mp_type_type))) {
             return new_ret;
         }
-
-        // The instance returned by __new__() becomes the new object
-        o = MP_OBJ_TO_PTR(new_ret);
+        // Otherwise lookup.obj stays NULL: the class has no native sub-object,
+        // so the __init__ lookup must not reach the native `type` base.
     }
 
     // now call Python class __init__ function with all args
     // This method has a chance to call super().__init__() to construct a
     // possible native base class.
     init_fn[0] = init_fn[1] = MP_OBJ_NULL;
-    lookup.obj = o;
     lookup.attr = MP_QSTR___init__;
     lookup.slot_offset = 0;
     mp_obj_class_lookup(&lookup, self);
     if (init_fn[0] != MP_OBJ_NULL) {
+        if (lookup.obj == NULL) {
+            // Bind the metaclass __init__ to the class returned by __new__.
+            init_fn[1] = MP_OBJ_FROM_PTR(o);
+        }
         mp_obj_t init_ret;
         if (n_args == 0 && n_kw == 0) {
             init_ret = mp_call_method_n_kw(0, 0, init_fn);
