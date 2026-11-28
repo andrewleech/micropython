@@ -64,6 +64,11 @@ renesas-ra, rp2, stm32 and webassembly ports and the unix standard variant.
     classes without a metaclass are not affected.  Also requires
     ``MICROPY_PY_COLLECTIONS_ORDEREDDICT``.
 
+``MICROPY_PY_METACLASS_RESOLUTION``
+    The metaclass is found from all base classes, using the most derived one
+    and raising ``TypeError`` on a conflict.  Otherwise only the first base
+    is used.
+
 Differences to CPython
 ----------------------
 
@@ -77,7 +82,6 @@ Differences to CPython
 - ``__prepare__`` is not called; the class namespace is always a ``dict``.
 - A metaclass ``__call__`` is not used when a class is called to create an
   instance.
-- Only the first base class is used to find the metaclass.
 - ``type.__new__`` is not provided, so a metaclass ``__new__`` cannot call
   ``super().__new__(meta, name, bases, dct)``.
 - Keyword arguments in a class definition, other than ``metaclass``, are
