@@ -1036,6 +1036,73 @@ static inline void setname_consume_call_all(setname_list_t *head, mp_obj_t owner
 }
 #endif
 
+#if MICROPY_PY_METACLASS_METHODS
+// The type of all classes in MicroPython is `type`, so look up attr on the
+// metaclass recorded on the class by __build_class__, binding it to the class.
+static void type_meta_lookup(mp_obj_type_t *self, qstr attr, mp_obj_t *dest) {
+    if (!mp_obj_is_instance_type(self)) {
+        return;
+    }
+    mp_obj_t meta[2] = {MP_OBJ_NULL, MP_OBJ_NULL};
+    struct class_lookup_data lookup = {
+        .obj = (mp_obj_instance_t *)self,
+        .attr = MP_QSTR___metaclass__,
+        .slot_offset = 0,
+        .dest = meta,
+        .is_type = true,
+    };
+    mp_obj_class_lookup(&lookup, self);
+    if (meta[0] == MP_OBJ_NULL || !mp_obj_is_type(meta[0], &mp_type_type)) {
+        return;
+    }
+    lookup.attr = attr;
+    lookup.dest = dest;
+    lookup.is_type = false;
+    mp_obj_class_lookup(&lookup, MP_OBJ_TO_PTR(meta[0]));
+    #if MICROPY_PY_BUILTINS_PROPERTY
+    if (dest[0] != MP_OBJ_NULL && mp_obj_is_type(dest[0], &mp_type_property)) {
+        dest[0] = mp_call_function_1(mp_obj_property_get(dest[0])[0], MP_OBJ_FROM_PTR(self));
+    }
+    #endif
+}
+
+// Call a special method of the metaclass with the class and an optional arg.
+static mp_obj_t type_meta_call(mp_obj_t self_in, qstr attr, size_t n_args, mp_obj_t arg) {
+    mp_obj_t dest[3] = {MP_OBJ_NULL, MP_OBJ_NULL, arg};
+    type_meta_lookup(MP_OBJ_TO_PTR(self_in), attr, dest);
+    if (dest[0] == MP_OBJ_NULL) {
+        return MP_OBJ_NULL;
+    }
+    return mp_call_method_n_kw(n_args, 0, dest);
+}
+
+static mp_obj_t type_unary_op(mp_unary_op_t op, mp_obj_t self_in) {
+    if (op == MP_UNARY_OP_HASH) {
+        return MP_OBJ_NEW_SMALL_INT((mp_uint_t)self_in);
+    }
+    if (op != MP_UNARY_OP_BOOL && op != MP_UNARY_OP_LEN) {
+        return MP_OBJ_NULL;
+    }
+    return type_meta_call(self_in, mp_unary_op_method_name[op], 0, MP_OBJ_NULL);
+}
+
+static mp_obj_t type_subscr(mp_obj_t self_in, mp_obj_t index, mp_obj_t value) {
+    if (value != MP_OBJ_SENTINEL) {
+        return MP_OBJ_NULL;
+    }
+    return type_meta_call(self_in, MP_QSTR___getitem__, 1, index);
+}
+
+static mp_obj_t type_getiter(mp_obj_t self_in, mp_obj_iter_buf_t *iter_buf) {
+    (void)iter_buf;
+    return type_meta_call(self_in, MP_QSTR___iter__, 0, MP_OBJ_NULL);
+}
+
+#define TYPE_METACLASS_SLOTS , unary_op, type_unary_op, subscr, type_subscr, iter, type_getiter
+#else
+#define TYPE_METACLASS_SLOTS
+#endif
+
 static void type_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     (void)kind;
     mp_obj_type_t *self = MP_OBJ_TO_PTR(self_in);
@@ -1135,6 +1202,11 @@ static void type_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             .is_type = true,
         };
         mp_obj_class_lookup(&lookup, self);
+        #if MICROPY_PY_METACLASS_METHODS
+        if (dest[0] == MP_OBJ_NULL) {
+            type_meta_lookup(self, attr, dest);
+        }
+        #endif
     } else {
         // delete/store attribute
 
@@ -1201,6 +1273,7 @@ MP_DEFINE_CONST_OBJ_TYPE(
     print, type_print,
     call, type_call,
     attr, type_attr
+    TYPE_METACLASS_SLOTS
     TYPE_LOCALS_DICT
     );
 

@@ -1351,6 +1351,13 @@ typedef time_t mp_timestamp_t;
 #define MICROPY_PY_METACLASS_KWARGS (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
 #endif
 
+// Whether methods and properties defined on a metaclass can be used from its
+// classes, including __len__, __bool__, __iter__ and __getitem__ (so that
+// len(cls), bool(cls), iteration, `x in cls` and cls[key] work).
+#ifndef MICROPY_PY_METACLASS_METHODS
+#define MICROPY_PY_METACLASS_METHODS (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
+#endif
+
 // Support for async/await/async for/async with
 #ifndef MICROPY_PY_ASYNC_AWAIT
 #define MICROPY_PY_ASYNC_AWAIT (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_CORE_FEATURES)

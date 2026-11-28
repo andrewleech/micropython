@@ -78,6 +78,12 @@ renesas-ra, rp2, stm32 and webassembly ports and the unix standard variant.
     ``class A(Base, size=3)``, are passed to the metaclass.  Otherwise they
     are ignored.
 
+``MICROPY_PY_METACLASS_METHODS``
+    Methods and properties defined on a metaclass can be used from its
+    classes.  The metaclass special methods ``__len__``, ``__bool__``,
+    ``__iter__`` and ``__getitem__`` are used for ``len(cls)``,
+    ``bool(cls)``, iteration, ``x in cls`` and ``cls[key]``.
+
 Differences to CPython
 ----------------------
 
@@ -95,6 +101,5 @@ Differences to CPython
   is always ``type``.
 - Keyword arguments in the definition of a class without a metaclass are
   ignored, as ``__init_subclass__`` is not supported.
-- Methods and properties defined on a metaclass cannot be used from its
-  classes, and metaclass special methods such as ``__len__`` and
-  ``__iter__`` are not used for ``len(cls)`` or iteration over a class.
+- An attribute found on the class takes precedence over a property of the
+  metaclass with the same name.
