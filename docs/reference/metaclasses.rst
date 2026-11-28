@@ -4,7 +4,9 @@ Metaclasses
 ===========
 
 MicroPython supports a subset of Python metaclasses, enough to write
-class-creation hooks such as registries and a simple ``Enum``.
+class-creation hooks such as registries and a simple ``Enum``.  The core
+support is available on all ports; some parts are enabled only at the
+extra features ROM level and above.
 
 Core support
 ------------
@@ -44,9 +46,23 @@ core features ROM level or above)::
 
     print(Color.RED.name, Color(2) is Color.GREEN)
 
-Class members are given to the metaclass in no particular order, so this
-``Enum`` cannot rely on definition order, for example to pick the canonical
-name of an alias.
+Class members are given to the metaclass in no particular order unless
+``MICROPY_PY_METACLASS_ORDERED`` is enabled, so this ``Enum`` cannot rely on
+definition order, for example to pick the canonical name of an alias.
+
+Build configuration
+-------------------
+
+The following options are enabled at ``MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES``
+and above.  This includes, for example, the alif, esp32, esp8266, mimxrt,
+renesas-ra, rp2, stm32 and webassembly ports and the unix standard variant.
+
+``MICROPY_PY_METACLASS_ORDERED``
+    A metaclass is given the class members in definition order, for example
+    so that an ``Enum`` can number ``auto()`` values after explicit ones.
+    Attribute lookups on these classes are linear instead of hashed, so
+    classes without a metaclass are not affected.  Also requires
+    ``MICROPY_PY_COLLECTIONS_ORDEREDDICT``.
 
 Differences to CPython
 ----------------------

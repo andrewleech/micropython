@@ -1325,6 +1325,13 @@ typedef time_t mp_timestamp_t;
 #define MICROPY_PY_DELATTR_SETATTR (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
 #endif
 
+// Whether a metaclass is given the class members in definition order.
+// Attribute lookups on such classes are linear instead of hashed.
+// Requires MICROPY_PY_COLLECTIONS_ORDEREDDICT.
+#ifndef MICROPY_PY_METACLASS_ORDERED
+#define MICROPY_PY_METACLASS_ORDERED (MICROPY_PY_COLLECTIONS_ORDEREDDICT && MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES)
+#endif
+
 // Support for async/await/async for/async with
 #ifndef MICROPY_PY_ASYNC_AWAIT
 #define MICROPY_PY_ASYNC_AWAIT (MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_CORE_FEATURES)

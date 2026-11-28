@@ -49,26 +49,12 @@ extern struct _mp_dummy_t mp_sys_stdout_obj; // type is irrelevant, just need po
 static mp_obj_t mp_builtin___build_class__(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs) {
     assert(2 <= n_args);
 
-    // set the new classes __locals__ object
-    mp_obj_dict_t *old_locals = mp_locals_get();
-    mp_obj_t class_locals = mp_obj_new_dict(0);
-    mp_locals_set(MP_OBJ_TO_PTR(class_locals));
-
-    // call the class code
-    mp_obj_t cell = mp_call_function_0(args[0]);
-
-    // restore old __locals__ object
-    mp_locals_set(old_locals);
-
     // get the class type (meta object) from the base objects
     mp_map_elem_t *key_elem = mp_map_lookup(kwargs, MP_OBJ_NEW_QSTR(MP_QSTR_metaclass), MP_MAP_LOOKUP);
     mp_obj_t meta;
     if (key_elem != NULL) {
         // metaclass specified in `class B(metaclass=A)`
         meta = key_elem->value;
-        // The type of all classes in MicroPython is `type` instead of the
-        // metaclass, so record the metaclass for subclasses to inherit.
-        mp_obj_dict_store(class_locals, MP_OBJ_NEW_QSTR(MP_QSTR___metaclass__), meta);
     } else if (n_args == 2) {
         // no explicit bases, so use 'type'
         meta = MP_OBJ_FROM_PTR(&mp_type_type);
@@ -80,6 +66,30 @@ static mp_obj_t mp_builtin___build_class__(size_t n_args, const mp_obj_t *args, 
     }
 
     // TODO do proper metaclass resolution for multiple base objects
+
+    // set the new classes __locals__ object
+    mp_obj_dict_t *old_locals = mp_locals_get();
+    mp_obj_t class_locals = mp_obj_new_dict(0);
+    #if MICROPY_PY_METACLASS_ORDERED
+    if (meta != MP_OBJ_FROM_PTR(&mp_type_type)) {
+        // Give the metaclass the members in definition order.  Lookups in an
+        // ordered map are linear, so only do this for classes that need it.
+        ((mp_obj_dict_t *)MP_OBJ_TO_PTR(class_locals))->map.is_ordered = 1;
+    }
+    #endif
+    mp_locals_set(MP_OBJ_TO_PTR(class_locals));
+
+    // call the class code
+    mp_obj_t cell = mp_call_function_0(args[0]);
+
+    // restore old __locals__ object
+    mp_locals_set(old_locals);
+
+    if (key_elem != NULL) {
+        // The type of all classes in MicroPython is `type` instead of the
+        // metaclass, so record the metaclass for subclasses to inherit.
+        mp_obj_dict_store(class_locals, MP_OBJ_NEW_QSTR(MP_QSTR___metaclass__), meta);
+    }
 
     // create the new class using a call to the meta object
     mp_obj_t meta_args[3];
